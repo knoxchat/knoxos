@@ -371,6 +371,8 @@ unsafe extern "C" fn switch_context_inner(old: *mut CpuContext, new: *const CpuC
         "mov rdi, [rsi + 5*8]",
         "mov rax, [rsi + 0*8]",
         "mov rsi, [rsi + 4*8]",
+        // Mirror jump_to_user_mode: syscall's swapgs expects user GS here.
+        "swapgs",
         "iretq",
         ".Lctx_resume:",
         "ret",

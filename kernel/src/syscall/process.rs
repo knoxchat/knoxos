@@ -140,6 +140,8 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
 pub fn sys_exit(status: i32) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     serial_println!("[KnoxOS] exit({}): PID {}", status, pid);
+    // Gate B2: one-shot hello never sysretq's into a dead RIP.
+    crate::usermode::exit_oneshot_userspace();
     crate::process::PROCESS_TABLE
         .lock()
         .set_state(pid, crate::process::ProcessState::Zombie);

@@ -97,7 +97,12 @@ jobs:
             if grep -q "Desktop Environment ready" serial.log 2>/dev/null; then
               echo "boot ok"
               kill "$QEMU_PID" 2>/dev/null || true
-              grep -E "RIP switch self-test|Idle thread|GDT:|syscall/sysret" serial.log || true
+              grep -E "RIP switch self-test|Idle thread|GDT:|syscall/sysret|hello from userspace|Returned from Ring 3" serial.log || true
+              if ! grep -q "hello from userspace" serial.log; then
+                echo "FAIL: Ring 3 hello did not print"
+                tail -80 serial.log || true
+                exit 1
+              fi
               exit 0
             fi
             if ! kill -0 "$QEMU_PID" 2>/dev/null; then

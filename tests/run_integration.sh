@@ -105,6 +105,8 @@ check_marker "Networking stack initialized"
 check_marker "Firewall initialized"
 check_marker "Settings persistence initialized"
 check_marker "Desktop Environment ready"
+check_marker "hello from userspace"
+check_marker "Returned from Ring 3 userspace"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

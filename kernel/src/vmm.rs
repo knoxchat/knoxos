@@ -1022,6 +1022,8 @@ unsafe fn map_page_in_table(cr3: u64, vaddr: u64, phys_frame: u64, flags: PageTa
         } else {
             return;
         }
+    } else if l3_table[l3_idx].flags().contains(PageTableFlags::HUGE_PAGE) {
+        return;
     }
     let l2_phys = l3_table[l3_idx].addr().as_u64();
     let l2_table = &mut *((offset + l2_phys) as *mut PageTable);
@@ -1039,6 +1041,8 @@ unsafe fn map_page_in_table(cr3: u64, vaddr: u64, phys_frame: u64, flags: PageTa
         } else {
             return;
         }
+    } else if l2_table[l2_idx].flags().contains(PageTableFlags::HUGE_PAGE) {
+        return;
     }
     let l1_phys = l2_table[l2_idx].addr().as_u64();
     let l1_table = &mut *((offset + l1_phys) as *mut PageTable);
@@ -1141,12 +1145,18 @@ unsafe fn get_mapped_frame(cr3: u64, vaddr: u64) -> Option<u64> {
     if l3_table[l3_idx].is_unused() {
         return None;
     }
+    if l3_table[l3_idx].flags().contains(PageTableFlags::HUGE_PAGE) {
+        return Some(l3_table[l3_idx].addr().as_u64());
+    }
 
     let l2_phys = l3_table[l3_idx].addr().as_u64();
     let l2_table = &*((offset + l2_phys) as *const PageTable);
     let l2_idx = ((vaddr >> 21) & 0x1FF) as usize;
     if l2_table[l2_idx].is_unused() {
         return None;
+    }
+    if l2_table[l2_idx].flags().contains(PageTableFlags::HUGE_PAGE) {
+        return Some(l2_table[l2_idx].addr().as_u64());
     }
 
     let l1_phys = l2_table[l2_idx].addr().as_u64();
@@ -1173,10 +1183,14 @@ unsafe fn clone_kernel_mappings(new_cr3: u64) {
 
     let new_l4 = &mut *((offset + new_cr3) as *mut PageTable);
 
-    // Copy entries 256-511 (upper half = kernel space)
-    // These are shared across all processes
-    for i in 256..512 {
-        new_l4[i] = kernel_l4[i].clone();
+    // Share every kernel L4 slot that is already present. The kernel heap
+    // lives at 0x4444_4444_0000 (L4 index 136, lower half), so copying only
+    // 256..511 drops the heap and any switch to a user CR3 #PF's immediately.
+    // User programs get their own L4 entries for unused indices (e.g. 0x401000).
+    for i in 0..512 {
+        if !kernel_l4[i].is_unused() {
+            new_l4[i] = kernel_l4[i].clone();
+        }
     }
 }
 
@@ -1742,6 +1756,128 @@ pub fn load_elf_into_address_space(pid: Pid, elf_data: &[u8]) -> Result<(u64, u6
     );
 
     Ok((header.e_entry, brk))
+}
+
+/// Map a static ELF plus a small user stack into the **current** page tables
+/// with `USER_ACCESSIBLE`. Used for Gate B2 (first Ring 3 hello) so `iretq`
+/// does not need a CR3 switch.
+///
+/// Returns `(entry_point, user_rsp)`.
+pub fn map_static_elf_into_current(elf_data: &[u8]) -> Result<(u64, u64), &'static str> {
+    let header = crate::elf::validate_elf(elf_data).map_err(|_| "invalid ELF binary")?;
+    let phdrs = crate::elf::parse_program_headers(elf_data, header);
+
+    let offset = PHYS_MEM_OFFSET.load(Ordering::Relaxed);
+    if offset == 0 {
+        return Err("VMM not initialized");
+    }
+
+    let (frame, _) = Cr3::read();
+    let cr3 = frame.start_address().as_u64();
+
+    for phdr in &phdrs {
+        if phdr.p_type != 1 {
+            continue;
+        }
+
+        let prot = ProtFlags {
+            read: phdr.p_flags & 4 != 0,
+            write: phdr.p_flags & 2 != 0,
+            execute: phdr.p_flags & 1 != 0,
+        };
+
+        let seg_start = page_align_down(phdr.p_vaddr);
+        let seg_end = page_align_up(phdr.p_vaddr + phdr.p_memsz);
+        let num_pages = (seg_end - seg_start) / PAGE_SIZE;
+        let load_flags =
+            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+
+        serial_println!(
+            "[VMM] Current-CR3 ELF segment: {:#x}-{:#x} ({} pages)",
+            seg_start,
+            seg_end,
+            num_pages
+        );
+
+        for i in 0..num_pages {
+            let page_addr = seg_start + i * PAGE_SIZE;
+            if unsafe { get_mapped_frame(cr3, page_addr) }.is_some() {
+                return Err("ELF vaddr already mapped in kernel tables");
+            }
+            let frame_phys = allocate_physical_frame().ok_or("OOM mapping ELF segment")?;
+            unsafe {
+                map_page_in_table(cr3, page_addr, frame_phys, load_flags);
+                zero_physical_frame(frame_phys);
+            }
+
+            let page_start = page_addr;
+            let page_end = page_addr + PAGE_SIZE;
+            let file_region_start = phdr.p_vaddr;
+            let file_region_end = phdr.p_vaddr + phdr.p_filesz;
+            let copy_start = page_start.max(file_region_start);
+            let copy_end = page_end.min(file_region_end);
+
+            if copy_start < copy_end {
+                let file_offset = phdr.p_offset + (copy_start - phdr.p_vaddr);
+                let dest_offset_in_frame = copy_start - page_start;
+                let copy_len = (copy_end - copy_start) as usize;
+                if (file_offset as usize + copy_len) <= elf_data.len() {
+                    let src = &elf_data[file_offset as usize..file_offset as usize + copy_len];
+                    unsafe {
+                        let dest_ptr = (offset + frame_phys + dest_offset_in_frame) as *mut u8;
+                        core::ptr::copy_nonoverlapping(src.as_ptr(), dest_ptr, copy_len);
+                    }
+                }
+            }
+        }
+
+        if !prot.write {
+            let final_flags = prot.to_page_flags();
+            for i in 0..num_pages {
+                let page_addr = seg_start + i * PAGE_SIZE;
+                unsafe {
+                    update_page_flags_in_table(cr3, page_addr, final_flags);
+                }
+            }
+        }
+    }
+
+    // Four writable stack pages just below STACK_TOP.
+    const HELLO_STACK_PAGES: u64 = 4;
+    let stack_end = STACK_TOP;
+    let stack_start = stack_end - HELLO_STACK_PAGES * PAGE_SIZE;
+    let stack_flags = PageTableFlags::PRESENT
+        | PageTableFlags::WRITABLE
+        | PageTableFlags::USER_ACCESSIBLE
+        | PageTableFlags::NO_EXECUTE;
+
+    for i in 0..HELLO_STACK_PAGES {
+        let page_addr = stack_start + i * PAGE_SIZE;
+        if unsafe { get_mapped_frame(cr3, page_addr) }.is_some() {
+            return Err("user stack vaddr already mapped in kernel tables");
+        }
+        let frame_phys = allocate_physical_frame().ok_or("OOM mapping user stack")?;
+        unsafe {
+            map_page_in_table(cr3, page_addr, frame_phys, stack_flags);
+            zero_physical_frame(frame_phys);
+        }
+    }
+
+    unsafe {
+        let (frame, flags) = Cr3::read();
+        Cr3::write(frame, flags);
+    }
+
+    // SysV: RSP % 16 == 8 at _start.
+    let user_rsp = (stack_end - 8) & !0xF | 8;
+    serial_println!(
+        "[VMM] Current-CR3 hello: entry={:#x} rsp={:#x} stack={:#x}-{:#x}",
+        header.e_entry,
+        user_rsp,
+        stack_start,
+        stack_end
+    );
+    Ok((header.e_entry, user_rsp))
 }
 
 /// Set up a user-mode stack in a process's address space

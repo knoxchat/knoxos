@@ -908,10 +908,11 @@ fn install_builtin_binaries() {
     // Also install into initramfs-searched paths
     let mut vfs = VFS.lock();
     vfs.write_file("/sbin/init", &generate_init_elf());
+    vfs.write_file("/bin/hello", &crate::init::hello_userspace_elf_data());
     drop(vfs);
 
     crate::serial_println!(
-        "[VFS] Installed built-in binaries: /bin/sh, /bin/bash, /bin/ash, /sbin/init"
+        "[VFS] Installed built-in binaries: /bin/sh, /bin/bash, /bin/ash, /sbin/init, /bin/hello"
     );
 }
 

@@ -52,13 +52,14 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 5. In-memory VFS with Linux FHS layout; **opt-in** VirtIO-blk + ATA PIO; ext4 and FAT32 can use that block layer.
 6. Software compositor: 32bpp BGRA, damage rects, window manager, taskbar, start menu, 17 in-process apps.
 7. Kernel shell + terminal (parser, pipes, glob, env, 60+ builtins) running **inside the kernel**, not as `/bin/sh` in Ring 3.
-8. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
+8. **Gate B2 hello** — static ELF `iretq`s to Ring 3, `sys_write`s `hello from userspace`, `sys_exit`s back to the kernel.
+9. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
 
 ### Architectural blockers (must fix first)
 
 | Blocker | Evidence | Why it blocks a perfect OS |
 |---------|----------|----------------------------|
-| **No Ring 3 execution** | `jump_to_user_mode` has **zero callers**. `KERNEL_GS_BASE` is programmed. | Cannot run isolated programs. Desktop apps are kernel functions. |
+| **Scheduled Ring 3** | Hello is a one-shot boot-time `iretq`; `execve` does not start a CFS task. | Isolated programs and a userspace `/bin/sh` still need B3–B6. |
 | **No user context switch** | Kernel threads save/restore RIP+FXSAVE; timer path only switches runnable contexts. | Userspace still never runs. |
 | **Signals not fully delivered** | `deliver_signals` runs from `deferred_schedule`; no Ring 3 frames yet. | Job control and Ctrl+C to userspace still incomplete. |
 | **Sockets do not transmit** | `Socket::send` appends `send_buf`. `send_tcp_segment` is unused. VirtIO-net TX does not fill the avail ring. | No internet, no DHCP-applied IP, no real TCP. |
@@ -93,7 +94,7 @@ Percentages are **production usefulness**, not lines of code.
 |---|-----------|-------|--------|----------|----------------|
 | 1 | Kernel Core | Wired | 64% | High | Interrupts and timers work; GS base set; SMP APs halt; no NMI/MCE. |
 | 2 | Memory Management | Wired | 48% | **Critical** | Demand paging + CoW + buddy pool; no reclaim or OOM-on-alloc. |
-| 3 | Process & Scheduling | Wired | 38% | **Critical** | Kernel-thread RIP switch + idle HLT; no Ring 3. |
+| 3 | Process & Scheduling | Wired | 45% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2 hello `iretq`s**; no scheduled Ring 3. |
 | 4 | Filesystem & Storage | Wired | 42% | **Critical** | VirtIO-blk + ext4/FAT32 real; AHCI/NVMe fake; VFS default RAM. |
 | 5 | Networking | Stub→Wired | 22% | **Critical** | NIC code exists; sockets never put packets on the wire. |
 | 6 | Device Drivers | Wired | 28% | **Critical** | PCI, PS/2, UART, VirtIO-blk live; USB/GPU/storage mostly stub. |
@@ -103,15 +104,15 @@ Percentages are **production usefulness**, not lines of code.
 | 10 | System Services | Wired | 28% | High | In-kernel units and in-memory D-Bus; no real supervision. |
 | 11 | Virtualization & Containers | Stub | 12% | Low | VMX `asm` unused; containers are comments. |
 | 12 | AI/ML | Wired | 22% | Low | GGUF parse + naive CPU; GPU matmul unused. |
-| 13 | Binary Compatibility | Stub→Wired | 18% | **Critical** | ELF maps into VMM; `execve` never `iretq`s. |
+| 13 | Binary Compatibility | Stub→Wired | 24% | **Critical** | Static hello `iretq`s; `execve` still does not schedule a process. |
 | 14 | Internationalization & Fonts | Live | 68% | Low | TTF, CJK, RTL on the compositor; locale loading partial. |
 | 15 | Build System & Tooling | Live | 75% | Medium | Make/QEMU work; `flake.nix` missing. |
 | 16 | Testing & Quality | Wired | 32% | **Critical** | Real VFS/widget/DNS/buddy tests; `assert!(true)` tests removed. |
 | 17 | Documentation | Wired | 35% | **Critical** | README + LICENSE + this file. Architecture guides still missing. |
 | 18 | CI/CD & Release | Wired | 30% | High | `.github/workflows/ci.yml` (fmt, clippy, size, QEMU boot); no signed releases. |
 
-**QEMU desktop demo readiness: ~70%** (boots, paints, clicks, types).
-**Production OS readiness: ~36%** (kernel threads switch RIP; still cannot run isolated userspace).
+**QEMU desktop demo readiness: ~70%** (boots, paints, clicks, types; serial prints `hello from userspace`).
+**Production OS readiness: ~38%** (Gate B2 hello runs in Ring 3 then returns; still no scheduled userspace).
 
 ---
 
@@ -197,9 +198,9 @@ The real MMU work is in **`vmm.rs`**, not a buddy allocator.
 
 ## 3. Process & Scheduling
 
-**Grade: Wired (38%)** · `scheduler.rs`, `process.rs`, `context.rs`, `usermode.rs`, `signals.rs`
+**Grade: Wired (45%)** · `scheduler.rs`, `process.rs`, `context.rs`, `usermode.rs`, `signals.rs`
 
-Kernel threads can switch RIP. Ring 3 is still not entered.
+Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello, then returns to the kernel desktop.
 
 ### Wired (data plane)
 - [x] Process table, PIDs, parent/child, reparent to init, zombie bookkeeping
@@ -211,11 +212,12 @@ Kernel threads can switch RIP. Ring 3 is still not entered.
 - [x] Signal frame builder (`signals.rs`)
 - [x] **Full kernel context switch** — GPRs, RIP, CS/SS, RFLAGS, FXSAVE/FXRSTOR; boot self-test switches two kernel threads
 - [x] **Idle thread** PID 0 `STI; HLT`; executor `yield_to_idle()` when the desktop has no work
-- [x] **`KERNEL_GS_BASE` / `GS_BASE`** programmed for `syscall` `swapgs` (not yet used from Ring 3)
+- [x] **`KERNEL_GS_BASE` / `GS_BASE`** programmed for `syscall` `swapgs`; Ring 3 `syscall` round-trip proven on hello
 - [x] **`deliver_signals`** called from `deferred_schedule` (no-op until a process has pending signals)
+- [x] **Gate B2 one-shot Ring 3** — static hello ELF mapped into current CR3, `iretq`, `sys_write` to serial, `sys_exit` returns to kernel
 
 ### Stub (control plane)
-- [ ] **`iretq` to Ring 3** — `jump_to_user_mode` never called
+- [ ] **Scheduled Ring 3** — hello is a blocking boot-time run, not a CFS task with its own CR3
 - [ ] **Preemption of userspace** — only kernel threads with a real RIP are switched
 - [ ] **Wait queues** — no callers outside `wait_queue.rs`
 - [ ] **SMP load balance / affinity** — stored, not enforced; APs idle
@@ -225,10 +227,10 @@ Kernel threads can switch RIP. Ring 3 is still not entered.
 ### Perfect-OS next steps (this is the critical path)
 1. ~~Save/restore full `iretq` frame + `fxsave`/`fxrstor` in `context.rs`.~~ (kernel threads done)
 2. ~~Per-CPU TSS RSP0 + `GS_BASE` / `KERNEL_GS_BASE`.~~ (BSP only; APs still share TSS)
-3. First userspace: map a static `hello` ELF, `iretq`, `sys_write` to serial, `sys_exit`.
+3. ~~First userspace: map a static `hello` ELF, `iretq`, `sys_write` to serial, `sys_exit`.~~ (Gate B2)
 4. Then `fork` + `execve` + `waitpid` + SIGCHLD + Ctrl+C via PTY.
 
-Until step 3 works, **do not add more scheduler policies**.
+Until step 4 works, **do not add more scheduler policies**.
 
 ---
 
@@ -479,7 +481,7 @@ Nice-to-have. Not on the path to a perfect OS.
 
 ## 13. Binary Compatibility & Runtime
 
-**Grade: Stub→Wired (18%)** · `elf.rs`, `dynlink.rs`, `syscall/mod.rs`, `vdso.rs`
+**Grade: Stub→Wired (24%)** · `elf.rs`, `dynlink.rs`, `syscall/mod.rs`, `vdso.rs`
 
 Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not** 95.8% compatibility. Many arms return `Ok(0)` or ignore flags (`mprotect` “not enforced on our flat memory model”).
 
@@ -489,9 +491,10 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 - [x] Relocation helpers in `dynlink.rs`
 - [x] vDSO page contents mapped for `/init` only
 - [x] Kernel `memcpy`/`printf`-family in `posix_libc.rs` (kernel address space, not libc.so)
+- [x] **Gate B2 static hello** — `iretq` to Ring 3, `sys_write` / `sys_exit` (not via `execve`)
 
 ### Stub
-- [ ] **`execve` starts the binary** (`iretq` / `sysretq`)
+- [ ] **`execve` starts the binary as a scheduled process**
 - [ ] Dynamic linker as a userspace `ld.so` (DT_NEEDED, lazy PLT, RELRO)
 - [ ] `dlopen` that maps `.so` via VMM (`ldknoxos.rs` fake base)
 - [ ] TLS (initial-exec / general-dynamic)
@@ -500,7 +503,7 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 - [ ] Working `fork` child that runs
 
 ### Perfect-OS next steps
-Ship **static musl hello** first. Dynamic linking is Phase 2 of userspace, not Phase 1.
+~~Ship **static musl hello** first.~~ Gate B2 hello is an in-kernel generated static ELF. Dynamic linking is Phase 2 of userspace, not Phase 1. Next: `execve` + `waitpid`.
 
 ---
 
@@ -624,8 +627,8 @@ This **is** becoming an OS.
 
 | ID | Task | Done when |
 |----|------|-----------|
-| B1 | TSS + `KERNEL_GS_BASE` + syscall entry that cannot fault on `swapgs` | **GS MSRs programmed**; still untested until Ring 3 `syscall` |
-| B2 | Map static ELF, `iretq`, `sys_write` serial, `sys_exit` | QEMU serial prints `hello from userspace` |
+| B1 | TSS + `KERNEL_GS_BASE` + syscall entry that cannot fault on `swapgs` | **Done** — hello `syscall`/`sysretq` round-trip (write + exit) |
+| B2 | Map static ELF, `iretq`, `sys_write` serial, `sys_exit` | **Done** — QEMU serial prints `hello from userspace`, then desktop starts |
 | B3 | `execve` + `waitpid` | Init launches hello, reaps it |
 | B4 | `fork` CoW + child runs | Child pid prints; parent wait succeeds |
 | B5 | Signals: SIGKILL, SIGSEGV, SIGINT from PTY | `kill`, crash, Ctrl+C work |
@@ -700,12 +703,12 @@ Do not:
 
 ## Progress tracker
 
-**Production OS: ~36%** · **QEMU desktop demo: ~70%**
+**Production OS: ~38%** · **QEMU desktop demo: ~70%**
 
 ```
 Kernel Core:        ███████████████░░░░░░░░░░  64%  Wired
 Memory Mgmt:        ████████████░░░░░░░░░░░░░  48%  Wired
-Process/Sched:      █████████░░░░░░░░░░░░░░░░  38%  Wired          ← critical path
+Process/Sched:      ███████████░░░░░░░░░░░░░░  45%  Wired          ← critical path (B2)
 Filesystem:         ██████████░░░░░░░░░░░░░░░  42%  Wired
 Networking:         █████░░░░░░░░░░░░░░░░░░░░  22%  Stub→Wired   ← critical path
 Device Drivers:     ███████░░░░░░░░░░░░░░░░░░  28%  Wired
@@ -715,7 +718,7 @@ Security:           ███████░░░░░░░░░░░░░
 System Services:    ███████░░░░░░░░░░░░░░░░░░  28%  Wired
 Virtualization:     ███░░░░░░░░░░░░░░░░░░░░░░  12%  Stub
 AI/ML:              █████░░░░░░░░░░░░░░░░░░░░  22%  Wired
-Binary Compat:      ████░░░░░░░░░░░░░░░░░░░░░  18%  Stub→Wired   ← critical path
+Binary Compat:      ██████░░░░░░░░░░░░░░░░░░░  24%  Stub→Wired   ← critical path (B2)
 i18n & Fonts:       █████████████████░░░░░░░░  68%  Live
 Build System:       ███████████████████░░░░░░  75%  Live
 Testing:            ████████░░░░░░░░░░░░░░░░░  32%  Wired
@@ -728,13 +731,13 @@ CI/CD:              ███████░░░░░░░░░░░░░
 | Subsystem | Old | Now | Why |
 |-----------|-----|-----|-----|
 | Kernel Core | 95% | 64% | IOAPIC/SMP exist but APs idle; NMI/MCE still missing; GS base now set |
-| Process | 90% | 38% | Kernel-thread RIP switch is real; still no Ring 3 |
-| Binary compat | 40% | 18% | 452 numbers ≠ 452 behaviors |
+| Process | 90% | 45% | Gate B2 hello `iretq`s; still no scheduled Ring 3 / `execve` |
+| Binary compat | 40% | 24% | Static hello runs; 452 numbers still ≠ 452 behaviors |
 | Filesystem | 35% | 42% | VirtIO-blk + ext4/FAT32 actually I/O |
 | GUI | 85% | 72% | Honest: in-process, Wayland/GPU unused |
 | Shell | 90% | 78% | PTY/glob/env now real; still in-kernel |
 | Docs / CI | 10% / 25% | 35% / 30% | README, LICENSE, GitHub Actions present; flake still missing |
-| **Overall production** | **~40%** | **~36%** | Recalibrated, then Gate A/G wired; still no userspace |
+| **Overall production** | **~40%** | **~38%** | Recalibrated, Gate A/G wired, Gate B2 hello live; B3+ still open |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates to this file should tick **Gate** IDs, not module counts.
 

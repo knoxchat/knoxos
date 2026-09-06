@@ -47,14 +47,15 @@ static mut SYSCALL_GS: SyscallGs = SyscallGs {
 
 /// EFER bits
 const EFER_SCE: u64 = 1 << 0; // System Call Extensions enable
+const EFER_NXE: u64 = 1 << 11; // NX enable (required before NO_EXECUTE PTEs)
 
 /// Initialize syscall/sysret mechanism
 pub fn init_syscall() {
     #[cfg(target_arch = "x86_64")]
     unsafe {
-        // Enable SCE (System Call Extensions) in EFER MSR
+        // Enable SCE (System Call Extensions) and NXE in EFER MSR
         let efer = rdmsr(MSR_EFER);
-        wrmsr(MSR_EFER, efer | EFER_SCE);
+        wrmsr(MSR_EFER, efer | EFER_SCE | EFER_NXE);
 
         // Set up STAR MSR:
         // Bits 47:32 = kernel CS/SS base (CS = STAR[47:32], SS = STAR[47:32]+8)
@@ -216,48 +217,135 @@ extern "C" fn syscall_handler_wrapper(
     crate::syscall::handle_syscall(number, arg1, arg2, arg3, arg4, arg5, arg6)
 }
 
+/// Kernel continuation saved around a one-shot Ring 3 run (`run_userspace_once`).
+#[repr(C)]
+struct KernelResume {
+    rsp: u64,
+    rbp: u64,
+    rbx: u64,
+    r12: u64,
+    r13: u64,
+    r14: u64,
+    r15: u64,
+    rip: u64,
+}
+
+static mut KERNEL_RESUME: KernelResume = KernelResume {
+    rsp: 0,
+    rbp: 0,
+    rbx: 0,
+    r12: 0,
+    r13: 0,
+    r14: 0,
+    r15: 0,
+    rip: 0,
+};
+
+static ONESHOT_USERSPACE: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
 /// Jump to user mode - execute a program at the given entry point
 /// # Safety
 /// The entry point and stack must be properly mapped in user-space page tables
-pub unsafe fn jump_to_user_mode(entry_point: u64, user_stack: u64) {
+pub unsafe fn jump_to_user_mode(entry_point: u64, user_stack: u64) -> ! {
+    run_userspace_once(entry_point, user_stack);
+    loop {
+        #[cfg(target_arch = "x86_64")]
+        core::arch::asm!("hlt", options(nomem, nostack));
+    }
+}
+
+/// SysV naked: rdi=entry, rsi=user_stack, rdx=*mut KernelResume. Does not return
+/// until [`resume_from_user`] restores RSP and `ret`s.
+#[unsafe(naked)]
+#[cfg(target_arch = "x86_64")]
+unsafe extern "C" fn enter_user(entry: u64, user_stack: u64, resume: *mut KernelResume) {
+    core::arch::naked_asm!(
+        "mov [rdx + 0], rsp",
+        "mov [rdx + 8], rbp",
+        "mov [rdx + 16], rbx",
+        "mov [rdx + 24], r12",
+        "mov [rdx + 32], r13",
+        "mov [rdx + 40], r14",
+        "mov [rdx + 48], r15",
+        "cli",
+        "push {user_ss}",
+        "push rsi",
+        "push 0x202",
+        "push {user_cs}",
+        "push rdi",
+        "mov ax, {user_ds}",
+        "mov ds, ax",
+        "mov es, ax",
+        "swapgs",
+        "iretq",
+        user_ss = const USER_DATA_SEGMENT as u64,
+        user_cs = const USER_CODE_SEGMENT as u64,
+        user_ds = const USER_DATA_SEGMENT,
+    );
+}
+
+/// Restore the kernel stack saved by [`enter_user`] and `ret` to its caller.
+#[unsafe(naked)]
+#[cfg(target_arch = "x86_64")]
+unsafe extern "C" fn resume_from_user(resume: *mut KernelResume) -> ! {
+    core::arch::naked_asm!(
+        "mov rsp, [rdi + 0]",
+        "mov rbp, [rdi + 8]",
+        "mov rbx, [rdi + 16]",
+        "mov r12, [rdi + 24]",
+        "mov r13, [rdi + 32]",
+        "mov r14, [rdi + 40]",
+        "mov r15, [rdi + 48]",
+        "mov ax, {kds}",
+        "mov ds, ax",
+        "mov es, ax",
+        "sti",
+        "ret",
+        kds = const KERNEL_DATA_SEGMENT,
+    );
+}
+
+/// Enter Ring 3 at `entry_point` and return when userspace calls `exit`.
+///
+/// Mappings must already be in the **current** page tables (user-accessible).
+/// `sys_exit` resumes this function via [`exit_oneshot_userspace`].
+///
+/// # Safety
+/// `entry_point` and `user_stack` must be mapped `USER_ACCESSIBLE` in the
+/// current CR3. Syscall entry uses TSS RSP0.
+#[inline(never)]
+pub unsafe fn run_userspace_once(entry_point: u64, user_stack: u64) {
     serial_println!(
         "[KnoxOS] Entering user mode: entry={:#x} stack={:#x}",
         entry_point,
         user_stack
     );
 
+    ONESHOT_USERSPACE.store(true, core::sync::atomic::Ordering::SeqCst);
+
     #[cfg(target_arch = "x86_64")]
-    core::arch::asm!(
-        // Set up for iretq to user mode
-        "cli",                              // Disable interrupts
+    {
+        let resume = core::ptr::addr_of_mut!(KERNEL_RESUME);
+        enter_user(entry_point, user_stack, resume);
+    }
 
-        // Push SS (user data segment)
-        "push {user_ss}",
-        // Push RSP (user stack pointer)
-        "push {user_rsp}",
-        // Push RFLAGS (with IF enabled)
-        "push 0x202",
-        // Push CS (user code segment)
-        "push {user_cs}",
-        // Push RIP (user entry point)
-        "push {entry}",
+    ONESHOT_USERSPACE.store(false, core::sync::atomic::Ordering::SeqCst);
+    serial_println!("[KnoxOS] Returned from Ring 3 userspace");
+}
 
-        // DS/ES to user data. Do not load GS — that would wipe IA32_GS_BASE.
-        "mov ax, {user_ds:x}",
-        "mov ds, ax",
-        "mov es, ax",
+/// If a one-shot `run_userspace_once` is in progress, restore the kernel
+/// continuation and never return (does not `sysretq`).
+pub fn exit_oneshot_userspace() {
+    if !ONESHOT_USERSPACE.load(core::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    serial_println!("[KnoxOS] sys_exit: resuming kernel after one-shot userspace");
 
-        // Swap to user GS (0); KERNEL_GS_BASE keeps SYSCALL_GS for swapgs on syscall.
-        "swapgs",
-        "iretq",
-
-        entry = in(reg) entry_point,
-        user_rsp = in(reg) user_stack,
-        user_cs = in(reg) USER_CODE_SEGMENT as u64,
-        user_ss = in(reg) USER_DATA_SEGMENT as u64,
-        user_ds = in(reg) USER_DATA_SEGMENT,
-        options(noreturn)
-    );
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        resume_from_user(core::ptr::addr_of_mut!(KERNEL_RESUME));
+    }
 }
 
 /// Check if we're currently in user mode

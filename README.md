@@ -6,13 +6,13 @@ This is **not** a production OS yet. The kernel compiles a large tree of modules
 
 | What works today | What does not |
 |------------------|---------------|
-| BIOS/UEFI boot in QEMU to a 1920×1080 desktop | Isolated Ring 3 processes (`iretq` / `execve` as a running program) |
+| BIOS/UEFI boot in QEMU to a 1920×1080 desktop | Scheduled Ring 3 processes (`execve` as a running program) |
 | PS/2 keyboard and mouse, in-kernel compositor | Preemptive RIP switch on the timer path for user tasks |
 | In-memory VFS; opt-in VirtIO-blk + ext4/FAT32 | Default disk persistence; AHCI/NVMe DMA |
 | Kernel shell, PTY, 60+ builtins | `/bin/sh` in userspace |
-| Serial debug console | Sockets that put packets on the wire |
+| Serial debug console; Gate B2 `hello from userspace` | Sockets that put packets on the wire |
 
-**Production OS readiness: ~32%.** **QEMU desktop demo: ~70%.**
+**Production OS readiness: ~38%.** **QEMU desktop demo: ~70%.**
 
 ## Quick start
 
@@ -45,13 +45,14 @@ bootloader (BIOS/UEFI)
 kernel_main
     → GDT/TSS, IDT, PIC, LAPIC timer, heap
     → VFS, scheduler tables, syscall MSRs
+    → Gate B2: iretq hello ELF → sys_write serial → sys_exit
     → software compositor + in-process apps
 async executor (~60 FPS)
     → keyboard, mouse, redraw
     → idle thread HLT when the desktop has no work
 ```
 
-Desktop apps are kernel functions dispatched by `WindowContentType`, not separate address spaces. The next real milestone is Gate B in `status.md`: map a static ELF, `iretq` to Ring 3, `sys_write` to serial, `sys_exit`.
+Desktop apps are kernel functions dispatched by `WindowContentType`, not separate address spaces. Gate B2 is done: a static ELF `iretq`s to Ring 3, prints `hello from userspace`, and `sys_exit`s back. Next is Gate B3 in `status.md`: `execve` + `waitpid`.
 
 ## Layout
 
