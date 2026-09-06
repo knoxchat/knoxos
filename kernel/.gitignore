@@ -3,6 +3,7 @@
 
 # Bootimage output
 *.bin
+!src/gui/icon_blob.bin
 *.iso
 *.img
 
