@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  docs:
+    name: Docs present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require README, LICENSE, status.md
+        run: |
+          test -f README.md
+          test -f LICENSE
+          test -f status.md
+
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly + rustfmt
+        run: |
+          rustup toolchain install nightly --profile minimal --component rustfmt rust-src
+          rustup override set nightly
+        working-directory: kernel
+      - name: Format check
+        run: cargo fmt -- --check
+        working-directory: kernel
+
+  clippy-size:
+    name: clippy + size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly + clippy
+        run: |
+          rustup toolchain install nightly --profile minimal --component clippy rust-src llvm-tools-preview
+          rustup override set nightly
+          rustup target add x86_64-unknown-none
+        working-directory: kernel
+      - name: Clippy
+        run: cargo clippy -- -D warnings -D clippy::all
+        working-directory: kernel
+      - name: Release size gate
+        run: make ci-size
+        working-directory: kernel
+
+  qemu-boot:
+    name: QEMU BIOS boot
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86
+      - name: Install nightly
+        run: |
+          rustup toolchain install nightly --profile minimal --component rust-src llvm-tools-preview
+          rustup override set nightly
+          rustup target add x86_64-unknown-none
+        working-directory: kernel
+      - name: Build kernel + BIOS image
+        run: |
+          cargo build --release
+          cd ../boot && cargo run --release -- ../kernel/target/x86_64-unknown-none/release/knoxos-kernel
+        working-directory: kernel
+      - name: Boot until desktop marker
+        run: |
+          qemu-system-x86_64 \
+            -drive format=raw,file=kernel/knoxos-bios.img \
+            -serial file:serial.log \
+            -display none \
+            -m 2G \
+            -smp 2 \
+            -cpu qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt \
+            -no-reboot \
+            -no-shutdown &
+          QEMU_PID=$!
+          for i in $(seq 1 60); do
+            sleep 2
+            if grep -q "Desktop Environment ready" serial.log 2>/dev/null; then
+              echo "boot ok"
+              kill "$QEMU_PID" 2>/dev/null || true
+              grep -E "RIP switch self-test|Idle thread|GDT:|syscall/sysret" serial.log || true
+              exit 0
+            fi
+            if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+              echo "QEMU exited early"
+              tail -50 serial.log || true
+              exit 1
+            fi
+          done
+          echo "timeout waiting for desktop"
+          tail -80 serial.log || true
+          kill "$QEMU_PID" 2>/dev/null || true
+          exit 1

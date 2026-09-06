@@ -1,0 +1,5 @@
+# LLVM 23 can rewrite wchar loops into `wcslen` calls. The UEFI target has no
+# libc, so those calls fail to link. The bootloader crate's build.rs strips
+# RUSTFLAGS, but it does not strip this target-specific variable.
+[env]
+CARGO_TARGET_X86_64_UNKNOWN_UEFI_RUSTFLAGS = "-C llvm-args=-disable-loop-idiom-wcslen"

@@ -1,0 +1,472 @@
+#!/usr/bin/env bash
+#
+# KnoxOS - AI Operating System
+# Build and run script for QEMU testing
+#
+# Usage:
+#   ./run.sh              # Build and run (BIOS mode, default)
+#   ./run.sh --uefi       # Build and run in UEFI mode
+#   ./run.sh --release    # Build optimized release
+#   ./run.sh --debug      # Build with GDB debugging
+#   ./run.sh --setup      # Install required tools
+#   ./run.sh --clean      # Clean build artifacts
+#   ./run.sh --help       # Show help
+#
+
+set -euo pipefail
+
+# ─── Configuration ─────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KERNEL_DIR="$SCRIPT_DIR/kernel"
+BOOT_DIR="$SCRIPT_DIR/boot"
+
+TARGET="x86_64-unknown-none"
+KERNEL_BIN_DEBUG="$KERNEL_DIR/target/$TARGET/debug/knoxos-kernel"
+KERNEL_BIN_RELEASE="$KERNEL_DIR/target/$TARGET/release/knoxos-kernel"
+
+QEMU="qemu-system-x86_64"
+QEMU_MEMORY="2G"
+QEMU_CPUS="2"
+
+# Auto-detect display backend for QEMU
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    QEMU_DISPLAY="cocoa,show-cursor=off"
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    QEMU_DISPLAY="gtk,show-cursor=off,grab-on-hover=off"
+else
+    QEMU_DISPLAY="sdl,show-cursor=off"
+fi
+
+# OVMF firmware paths (tried in order)
+OVMF_PATHS=(
+    "/opt/homebrew/share/qemu/edk2-x86_64-code.fd"    # macOS ARM Homebrew
+    "/usr/local/share/qemu/edk2-x86_64-code.fd"       # macOS Intel Homebrew
+    "/opt/homebrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd" # macOS ARM alt
+    "/usr/share/OVMF/OVMF_CODE.fd"                    # Ubuntu/Debian
+    "/usr/share/edk2/ovmf/OVMF_CODE.fd"               # Fedora
+    "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd"           # Arch
+    "/usr/share/qemu/OVMF.fd"                          # Generic
+)
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# ─── Helper Functions ──────────────────────────────────────────────
+
+print_banner() {
+    echo -e "\033[38;2;21;153;148m"
+    echo "╔══════════════════════════════════════════════════════════════════════╗"
+    echo "║                                                                      ║"
+    echo "║   ██╗  ██╗███╗   ██╗ ██████╗ ██╗  ██╗ ██████╗ ███████╗               ║"
+    echo "║   ██║ ██╔╝████╗  ██║██╔═══██╗╚██╗██╔╝██╔═══██╗██╔════╝               ║"
+    echo "║   █████╔╝ ██╔██╗ ██║██║   ██║ ╚███╔╝ ██║   ██║███████╗               ║"
+    echo "║   ██╔═██╗ ██║╚██╗██║██║   ██║ ██╔██╗ ██║   ██║╚════██║               ║"
+    echo "║   ██║  ██╗██║ ╚████║╚██████╔╝██╔╝ ██╗╚██████╔╝███████║               ║"
+    echo "║   ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝               ║"
+    echo "║                                                                      ║"
+    echo "║   AI Operating System - Linux Compatible                             ║"
+    echo "║   Rust-powered | Framebuffer GUI | QEMU Testing                      ║"
+    echo "║                                                                      ║"
+    echo "╚══════════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+log_info() {
+    echo -e "${CYAN}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+log_step() {
+    echo -e "${BLUE}[STEP]${NC} $1"
+}
+
+find_ovmf() {
+    for path in "${OVMF_PATHS[@]}"; do
+        # Handle glob patterns
+        for expanded in $path; do
+            if [ -f "$expanded" ]; then
+                echo "$expanded"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+check_dependencies() {
+    local missing=()
+
+    if ! command -v rustup &> /dev/null; then
+        missing+=("rustup (https://rustup.rs)")
+    fi
+
+    if ! command -v cargo &> /dev/null; then
+        missing+=("cargo (install via rustup)")
+    fi
+
+    if ! command -v $QEMU &> /dev/null; then
+        missing+=("qemu-system-x86_64 (brew install qemu / apt install qemu-system-x86)")
+    fi
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        log_error "Missing dependencies:"
+        for dep in "${missing[@]}"; do
+            echo "  - $dep"
+        done
+        echo ""
+        echo "Run './run.sh --setup' to install required tools."
+        exit 1
+    fi
+}
+
+# ─── Commands ──────────────────────────────────────────────────────
+
+do_setup() {
+    log_step "Installing required tools..."
+
+    # Rust nightly toolchain
+    log_info "Setting up Rust nightly toolchain..."
+    rustup install nightly
+    rustup default nightly
+    rustup component add rust-src llvm-tools-preview clippy rustfmt
+
+    # Target
+    rustup target add x86_64-unknown-none
+
+    # QEMU
+    if ! command -v $QEMU &> /dev/null; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            log_info "Installing QEMU via Homebrew..."
+            if command -v brew &> /dev/null; then
+                brew install qemu
+            else
+                log_error "Homebrew not found. Install from https://brew.sh"
+                log_info "Then run: brew install qemu"
+            fi
+        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            log_info "Installing QEMU..."
+            if command -v apt &> /dev/null; then
+                sudo apt update && sudo apt install -y qemu-system-x86 ovmf
+            elif command -v dnf &> /dev/null; then
+                sudo dnf install -y qemu-system-x86 edk2-ovmf
+            elif command -v pacman &> /dev/null; then
+                sudo pacman -S --noconfirm qemu-system-x86 edk2-ovmf
+            fi
+        fi
+    else
+        log_success "QEMU already installed: $(which $QEMU)"
+    fi
+
+    log_success "Setup complete!"
+}
+
+do_clean() {
+    log_step "Cleaning build artifacts..."
+    cd "$KERNEL_DIR" && cargo clean 2>/dev/null || true
+    cd "$BOOT_DIR" && cargo clean 2>/dev/null || true
+    log_success "Clean complete"
+}
+
+build_kernel() {
+    local profile="$1"  # "debug" or "release"
+
+    log_step "Building KnoxOS kernel ($profile)..."
+
+    cd "$KERNEL_DIR"
+
+    if [ "$profile" = "release" ]; then
+        cargo build --release
+    else
+        cargo build
+    fi
+
+    if [ "$profile" = "release" ]; then
+        KERNEL_BIN_PATH="$KERNEL_BIN_RELEASE"
+    else
+        KERNEL_BIN_PATH="$KERNEL_BIN_DEBUG"
+    fi
+
+    if [ ! -f "$KERNEL_BIN_PATH" ]; then
+        log_error "Kernel binary not found at: $KERNEL_BIN_PATH"
+        exit 1
+    fi
+
+    local size=$(ls -lh "$KERNEL_BIN_PATH" | awk '{print $5}')
+    log_success "Kernel built: $KERNEL_BIN_PATH ($size)"
+}
+
+create_boot_image() {
+    local kernel_bin="$1"
+
+    log_step "Creating boot disk images..."
+
+    cd "$BOOT_DIR"
+    cargo run -- "$kernel_bin" 2>&1
+
+    if [ $? -ne 0 ]; then
+        log_error "Boot image creation failed!"
+        exit 1
+    fi
+
+    local kernel_dir=$(dirname "$kernel_bin")
+    local uefi_img="$kernel_dir/knoxos-uefi.img"
+    local bios_img="$kernel_dir/knoxos-bios.img"
+
+    if [ -f "$uefi_img" ]; then
+        log_success "UEFI image: $uefi_img ($(ls -lh "$uefi_img" | awk '{print $5}'))"
+    fi
+    if [ -f "$bios_img" ]; then
+        log_success "BIOS image: $bios_img ($(ls -lh "$bios_img" | awk '{print $5}'))"
+    fi
+}
+
+run_qemu_bios() {
+    local kernel_bin="$1"
+    local kernel_dir=$(dirname "$kernel_bin")
+    local bios_img="$kernel_dir/knoxos-bios.img"
+
+    if [ ! -f "$bios_img" ]; then
+        log_error "BIOS disk image not found: $bios_img"
+        exit 1
+    fi
+
+    echo ""
+    log_step "Starting KnoxOS in QEMU (BIOS mode)..."
+    echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
+    echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
+    echo -e "  ${CYAN}Input:${NC}   PS/2 Mouse (relative)"
+    echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
+    echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
+    echo -e "  ${CYAN}Serial:${NC}   /tmp/knoxos-serial.log"
+    echo -e "  ${CYAN}Exit:${NC}     Ctrl+C or close QEMU window"
+    echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    $QEMU \
+        -drive format=raw,file="$bios_img" \
+        -serial file:/tmp/knoxos-serial.log \
+        -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+        -m "$QEMU_MEMORY" \
+        -cpu qemu64 \
+        -smp "$QEMU_CPUS" \
+        -vga std \
+        -global VGA.vgamem_mb=64 \
+        -global VGA.xres=1920 \
+        -global VGA.yres=1080 \
+        -display $QEMU_DISPLAY \
+        -no-reboot \
+        -no-shutdown
+}
+
+run_qemu_uefi() {
+    local kernel_bin="$1"
+    local kernel_dir=$(dirname "$kernel_bin")
+    local uefi_img="$kernel_dir/knoxos-uefi.img"
+
+    if [ ! -f "$uefi_img" ]; then
+        log_error "UEFI disk image not found: $uefi_img"
+        exit 1
+    fi
+
+    local ovmf
+    ovmf=$(find_ovmf) || {
+        log_error "OVMF firmware not found!"
+        log_info "Searched paths:"
+        for p in "${OVMF_PATHS[@]}"; do
+            echo "  - $p"
+        done
+        log_info "Install OVMF: brew install qemu (macOS) / apt install ovmf (Ubuntu)"
+        log_info "Or set OVMF environment variable to the correct path"
+        log_info "Falling back to BIOS mode..."
+        run_qemu_bios "$kernel_bin"
+        return
+    }
+
+    echo ""
+    log_step "Starting KnoxOS in QEMU (UEFI mode)..."
+    echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
+    echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
+    echo -e "  ${CYAN}Input:${NC}   PS/2 Mouse (relative)"
+    echo -e "  ${CYAN}OVMF:${NC}    $ovmf"
+    echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
+    echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
+    echo -e "  ${CYAN}Serial:${NC}   stdout (below)"
+    echo -e "  ${CYAN}Exit:${NC}     Ctrl+C or close QEMU window"
+    echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    $QEMU \
+        -bios "$ovmf" \
+        -drive format=raw,file="$uefi_img" \
+        -serial stdio \
+        -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+        -m "$QEMU_MEMORY" \
+        -cpu qemu64 \
+        -smp "$QEMU_CPUS" \
+        -vga std \
+        -global VGA.vgamem_mb=64 \
+        -global VGA.xres=1920 \
+        -global VGA.yres=1080 \
+        -display $QEMU_DISPLAY \
+        -no-reboot \
+        -no-shutdown
+}
+
+run_qemu_debug() {
+    local kernel_bin="$1"
+    local kernel_dir=$(dirname "$kernel_bin")
+    local bios_img="$kernel_dir/knoxos-bios.img"
+
+    if [ ! -f "$bios_img" ]; then
+        log_error "BIOS disk image not found: $bios_img"
+        exit 1
+    fi
+
+    echo ""
+    log_step "Starting KnoxOS in QEMU (DEBUG mode)..."
+    log_info "QEMU will wait for GDB connection on localhost:1234"
+    log_info "Connect with: gdb -ex 'target remote :1234' $kernel_bin"
+    echo ""
+
+    $QEMU \
+        -drive format=raw,file="$bios_img" \
+        -serial stdio \
+        -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+        -m "$QEMU_MEMORY" \
+        -cpu qemu64 \
+        -smp "$QEMU_CPUS" \
+        -vga std \
+        -global VGA.vgamem_mb=64 \
+        -global VGA.xres=1920 \
+        -global VGA.yres=1080 \
+        -display $QEMU_DISPLAY \
+        -s -S \
+        -no-reboot \
+        -no-shutdown
+}
+
+show_help() {
+    print_banner
+    echo "Usage: ./run.sh [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  (no args)       Build release and run in QEMU (BIOS mode)"
+    echo "  --uefi          Build and run in UEFI mode"
+    echo "  --dev           Build debug (unoptimized) instead of release"
+    echo "  --release       Build optimized release build (default)"
+    echo "  --debug         Build and run with GDB debugging"
+    echo "  --build-only    Build without running QEMU"
+    echo "  --setup         Install required tools (Rust, QEMU)"
+    echo "  --clean         Clean all build artifacts"
+    echo "  --help          Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  ./run.sh                    # Release build & run (BIOS)"
+    echo "  ./run.sh --uefi             # Run with UEFI firmware"
+    echo "  ./run.sh --dev              # Debug build & run (slower)"
+    echo "  ./run.sh --debug            # Debug with GDB"
+    echo ""
+    echo "Requirements:"
+    echo "  - Rust nightly toolchain (with rust-src, llvm-tools-preview)"
+    echo "  - QEMU (qemu-system-x86_64)"
+    echo "  - OVMF firmware (for UEFI mode only)"
+    echo ""
+}
+
+# ─── Main ──────────────────────────────────────────────────────────
+
+main() {
+    local mode="bios"
+    local profile="release"
+    local build_only=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --uefi)
+                mode="uefi"
+                shift
+                ;;
+            --release)
+                profile="release"
+                shift
+                ;;
+            --dev)
+                profile="debug"
+                shift
+                ;;
+            --debug)
+                mode="debug"
+                shift
+                ;;
+            --build-only)
+                build_only=true
+                shift
+                ;;
+            --setup)
+                do_setup
+                exit 0
+                ;;
+            --clean)
+                do_clean
+                exit 0
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                echo "Run './run.sh --help' for usage information."
+                exit 1
+                ;;
+        esac
+    done
+
+    print_banner
+    check_dependencies
+
+    # Build
+    KERNEL_BIN_PATH=""
+    build_kernel "$profile"
+
+    # Create boot images
+    create_boot_image "$KERNEL_BIN_PATH"
+
+    if [ "$build_only" = true ]; then
+        log_success "Build complete! Images are ready."
+        exit 0
+    fi
+
+    # Run in QEMU
+    case "$mode" in
+        uefi)
+            run_qemu_uefi "$KERNEL_BIN_PATH"
+            ;;
+        debug)
+            run_qemu_debug "$KERNEL_BIN_PATH"
+            ;;
+        *)
+            run_qemu_bios "$KERNEL_BIN_PATH"
+            ;;
+    esac
+}
+
+main "$@"

@@ -1,0 +1,19 @@
+# Rust build artifacts
+/target/
+
+# Bootimage output
+*.bin
+*.iso
+*.img
+
+# Environment
+/.env
+
+# Editor
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

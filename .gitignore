@@ -1,2 +1,26 @@
-# macOS metadata
+# Rust build artifacts
+kernel/target/
+boot/target/
+backend/target/
+tools/**/target/
+
+# Disk and boot images (QEMU persistent disk, BIOS/UEFI images)
+*.img
+*.iso
+*.qcow2
+*.vmdk
+*.vdi
+
+# QEMU / run leftovers
+serial.log
+nohup.out
+
+# Editor / OS
 .DS_Store
+Thumbs.db
+.knox
+.vscode/
+*.swp
+*.swo
+*~
+*.rs.bk

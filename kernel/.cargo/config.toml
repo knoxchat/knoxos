@@ -1,0 +1,20 @@
+[build]
+target = "x86_64-unknown-none"
+# Force abort for every rustc on this target, including build-std.
+# `cargo test` otherwise compiles a second `core` without `-C panic=abort`
+# and hits duplicate lang item `sized`.
+#
+# `x86_softfloat_sse`: rustc `core` stdarch uses `#[target_feature(enable = "sse")]`,
+# which is a future-incompat lint on this soft-float target (rust-lang/rust#117938).
+# Keep kernel codegen soft-float (`x86_64-unknown-none` default). Do not enable
+# SSE globally or interrupt handlers can clobber XMM without a save/restore.
+rustflags = ["-C", "panic=abort", "-A", "x86_softfloat_sse"]
+
+[unstable]
+build-std = ["core", "compiler_builtins", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+# `core` rebuilds still trip rustc's SSE/soft-float FCW; do not nag on every
+# cargo check/clippy after the lint is allowed above.
+[future-incompat-report]
+frequency = "never"

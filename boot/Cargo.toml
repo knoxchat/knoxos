@@ -1,0 +1,9 @@
+[package]
+name = "knoxos-boot"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98.1"
+description = "Boot image builder for KnoxOS kernel"
+
+[dependencies]
+bootloader = { version = "0.11.17", features = ["uefi", "bios"] }
