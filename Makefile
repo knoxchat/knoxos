@@ -294,12 +294,6 @@ info: ## Show KnoxOS information
 # CI / AUTOMATION TARGETS (Section 27)
 # ═══════════════════════════════════════════════════════════════════════
 
-docker-build: ## Build using Docker container
-	@echo "$(BLUE)[KnoxOS] Building in Docker container...$(NC)"
-	docker build -t knoxos-build -f Dockerfile.build .
-	docker run --rm -v $$(pwd):/workspace knoxos-build make -C /workspace/kernel release
-	@echo "$(GREEN)[✓] Docker build complete$(NC)"
-
 nix-build: ## Build using Nix
 	@echo "$(BLUE)[KnoxOS] Building with Nix...$(NC)"
 	nix build

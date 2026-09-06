@@ -105,7 +105,7 @@ Percentages are **production usefulness**, not lines of code.
 | 12 | AI/ML | Wired | 22% | Low | GGUF parse + naive CPU; GPU matmul unused. |
 | 13 | Binary Compatibility | Stub→Wired | 18% | **Critical** | ELF maps into VMM; `execve` never `iretq`s. |
 | 14 | Internationalization & Fonts | Live | 68% | Low | TTF, CJK, RTL on the compositor; locale loading partial. |
-| 15 | Build System & Tooling | Live | 75% | Medium | Make/QEMU/Docker work; `flake.nix` missing. |
+| 15 | Build System & Tooling | Live | 75% | Medium | Make/QEMU work; `flake.nix` missing. |
 | 16 | Testing & Quality | Wired | 32% | **Critical** | Real VFS/widget/DNS/buddy tests; `assert!(true)` tests removed. |
 | 17 | Documentation | Wired | 35% | **Critical** | README + LICENSE + this file. Architecture guides still missing. |
 | 18 | CI/CD & Release | Wired | 30% | High | `.github/workflows/ci.yml` (fmt, clippy, size, QEMU boot); no signed releases. |
@@ -523,13 +523,12 @@ Ship **static musl hello** first. Dynamic linking is Phase 2 of userspace, not P
 
 ## 15. Build System & Tooling
 
-**Grade: Live (72%)** · `Makefile`, `kernel/Makefile`, `Dockerfile.build`, `run.sh`
+**Grade: Live (72%)** · `Makefile`, `kernel/Makefile`, `run.sh`
 
 ### Live
 - [x] `./run.sh` / `make kernel` / BIOS & UEFI images
 - [x] QEMU: 2G RAM, 2 CPUs, VirtIO disk, serial, cocoa/gtk display
 - [x] Release: LTO, `opt-level = "z"`, 16 MB size gate
-- [x] Docker build image (nightly Rust + QEMU + OVMF)
 - [x] Local CI: `ci-fmt`, `ci-clippy`, `ci-size`, `ci-qemu`
 - [x] Cross stubs for aarch64/riscv64
 - [x] **`.github/workflows/ci.yml`** — docs, fmt, clippy+size, QEMU BIOS boot
@@ -593,7 +592,6 @@ Ship **static musl hello** first. Dynamic linking is Phase 2 of userspace, not P
 
 ### Live locally
 - [x] `make ci-all` (fmt, clippy, size)
-- [x] Docker build
 
 ### Missing
 - [x] **`.github/workflows`** — fmt, clippy, size, QEMU BIOS boot, docs present
