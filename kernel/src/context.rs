@@ -379,10 +379,151 @@ unsafe extern "C" fn switch_context_inner(old: *mut CpuContext, new: *const CpuC
     );
 }
 
+/// Load `new` and start executing it **without saving the current state**.
+///
+/// Used when the outgoing task no longer has a continuation worth keeping:
+/// a process that has called `exit`, or one that is blocking inside a syscall
+/// and whose resume point is a Ring 3 frame rather than the kernel stack it is
+/// standing on. The abandoned kernel frames are never returned to.
+///
+/// # Safety
+/// `new` must describe a runnable context, and `new.cr3` (when non-zero) must
+/// keep this kernel mapped.
+#[unsafe(naked)]
+#[cfg(target_arch = "x86_64")]
+pub unsafe extern "C" fn enter_context(new: *const CpuContext) {
+    core::arch::naked_asm!(
+        // Keep the context pointer in rdx: rdi/rsi are reloaded from it.
+        "mov rdx, rdi",
+        "cli",
+        "mov rax, [rdx + 24*8]",
+        "test rax, rax",
+        "jz 2f",
+        "mov cr3, rax",
+        "2:",
+        "cmp byte ptr [rdx + 720], 0",
+        "je 3f",
+        "fxrstor64 [rdx + 208]",
+        "3:",
+        "mov rax, [rdx + 18*8]",
+        "and rax, 3",
+        "jnz 4f",
+        // Kernel target: restore RFLAGS/RSP, then jump to the continuation.
+        "mov rax, [rdx + 17*8]",
+        "push rax",
+        "popfq",
+        "mov rbx, [rdx + 1*8]",
+        "mov rcx, [rdx + 2*8]",
+        "mov rbp, [rdx + 6*8]",
+        "mov r8,  [rdx + 8*8]",
+        "mov r9,  [rdx + 9*8]",
+        "mov r10, [rdx + 10*8]",
+        "mov r11, [rdx + 11*8]",
+        "mov r12, [rdx + 12*8]",
+        "mov r13, [rdx + 13*8]",
+        "mov r14, [rdx + 14*8]",
+        "mov r15, [rdx + 15*8]",
+        "mov rax, [rdx + 16*8]",
+        "mov rsp, [rdx + 7*8]",
+        "mov rsi, [rdx + 4*8]",
+        "mov rdi, [rdx + 5*8]",
+        "jmp rax",
+        // Ring 3 target: rebuild the iretq frame (SS, RSP, RFLAGS, CS, RIP).
+        "4:",
+        "mov rax, [rdx + 19*8]",
+        "push rax",
+        "mov rax, [rdx + 7*8]",
+        "push rax",
+        "mov rax, [rdx + 17*8]",
+        "or rax, 0x200",
+        "push rax",
+        "mov rax, [rdx + 18*8]",
+        "push rax",
+        "mov rax, [rdx + 16*8]",
+        "push rax",
+        "mov rax, [rdx + 21*8]",
+        "mov es, ax",
+        "mov rax, [rdx + 20*8]",
+        "mov ds, ax",
+        "mov rbx, [rdx + 1*8]",
+        "mov rcx, [rdx + 2*8]",
+        "mov rbp, [rdx + 6*8]",
+        "mov r8,  [rdx + 8*8]",
+        "mov r9,  [rdx + 9*8]",
+        "mov r10, [rdx + 10*8]",
+        "mov r11, [rdx + 11*8]",
+        "mov r12, [rdx + 12*8]",
+        "mov r13, [rdx + 13*8]",
+        "mov r14, [rdx + 14*8]",
+        "mov r15, [rdx + 15*8]",
+        "mov rax, [rdx + 0*8]",
+        "mov rsi, [rdx + 4*8]",
+        "mov rdi, [rdx + 5*8]",
+        // The syscall `swapgs` expects GS_BASE to hold the user value here.
+        "swapgs",
+        "iretq",
+    );
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub unsafe extern "C" fn enter_context(_new: *const CpuContext) {}
+
+/// Copy `ctx` out of the process context table.
+pub fn snapshot(pid: Pid) -> Option<CpuContext> {
+    PROCESS_CONTEXTS
+        .lock()
+        .iter()
+        .find(|pc| pc.pid == pid)
+        .map(|pc| pc.context)
+}
+
+/// Switch to another task and never resume the caller.
+///
+/// # Safety
+/// Must be called with `PROCESS_CONTEXTS` **not** held.
+pub unsafe fn abandon_current_and_enter(next_pid: Pid) {
+    let next = match snapshot(next_pid) {
+        Some(c) if c.is_runnable() => c,
+        _ => return,
+    };
+    crate::scheduler::set_running(next_pid);
+    set_current_pid(next_pid);
+    program_kernel_stack(next_pid);
+    enter_context(&next);
+}
+
 /// Create a context for a new process
 pub fn create_process_context(pid: Pid) {
     let pc = ProcessContext::new(pid);
     PROCESS_CONTEXTS.lock().push(Box::new(pc));
+}
+
+/// Run `f` with the current task registered as [`DESKTOP_PID`].
+///
+/// The desktop context does not need a hand-built trampoline: the first
+/// `switch_to` away from here saves this kernel continuation via
+/// `switch_context`, and a later switch back resumes at the `ret` inside
+/// `switch_context_inner`, returning straight into `f`. Clearing RIP first
+/// keeps a stale entry from being picked before that save happens.
+///
+/// # Safety
+/// `f` must not hold a lock across a yield, and the scheduler must be able to
+/// switch away and back.
+pub unsafe fn run_in_desktop_context(f: extern "C" fn()) {
+    {
+        let mut contexts = PROCESS_CONTEXTS.lock();
+        if let Some(pc) = contexts.iter_mut().find(|pc| pc.pid == DESKTOP_PID) {
+            // A kernel task must never be restored through the Ring 3 branch.
+            pc.context.cs = crate::usermode::KERNEL_CODE_SEGMENT as u64;
+            pc.context.ss = crate::usermode::KERNEL_DATA_SEGMENT as u64;
+            pc.context.rip = 0;
+        }
+    }
+    crate::scheduler::set_running(DESKTOP_PID);
+    set_current_pid(DESKTOP_PID);
+    f();
+    crate::scheduler::set_running(DESKTOP_PID);
+    set_current_pid(DESKTOP_PID);
 }
 
 /// Create a kernel thread context
@@ -405,6 +546,72 @@ pub fn create_user_process_context(pid: Pid, entry_point: u64, user_stack: u64, 
         cr3
     );
     PROCESS_CONTEXTS.lock().push(Box::new(pc));
+}
+
+/// Replace the image of an existing user task without freeing its kernel stack.
+///
+/// `execve` runs on that stack; destroying the `ProcessContext` would free the
+/// memory the syscall is standing on.
+pub fn reset_user_process_context(pid: Pid, entry_point: u64, user_stack: u64, cr3: u64) {
+    let mut contexts = PROCESS_CONTEXTS.lock();
+    if let Some(pc) = contexts.iter_mut().find(|pc| pc.pid == pid) {
+        pc.context = CpuContext::new_user_thread(entry_point, user_stack);
+        pc.context.cr3 = cr3;
+        pc.in_user_mode = true;
+        serial_println!(
+            "[context] Reset user image PID={} entry={:#x} stack={:#x} cr3={:#x}",
+            pid,
+            entry_point,
+            user_stack,
+            cr3
+        );
+        return;
+    }
+    drop(contexts);
+    create_user_process_context(pid, entry_point, user_stack, cr3);
+}
+
+/// Fork a Ring 3 context: new kernel stack, child's CR3, `rax = 0`, resume at
+/// the instruction after the parent's `syscall`.
+pub fn clone_user_context(parent: Pid, child: Pid, child_cr3: u64) {
+    let mut ctx = snapshot(parent).unwrap_or_default();
+    let resume_rip = crate::usermode::pending_user_rip();
+    let resume_rsp = crate::usermode::current_user_rsp();
+    if resume_rip != 0 {
+        ctx.rip = resume_rip;
+    }
+    if resume_rsp != 0 {
+        ctx.rsp = resume_rsp;
+    }
+    ctx.cr3 = child_cr3;
+    ctx.rax = 0;
+    if ctx.cs & 3 == 0 {
+        ctx.cs = crate::usermode::USER_CODE_SEGMENT as u64;
+        ctx.ss = crate::usermode::USER_DATA_SEGMENT as u64;
+        ctx.ds = crate::usermode::USER_DATA_SEGMENT as u64;
+        ctx.es = crate::usermode::USER_DATA_SEGMENT as u64;
+    }
+    let mut pc = ProcessContext::new(child);
+    pc.context = ctx;
+    pc.in_user_mode = true;
+    serial_println!(
+        "[context] Forked user context {} -> {} rip={:#x} rsp={:#x} cr3={:#x}",
+        parent,
+        child,
+        pc.context.rip,
+        pc.context.rsp,
+        child_cr3
+    );
+    PROCESS_CONTEXTS.lock().push(Box::new(pc));
+}
+
+/// Kernel stack top for a task, if it has one.
+pub fn kernel_stack_top(pid: Pid) -> Option<u64> {
+    PROCESS_CONTEXTS
+        .lock()
+        .iter()
+        .find(|pc| pc.pid == pid)
+        .map(|pc| pc.kernel_stack_top)
 }
 
 /// Remove a process context
@@ -459,6 +666,11 @@ pub fn schedule_tick() {
 
 /// Switch to a specific process by PID.
 ///
+/// The `iretq` path inside [`switch_context_inner`] handles both first entry
+/// into Ring 3 and every later resume, because `create_user_process_context`
+/// leaves `cs`/`ss` at the Ring 3 selectors: one entry point, no separate
+/// "has run before" case to keep in sync.
+///
 /// # Safety
 /// Must be called with the scheduler / `PROCESS_CONTEXTS` lock **not** held.
 pub unsafe fn switch_to(next_pid: Pid) {
@@ -486,8 +698,21 @@ pub unsafe fn switch_to(next_pid: Pid) {
         )
     };
 
+    crate::scheduler::switch_running(next_pid);
     set_current_pid(next_pid);
+    program_kernel_stack(next_pid);
     switch_context(&mut *old_ptr, &*new_ptr);
+}
+
+/// Point the CPU's Ring 0 entry stacks at this task's kernel stack.
+///
+/// Without this every user task would syscall onto whichever stack was
+/// programmed last. `TSS.RSP0` covers hardware IRQs and exceptions taken in
+/// Ring 3; `gs:[8]` covers the `syscall` instruction itself.
+pub fn program_kernel_stack(pid: Pid) {
+    if let Some(top) = kernel_stack_top(pid) {
+        crate::usermode::set_kernel_stack(top);
+    }
 }
 
 /// Cooperative yield to the idle thread (HLT). Returns when idle switches back.
@@ -624,6 +849,14 @@ pub fn set_user_context(pid: Pid, rip: u64, rsp: u64, rdi: u64) {
         pc.context.rip = rip;
         pc.context.rsp = rsp;
         pc.context.rdi = rdi;
+    }
+}
+
+/// Set the syscall return value a parked task will observe in RAX.
+pub fn set_user_retval(pid: Pid, value: i64) {
+    let mut contexts = PROCESS_CONTEXTS.lock();
+    if let Some(pc) = contexts.iter_mut().find(|pc| pc.pid == pid) {
+        pc.context.rax = value as u64;
     }
 }
 

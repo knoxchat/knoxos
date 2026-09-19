@@ -62,6 +62,7 @@ bench = false
 
 [lib]
 doctest = false
+harness = false
 
 [profile.release]
 lto = true

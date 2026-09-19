@@ -211,6 +211,124 @@ pub fn hello_userspace_elf_data() -> Vec<u8> {
     elf
 }
 
+/// Pack `code` into a static ELF64 loaded at the Gate B2 vaddr (L4 index 1).
+pub fn build_static_user_elf(code: &[u8]) -> Vec<u8> {
+    let entry_point: u64 = 0x0000_0080_0000_1000;
+    let program_header_offset: u64 = 0x40;
+    let mut elf = Vec::new();
+
+    elf.extend_from_slice(&[0x7f, b'E', b'L', b'F']);
+    elf.push(2);
+    elf.push(1);
+    elf.push(1);
+    elf.push(0);
+    elf.extend_from_slice(&[0; 8]);
+    elf.extend_from_slice(&2u16.to_le_bytes());
+    elf.extend_from_slice(&62u16.to_le_bytes());
+    elf.extend_from_slice(&1u32.to_le_bytes());
+    elf.extend_from_slice(&entry_point.to_le_bytes());
+    elf.extend_from_slice(&program_header_offset.to_le_bytes());
+    elf.extend_from_slice(&0u64.to_le_bytes());
+    elf.extend_from_slice(&0u32.to_le_bytes());
+    elf.extend_from_slice(&64u16.to_le_bytes());
+    elf.extend_from_slice(&56u16.to_le_bytes());
+    elf.extend_from_slice(&1u16.to_le_bytes());
+    elf.extend_from_slice(&0u16.to_le_bytes());
+    elf.extend_from_slice(&0u16.to_le_bytes());
+    elf.extend_from_slice(&0u16.to_le_bytes());
+
+    let code_offset: u64 = 0x1000;
+    let code_vaddr: u64 = 0x0000_0080_0000_1000;
+    let code_size: u64 = 0x1000;
+
+    elf.extend_from_slice(&1u32.to_le_bytes());
+    elf.extend_from_slice(&5u32.to_le_bytes());
+    elf.extend_from_slice(&code_offset.to_le_bytes());
+    elf.extend_from_slice(&code_vaddr.to_le_bytes());
+    elf.extend_from_slice(&code_vaddr.to_le_bytes());
+    elf.extend_from_slice(&code_size.to_le_bytes());
+    elf.extend_from_slice(&code_size.to_le_bytes());
+    elf.extend_from_slice(&0x1000u64.to_le_bytes());
+
+    elf.resize(code_offset as usize, 0);
+    elf.extend_from_slice(code);
+    elf.resize((code_offset + code_size) as usize, 0);
+    elf
+}
+
+/// `execve("/bin/hello", NULL, NULL)` then `exit(1)` if execve returns.
+pub fn exec_hello_elf_data() -> Vec<u8> {
+    // lea rdi, [rip+path]; xor rsi,rsi; xor rdx,rdx; mov rax,59; syscall;
+    // mov rax,60; mov rdi,1; syscall; "/bin/hello\0"
+    build_static_user_elf(&[
+        0x48, 0x8D, 0x3D, 0x1F, 0x00, 0x00, 0x00, // lea rdi, [rip+0x1F]
+        0x48, 0x31, 0xF6, // xor rsi, rsi
+        0x48, 0x31, 0xD2, // xor rdx, rdx
+        0x48, 0xC7, 0xC0, 0x3B, 0x00, 0x00, 0x00, // mov rax, 59
+        0x0F, 0x05, // syscall
+        0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, // mov rax, 60
+        0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
+        0x0F, 0x05, // syscall
+        b'/', b'b', b'i', b'n', b'/', b'h', b'e', b'l', b'l', b'o', 0,
+    ])
+}
+
+/// `fork`; child writes "fork child ran\n" and exits; parent `wait4`s then
+/// writes `GATE_B4 fork complete\n`.
+pub fn fork_userspace_elf_data() -> Vec<u8> {
+    build_static_user_elf(&[
+        0x48, 0xC7, 0xC0, 0x39, 0x00, 0x00, 0x00, // mov rax, 57
+        0x0F, 0x05, // syscall
+        0x48, 0x85, 0xC0, // test rax, rax
+        0x75, 0x2A, // jnz parent (0x38)
+        // child
+        0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
+        0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
+        0x48, 0x8D, 0x35, 0x54, 0x00, 0x00, 0x00, // lea rsi, [rip+0x54]
+        0x48, 0xC7, 0xC2, 0x0F, 0x00, 0x00, 0x00, // mov rdx, 15
+        0x0F, 0x05, // syscall
+        0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, // mov rax, 60
+        0x48, 0x31, 0xFF, // xor rdi, rdi
+        0x0F, 0x05, // syscall
+        // parent at 0x38
+        0x48, 0x89, 0xC7, // mov rdi, rax
+        0x48, 0x31, 0xF6, // xor rsi, rsi
+        0x48, 0x31, 0xD2, // xor rdx, rdx
+        0x4D, 0x31, 0xD2, // xor r10, r10
+        0x48, 0xC7, 0xC0, 0x3D, 0x00, 0x00, 0x00, // mov rax, 61
+        0x0F, 0x05, // syscall
+        0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
+        0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
+        0x48, 0x8D, 0x35, 0x24, 0x00, 0x00, 0x00, // lea rsi, [rip+0x24]
+        0x48, 0xC7, 0xC2, 0x16, 0x00, 0x00, 0x00, // mov rdx, 22
+        0x0F, 0x05, // syscall
+        0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, // mov rax, 60
+        0x48, 0x31, 0xFF, // xor rdi, rdi
+        0x0F, 0x05, // syscall
+        b'f', b'o', b'r', b'k', b' ', b'c', b'h', b'i', b'l', b'd', b' ', b'r', b'a', b'n', b'\n',
+        b'G', b'A', b'T', b'E', b'_', b'B', b'4', b' ', b'f', b'o', b'r', b'k', b' ', b'c', b'o',
+        b'm', b'p', b'l', b'e', b't', b'e', b'\n',
+    ])
+}
+
+/// `pause()` then `exit(1)` if it ever returns.
+pub fn pause_userspace_elf_data() -> Vec<u8> {
+    build_static_user_elf(&[
+        0x48, 0xC7, 0xC0, 0x22, 0x00, 0x00, 0x00, // mov rax, 34
+        0x0F, 0x05, // syscall
+        0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, // mov rax, 60
+        0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
+        0x0F, 0x05, // syscall
+    ])
+}
+
+/// `mov rax, [0]` — #PF in Ring 3, delivered as SIGSEGV.
+pub fn segfault_userspace_elf_data() -> Vec<u8> {
+    build_static_user_elf(&[
+        0x48, 0x8B, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00, // mov rax, [0]
+    ])
+}
+
 fn launch_hello_userspace() -> Result<(), &'static str> {
     let elf = hello_userspace_elf_data();
     if !crate::elf::is_elf(&elf) {
@@ -257,9 +375,9 @@ fn find_init_binary() -> Option<Vec<u8>> {
 /// Start the first user-space program.
 ///
 /// Gate B2: map a static hello ELF into the current page tables, `iretq` to
-/// Ring 3, `sys_write` to serial, `sys_exit` back to the kernel. A long-running
-/// `/init` is not enqueued until `execve`+`waitpid` (B3) — a competing user
-/// context on the CFS run queue would steal the desktop CPU.
+/// Ring 3, `sys_write` to serial, `sys_exit` back to the kernel.
+/// Gate B3–B5: scheduled tasks with their own CR3 — `execve`+`waitpid`,
+/// `fork`+child, then SIGKILL / SIGSEGV / PTY SIGINT.
 pub fn start_init() -> Option<Pid> {
     serial_println!("[init] Starting first userspace (Gate B2 hello)...");
 
@@ -271,6 +389,8 @@ pub fn start_init() -> Option<Pid> {
             serial_println!("[init] Ring 3 hello failed: {}", e);
         }
     }
+
+    crate::user_task::run_gate_demos();
 
     None
 }

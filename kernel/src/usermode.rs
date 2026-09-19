@@ -34,15 +34,21 @@ const MSR_GS_BASE: u32 = 0xC000_0101;
 const MSR_KERNEL_GS_BASE: u32 = 0xC000_0102;
 
 /// Per-CPU GS scratch used by `syscall_entry` (`swapgs` then gs:[0]/gs:[8]).
+///
+/// `user_rip` (offset 16) is the Ring 3 resume point the CPU put in RCX; it is
+/// stashed here because a handler that blocks the task (`wait4`) needs it long
+/// after the register was reused.
 #[repr(C)]
 struct SyscallGs {
     user_rsp: u64,
     kernel_rsp: u64,
+    user_rip: u64,
 }
 
 static mut SYSCALL_GS: SyscallGs = SyscallGs {
     user_rsp: 0,
     kernel_rsp: 0,
+    user_rip: 0,
 };
 
 /// EFER bits
@@ -136,6 +142,7 @@ unsafe extern "C" fn syscall_entry() {
         // Save user registers on kernel stack
         "swapgs",                   // Switch to kernel GS base
         "mov gs:[0x0], rsp",        // Save user RSP
+        "mov gs:[0x10], rcx",       // Save user RIP (resume point) for blocking syscalls
         "mov rsp, gs:[0x8]",        // Load kernel RSP
 
         // Build a trap frame
@@ -204,7 +211,12 @@ unsafe extern "C" fn syscall_entry() {
     );
 }
 
-/// Wrapper that calls the actual syscall dispatcher
+/// Wrapper that calls the actual syscall dispatcher.
+///
+/// Also the hook for syscalls that must **not** return to the interrupted
+/// Ring 3 instruction: `exit`, a blocking `wait`, and `execve`. Those set a
+/// [`RedirectRequest`] which is honoured here, after `handle_syscall` has
+/// released every lock it took.
 extern "C" fn syscall_handler_wrapper(
     number: u64,
     arg1: u64,
@@ -214,7 +226,159 @@ extern "C" fn syscall_handler_wrapper(
     arg5: u64,
     arg6: u64,
 ) -> i64 {
-    crate::syscall::handle_syscall(number, arg1, arg2, arg3, arg4, arg5, arg6)
+    let ret = crate::syscall::handle_syscall(number, arg1, arg2, arg3, arg4, arg5, arg6);
+    if redirect_pending() {
+        syscall_redirect_dispatch();
+    }
+    ret
+}
+
+/// Hand the CPU somewhere other than straight back to the interrupted Ring 3
+/// instruction. Called with a redirect pending. Never returns for `exit` /
+/// `execve`; the `None` arm is just a defensive fall-through.
+fn syscall_redirect_dispatch() {
+    let pid = crate::context::current_pid();
+    match take_redirect_request() {
+        RedirectRequest::Exit(code) => {
+            crate::user_task::finish_current(pid, code);
+        }
+        RedirectRequest::ResumeSelf => {
+            crate::context::program_kernel_stack(pid);
+            if let Some(ctx) = crate::context::snapshot(pid) {
+                unsafe {
+                    crate::context::enter_context(&ctx);
+                }
+            }
+        }
+        RedirectRequest::None => {}
+    }
+}
+
+/// The Ring 3 RSP of the interrupted task, saved by `syscall_entry` at `gs:[0]`.
+pub fn current_user_rsp() -> u64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: `gs` points at SYSCALL_GS while executing in the kernel.
+        let rsp: u64;
+        unsafe {
+            core::arch::asm!(
+                "mov {}, gs:[0x0]",
+                out(reg) rsp,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+        rsp
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        0
+    }
+}
+
+/// The Ring 3 RIP to resume at after a blocking syscall completes, saved by
+/// `syscall_entry` at `gs:[0x10]`.
+pub fn pending_user_rip() -> u64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: `gs` points at SYSCALL_GS while executing in the kernel.
+        let rip: u64;
+        unsafe {
+            core::arch::asm!(
+                "mov {}, gs:[0x10]",
+                out(reg) rip,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+        rip
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        0
+    }
+}
+
+/// Restore the kernel GS base for the current thread. `syscall_entry` does
+/// `swapgs` before pushing the trap frame, so the thread's kernel GS is live
+/// while the handler runs and must be reinstated before the next `sysretq`.
+#[cfg(target_arch = "x86_64")]
+pub unsafe fn set_user_gs_base() {
+    wrmsr(MSR_KERNEL_GS_BASE, 0);
+}
+
+/// Point the Ring 3 entry path at a task's kernel stack.
+///
+/// Both are needed: `syscall` loads RSP from `gs:[8]`, while hardware
+/// interrupts and exceptions that arrive in Ring 3 use `TSS.RSP0`.
+/// Must be called on every context switch so two user tasks never share a
+/// kernel stack.
+pub fn set_kernel_stack(top: u64) {
+    if top == 0 {
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        crate::gdt::set_privilege_stack_top(top);
+        SYSCALL_GS.kernel_rsp = top;
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = top;
+}
+
+// ─── Syscall return redirection ─────────────────────────────────────────
+//
+// The `syscall` path is synchronous: enter, handle, `sysretq`. Three things
+// break that shape — `exit` (never return), a blocking `wait` (return much
+// later, on another task's terms) and `execve` (return to a different
+// address). Each sets a request here; `syscall_entry` sees the flag after
+// the handler returns and calls [`syscall_redirect`] instead of `sysretq`.
+
+/// What `syscall_entry` should do instead of returning to Ring 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedirectRequest {
+    /// Normal return: `sysretq`.
+    None,
+    /// The current task is finished; enter someone else and never come back.
+    Exit(i32),
+    /// Resume Ring 3 at the context the handler just installed in the table.
+    ResumeSelf,
+}
+
+static REDIRECT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+static EXIT_CODE: core::sync::atomic::AtomicI32 = core::sync::atomic::AtomicI32::new(0);
+
+const REDIRECT_NONE: u8 = 0;
+const REDIRECT_EXIT: u8 = 1;
+const REDIRECT_RESUME: u8 = 3;
+
+/// Ask `syscall_entry` to hand the CPU to another task instead of returning.
+/// Only valid inside a syscall handler.
+pub fn request_exit(code: i32) {
+    EXIT_CODE.store(code, core::sync::atomic::Ordering::SeqCst);
+    REDIRECT.store(REDIRECT_EXIT, core::sync::atomic::Ordering::Release);
+}
+
+/// Ask `syscall_entry` to re-enter Ring 3 from the context table (used by
+/// `execve`, which has just replaced the image).
+pub fn request_resume_self() {
+    REDIRECT.store(REDIRECT_RESUME, core::sync::atomic::Ordering::Release);
+}
+
+/// Read and clear the pending redirect request. Called from the entry stub.
+pub fn take_redirect_request() -> RedirectRequest {
+    match REDIRECT.swap(REDIRECT_NONE, core::sync::atomic::Ordering::AcqRel) {
+        REDIRECT_EXIT => {
+            RedirectRequest::Exit(EXIT_CODE.load(core::sync::atomic::Ordering::SeqCst))
+        }
+        REDIRECT_RESUME => RedirectRequest::ResumeSelf,
+        _ => RedirectRequest::None,
+    }
+}
+
+/// Whether a redirect is pending. Kept lock-free and cheap so the syscall
+/// return path can test it without a syscall-shaped penalty.
+#[inline]
+pub fn redirect_pending() -> bool {
+    REDIRECT.load(core::sync::atomic::Ordering::Acquire) != REDIRECT_NONE
 }
 
 /// Kernel continuation saved around a one-shot Ring 3 run (`run_userspace_once`).
@@ -346,6 +510,11 @@ pub fn exit_oneshot_userspace() {
     unsafe {
         resume_from_user(core::ptr::addr_of_mut!(KERNEL_RESUME));
     }
+}
+
+/// Whether the boot-time one-shot Ring 3 hello is currently running.
+pub fn oneshot_active() -> bool {
+    ONESHOT_USERSPACE.load(core::sync::atomic::Ordering::SeqCst)
 }
 
 /// Check if we're currently in user mode

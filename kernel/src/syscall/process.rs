@@ -15,7 +15,7 @@ pub fn sys_fork() -> SyscallResult {
             .unwrap_or(false);
         drop(table);
 
-        // Fork the VMM address space (CoW) if the parent has one
+        // process::fork already cloned the fd table and signal state.
         if parent_has_as {
             if !crate::vmm::fork_address_space(ppid, child_pid) {
                 serial_println!(
@@ -25,29 +25,13 @@ pub fn sys_fork() -> SyscallResult {
                 );
                 return Err(SyscallError::OutOfMemory);
             }
-            // Clone parent's context with CR3 pointing to child's new page table
             let child_cr3 = crate::vmm::get_cr3(child_pid).unwrap_or(0);
-            let parent_ctx = {
-                let contexts = crate::context::PROCESS_CONTEXTS.lock();
-                contexts
-                    .iter()
-                    .find(|pc| pc.pid == ppid)
-                    .map(|pc| pc.context)
-            };
-            if let Some(mut ctx) = parent_ctx {
-                ctx.cr3 = child_cr3;
-                ctx.rax = 0; // child returns 0 from fork
-                crate::context::create_user_process_context(child_pid, ctx.rip, ctx.rsp, child_cr3);
-            } else {
-                crate::context::create_process_context(child_pid);
-            }
+            crate::context::clone_user_context(ppid, child_pid, child_cr3);
         } else {
             crate::context::create_process_context(child_pid);
         }
 
-        crate::fd::create_fd_table(child_pid);
-        crate::signals::create_process_signals(child_pid);
-        crate::scheduler::SCHEDULER.lock().add_process(child_pid, 0);
+        crate::scheduler::add_process(child_pid, 0);
         serial_println!("[KnoxOS] fork() -> PID {}", child_pid);
         Ok(child_pid as u64)
     } else {
@@ -59,14 +43,23 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
     let filename =
         unsafe { read_user_string(filename_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
+
+    // Gate B2's hello runs as a boot-time one-shot on the kernel's own page
+    // tables, so there is no task to replace; keep the old name-only path.
+    if pid <= crate::context::DESKTOP_PID {
+        crate::serial_println!("[execve] {}: no user task for PID {}", filename, pid);
+        let name = filename.rsplit('/').next().unwrap_or(&filename);
+        crate::process::PROCESS_TABLE.lock().exec(pid, name, &[]);
+        return Ok(0);
+    }
+
     serial_println!("[KnoxOS] execve({}) PID={}", filename, pid);
 
-    // Read ELF data from VFS
+    // Read the new image out of the VFS.
     let data_copy = {
         let vfs = crate::vfs::VFS.lock();
         let data = vfs.read_file(&filename).ok_or(SyscallError::FileNotFound)?;
         if !crate::elf::is_elf(data) {
-            // Not an ELF — fall back to old behavior (name change only)
             let name = filename.rsplit('/').next().unwrap_or(&filename);
             drop(vfs);
             crate::process::PROCESS_TABLE.lock().exec(pid, name, &[]);
@@ -75,43 +68,36 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
         data.to_vec()
     };
 
-    // Destroy old address space if any
+    // Replace the address space wholesale. Retiring the old one also discards
+    // the page tables the task is currently executing on — harmless because
+    // `request_resume_self` re-enters from the new context, and the kernel
+    // mappings are shared.
     crate::vmm::destroy_address_space(pid);
-
-    // Create fresh address space
     if !crate::vmm::create_address_space(pid) {
         serial_println!("[execve] Failed to create address space for PID {}", pid);
         return Err(SyscallError::OutOfMemory);
     }
 
-    // Load ELF segments into new address space
-    let (entry_point, _brk) = match crate::vmm::load_elf_into_address_space(pid, &data_copy) {
-        Ok(r) => r,
+    let entry_point = match crate::vmm::load_elf_into_address_space(pid, &data_copy) {
+        Ok((entry, _brk)) => entry,
         Err(e) => {
             serial_println!("[execve] ELF load failed: {}", e);
-            crate::vmm::destroy_address_space(pid);
             return Err(SyscallError::InvalidArgument);
         }
     };
 
-    // Map user stack
     let stack_top = crate::vmm::STACK_TOP;
-    let stack_size = crate::vmm::STACK_SIZE;
-    if crate::vmm::setup_user_stack(pid, stack_top, stack_size).is_none() {
+    if crate::vmm::setup_user_stack(pid, stack_top, crate::vmm::STACK_SIZE).is_none() {
         serial_println!("[execve] Stack setup failed for PID {}", pid);
-        crate::vmm::destroy_address_space(pid);
         return Err(SyscallError::OutOfMemory);
     }
 
-    // Set up initial stack layout (argc, argv, envp, auxv)
-    let argv_strs: &[&str] = &[&filename];
-    let envp_strs: &[&str] = &[];
+    let name = filename.rsplit('/').next().unwrap_or(&filename);
+    let argv_strs: &[&str] = &[name];
     let initial_rsp =
-        crate::vmm::setup_initial_stack(pid, stack_top, argv_strs, envp_strs, entry_point, 0, 0)
+        crate::vmm::setup_initial_stack(pid, stack_top, argv_strs, &[], entry_point, 0, 0)
             .unwrap_or(stack_top - 8);
 
-    // Update process table entry
-    let name = filename.rsplit('/').next().unwrap_or(&filename);
     {
         let mut table = crate::process::PROCESS_TABLE.lock();
         if let Some(proc) = table.get_process_mut(pid) {
@@ -122,10 +108,12 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
         }
     }
 
-    // Replace process context with new user-mode context
+    // Point this PID's context at the new image without freeing the kernel
+    // stack the syscall is using. `request_resume_self` re-enters Ring 3
+    // from here instead of sysretq'ing into the destroyed address space.
     let cr3 = crate::vmm::get_cr3(pid).unwrap_or(0);
-    crate::context::destroy_process_context(pid);
-    crate::context::create_user_process_context(pid, entry_point, initial_rsp, cr3);
+    crate::context::reset_user_process_context(pid, entry_point, initial_rsp, cr3);
+    crate::usermode::request_resume_self();
 
     serial_println!(
         "[execve] PID {} ready: entry={:#x} rsp={:#x} cr3={:#x}",
@@ -140,42 +128,52 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
 pub fn sys_exit(status: i32) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     serial_println!("[KnoxOS] exit({}): PID {}", status, pid);
-    // Gate B2: one-shot hello never sysretq's into a dead RIP.
-    crate::usermode::exit_oneshot_userspace();
-    crate::process::PROCESS_TABLE
-        .lock()
-        .set_state(pid, crate::process::ProcessState::Zombie);
-    crate::scheduler::SCHEDULER.lock().remove_process(pid);
-    let ppid = crate::process::PROCESS_TABLE
-        .lock()
-        .get_process(pid)
-        .map(|p| p.ppid)
-        .unwrap_or(0);
-    if ppid > 0 {
-        let _ = crate::signals::kill(ppid, crate::signals::Signal::SIGCHLD, pid);
+
+    // Gate B2's one-shot hello is not a task: it returns to the kernel
+    // continuation that launched it. A scheduled task (PID > desktop) hands
+    // the CPU to the next runnable task instead.
+    if crate::usermode::oneshot_active() {
+        crate::usermode::exit_oneshot_userspace();
     }
-    // Clean up VMM address space and context
-    crate::vmm::destroy_address_space(pid);
-    crate::context::destroy_process_context(pid);
-    crate::fd::destroy_fd_table(pid);
+    if pid > crate::context::DESKTOP_PID {
+        crate::usermode::request_exit(status);
+    }
     Ok(0)
 }
 
-pub fn sys_wait4(pid: i32, wstatus_ptr: u64, _options: i32) -> SyscallResult {
-    let wait_pid = if pid == -1 { 0 } else { pid as u32 };
-    let mut table = crate::process::PROCESS_TABLE.lock();
-    if let Some((child_pid, status)) = table.waitpid(wait_pid) {
-        if wstatus_ptr != 0 {
-            unsafe {
-                *(wstatus_ptr as *mut i32) = status;
+pub fn sys_wait4(pid: i32, wstatus_ptr: u64, options: i32) -> SyscallResult {
+    const WNOHANG: i32 = 1;
+    let self_pid = crate::scheduler::current_pid().unwrap_or(1);
+
+    // Reap a specific child, or any child when pid <= 0.
+    let target = if pid > 0 { pid as u32 } else { 0 };
+    let reaped = {
+        let mut table = crate::process::PROCESS_TABLE.lock();
+        table.waitpid(target)
+    };
+
+    match reaped {
+        Some((child_pid, status)) => {
+            let packed = crate::user_task::wait_status(status);
+            if wstatus_ptr != 0 {
+                unsafe {
+                    *(wstatus_ptr as *mut i32) = packed;
+                }
             }
+            crate::signals::destroy_process_signals(child_pid);
+            Ok(child_pid as u64)
         }
-        crate::signals::destroy_process_signals(child_pid);
-        Ok(child_pid as u64)
-    } else {
-        if _options & 1 != 0 {
-            Ok(0)
-        } else {
+        None => {
+            if options & WNOHANG != 0 {
+                return Ok(0);
+            }
+            // No child ready. A Ring 3 task parks here and is woken by the
+            // child's exit; the kernel can only spin (there is no other frame
+            // to resume).
+            if self_pid > crate::context::DESKTOP_PID {
+                crate::user_task::park_for_wait(wstatus_ptr);
+                return Ok(0);
+            }
             Err(SyscallError::Interrupted)
         }
     }

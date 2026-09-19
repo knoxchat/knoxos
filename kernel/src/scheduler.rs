@@ -222,6 +222,47 @@ impl Scheduler {
         self.current.as_ref().map(|s| s.pid)
     }
 
+    /// Forget the running task without requeueing it.
+    ///
+    /// Used when a task is exiting or blocking: [`Scheduler::schedule`] pushes
+    /// `current` back onto the run queue, which would resurrect a task that is
+    /// no longer runnable.
+    pub fn clear_current(&mut self) {
+        self.current = None;
+    }
+
+    /// Make `pid` the running task without putting the outgoing task back
+    /// on the run queue (exit / block / abandon).
+    pub fn set_running(&mut self, pid: Pid) {
+        if self.current.as_ref().map(|c| c.pid) == Some(pid) {
+            return;
+        }
+        self.current = None;
+        if let Some(pos) = self.run_queue.iter().position(|s| s.pid == pid) {
+            self.current = self.run_queue.remove(pos);
+        } else if let Some(pos) = self.wait_queue.iter().position(|s| s.pid == pid) {
+            self.current = Some(self.wait_queue.remove(pos));
+        } else {
+            self.current = Some(SchedInfo::new(pid, 0));
+        }
+    }
+
+    /// Cooperative switch: the outgoing task stays runnable.
+    pub fn switch_running(&mut self, pid: Pid) {
+        if let Some(cur) = self.current.take() {
+            if cur.pid == pid {
+                self.current = Some(cur);
+                return;
+            }
+            if !self.run_queue.iter().any(|s| s.pid == cur.pid)
+                && !self.wait_queue.iter().any(|s| s.pid == cur.pid)
+            {
+                self.run_queue.push_back(cur);
+            }
+        }
+        self.set_running(pid);
+    }
+
     /// Timer tick - called from the timer interrupt handler
     /// Returns true if a context switch should occur
     pub fn tick(&mut self) -> bool {
@@ -496,7 +537,21 @@ pub fn timer_tick() -> bool {
 
 /// Get current running PID
 pub fn current_pid() -> Option<Pid> {
-    SCHEDULER.lock().current_pid()
+    if let Some(pid) = SCHEDULER.lock().current_pid() {
+        return Some(pid);
+    }
+    let ctx = crate::context::current_pid();
+    if ctx == 0 { None } else { Some(ctx) }
+}
+
+/// Mark `pid` as the CPU owner without requeueing whoever was running.
+pub fn set_running(pid: Pid) {
+    SCHEDULER.lock().set_running(pid);
+}
+
+/// Mark `pid` as the CPU owner and keep the outgoing task runnable.
+pub fn switch_running(pid: Pid) {
+    SCHEDULER.lock().switch_running(pid);
 }
 
 /// Wake a specific process
@@ -509,6 +564,20 @@ pub fn sleep_current() {
     if let Some(pid) = current_pid() {
         SCHEDULER.lock().block_process(pid);
     }
+}
+
+/// Block the current task with lock-free semantics: drop it from the running
+/// slot and, if it is still queued, move it to the wait queue where only
+/// `wake_process` can bring it back.
+///
+/// Used by `wait4` when no child is reapable yet. The task's Ring 3 resume
+/// point is stored separately by the caller.
+pub fn block_current() {
+    let mut sched = SCHEDULER.lock();
+    let Some(pid) = sched.current_pid() else {
+        return;
+    };
+    sched.block_process(pid);
 }
 
 /// Yield the current time slice

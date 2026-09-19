@@ -1138,8 +1138,13 @@ pub fn handle_syscall(
         SyscallNumber::Dup => fd::sys_dup(arg1 as i32),
         SyscallNumber::Dup2 => fd::sys_dup2(arg1 as i32, arg2 as i32),
         SyscallNumber::Pause => {
-            crate::arch_compat::instructions::interrupts::hlt();
-            Err(SyscallError::Interrupted)
+            let pid = crate::context::current_pid();
+            if pid > crate::context::DESKTOP_PID {
+                crate::user_task::park_current(pid);
+                Ok(0)
+            } else {
+                Err(SyscallError::Interrupted)
+            }
         }
         SyscallNumber::Nanosleep | SyscallNumber::ClockNanosleep => time::sys_nanosleep(arg1),
         SyscallNumber::Getitimer => advanced::sys_getitimer_linux(arg1 as i32, arg2),

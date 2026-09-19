@@ -167,15 +167,16 @@ extern "x86-interrupt" fn page_fault_handler(
     serial_println!("  PID: {}", pid);
     serial_println!("{:#?}", stack_frame);
 
-    if is_user && pid > 2 {
-        // Kill the user process instead of halting the kernel
-        serial_println!(
-            "[page_fault] Killing PID {} due to segfault at {:?}",
-            pid,
-            fault_addr
-        );
-        let _ = crate::signals::kill(pid, crate::signals::Signal::SIGSEGV, 0);
-        crate::process::destroy_process(pid);
+    if is_user && pid > crate::context::DESKTOP_PID {
+        // Kill the user process instead of halting the kernel. swapgs so
+        // `enter_context` sees kernel GS — the CPU does not swapgs on #PF.
+        serial_println!("[page_fault] SIGSEGV PID {} at {:?}", pid, fault_addr);
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            core::arch::asm!("swapgs", options(nomem, nostack));
+        }
+        crate::user_task::finish_current(pid, -(crate::signals::Signal::SIGSEGV as i32));
+        hlt_loop();
     } else {
         hlt_loop();
     }

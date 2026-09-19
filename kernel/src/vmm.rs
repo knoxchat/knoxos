@@ -1341,6 +1341,11 @@ pub fn get_phys_mem_offset() -> u64 {
     PHYS_MEM_OFFSET.load(Ordering::Relaxed)
 }
 
+/// Whether the VMM has been initialised (physical memory is mapped).
+pub fn ready() -> bool {
+    PHYS_MEM_OFFSET.load(Ordering::Relaxed) != 0
+}
+
 /// Public wrapper to map a page in a process's page table.
 ///
 /// # Safety

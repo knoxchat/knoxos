@@ -286,7 +286,8 @@ pub fn kill(target_pid: Pid, sig: Signal, sender_pid: Pid) -> Result<(), i32> {
         Signal::SIGKILL => {
             serial_println!("[KnoxOS] SIGKILL -> PID {}", target_pid);
             drop(signals);
-            crate::process::PROCESS_TABLE.lock().kill(target_pid);
+            crate::user_task::terminate(target_pid, -9);
+            return Ok(());
         }
         Signal::SIGSTOP => {
             serial_println!("[KnoxOS] SIGSTOP -> PID {}", target_pid);
@@ -363,8 +364,9 @@ pub fn deliver_signals(pid: Pid) {
                         pending.signal,
                         pid
                     );
+                    let code = -(pending.signal as i32);
                     drop(signals);
-                    crate::process::PROCESS_TABLE.lock().kill(pid);
+                    crate::user_task::terminate(pid, code);
                     return;
                 }
                 SignalAction::Stop => {
