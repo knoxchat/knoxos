@@ -137,8 +137,18 @@ fn retire(pid: Pid, code: i32) {
     };
 
     crate::scheduler::remove_process(pid);
-    crate::context::destroy_process_context(pid);
     crate::fd::destroy_fd_table(pid);
+
+    let running_here = pid == crate::context::current_pid();
+    if running_here {
+        // The syscall / #PF is still on this CR3 and this kernel stack.
+        // Leave the boot tables before freeing the L4; keep the stack
+        // allocation until the parent reaps (see `reap_child`).
+        crate::vmm::activate_kernel_cr3();
+        crate::context::invalidate_rip(pid);
+    } else {
+        crate::context::destroy_process_context(pid);
+    }
     crate::vmm::destroy_address_space(pid);
     crate::pgrp::unregister_process(pid);
 
@@ -289,10 +299,27 @@ pub fn is_runnable(pid: Pid) -> bool {
     crate::context::has_runnable_context(pid)
 }
 
-/// Switch to `pid` and return when that task (or its descendants) give the
-/// CPU back to the desktop.
+/// Switch to `pid` and keep running user tasks until they all block or exit.
+///
+/// A single `switch_to` is not enough: `wait4` parks the parent and
+/// `resume_next_or_return` may hand the CPU back to the desktop *before*
+/// the child has run. Drain the user run queue so Gate B4's parent actually
+/// finishes (and can be reaped) before the next demo starts.
 unsafe fn run_until_desktop(pid: Pid) {
     crate::context::switch_to(pid);
+    loop {
+        let next = {
+            let mut sched = crate::scheduler::SCHEDULER.lock();
+            sched.clear_current();
+            sched.schedule()
+        };
+        match next {
+            Some(n) if n > DESKTOP_PID && crate::context::has_runnable_context(n) => {
+                crate::context::switch_to(n);
+            }
+            _ => break,
+        }
+    }
 }
 
 fn spawn_or_log(elf: &[u8], name: &str) -> Option<Pid> {
@@ -313,6 +340,7 @@ fn reap_child(pid: Pid) -> bool {
     let reaped = crate::process::PROCESS_TABLE.lock().waitpid(pid);
     if reaped.is_some() {
         crate::signals::destroy_process_signals(pid);
+        crate::context::destroy_process_context(pid);
         return true;
     }
     crate::process::PROCESS_TABLE
@@ -330,6 +358,8 @@ pub const GATE_B3_MARKER: &str = "GATE_B3 wait complete";
 pub const GATE_B4_MARKER: &str = "GATE_B4 fork complete";
 /// SIGKILL / SIGSEGV / PTY SIGINT all took down a user task.
 pub const GATE_B5_MARKER: &str = "GATE_B5 signals complete";
+/// `/bin/sh` ran in Ring 3 with a kernel PTY as its controlling terminal.
+pub const GATE_B6_MARKER: &str = "GATE_B6 sh complete";
 
 /// Run the scheduled-userspace demonstrations; returns when they complete.
 pub fn run_gate_demos() {
@@ -337,17 +367,18 @@ pub fn run_gate_demos() {
         serial_println!("[user_task] Gate B3+ skipped: VMM not ready");
         return;
     }
-    serial_println!("[user_task] ── Gate B3–B5: scheduled Ring 3 ──");
+    serial_println!("[user_task] ── Gate B3–B6: scheduled Ring 3 ──");
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
-    serial_println!("[user_task] ── Gate B3–B5: done ──");
+    serial_println!("[user_task] ── Gate B3–B6: done ──");
 }
 
 extern "C" fn gate_boot_body() {
     run_gate_b3();
     run_gate_b4();
     run_gate_b5();
+    run_gate_b6();
 }
 
 fn run_gate_b3() {
@@ -433,6 +464,49 @@ fn run_gate_b5() {
             ok_kill,
             ok_segv,
             ok_int
+        );
+    }
+}
+
+fn run_gate_b6() {
+    serial_println!("[user_task] Gate B6: /bin/sh on a PTY");
+    let elf = {
+        let vfs = crate::vfs::VFS.lock();
+        match vfs.read_file("/bin/sh") {
+            Some(data) => data.to_vec(),
+            None => {
+                serial_println!("[user_task] Gate B6 FAILED: /bin/sh missing");
+                return;
+            }
+        }
+    };
+    let Some(pid) = spawn_or_log(&elf, "sh") else {
+        return;
+    };
+    let _ = crate::pgrp::setpgid(pid, pid);
+    let Ok((pty, _)) = crate::pty::openpty() else {
+        serial_println!("[user_task] Gate B6 FAILED: openpty");
+        return;
+    };
+    let _ = crate::pty::open_slave(pty);
+    let _ = crate::pty::pty_ioctl(pty, crate::pty::TIOCSPGRP, pid as u64);
+    crate::fd::attach_pty_stdio(pid, pty);
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let mut prompt = [0u8; 8];
+    let n = crate::pty::read_master(pty, &mut prompt).unwrap_or(0);
+    let saw_prompt = n >= 2 && &prompt[..2] == b"$ ";
+    let reaped = reap_child(pid);
+    if reaped && saw_prompt {
+        serial_println!("[user_task] {} (pid={} pty={})", GATE_B6_MARKER, pid, pty);
+    } else {
+        serial_println!(
+            "[user_task] Gate B6 partial: pid={} reaped={} prompt={} n={}",
+            pid,
+            reaped,
+            saw_prompt,
+            n
         );
     }
 }

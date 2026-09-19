@@ -623,16 +623,13 @@ impl AddressSpace {
 
                 // Get the physical frame from parent's page table
                 if let Some(phys_frame) = unsafe { get_mapped_frame(self.cr3, page_addr) } {
-                    // Map same frame in child as read-only
-                    let cow_flags = PageTableFlags::PRESENT
-                        | PageTableFlags::USER_ACCESSIBLE
-                        | PageTableFlags::NO_EXECUTE;
+                    // CoW: share the frame, writable removed, execute preserved.
+                    // Forcing NO_EXECUTE here made the parent's text page NX, so
+                    // `sysretq` from fork #PF'd on the next instruction fetch.
+                    let mut cow_flags = vma.prot.to_page_flags();
+                    cow_flags.remove(PageTableFlags::WRITABLE);
                     unsafe {
                         map_page_in_table(child.cr3, page_addr, phys_frame, cow_flags);
-                    }
-
-                    // Also make parent page read-only
-                    unsafe {
                         update_page_flags_in_table(self.cr3, page_addr, cow_flags);
                     }
 
@@ -848,6 +845,14 @@ lazy_static::lazy_static! {
 
 /// Physical memory offset (set during init)
 static PHYS_MEM_OFFSET: AtomicU64 = AtomicU64::new(0);
+
+/// Boot kernel CR3, captured before any user mappings are added.
+static KERNEL_CR3: AtomicU64 = AtomicU64::new(0);
+
+/// Frozen copy of the kernel L4 taken after the frame pool is ready and
+/// before Gate B2 maps hello into the live kernel tables. New process
+/// address spaces clone from this, not from the current CR3.
+static KERNEL_L4_TEMPLATE: AtomicU64 = AtomicU64::new(0);
 
 // ─── Physical Frame Allocator (Global) ─────────────────────────────────
 
@@ -1169,27 +1174,72 @@ unsafe fn get_mapped_frame(cr3: u64, vaddr: u64) -> Option<u64> {
     Some(l1_table[l1_idx].addr().as_u64())
 }
 
-/// Clone the kernel's upper-half page table entries into a new L4 table
+/// Physical address of the L4 we clone kernel mappings from.
+fn kernel_l4_source() -> u64 {
+    let tmpl = KERNEL_L4_TEMPLATE.load(Ordering::Relaxed);
+    if tmpl != 0 {
+        return tmpl;
+    }
+    let saved = KERNEL_CR3.load(Ordering::Relaxed);
+    if saved != 0 {
+        return saved;
+    }
+    let (frame, _) = Cr3::read();
+    frame.start_address().as_u64()
+}
+
+/// Clone kernel page-table slots into a new L4 table.
+///
+/// Source is the L4 snapshot taken before any user mappings, not the live
+/// CR3. Copying from the current tables after Gate B2 would share the hello
+/// L3/L2/L1 with the kernel; `execve` dropping those frames then corrupts
+/// the boot page tables.
+///
+/// Every present snapshot slot is shared, including the lower-half kernel
+/// heap (L4 136) and the physical-memory window (L4 20 at 0x28_0000_0000
+/// on QEMU). Skipping "user-half" L4 entries unmapped that window and
+/// hung the first `switch_to` into Ring 3.
 unsafe fn clone_kernel_mappings(new_cr3: u64) {
     let offset = PHYS_MEM_OFFSET.load(Ordering::Relaxed);
     if offset == 0 {
         return;
     }
 
-    // Get the current kernel page table
-    let (kernel_l4_frame, _) = Cr3::read();
-    let kernel_l4_phys = kernel_l4_frame.start_address().as_u64();
+    let kernel_l4_phys = kernel_l4_source();
     let kernel_l4 = &*((offset + kernel_l4_phys) as *const PageTable);
-
     let new_l4 = &mut *((offset + new_cr3) as *mut PageTable);
 
-    // Share every kernel L4 slot that is already present. The kernel heap
-    // lives at 0x4444_4444_0000 (L4 index 136, lower half), so copying only
-    // 256..511 drops the heap and any switch to a user CR3 #PF's immediately.
-    // User programs get their own L4 entries for unused indices (e.g. 0x401000).
     for i in 0..512 {
         if !kernel_l4[i].is_unused() {
             new_l4[i] = kernel_l4[i].clone();
+        }
+    }
+}
+
+/// Load `cr3` into the CPU. `mov cr3` also flushes the TLB.
+///
+/// # Safety
+/// `cr3` must be a valid L4 that maps this kernel (code, heap, phys offset).
+pub unsafe fn activate_cr3(cr3: u64) {
+    if cr3 == 0 {
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        let (_, flags) = Cr3::read();
+        let frame = PhysFrame::containing_address(PhysAddr::new(cr3));
+        Cr3::write(frame, flags);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = cr3;
+}
+
+/// Switch onto the boot kernel page tables.
+pub fn activate_kernel_cr3() {
+    let cr3 = KERNEL_CR3.load(Ordering::Relaxed);
+    if cr3 != 0 {
+        unsafe {
+            activate_cr3(cr3);
         }
     }
 }
@@ -1245,6 +1295,33 @@ pub fn create_address_space(pid: Pid) -> bool {
 pub fn destroy_address_space(pid: Pid) {
     ADDRESS_SPACES.lock().remove(&pid);
     serial_println!("[VMM] Destroyed address space for PID {}", pid);
+}
+
+/// Replace a live process's address space without leaving CR3 on freed tables.
+///
+/// `execve` used to `destroy` then `create` while the syscall was still
+/// executing on the dying L4; `Drop` freed that CR3 and the next heap
+/// access triple-faulted. This builds the new tables first, switches onto
+/// them, then drops the old ones.
+pub fn replace_address_space(pid: Pid) -> bool {
+    let Some(new_as) = AddressSpace::new(pid) else {
+        serial_println!(
+            "[VMM] Failed to allocate replacement address space for PID {}",
+            pid
+        );
+        return false;
+    };
+    let new_cr3 = new_as.cr3;
+    unsafe {
+        activate_cr3(new_cr3);
+    }
+    ADDRESS_SPACES.lock().insert(pid, new_as);
+    serial_println!(
+        "[VMM] Replaced address space for PID {} (cr3={:#x})",
+        pid,
+        new_cr3
+    );
+    true
 }
 
 /// Fork a process's address space (CoW)
@@ -1437,6 +1514,9 @@ pub fn get_memory_regions(pid: Pid) -> Vec<MemRegionInfo> {
 pub fn init(phys_mem_offset: u64) {
     PHYS_MEM_OFFSET.store(phys_mem_offset, Ordering::Relaxed);
 
+    let (frame, _) = Cr3::read();
+    KERNEL_CR3.store(frame.start_address().as_u64(), Ordering::Relaxed);
+
     // Initialize ASLR seed from CPU timestamp counter
     init_aslr_seed();
 
@@ -1486,6 +1566,26 @@ pub fn populate_frame_pool(
         allocated * 4,
         pool.available() * 4
     );
+    drop(pool);
+    snapshot_kernel_l4();
+}
+
+/// Copy the boot L4 into a private template used by [`clone_kernel_mappings`].
+fn snapshot_kernel_l4() {
+    if KERNEL_CR3.load(Ordering::Relaxed) == 0 {
+        let (frame, _) = Cr3::read();
+        KERNEL_CR3.store(frame.start_address().as_u64(), Ordering::Relaxed);
+    }
+    let src = KERNEL_CR3.load(Ordering::Relaxed);
+    if let Some(tmpl) = allocate_page_table_frame() {
+        unsafe {
+            copy_physical_frame(src, tmpl);
+        }
+        KERNEL_L4_TEMPLATE.store(tmpl, Ordering::Relaxed);
+        serial_println!("[VMM] Kernel L4 snapshot at {:#x}", tmpl);
+    } else {
+        serial_println!("[VMM] Kernel L4 snapshot skipped (no frames)");
+    }
 }
 
 /// Get VMM statistics

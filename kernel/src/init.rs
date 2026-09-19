@@ -329,6 +329,37 @@ pub fn segfault_userspace_elf_data() -> Vec<u8> {
     ])
 }
 
+/// Minimal `/bin/sh`: print `$ `, read stdin (EOF → exit), echo, loop.
+/// Loaded at the same high vaddr as the other Gate B ELFs so it does not
+/// share L4[0] with any kernel identity map.
+pub fn sh_userspace_elf_data() -> Vec<u8> {
+    build_static_user_elf(&[
+        0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
+        0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
+        0x48, 0x8D, 0x35, 0x55, 0x00, 0x00, 0x00, // lea rsi, [rip+0x55] ; "$ "
+        0x48, 0xC7, 0xC2, 0x02, 0x00, 0x00, 0x00, // mov rdx, 2
+        0x0F, 0x05, // syscall
+        0x48, 0xC7, 0xC0, 0x00, 0x00, 0x00, 0x00, // mov rax, 0
+        0x48, 0x31, 0xFF, // xor rdi, rdi
+        0x48, 0x8D, 0xB4, 0x24, 0x00, 0xFF, 0xFF, 0xFF, // lea rsi, [rsp-0x100]
+        0x48, 0xC7, 0xC2, 0xFF, 0x00, 0x00, 0x00, // mov rdx, 255
+        0x0F, 0x05, // syscall
+        0x48, 0x85, 0xC0, // test rax, rax
+        0x7E, 0x20, // jle exit
+        0x49, 0x89, 0xC0, // mov r8, rax
+        0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
+        0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
+        0x48, 0x8D, 0xB4, 0x24, 0x00, 0xFF, 0xFF, 0xFF, // lea rsi, [rsp-0x100]
+        0x4C, 0x89, 0xC2, // mov rdx, r8
+        0x0F, 0x05, // syscall
+        0xEB, 0xA2, // jmp prompt
+        0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, // mov rax, 60
+        0x48, 0x31, 0xFF, // xor rdi, rdi
+        0x0F, 0x05, // syscall
+        b'$', b' ',
+    ])
+}
+
 fn launch_hello_userspace() -> Result<(), &'static str> {
     let elf = hello_userspace_elf_data();
     if !crate::elf::is_elf(&elf) {
@@ -376,8 +407,8 @@ fn find_init_binary() -> Option<Vec<u8>> {
 ///
 /// Gate B2: map a static hello ELF into the current page tables, `iretq` to
 /// Ring 3, `sys_write` to serial, `sys_exit` back to the kernel.
-/// Gate B3–B5: scheduled tasks with their own CR3 — `execve`+`waitpid`,
-/// `fork`+child, then SIGKILL / SIGSEGV / PTY SIGINT.
+/// Gate B3–B6: scheduled tasks with their own CR3 — `execve`+`waitpid`,
+/// `fork`+child, SIGKILL / SIGSEGV / PTY SIGINT, then `/bin/sh` on a PTY.
 pub fn start_init() -> Option<Pid> {
     serial_println!("[init] Starting first userspace (Gate B2 hello)...");
 

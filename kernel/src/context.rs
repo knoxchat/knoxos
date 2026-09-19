@@ -468,6 +468,21 @@ pub unsafe extern "C" fn enter_context(new: *const CpuContext) {
 #[cfg(not(target_arch = "x86_64"))]
 pub unsafe extern "C" fn enter_context(_new: *const CpuContext) {}
 
+/// Pointer to a task's saved CPU state, if that task can be dispatched.
+///
+/// The `Box` in `PROCESS_CONTEXTS` keeps this address stable. Callers must
+/// not hold the table lock across `enter_context`.
+pub fn runnable_context_ptr(pid: Pid) -> Option<*const CpuContext> {
+    let contexts = PROCESS_CONTEXTS.lock();
+    contexts.iter().find(|pc| pc.pid == pid).and_then(|pc| {
+        if pc.context.is_runnable() {
+            Some(&pc.context as *const CpuContext)
+        } else {
+            None
+        }
+    })
+}
+
 /// Copy `ctx` out of the process context table.
 pub fn snapshot(pid: Pid) -> Option<CpuContext> {
     PROCESS_CONTEXTS
@@ -480,16 +495,16 @@ pub fn snapshot(pid: Pid) -> Option<CpuContext> {
 /// Switch to another task and never resume the caller.
 ///
 /// # Safety
-/// Must be called with `PROCESS_CONTEXTS` **not** held.
+/// Must be called with `PROCESS_CONTEXTS` **not** held. The pointed-to
+/// context must outlive the jump (the Box in the table does).
 pub unsafe fn abandon_current_and_enter(next_pid: Pid) {
-    let next = match snapshot(next_pid) {
-        Some(c) if c.is_runnable() => c,
-        _ => return,
+    let Some(new_ptr) = runnable_context_ptr(next_pid) else {
+        return;
     };
     crate::scheduler::set_running(next_pid);
     set_current_pid(next_pid);
     program_kernel_stack(next_pid);
-    enter_context(&next);
+    enter_context(new_ptr);
 }
 
 /// Create a context for a new process

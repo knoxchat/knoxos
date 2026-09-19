@@ -68,12 +68,10 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
         data.to_vec()
     };
 
-    // Replace the address space wholesale. Retiring the old one also discards
-    // the page tables the task is currently executing on — harmless because
-    // `request_resume_self` re-enters from the new context, and the kernel
-    // mappings are shared.
-    crate::vmm::destroy_address_space(pid);
-    if !crate::vmm::create_address_space(pid) {
+    // Build the new page tables and switch onto them *before* dropping the
+    // old ones. The syscall is still running on the dying CR3; freeing that
+    // L4 is what stopped Gate B3 at "Destroyed address space for PID 3".
+    if !crate::vmm::replace_address_space(pid) {
         serial_println!("[execve] Failed to create address space for PID {}", pid);
         return Err(SyscallError::OutOfMemory);
     }
@@ -107,6 +105,8 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
             proc.user_stack_top = initial_rsp;
         }
     }
+
+    crate::signals::exec_reset_signals(pid);
 
     // Point this PID's context at the new image without freeing the kernel
     // stack the syscall is using. `request_resume_self` re-enters Ring 3
@@ -156,9 +156,7 @@ pub fn sys_wait4(pid: i32, wstatus_ptr: u64, options: i32) -> SyscallResult {
         Some((child_pid, status)) => {
             let packed = crate::user_task::wait_status(status);
             if wstatus_ptr != 0 {
-                unsafe {
-                    *(wstatus_ptr as *mut i32) = packed;
-                }
+                crate::vmm::write_user_memory(self_pid, wstatus_ptr, &packed.to_ne_bytes());
             }
             crate::signals::destroy_process_signals(child_pid);
             Ok(child_pid as u64)

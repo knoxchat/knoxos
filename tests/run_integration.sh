@@ -29,6 +29,17 @@ if [ ! -f "$KERNEL_BIN" ]; then
     echo "ERROR: Kernel binary not found at $KERNEL_BIN"
     exit 1
 fi
+echo "       Kernel OK"
+
+echo "       Creating BIOS disk image..."
+cd "$PROJECT_ROOT/boot"
+export CARGO_TARGET_X86_64_UNKNOWN_UEFI_RUSTFLAGS="${CARGO_TARGET_X86_64_UNKNOWN_UEFI_RUSTFLAGS:--C llvm-args=-disable-loop-idiom-wcslen}"
+cargo run --release -- "$KERNEL_BIN" >/dev/null
+BIOS_IMG="$KERNEL_DIR/target/x86_64-unknown-none/release/knoxos-bios.img"
+if [ ! -f "$BIOS_IMG" ]; then
+    echo "ERROR: BIOS image not found at $BIOS_IMG"
+    exit 1
+fi
 echo "       Build OK"
 
 # 2. Boot QEMU with serial to file (headless, auto-exit on triple fault)
@@ -36,12 +47,13 @@ echo "[2/4] Booting QEMU (timeout ${TIMEOUT_SECS}s)..."
 rm -f "$SERIAL_LOG"
 
 timeout "$TIMEOUT_SECS" qemu-system-x86_64 \
-    -drive format=raw,file="$KERNEL_BIN" \
+    -drive format=raw,file="$BIOS_IMG" \
     -serial file:"$SERIAL_LOG" \
     -display none \
     -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
     -m 2G \
     -smp 2 \
+    -cpu qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt \
     -no-reboot \
     -no-shutdown \
     2>/dev/null &
@@ -110,6 +122,7 @@ check_marker "Returned from Ring 3 userspace"
 check_marker "GATE_B3 wait complete"
 check_marker "GATE_B4 fork complete"
 check_marker "GATE_B5 signals complete"
+check_marker "GATE_B6 sh complete"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

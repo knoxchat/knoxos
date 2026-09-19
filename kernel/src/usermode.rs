@@ -244,9 +244,9 @@ fn syscall_redirect_dispatch() {
         }
         RedirectRequest::ResumeSelf => {
             crate::context::program_kernel_stack(pid);
-            if let Some(ctx) = crate::context::snapshot(pid) {
+            if let Some(ptr) = crate::context::runnable_context_ptr(pid) {
                 unsafe {
-                    crate::context::enter_context(&ctx);
+                    crate::context::enter_context(ptr);
                 }
             }
         }

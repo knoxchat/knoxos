@@ -292,6 +292,9 @@ impl FdTable {
                 Ok(0)
             }
             FileType::CharDevice => {
+                if let Some(idx) = pts_index(&file.path) {
+                    return crate::pty::read_slave(idx, buf);
+                }
                 match file.path.as_str() {
                     "/dev/null" => Ok(0), // Always EOF
                     "/dev/zero" => {
@@ -364,6 +367,12 @@ impl FdTable {
                 }
             }
             FileType::CharDevice => {
+                if let Some(idx) = pts_index(&file.path) {
+                    for &byte in buf {
+                        crate::serial_print!("{}", byte as char);
+                    }
+                    return crate::pty::write_slave(idx, buf);
+                }
                 match file.path.as_str() {
                     "/dev/null" => Ok(buf.len()), // Discard
                     "/dev/tty" | "/dev/console" => {
@@ -553,6 +562,27 @@ pub fn get_fd_table(pid: u32) -> &'static Mutex<BTreeMap<u32, FdTable>> {
 /// Create fd table for a new process
 pub fn create_fd_table(pid: u32) {
     PROCESS_FD_TABLES.lock().insert(pid, FdTable::new());
+}
+
+/// Point stdout/stderr at a PTY slave. Stdin stays the EOF stdio handle so a
+/// boot-demo `/bin/sh` can finish its first `read` instead of blocking.
+pub fn attach_pty_stdio(pid: u32, pty_index: u32) {
+    let path = alloc::format!("/dev/pts/{}", pty_index);
+    let mut tables = PROCESS_FD_TABLES.lock();
+    if let Some(table) = tables.get_mut(&pid) {
+        table.files.insert(
+            STDOUT_FD,
+            OpenFile::new(&path, FileType::CharDevice, OpenFlags(OpenFlags::O_WRONLY)),
+        );
+        table.files.insert(
+            STDERR_FD,
+            OpenFile::new(&path, FileType::CharDevice, OpenFlags(OpenFlags::O_WRONLY)),
+        );
+    }
+}
+
+fn pts_index(path: &str) -> Option<u32> {
+    path.strip_prefix("/dev/pts/")?.parse().ok()
 }
 
 /// Remove fd table when process exits
