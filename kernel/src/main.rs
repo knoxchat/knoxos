@@ -1388,6 +1388,7 @@ async fn gui_redraw_loop() {
                 .tick(dt.minute, dt.hour, dt.day, dt.month, dt.day_of_week);
 
             ntp::periodic_sync();
+            knoxos_kernel::page_cache::writeback_tick();
         }
 
         virtio_input::poll();

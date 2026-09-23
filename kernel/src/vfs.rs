@@ -270,6 +270,47 @@ impl VirtualFS {
         self.create_file_at_path(path, FileType::Regular, data, 0o644)
     }
 
+    /// Overlay `data` at `offset` without replacing the rest of the file.
+    /// Extends the inode if the range runs past EOF. This is the backing
+    /// store primitive for page-cache writeback (Gate C3).
+    pub fn write_file_range(&mut self, path: &str, offset: u64, data: &[u8]) -> bool {
+        let ino = match self.resolve_path(path) {
+            Some(ino) => ino,
+            None => {
+                if !self.write_file(path, &[]) {
+                    return false;
+                }
+                match self.resolve_path(path) {
+                    Some(ino) => ino,
+                    None => return false,
+                }
+            }
+        };
+        let Some(inode) = self.inodes.iter_mut().find(|i| i.ino == ino) else {
+            return false;
+        };
+        if inode.file_type != FileType::Regular && inode.file_type != FileType::CharDevice {
+            return false;
+        }
+        let start = offset as usize;
+        let Some(end) = start.checked_add(data.len()) else {
+            return false;
+        };
+        if inode.data.len() < end {
+            inode.data.resize(end, 0);
+        }
+        if !data.is_empty() {
+            inode.data[start..end].copy_from_slice(data);
+        }
+        if (end as u64) > inode.size {
+            inode.size = end as u64;
+        }
+        let ts = now_timestamp();
+        inode.mtime = ts;
+        inode.ctime = ts;
+        true
+    }
+
     /// Write a file but only store a small stub in memory.
     /// Reports `virtual_size` for stat/ls but only keeps the first
     /// `keep_bytes` of actual data (saves heap for huge binaries).
@@ -780,17 +821,44 @@ pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
     }
     let mut vfs = VFS.lock();
     let ok = vfs.write_file(path, data);
-    let perms = vfs
+    let (ino, perms) = vfs
         .resolve_path(path)
-        .and_then(|ino| vfs.get_inode(ino))
-        .map(|i| i.permissions)
-        .unwrap_or(0o644);
+        .map(|ino| {
+            let perms = vfs.get_inode(ino).map(|i| i.permissions).unwrap_or(0o644);
+            (Some(ino), perms)
+        })
+        .unwrap_or((None, 0o644));
     drop(vfs);
     // Persist to disk for durability across reboots
     if ok {
         crate::persist::persist_file(path, data, perms);
+        if let Some(ino) = ino {
+            crate::page_cache::invalidate_inode(ino);
+            crate::page_cache::register_inode(ino, path);
+            crate::page_cache::set_file_size(ino, data.len() as u64);
+        }
     }
     ok
+}
+
+/// Overlay bytes at `offset` without replacing the rest of the file.
+/// Does not persist and does not touch the page cache — used as the
+/// writeback backing-store primitive.
+pub fn pwrite_file(path: &str, offset: u64, data: &[u8]) -> bool {
+    VFS.lock().write_file_range(path, offset, data)
+}
+
+/// Read up to `buf.len()` bytes at `offset`. Returns bytes copied.
+pub fn pread_file(path: &str, offset: u64, buf: &mut [u8]) -> Option<usize> {
+    let vfs = VFS.lock();
+    let data = vfs.read_file(path)?;
+    let start = offset as usize;
+    if start >= data.len() || buf.is_empty() {
+        return Some(0);
+    }
+    let n = buf.len().min(data.len() - start);
+    buf[..n].copy_from_slice(&data[start..start + n]);
+    Some(n)
 }
 
 /// Create a file via dispatch (ext4 or in-memory VFS)
@@ -824,6 +892,11 @@ pub fn ensure_directory(path: &str) {
 
 /// Remove a file or directory via dispatch
 pub fn remove_dispatch(path: &str) -> Result<(), i32> {
+    let ino = { VFS.lock().resolve_path(path) };
+    if let Some(ino) = ino {
+        crate::page_cache::invalidate_inode(ino);
+        crate::page_cache::unregister_inode(ino);
+    }
     let mut vfs = VFS.lock();
     vfs.unlink(path)
 }

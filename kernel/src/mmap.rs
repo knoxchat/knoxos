@@ -457,16 +457,17 @@ fn writeback_mapping(mapping: &FileMappedRegion) {
     let mut buf = alloc::vec![0u8; mapping.length as usize];
     crate::vmm::read_user_memory(mapping.pid, mapping.vaddr, &mut buf);
 
-    let offset = mapping.file_offset as usize;
-    if offset > 0 {
-        // Partial write-back: read existing file, overlay mapped region
-        let mut existing = crate::vfs::read_file_dispatch(&mapping.file_path).unwrap_or_default();
-        let end = (offset + buf.len()).max(existing.len());
-        existing.resize(end, 0);
-        existing[offset..offset + buf.len()].copy_from_slice(&buf);
-        crate::vfs::write_file_dispatch(&mapping.file_path, &existing);
-    } else {
-        crate::vfs::write_file_dispatch(&mapping.file_path, &buf);
+    if crate::vfs::pwrite_file(&mapping.file_path, mapping.file_offset, &buf) {
+        if let Some(data) = crate::vfs::read_file_dispatch(&mapping.file_path) {
+            let perms = {
+                let vfs = crate::vfs::VFS.lock();
+                vfs.resolve_path(&mapping.file_path)
+                    .and_then(|ino| vfs.get_inode(ino))
+                    .map(|i| i.permissions)
+                    .unwrap_or(0o644)
+            };
+            crate::persist::persist_file(&mapping.file_path, &data, perms);
+        }
     }
 }
 

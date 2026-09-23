@@ -854,8 +854,9 @@ pub fn sys_fallocate(fd: i32, mode: i32, offset: i64, len: i64) -> SyscallResult
 // ── sync / fdatasync / syncfs / sync_file_range ─────────────────────
 
 pub fn sys_sync() -> SyscallResult {
-    // Persist already writes on VFS mutate; issue a device flush so `sync(2)`
-    // is a real barrier when VirtIO-blk is present.
+    // Persist already writes on VFS mutate; flush dirty pages first so
+    // `sync(2)` is a real barrier when VirtIO-blk is present.
+    let _ = crate::page_cache::sync_all();
     let _ = crate::virtio_blk::flush();
     Ok(0)
 }
@@ -877,6 +878,7 @@ fn fsync_fd(fd: i32) -> SyscallResult {
         (file.path.clone(), file.file_type)
     };
     if file_type == crate::fd::FileType::Regular {
+        let _ = crate::page_cache::flush_path(&path);
         if let Some(data) = crate::vfs::read_file_dispatch(&path) {
             let perms = {
                 let vfs = crate::vfs::VFS.lock();

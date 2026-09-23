@@ -200,7 +200,13 @@ impl FdTable {
     /// Open a file and return its fd
     pub fn open(&mut self, path: &str, flags: OpenFlags, file_type: FileType) -> Result<Fd, i32> {
         let fd = self.alloc_fd().ok_or(-24i32)?; // EMFILE
-        let file = OpenFile::new(path, file_type, flags);
+        let mut file = OpenFile::new(path, file_type, flags);
+        if file_type == FileType::Regular {
+            if let Some(ino) = crate::page_cache::register_path(path) {
+                file.inode = ino;
+                file.size = crate::page_cache::logical_size(ino) as usize;
+            }
+        }
         self.files.insert(fd, file);
         Ok(fd)
     }
@@ -329,6 +335,25 @@ impl FdTable {
                 }
             }
             FileType::Regular | FileType::ProcFile => {
+                if file.file_type == FileType::Regular {
+                    let mut ino = file.inode;
+                    if ino == 0 {
+                        if let Some(registered) = crate::page_cache::register_path(&file.path) {
+                            file.inode = registered;
+                            ino = registered;
+                        }
+                    }
+                    if ino != 0 {
+                        let offset = file.offset as u64;
+                        match crate::page_cache::read(ino, offset, buf) {
+                            Ok(n) => {
+                                file.offset += n;
+                                return Ok(n);
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                }
                 // Read from VFS
                 if let Some(data) = crate::vfs::VFS.lock().read_file(&file.path) {
                     let available = if file.offset >= data.len() {
@@ -396,6 +421,30 @@ impl FdTable {
                 }
             }
             FileType::Regular => {
+                let mut ino = file.inode;
+                if ino == 0 {
+                    if let Some(registered) = crate::page_cache::register_path(&file.path) {
+                        file.inode = registered;
+                        ino = registered;
+                    }
+                }
+                if ino != 0 {
+                    let offset = if file.flags.is_append() {
+                        crate::page_cache::logical_size(ino) as usize
+                    } else {
+                        file.offset
+                    };
+                    match crate::page_cache::write(ino, offset as u64, buf) {
+                        Ok(n) => {
+                            file.offset = offset + n;
+                            if file.offset > file.size {
+                                file.size = file.offset;
+                            }
+                            return Ok(n);
+                        }
+                        Err(_) => {}
+                    }
+                }
                 // Write to VFS
                 let data = if file.flags.is_append() {
                     // Append mode

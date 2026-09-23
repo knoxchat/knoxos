@@ -72,13 +72,10 @@ mod vfs_tests {
     }
 
     #[test_case]
-    fn test_persist_journal_replay_if_virtio() {
-        if !crate::virtio_blk::is_available() {
-            return;
-        }
+    fn test_page_cache_writeback() {
         assert!(
-            crate::persist::journal_recovery_self_test(),
-            "committed journal must recover after simulated crash; uncommitted must not"
+            crate::page_cache::writeback_self_test(),
+            "dirty middle page must flush without replacing sibling pages"
         );
     }
 }

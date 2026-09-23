@@ -118,6 +118,7 @@ impl PageCache {
 
 lazy_static::lazy_static! {
     static ref CACHE: Mutex<PageCache> = Mutex::new(PageCache::new());
+    static ref FILE_SIZES: Mutex<BTreeMap<u64, u64>> = Mutex::new(BTreeMap::new());
 }
 
 static TOTAL_HIT: AtomicU64 = AtomicU64::new(0);
@@ -178,10 +179,18 @@ pub fn insert_page(inode: u64, index: u64, data: &[u8], dirty: bool) {
         lru_gen: generation,
     };
 
+    let was_dirty = cache
+        .pages
+        .get(&key)
+        .map(|p| p.flags.dirty)
+        .unwrap_or(false);
+
     cache.pages.insert(key, page);
 
-    if dirty {
+    if dirty && !was_dirty {
         cache.stats.dirty_pages += 1;
+    } else if !dirty && was_dirty {
+        cache.stats.dirty_pages = cache.stats.dirty_pages.saturating_sub(1);
     }
     cache.stats.total_pages = cache.pages.len();
 }
@@ -192,6 +201,12 @@ pub fn insert_page(inode: u64, index: u64, data: &[u8], dirty: bool) {
 
 /// Read data from the page cache, loading from backing store on miss
 pub fn read(inode: u64, offset: u64, buf: &mut [u8]) -> Result<usize, PageCacheError> {
+    let file_size = logical_size(inode);
+    if offset >= file_size || buf.is_empty() {
+        return Ok(0);
+    }
+    let want = ((file_size - offset) as usize).min(buf.len());
+
     let page_index = offset / PAGE_SIZE as u64;
     let page_offset = (offset % PAGE_SIZE as u64) as usize;
 
@@ -200,7 +215,7 @@ pub fn read(inode: u64, offset: u64, buf: &mut [u8]) -> Result<usize, PageCacheE
     let mut buf_offset = 0;
     let mut first_page_skip = page_offset;
 
-    while buf_offset < buf.len() {
+    while buf_offset < want {
         let page_data = if let Some(data) = find_page(inode, current_index) {
             data
         } else {
@@ -215,7 +230,7 @@ pub fn read(inode: u64, offset: u64, buf: &mut [u8]) -> Result<usize, PageCacheE
         };
 
         let available = PAGE_SIZE - first_page_skip;
-        let copy_len = available.min(buf.len() - buf_offset);
+        let copy_len = available.min(want - buf_offset);
         buf[buf_offset..buf_offset + copy_len]
             .copy_from_slice(&page_data[first_page_skip..first_page_skip + copy_len]);
 
@@ -261,6 +276,7 @@ pub fn write(inode: u64, offset: u64, data: &[u8]) -> Result<usize, PageCacheErr
         first_page_skip = 0;
     }
 
+    note_file_size(inode, offset + data.len() as u64);
     CACHE.lock().stats.writes += 1;
     Ok(total)
 }
@@ -271,62 +287,86 @@ pub fn write(inode: u64, offset: u64, data: &[u8]) -> Result<usize, PageCacheErr
 
 /// Flush all dirty pages for a given inode
 pub fn flush_inode(inode: u64) -> Result<usize, PageCacheError> {
-    let mut cache = CACHE.lock();
-    let mut flushed = 0;
+    let path = { INODE_PATHS.lock().get(&inode).cloned() };
+    let path = path.ok_or(PageCacheError::NotFound)?;
+    let file_size = logical_size(inode);
 
-    let keys: Vec<PageKey> = cache
-        .pages
-        .keys()
-        .filter(|k| k.inode == inode)
-        .copied()
-        .collect();
-
-    for key in keys {
-        if let Some(page) = cache.pages.get_mut(&key) {
-            if page.flags.dirty && !page.flags.writeback {
-                page.flags.writeback = true;
-                // Write to backing store
-                let _ = write_to_backing(key.inode, key.index, &page.data);
-                page.flags.dirty = false;
-                page.flags.writeback = false;
-                flushed += 1;
+    let to_write: Vec<(u64, Vec<u8>)> = {
+        let mut cache = CACHE.lock();
+        let keys: Vec<PageKey> = cache
+            .pages
+            .keys()
+            .filter(|k| k.inode == inode)
+            .copied()
+            .collect();
+        let mut pages = Vec::new();
+        for key in keys {
+            if let Some(page) = cache.pages.get_mut(&key) {
+                if page.flags.dirty && !page.flags.writeback {
+                    page.flags.writeback = true;
+                    pages.push((key.index, page.data.clone()));
+                }
             }
         }
+        pages
+    };
+
+    let mut flushed = 0;
+    for (index, data) in &to_write {
+        let offset = *index * PAGE_SIZE as u64;
+        if offset >= file_size {
+            continue;
+        }
+        let valid = ((file_size - offset) as usize).min(data.len());
+        if !crate::vfs::pwrite_file(&path, offset, &data[..valid]) {
+            return Err(PageCacheError::IoError);
+        }
+        flushed += 1;
     }
 
-    cache.stats.writebacks += flushed as u64;
-    if flushed > 0 {
-        cache.stats.dirty_pages = cache.stats.dirty_pages.saturating_sub(flushed);
+    {
+        let mut cache = CACHE.lock();
+        for (index, _) in &to_write {
+            let key = PageKey {
+                inode,
+                index: *index,
+            };
+            if let Some(page) = cache.pages.get_mut(&key) {
+                if page.flags.writeback {
+                    page.flags.dirty = false;
+                    page.flags.writeback = false;
+                }
+            }
+        }
+        cache.stats.writebacks += flushed as u64;
+        cache.stats.dirty_pages = cache.pages.values().filter(|p| p.flags.dirty).count();
     }
 
+    persist_backing(&path);
     Ok(flushed)
 }
 
 /// Flush ALL dirty pages to disk (called periodically by the writeback timer)
 pub fn sync_all() -> usize {
-    let mut cache = CACHE.lock();
+    let dirty_inodes: Vec<u64> = {
+        let cache = CACHE.lock();
+        let mut inodes: Vec<u64> = cache
+            .pages
+            .iter()
+            .filter(|(_, p)| p.flags.dirty && !p.flags.writeback)
+            .map(|(k, _)| k.inode)
+            .collect();
+        inodes.sort_unstable();
+        inodes.dedup();
+        inodes
+    };
+
     let mut flushed = 0;
-
-    let dirty_keys: Vec<PageKey> = cache
-        .pages
-        .iter()
-        .filter(|(_, p)| p.flags.dirty && !p.flags.writeback)
-        .map(|(k, _)| *k)
-        .collect();
-
-    for key in dirty_keys {
-        if let Some(page) = cache.pages.get_mut(&key) {
-            page.flags.writeback = true;
-            let _ = write_to_backing(key.inode, key.index, &page.data);
-            page.flags.dirty = false;
-            page.flags.writeback = false;
-            flushed += 1;
-        }
+    for inode in dirty_inodes {
+        flushed += flush_inode(inode).unwrap_or(0);
     }
 
-    cache.stats.writebacks += flushed as u64;
-    cache.stats.dirty_pages = cache.pages.values().filter(|p| p.flags.dirty).count();
-    cache.last_writeback_tick = crate::interrupts::get_ticks();
+    CACHE.lock().last_writeback_tick = crate::interrupts::get_ticks();
 
     if flushed > 0 {
         serial_println!("[page_cache] Synced {} dirty pages", flushed);
@@ -371,12 +411,22 @@ fn evict_lru(cache: &mut PageCache) {
             .map(|(k, _)| *k);
 
         if let Some(key) = oldest_dirty {
-            if let Some(page) = cache.pages.get(&key) {
-                let _ = write_to_backing(key.inode, key.index, &page.data);
+            let (data, path, file_size) = {
+                let page_data = cache.pages.get(&key).map(|p| p.data.clone());
+                let path = INODE_PATHS.lock().get(&key.inode).cloned();
+                (page_data, path, logical_size(key.inode))
+            };
+            if let (Some(data), Some(path)) = (data, path) {
+                let offset = key.index * PAGE_SIZE as u64;
+                if offset < file_size {
+                    let valid = ((file_size - offset) as usize).min(data.len());
+                    let _ = crate::vfs::pwrite_file(&path, offset, &data[..valid]);
+                }
             }
             cache.pages.remove(&key);
             cache.stats.evictions += 1;
             cache.stats.writebacks += 1;
+            cache.stats.dirty_pages = cache.stats.dirty_pages.saturating_sub(1);
             cache.stats.total_pages = cache.pages.len();
         }
     }
@@ -445,9 +495,58 @@ pub fn register_inode(inode: u64, path: &str) {
     INODE_PATHS.lock().insert(inode, String::from(path));
 }
 
+/// Resolve `path` in VFS, register it, and remember its size.
+pub fn register_path(path: &str) -> Option<u64> {
+    let (ino, size) = {
+        let vfs = crate::vfs::VFS.lock();
+        let ino = vfs.resolve_path(path)?;
+        let size = vfs.get_inode(ino).map(|i| i.size).unwrap_or(0);
+        (ino, size)
+    };
+    register_inode(ino, path);
+    note_file_size(ino, size);
+    Some(ino)
+}
+
 /// Unregister an inode mapping
 pub fn unregister_inode(inode: u64) {
     INODE_PATHS.lock().remove(&inode);
+    FILE_SIZES.lock().remove(&inode);
+}
+
+/// Remember the logical size of a cached file (grows only).
+pub fn note_file_size(inode: u64, size: u64) {
+    let mut sizes = FILE_SIZES.lock();
+    let entry = sizes.entry(inode).or_insert(0);
+    if size > *entry {
+        *entry = size;
+    }
+}
+
+/// Set the logical size of a cached file (used on truncate / whole-file replace).
+pub fn set_file_size(inode: u64, size: u64) {
+    FILE_SIZES.lock().insert(inode, size);
+}
+
+/// Logical size used to clip reads and last-page writeback.
+pub fn logical_size(inode: u64) -> u64 {
+    if let Some(sz) = FILE_SIZES.lock().get(&inode).copied() {
+        return sz;
+    }
+    let path = INODE_PATHS.lock().get(&inode).cloned();
+    if let Some(path) = path {
+        let vfs = crate::vfs::VFS.lock();
+        if let Some(ino) = vfs.resolve_path(&path) {
+            return vfs.get_inode(ino).map(|i| i.size).unwrap_or(0);
+        }
+    }
+    0
+}
+
+/// Flush dirty pages for the file at `path`.
+pub fn flush_path(path: &str) -> Result<usize, PageCacheError> {
+    let inode = register_path(path).ok_or(PageCacheError::NotFound)?;
+    flush_inode(inode)
 }
 
 /// Load a page from the underlying filesystem via VFS
@@ -455,29 +554,24 @@ fn load_from_backing(inode: u64, index: u64) -> Result<Vec<u8>, PageCacheError> 
     let path = { INODE_PATHS.lock().get(&inode).cloned() };
     let path = path.ok_or(PageCacheError::NotFound)?;
 
-    // Read the whole file via VFS and extract the page we need
-    let file_data = crate::vfs::read_file_dispatch(&path).ok_or(PageCacheError::IoError)?;
-
-    let offset = (index as usize) * PAGE_SIZE;
+    let offset = index * PAGE_SIZE as u64;
     let mut buf = alloc::vec![0u8; PAGE_SIZE];
-    if offset < file_data.len() {
-        let avail = (file_data.len() - offset).min(PAGE_SIZE);
-        buf[..avail].copy_from_slice(&file_data[offset..offset + avail]);
-    }
+    let _ = crate::vfs::pread_file(&path, offset, &mut buf);
     Ok(buf)
 }
 
-/// Write a page to the underlying filesystem via VFS
-fn write_to_backing(inode: u64, _index: u64, data: &[u8]) -> Result<(), PageCacheError> {
-    let path = { INODE_PATHS.lock().get(&inode).cloned() };
-    let path = path.ok_or(PageCacheError::NotFound)?;
-
-    // Write the page data back (simplified — full impl would do partial writes)
-    if crate::vfs::write_file_dispatch(&path, data) {
-        Ok(())
-    } else {
-        Err(PageCacheError::IoError)
-    }
+fn persist_backing(path: &str) {
+    let (data, perms) = {
+        let vfs = crate::vfs::VFS.lock();
+        let Some(ino) = vfs.resolve_path(path) else {
+            return;
+        };
+        let Some(inode) = vfs.get_inode(ino) else {
+            return;
+        };
+        (inode.data.clone(), inode.permissions)
+    };
+    crate::persist::persist_file(path, &data, perms);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -498,6 +592,9 @@ pub fn invalidate_inode(inode: u64) {
     }
     cache.readahead.remove(&inode);
     cache.stats.total_pages = cache.pages.len();
+    cache.stats.dirty_pages = cache.pages.values().filter(|p| p.flags.dirty).count();
+    drop(cache);
+    FILE_SIZES.lock().remove(&inode);
 }
 
 /// Invalidate a single page
@@ -559,4 +656,122 @@ pub fn init() {
         DEFAULT_MAX_PAGES,
         DEFAULT_MAX_PAGES * PAGE_SIZE / (1024 * 1024)
     );
+    let _ = writeback_self_test();
+}
+
+/// Serial marker once a dirty middle page flushes without replacing the
+/// rest of the file.
+pub const GATE_C3_MARKER: &str = "GATE_C3 writeback complete";
+
+const GATE_C3_PATH: &str = "/var/lib/knoxos/gate_c3";
+
+/// Write a 3-page file, dirty only the middle page, flush, and prove the
+/// other pages survived. That is Gate C3: writeback is page-granular, not
+/// whole-file replace.
+pub fn writeback_self_test() -> bool {
+    let mut original = alloc::vec![0u8; PAGE_SIZE * 3];
+    original[..PAGE_SIZE].fill(b'A');
+    original[PAGE_SIZE..PAGE_SIZE * 2].fill(b'B');
+    original[PAGE_SIZE * 2..].fill(b'C');
+
+    if !crate::vfs::write_file_dispatch(GATE_C3_PATH, &original) {
+        serial_println!(
+            "[page_cache] Gate C3 FAILED: could not write {}",
+            GATE_C3_PATH
+        );
+        return false;
+    }
+
+    let Some(ino) = register_path(GATE_C3_PATH) else {
+        serial_println!("[page_cache] Gate C3 FAILED: missing inode");
+        return false;
+    };
+    set_file_size(ino, original.len() as u64);
+
+    let dirty = alloc::vec![b'X'; PAGE_SIZE];
+    if write(ino, PAGE_SIZE as u64, &dirty).is_err() {
+        serial_println!("[page_cache] Gate C3 FAILED: cached write");
+        return false;
+    }
+
+    // Write-back, not write-through: VFS still has the original middle page.
+    match crate::vfs::read_file_dispatch(GATE_C3_PATH) {
+        Some(before)
+            if before.len() == original.len()
+                && before[0] == b'A'
+                && before[PAGE_SIZE] == b'B'
+                && before[PAGE_SIZE * 2] == b'C' => {}
+        Some(before) => {
+            serial_println!(
+                "[page_cache] Gate C3 FAILED: write-through or truncated before flush (len={})",
+                before.len()
+            );
+            return false;
+        }
+        None => {
+            serial_println!("[page_cache] Gate C3 FAILED: backing file missing before flush");
+            return false;
+        }
+    }
+
+    match flush_inode(ino) {
+        Ok(n) if n >= 1 => {}
+        Ok(n) => {
+            serial_println!(
+                "[page_cache] Gate C3 FAILED: flushed {} dirty pages, expected >= 1",
+                n
+            );
+            return false;
+        }
+        Err(_) => {
+            serial_println!("[page_cache] Gate C3 FAILED: flush_inode");
+            return false;
+        }
+    }
+
+    match crate::vfs::read_file_dispatch(GATE_C3_PATH) {
+        Some(after)
+            if after.len() == original.len()
+                && after[0] == b'A'
+                && after[PAGE_SIZE] == b'X'
+                && after[PAGE_SIZE * 2] == b'C' => {}
+        Some(after) => {
+            serial_println!(
+                "[page_cache] Gate C3 FAILED: after flush len={} p0={} p1={} p2={}",
+                after.len(),
+                after.first().copied().unwrap_or(0) as char,
+                after.get(PAGE_SIZE).copied().unwrap_or(0) as char,
+                after.get(PAGE_SIZE * 2).copied().unwrap_or(0) as char
+            );
+            return false;
+        }
+        None => {
+            serial_println!("[page_cache] Gate C3 FAILED: file missing after flush");
+            return false;
+        }
+    }
+
+    if crate::virtio_blk::is_available() {
+        if crate::vfs::remove_dispatch(GATE_C3_PATH).is_err() {
+            serial_println!("[page_cache] Gate C3 FAILED: unlink");
+            return false;
+        }
+        crate::persist::restore_all();
+        match crate::vfs::read_file_dispatch(GATE_C3_PATH) {
+            Some(restored)
+                if restored.len() == original.len()
+                    && restored[0] == b'A'
+                    && restored[PAGE_SIZE] == b'X'
+                    && restored[PAGE_SIZE * 2] == b'C' => {}
+            _ => {
+                serial_println!(
+                    "[page_cache] Gate C3 FAILED: persist restore did not keep sibling pages"
+                );
+                return false;
+            }
+        }
+    }
+
+    serial_println!("[page_cache] {}", GATE_C3_MARKER);
+    true
 }
