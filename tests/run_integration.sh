@@ -169,6 +169,7 @@ check_marker "GATE_E2 csprng complete"
 check_marker "GATE_E3 seccomp deny"
 check_marker "GATE_E4 caps exec"
 check_marker "GATE_B7 sigreturn complete"
+check_marker "GATE_B8 timer preempt complete"
 check_marker "GATE_F1 client isolated"
 check_marker "GATE_F2 shm commit"
 

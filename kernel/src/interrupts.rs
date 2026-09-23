@@ -399,8 +399,29 @@ extern "x86-interrupt" fn virtio_irq_handler(_stack_frame: InterruptStackFrame) 
 // ─── APIC Timer IRQ Handler (vector 0x40) ────────────────────────────
 
 #[cfg(target_arch = "x86_64")]
-extern "x86-interrupt" fn apic_timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+extern "x86-interrupt" fn apic_timer_interrupt_handler(stack_frame: InterruptStackFrame) {
     crate::apic_timer::handle_interrupt();
+
+    let cs = stack_frame.code_segment.0 as u64;
+    if cs & 3 != 3 {
+        return;
+    }
+    // Hardware IRQs do not swapgs. Kernel GS must be live before we touch
+    // per-CPU state or `enter_context` (which swapgs's again on the way to
+    // Ring 3). If we return, restore user GS for `iretq`.
+    unsafe {
+        core::arch::asm!("swapgs", options(nomem, nostack));
+    }
+    crate::scheduler::maybe_preempt_user(
+        stack_frame.instruction_pointer.as_u64(),
+        cs,
+        stack_frame.cpu_flags.bits(),
+        stack_frame.stack_pointer.as_u64(),
+        stack_frame.stack_segment.0 as u64,
+    );
+    unsafe {
+        core::arch::asm!("swapgs", options(nomem, nostack));
+    }
 }
 
 // ─── ATA Disk IRQ Handler (IRQ 14 / 15) ─────────────────────────────

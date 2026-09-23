@@ -595,6 +595,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial_println!("[KnoxOS] APIC disabled by kernel command line (noapic)");
     }
 
+    // Start the local APIC timer now — IDT vector 0x40 is already registered.
+    // `smp::init` leaves the LVT masked and the PIC disabled, so without this
+    // a Ring 3 program would never see a tick (Gate B8).
+    apic_timer::init();
+    if apic_timer::is_initialized() {
+        apic_timer::start_periodic(10_000); // 10ms = 100Hz quantum
+        serial_println!("[KnoxOS] APIC timer started (100Hz periodic, 10ms quantum)");
+    }
+
     // Initialize virtio network device
     virtio_net::init();
 
@@ -1151,13 +1160,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ─── Phase 30: Remaining Status Items ───────────────────────────
     serial_println!("[KnoxOS] Phase 30: Remaining status.md items...");
 
-    // Kernel core
-    apic_timer::init();
-    // Start the APIC timer in periodic mode for per-core preemptive scheduling
-    // The IDT handler for vector 0x40 was registered during IDT init above.
-    if apic_timer::is_initialized() {
-        apic_timer::start_periodic(10_000); // 10ms = 100Hz quantum
-        serial_println!("[KnoxOS] APIC timer started (100Hz periodic, 10ms quantum)");
+    // Kernel core — APIC timer already started after SMP init (needed for
+    // Ring 3 preemption during start_init / Gate B8).
+    if !apic_timer::is_initialized() {
+        apic_timer::init();
+        if apic_timer::is_initialized() {
+            apic_timer::start_periodic(10_000);
+            serial_println!("[KnoxOS] APIC timer started (100Hz periodic, 10ms quantum)");
+        }
     }
     cmdline::init();
     multiboot::init();

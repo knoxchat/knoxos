@@ -371,6 +371,8 @@ pub const GATE_B6_MARKER: &str = "GATE_B6 sh complete";
 pub const GATE_D1_MARKER: &str = "GATE_D1 loopback complete";
 /// Custom SIGINT handler returned via rt_sigreturn.
 pub const GATE_B7_MARKER: &str = "GATE_B7 sigreturn complete";
+/// Timer IRQ switched a spinning Ring 3 task that never syscalled.
+pub const GATE_B8_MARKER: &str = "GATE_B8 timer preempt complete";
 /// Ring 3 client presented a buffer; not an in-kernel WindowContentType app.
 pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
 
@@ -380,11 +382,11 @@ pub fn run_gate_demos() {
         serial_println!("[user_task] Gate B3+ skipped: VMM not ready");
         return;
     }
-    serial_println!("[user_task] ── Gate B3–B7 + D1 + F1: scheduled Ring 3 ──");
+    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1: scheduled Ring 3 ──");
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
-    serial_println!("[user_task] ── Gate B3–B7 + D1 + F1: done ──");
+    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1: done ──");
 }
 
 extern "C" fn gate_boot_body() {
@@ -394,6 +396,7 @@ extern "C" fn gate_boot_body() {
     run_gate_b6();
     run_gate_d1();
     run_gate_b7();
+    run_gate_b8();
     run_gate_f1();
 }
 
@@ -572,6 +575,60 @@ fn run_gate_b7() {
         pid,
         reaped
     );
+}
+
+fn run_gate_b8() {
+    serial_println!("[user_task] Gate B8: timer preempt spinning Ring 3");
+    let spin_elf = crate::init::spin_userspace_elf_data();
+    let writer_elf = crate::init::preempt_writer_elf_data();
+    let Some(spinner) = spawn_or_log(&spin_elf, "spin") else {
+        return;
+    };
+    let Some(writer) = spawn_or_log(&writer_elf, "preempt-w") else {
+        terminate(spinner, -(crate::signals::Signal::SIGKILL as i32));
+        let _ = reap_child(spinner);
+        return;
+    };
+
+    serial_println!(
+        "[user_task] Gate B8: switching to spinner pid={} (writer={}) ticks={}",
+        spinner,
+        writer,
+        crate::apic_timer::total_ticks()
+    );
+    let before = crate::scheduler::user_preempt_count();
+    unsafe {
+        crate::context::switch_to(spinner);
+    }
+    serial_println!(
+        "[user_task] Gate B8: returned from spinner ticks={}",
+        crate::apic_timer::total_ticks()
+    );
+    let preempts = crate::scheduler::user_preempt_count().saturating_sub(before);
+
+    // Spinner never exits; kill it so it cannot steal the CPU again.
+    terminate(spinner, -(crate::signals::Signal::SIGKILL as i32));
+    if crate::context::has_runnable_context(writer) {
+        unsafe {
+            crate::context::switch_to(writer);
+        }
+    }
+    let writer_reaped = reap_child(writer);
+    let spinner_reaped = reap_child(spinner);
+    if preempts > 0 {
+        serial_println!(
+            "[user_task] {} (preempts={} writer_reaped={} spinner_reaped={})",
+            GATE_B8_MARKER,
+            preempts,
+            writer_reaped,
+            spinner_reaped
+        );
+    } else {
+        serial_println!(
+            "[user_task] Gate B8 FAILED: no timer preempt (writer_reaped={})",
+            writer_reaped
+        );
+    }
 }
 
 fn run_gate_f1() {

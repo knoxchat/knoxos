@@ -60,15 +60,16 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 13. **Gate D4 DNS + TCP** — UDP DNS to QEMU user-net; TCP SYN/ACK plus RTO retransmit; HTTP GET to `10.0.2.100` (`GATE_D4 dns tcp complete`).
 14. **Gate E1–E4 enforcement** — W^X/`mprotect` RWX denied + ASLR; ChaCha20 `getrandom`; seccomp EPERM; unprivileged bind `<1024` fails.
 15. **Gate B7 sigreturn** — Ring 3 `rt_sigaction(SIGINT)` handler `ret`s into a trampoline; `rt_sigreturn` restores `pause` (`GATE_B7 sigreturn complete`).
-16. **Gate F1–F2 isolated client** — Ring 3 program mmaps a 64×64 BGRA buffer, `ioctl(/dev/wl0)` presents it; compositor SHM round-trips the pixels and a chrome window blits them (`GATE_F1 client isolated`, `GATE_F2 shm commit`).
-17. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
+16. **Gate B8 timer preempt** — a Ring 3 `jmp $` spinner is switched out by the APIC timer without a syscall; a peer writer runs (`GATE_B8 timer preempt complete`).
+17. **Gate F1–F2 isolated client** — Ring 3 program mmaps a 64×64 BGRA buffer, `ioctl(/dev/wl0)` presents it; compositor SHM round-trips the pixels and a chrome window blits them (`GATE_F1 client isolated`, `GATE_F2 shm commit`).
+18. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
 
 ### Architectural blockers (must fix first)
 
 | Blocker | Evidence | Why it blocks a perfect OS |
 |---------|----------|----------------------------|
 | **Scheduled Ring 3** | Hello is a CFS task with its own CR3; `execve`/`waitpid`/`fork`/`/bin/sh` run on the boot path. | Desktop apps other than the Gate F demo are still in-kernel. |
-| **No timer preemption of Ring 3** | Timer sets `NEED_RESCHED`; switch happens in the executor or on syscall (`exit`/`wait`/`pause`). | A spinning user program would not yield until it syscalls. |
+| **Ring 3 timer preemption** | APIC timer saves the IRET frame and `enter_context`s the next task (`GATE_B8 timer preempt complete`). | Done for the spinning-user case. FPU/GPR save from IRQ is still incomplete. |
 | **Signal frames for handlers** | Default terminate plus a live SIGINT handler + `rt_sigreturn` (B7). | Catching SIGINT in a user handler is done. |
 | **Sockets do not transmit off-box** | Loopback `send` delivers to a peer `recv_buf`. VirtIO-net TX/RX rings are live (D2). DHCP writes `eth0`. DNS + TCP SYN/retransmit/HTTP are live (D4). | CUBIC/window still unwired. |
 | **AHCI DMA is live; NVMe is fake** | AHCI command-list + PRDT round-trips a sector (C4). NVMe `prp1: 0`; reads zero-fill. | Bare-metal NVMe still missing. |
@@ -651,6 +652,7 @@ This **is** becoming an OS.
 | B5 | Signals: SIGKILL, SIGSEGV, SIGINT from PTY | **Done** — parked `pause` + SIGKILL; null-deref SIGSEGV; PTY Ctrl+C (`GATE_B5 signals complete`) |
 | B6 | PTY + `/bin/sh` (even a tiny static shell) | **Done** — boot spawns `/bin/sh` on a kernel PTY; serial shows `$ ` then `GATE_B6 sh complete` |
 | B7 | Custom handler + live `rt_sigreturn` | **Done** — SIGINT handler `ret`s into trampoline; `pause` resumes (`GATE_B7 sigreturn complete`) |
+| B8 | Timer preempt of spinning Ring 3 | **Done** — APIC timer switches a `jmp $` user off the CPU (`GATE_B8 timer preempt complete`) |
 
 ### Gate C — Durable storage (4–8 weeks)
 

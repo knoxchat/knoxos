@@ -311,6 +311,29 @@ pub fn fork_userspace_elf_data() -> Vec<u8> {
     ])
 }
 
+/// Infinite `jmp $` — never syscalls, so only a timer can switch it out.
+pub fn spin_userspace_elf_data() -> Vec<u8> {
+    // Infinite `jmp $` — never syscalls; only a timer can switch it out.
+    // Do not `sti` here: Ring 3 STI #GPs unless IOPL=3.
+    build_static_user_elf(&[0xEB, 0xFE])
+}
+
+/// Write `preempt writer ran` then `exit(0)`.
+pub fn preempt_writer_elf_data() -> Vec<u8> {
+    build_static_user_elf(&[
+        0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
+        0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
+        0x48, 0x8D, 0x35, 0x15, 0x00, 0x00, 0x00, // lea rsi, [rip+0x15]
+        0x48, 0xC7, 0xC2, 0x13, 0x00, 0x00, 0x00, // mov rdx, 19
+        0x0F, 0x05, // syscall
+        0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, // mov rax, 60
+        0x48, 0x31, 0xFF, // xor rdi, rdi
+        0x0F, 0x05, // syscall
+        b'p', b'r', b'e', b'e', b'm', b'p', b't', b' ', b'w', b'r', b'i', b't', b'e', b'r', b' ',
+        b'r', b'a', b'n', b'\n',
+    ])
+}
+
 /// `pause()` then `exit(1)` if it ever returns.
 pub fn pause_userspace_elf_data() -> Vec<u8> {
     build_static_user_elf(&[
@@ -537,6 +560,7 @@ fn find_init_binary() -> Option<Vec<u8>> {
 /// Gate B3–B6: scheduled tasks with their own CR3 — `execve`+`waitpid`,
 /// `fork`+child, SIGKILL / SIGSEGV / PTY SIGINT, then `/bin/sh` on a PTY.
 /// Gate B7: custom SIGINT handler + live `rt_sigreturn`.
+/// Gate B8: timer preempts a spinning Ring 3 program that never syscalls.
 /// Gate D1: loopback `send`/`recv` from a Ring 3 UDP pair.
 /// Gate F1/F2: Ring 3 SHM client presents a buffer the compositor scans out.
 pub fn start_init() -> Option<Pid> {

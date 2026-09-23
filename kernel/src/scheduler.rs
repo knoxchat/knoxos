@@ -433,6 +433,9 @@ lazy_static::lazy_static! {
 /// This avoids locking the SCHEDULER mutex from interrupt context.
 static NEED_RESCHED: AtomicBool = AtomicBool::new(false);
 
+/// How many times a Ring 3 task was switched away from a timer IRQ.
+static USER_PREEMPTS: AtomicU64 = AtomicU64::new(0);
+
 /// Atomic tick counter for the scheduler (updated locklessly from ISR)
 static ISR_TICK_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -481,6 +484,89 @@ pub fn isr_timer_tick() {
 /// Returns true if a context switch should be performed.
 pub fn check_need_resched() -> bool {
     NEED_RESCHED.swap(false, Ordering::AcqRel)
+}
+
+/// Count of timer preemptions of Ring 3 tasks.
+pub fn user_preempt_count() -> u64 {
+    USER_PREEMPTS.load(Ordering::Relaxed)
+}
+
+/// If the timer interrupted Ring 3 and the slice expired, switch away.
+///
+/// Must be called after EOI. Never returns when a switch is performed.
+pub fn maybe_preempt_user(rip: u64, cs: u64, rflags: u64, rsp: u64, ss: u64) {
+    if cs & 3 != 3 {
+        return;
+    }
+    if !is_preemption_enabled() {
+        return;
+    }
+    if !NEED_RESCHED.load(Ordering::Acquire) {
+        return;
+    }
+
+    let current = crate::context::current_pid();
+    if current <= crate::context::DESKTOP_PID {
+        return;
+    }
+
+    let Some(mut contexts) = crate::context::PROCESS_CONTEXTS.try_lock() else {
+        return;
+    };
+    if let Some(pc) = contexts.iter_mut().find(|pc| pc.pid == current) {
+        pc.context.rip = rip;
+        pc.context.rsp = rsp;
+        pc.context.rflags = rflags | 0x200;
+        pc.context.cs = cs;
+        pc.context.ss = ss;
+    }
+    let desktop_ok = contexts
+        .iter()
+        .any(|pc| pc.pid == crate::context::DESKTOP_PID && pc.context.is_runnable());
+    drop(contexts);
+
+    let Some(mut sched) = SCHEDULER.try_lock() else {
+        return;
+    };
+    if !NEED_RESCHED.swap(false, Ordering::AcqRel) {
+        return;
+    }
+    CURRENT_TIME_SLICE.store(DEFAULT_TIME_SLICE, Ordering::Relaxed);
+
+    let picked = sched.schedule();
+    let next = match picked {
+        Some(pid) if pid != current && pid != crate::context::IDLE_PID => pid,
+        _ if desktop_ok => {
+            sched.switch_running(crate::context::DESKTOP_PID);
+            crate::context::DESKTOP_PID
+        }
+        _ => return,
+    };
+    drop(sched);
+
+    if next == current {
+        return;
+    }
+
+    let Some(ptr) = crate::context::runnable_context_ptr(next) else {
+        crate::scheduler::switch_running(current);
+        crate::context::set_current_pid(current);
+        crate::context::program_kernel_stack(current);
+        return;
+    };
+
+    USER_PREEMPTS.fetch_add(1, Ordering::Relaxed);
+    serial_println!(
+        "[sched] preempt user {} -> {} rip={:#x}",
+        current,
+        next,
+        rip
+    );
+    crate::context::set_current_pid(next);
+    crate::context::program_kernel_stack(next);
+    unsafe {
+        crate::context::enter_context(ptr);
+    }
 }
 
 /// Perform a deferred context switch — called with interrupts enabled,
