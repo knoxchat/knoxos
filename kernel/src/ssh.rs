@@ -1057,9 +1057,7 @@ impl SshServer {
         if let Some(listen_fd) = self.listen_fd {
             let mut sockets = crate::net::SOCKETS.lock();
             if let Some(listener) = sockets.get_mut(&listen_fd) {
-                if let Ok(client_socket) = listener.accept() {
-                    let client_fd = NEXT_SSH_ID.fetch_add(1, Ordering::Relaxed);
-                    sockets.insert(client_fd, client_socket);
+                if let Ok(client_fd) = listener.accept() {
                     session.socket_fd = Some(client_fd);
                 }
             }

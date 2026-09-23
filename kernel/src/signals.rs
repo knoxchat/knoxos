@@ -540,9 +540,16 @@ fn setup_signal_frame(pid: Pid, signal: Signal, handler: u64) {
 
 /// Handle rt_sigreturn — restore context from signal frame
 pub fn sigreturn(pid: Pid) -> Option<(u64, u64)> {
-    // Read the signal frame from the current user RSP
-    let ctx = crate::context::get_user_context(pid)?;
-    let frame_rsp = ctx.rsp; // RSP points to the signal frame
+    // Read the signal frame from the live user RSP (syscall saved gs:[0]),
+    // not the possibly-stale copy in PROCESS_CONTEXTS.
+    let frame_rsp = {
+        let live = crate::usermode::current_user_rsp();
+        if live != 0 {
+            live
+        } else {
+            crate::context::get_user_context(pid)?.rsp
+        }
+    };
 
     // Read signal frame from user memory
     let frame_size = core::mem::size_of::<SignalFrame>();

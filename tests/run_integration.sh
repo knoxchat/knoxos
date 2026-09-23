@@ -123,6 +123,7 @@ check_marker "GATE_B3 wait complete"
 check_marker "GATE_B4 fork complete"
 check_marker "GATE_B5 signals complete"
 check_marker "GATE_B6 sh complete"
+check_marker "GATE_D1 loopback complete"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

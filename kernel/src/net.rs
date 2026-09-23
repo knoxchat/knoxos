@@ -425,9 +425,12 @@ pub struct Socket {
     pub recv_buf: Vec<u8>,
     pub send_buf: Vec<u8>,
     pub tcp_conn: Option<TcpConnection>,
-    pub backlog: Vec<Socket>, // For listening sockets
+    /// Pending accepted connection IDs (already inserted into `SOCKETS`).
+    pub backlog: Vec<u32>,
     pub max_backlog: usize,
     pub nonblocking: bool,
+    /// Connected peer socket id (TCP loopback / paired sockets).
+    pub peer_id: Option<u32>,
 }
 
 /// Socket state
@@ -443,7 +446,7 @@ pub enum SocketState {
 }
 
 /// Generic socket address
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SocketAddress {
     Inet(Ipv4Address, u16),
     Unix(String),
@@ -468,6 +471,7 @@ impl Socket {
             backlog: Vec::new(),
             max_backlog: 128,
             nonblocking: false,
+            peer_id: None,
         }
     }
 
@@ -517,8 +521,8 @@ impl Socket {
         Ok(())
     }
 
-    /// Accept an incoming connection (TCP only)
-    pub fn accept(&mut self) -> Result<Socket, i32> {
+    /// Accept an incoming connection (TCP only). Returns the new socket id.
+    pub fn accept(&mut self) -> Result<u32, i32> {
         if self.state != SocketState::Listening {
             return Err(-22); // EINVAL
         }
@@ -528,33 +532,38 @@ impl Socket {
         Ok(self.backlog.remove(0))
     }
 
-    /// Send data
+    fn can_recv(&self) -> bool {
+        match self.sock_type {
+            SocketType::Stream => {
+                self.state == SocketState::Connected || self.state == SocketState::Closing
+            }
+            SocketType::Dgram | SocketType::Raw => {
+                self.state == SocketState::Bound
+                    || self.state == SocketState::Connected
+                    || self.state == SocketState::Closing
+            }
+        }
+    }
+
+    /// Send data (connected socket). Delivery is handled by `sys_sendto`.
     pub fn send(&mut self, data: &[u8]) -> Result<usize, i32> {
-        if self.state != SocketState::Connected {
+        if self.sock_type == SocketType::Stream && self.state != SocketState::Connected {
             return Err(-107); // ENOTCONN
         }
         self.send_buf.extend_from_slice(data);
-        // Account for transmitted bytes on the primary interface
-        {
-            let mut interfaces = NETWORK_INTERFACES.lock();
-            if let Some(iface) = interfaces.iter_mut().find(|i| i.is_up && i.name != "lo") {
-                iface.tx_bytes += data.len() as u64;
-                iface.tx_packets += 1;
-            }
-        }
         Ok(data.len())
     }
 
     /// Receive data
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize, i32> {
-        if self.state != SocketState::Connected && self.state != SocketState::Closing {
+        if !self.can_recv() {
             return Err(-107); // ENOTCONN
         }
         if self.recv_buf.is_empty() {
             if self.nonblocking {
                 return Err(-11); // EAGAIN
             }
-            return Ok(0); // EOF for blocking
+            return Ok(0); // EOF / no datagram yet
         }
         let to_read = buf.len().min(self.recv_buf.len());
         buf[..to_read].copy_from_slice(&self.recv_buf[..to_read]);
@@ -562,7 +571,7 @@ impl Socket {
         Ok(to_read)
     }
 
-    /// Send data to a specific address (UDP)
+    /// Send data to a specific address (UDP). Delivery is handled by `sys_sendto`.
     pub fn sendto(&mut self, data: &[u8], addr: &SocketAddress) -> Result<usize, i32> {
         self.remote_addr = Some(addr.clone());
         self.send_buf.extend_from_slice(data);
@@ -669,6 +678,279 @@ pub fn dns_resolve(hostname: &str) -> Option<Ipv4Address> {
 // SOCKET SYSCALLS
 // ═══════════════════════════════════════════════════════════════════════
 
+fn is_loopback_ip(ip: Ipv4Address) -> bool {
+    ip.is_loopback()
+}
+
+fn is_local_or_loopback(ip: Ipv4Address) -> bool {
+    if ip.is_loopback() || ip == Ipv4Address::UNSPECIFIED {
+        return true;
+    }
+    NETWORK_INTERFACES.lock().iter().any(|i| i.ip == ip)
+}
+
+fn inet_parts(addr: &SocketAddress) -> Option<(Ipv4Address, u16)> {
+    match addr {
+        SocketAddress::Inet(ip, port) => Some((*ip, *port)),
+        SocketAddress::Unix(_) => None,
+    }
+}
+
+fn bind_conflict(existing: &SocketAddress, new_ip: Ipv4Address, new_port: u16) -> bool {
+    match existing {
+        SocketAddress::Inet(ip, port) if *port == new_port => {
+            *ip == Ipv4Address::UNSPECIFIED || new_ip == Ipv4Address::UNSPECIFIED || *ip == new_ip
+        }
+        _ => false,
+    }
+}
+
+fn dgram_matches(local: &SocketAddress, dest: &SocketAddress) -> bool {
+    match (local, dest) {
+        (SocketAddress::Inet(lip, lport), SocketAddress::Inet(dip, dport)) => {
+            *lport == *dport
+                && (*lip == Ipv4Address::UNSPECIFIED
+                    || *lip == *dip
+                    || (lip.is_loopback() && dip.is_loopback()))
+        }
+        (SocketAddress::Unix(a), SocketAddress::Unix(b)) => a == b,
+        _ => false,
+    }
+}
+
+fn account_loopback(nbytes: usize) {
+    let mut interfaces = NETWORK_INTERFACES.lock();
+    if let Some(lo) = interfaces.iter_mut().find(|i| i.name == "lo") {
+        lo.tx_bytes += nbytes as u64;
+        lo.tx_packets += 1;
+        lo.rx_bytes += nbytes as u64;
+        lo.rx_packets += 1;
+    }
+}
+
+fn loopback_connect(
+    sockets: &mut BTreeMap<u32, Socket>,
+    sockfd: u32,
+    addr: SocketAddress,
+) -> Result<(), i32> {
+    let client_type = sockets.get(&sockfd).ok_or(-9i32)?.sock_type;
+
+    if client_type != SocketType::Stream {
+        let client = sockets.get_mut(&sockfd).ok_or(-9i32)?;
+        if client.state == SocketState::Unbound {
+            if let SocketAddress::Inet(_, _) = &addr {
+                let port = NEXT_EPHEMERAL_PORT.fetch_add(1, Ordering::Relaxed);
+                client.local_addr = Some(SocketAddress::Inet(Ipv4Address::LOOPBACK, port));
+            }
+        }
+        client.remote_addr = Some(addr);
+        client.state = SocketState::Connected;
+        return Ok(());
+    }
+
+    let dest = inet_parts(&addr).ok_or(-97i32)?;
+    let listener_id = sockets.iter().find_map(|(id, s)| {
+        if s.sock_type != SocketType::Stream || s.state != SocketState::Listening {
+            return None;
+        }
+        match &s.local_addr {
+            Some(SocketAddress::Inet(lip, lport)) if *lport == dest.1 => {
+                if *lip == Ipv4Address::UNSPECIFIED
+                    || *lip == dest.0
+                    || (lip.is_loopback() && dest.0.is_loopback())
+                {
+                    Some(*id)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    });
+    let listener_id = listener_id.ok_or(-111i32)?; // ECONNREFUSED
+
+    {
+        let listener = sockets.get(&listener_id).ok_or(-111i32)?;
+        if listener.backlog.len() >= listener.max_backlog {
+            return Err(-11); // EAGAIN
+        }
+    }
+
+    let client_local = {
+        let client = sockets.get_mut(&sockfd).ok_or(-9i32)?;
+        if client.state == SocketState::Unbound {
+            let port = NEXT_EPHEMERAL_PORT.fetch_add(1, Ordering::Relaxed);
+            client.local_addr = Some(SocketAddress::Inet(Ipv4Address::LOOPBACK, port));
+        }
+        client.local_addr.clone()
+    };
+    let listener_local = sockets.get(&listener_id).and_then(|l| l.local_addr.clone());
+
+    let mut accepted = Socket::new(AddressFamily::Inet, SocketType::Stream, 6);
+    accepted.state = SocketState::Connected;
+    accepted.local_addr = listener_local;
+    accepted.remote_addr = client_local;
+    accepted.peer_id = Some(sockfd);
+    let accepted_id = accepted.id;
+
+    {
+        let client = sockets.get_mut(&sockfd).ok_or(-9i32)?;
+        client.remote_addr = Some(addr);
+        client.peer_id = Some(accepted_id);
+        client.state = SocketState::Connected;
+    }
+
+    sockets.insert(accepted_id, accepted);
+    sockets
+        .get_mut(&listener_id)
+        .ok_or(-111i32)?
+        .backlog
+        .push(accepted_id);
+    Ok(())
+}
+
+fn loopback_send(
+    sockets: &mut BTreeMap<u32, Socket>,
+    sockfd: u32,
+    buf: &[u8],
+    dest: Option<SocketAddress>,
+) -> Result<usize, i32> {
+    let sock = sockets.get(&sockfd).ok_or(-9i32)?;
+    let sock_type = sock.sock_type;
+    let state = sock.state;
+    let peer_id = sock.peer_id;
+    let local = sock.local_addr.clone();
+    let remote = dest.clone().or_else(|| sock.remote_addr.clone());
+
+    if sock_type == SocketType::Stream {
+        if state != SocketState::Connected {
+            return Err(-107); // ENOTCONN
+        }
+        let peer = peer_id.ok_or(-32i32)?; // EPIPE
+        let peer_sock = sockets.get_mut(&peer).ok_or(-32i32)?;
+        peer_sock.recv_buf.extend_from_slice(buf);
+        account_loopback(buf.len());
+        return Ok(buf.len());
+    }
+
+    let dest = remote.ok_or(-89i32)?; // EDESTADDRREQ
+    if let SocketAddress::Inet(ip, _) = &dest {
+        if is_local_or_loopback(*ip) {
+            let sender = local.unwrap_or(SocketAddress::Inet(Ipv4Address::LOOPBACK, 0));
+            let target = sockets.iter().find_map(|(id, s)| {
+                if *id == sockfd || s.sock_type != SocketType::Dgram {
+                    return None;
+                }
+                s.local_addr
+                    .as_ref()
+                    .filter(|la| dgram_matches(la, &dest))
+                    .map(|_| *id)
+            });
+            if let Some(tid) = target {
+                if let Some(t) = sockets.get_mut(&tid) {
+                    t.recv_buf.extend_from_slice(buf);
+                    t.remote_addr = Some(sender);
+                }
+            }
+            account_loopback(buf.len());
+            return Ok(buf.len());
+        }
+    }
+
+    // Not loopback: keep the bytes so a later NIC path can drain send_buf.
+    let socket = sockets.get_mut(&sockfd).ok_or(-9i32)?;
+    if dest_is_set(&dest) {
+        socket.sendto(buf, &dest)
+    } else {
+        socket.send(buf)
+    }
+}
+
+fn dest_is_set(addr: &SocketAddress) -> bool {
+    !matches!(addr, SocketAddress::Inet(ip, 0) if *ip == Ipv4Address::UNSPECIFIED)
+}
+
+/// Bind + connect + send/recv on 127.0.0.1. Used by Gate D1 and tests.
+pub fn loopback_self_test() -> bool {
+    const PORT: u16 = 42424;
+    const PAYLOAD: &[u8] = b"ping";
+
+    let udp_ok = (|| -> Result<(), i32> {
+        let a = sys_socket(2, 2, 0)?;
+        let b = sys_socket(2, 2, 0)?;
+        {
+            let mut sockets = SOCKETS.lock();
+            let sock = sockets.get_mut(&b).ok_or(-9i32)?;
+            sock.bind(SocketAddress::Inet(Ipv4Address::LOOPBACK, PORT))?;
+        }
+        {
+            let mut sockets = SOCKETS.lock();
+            loopback_send(
+                &mut sockets,
+                a,
+                PAYLOAD,
+                Some(SocketAddress::Inet(Ipv4Address::LOOPBACK, PORT)),
+            )?;
+        }
+        let mut buf = [0u8; 8];
+        let n = sys_recvfrom(b, &mut buf)?;
+        let _ = sys_close_socket(a);
+        let _ = sys_close_socket(b);
+        if n == PAYLOAD.len() && &buf[..n] == PAYLOAD {
+            Ok(())
+        } else {
+            Err(-1)
+        }
+    })()
+    .is_ok();
+
+    let tcp_ok = (|| -> Result<(), i32> {
+        let listener = sys_socket(2, 1, 0)?;
+        let client = sys_socket(2, 1, 0)?;
+        {
+            let mut sockets = SOCKETS.lock();
+            let sock = sockets.get_mut(&listener).ok_or(-9i32)?;
+            sock.bind(SocketAddress::Inet(Ipv4Address::LOOPBACK, PORT + 1))?;
+            sock.listen(1)?;
+        }
+        {
+            let mut sockets = SOCKETS.lock();
+            loopback_connect(
+                &mut sockets,
+                client,
+                SocketAddress::Inet(Ipv4Address::LOOPBACK, PORT + 1),
+            )?;
+        }
+        let accepted = sys_accept(listener)?;
+        {
+            let mut sockets = SOCKETS.lock();
+            loopback_send(&mut sockets, client, PAYLOAD, None)?;
+        }
+        let mut buf = [0u8; 8];
+        let n = sys_recvfrom(accepted, &mut buf)?;
+        let _ = sys_close_socket(client);
+        let _ = sys_close_socket(accepted);
+        let _ = sys_close_socket(listener);
+        if n == PAYLOAD.len() && &buf[..n] == PAYLOAD {
+            Ok(())
+        } else {
+            Err(-1)
+        }
+    })()
+    .is_ok();
+
+    if udp_ok && tcp_ok {
+        serial_println!("[NET] loopback self-test: UDP+TCP send/recv ok");
+    } else {
+        serial_println!(
+            "[NET] loopback self-test FAILED udp={} tcp={}",
+            udp_ok,
+            tcp_ok
+        );
+    }
+    udp_ok && tcp_ok
+}
+
 /// Create a socket
 pub fn sys_socket(domain: u32, sock_type: u32, protocol: u32) -> Result<u32, i32> {
     let family = AddressFamily::from_u32(domain).ok_or(-97i32)?; // EAFNOSUPPORT
@@ -682,10 +964,33 @@ pub fn sys_socket(domain: u32, sock_type: u32, protocol: u32) -> Result<u32, i32
 
 /// Bind a socket
 pub fn sys_bind(sockfd: u32, addr_ptr: u64) -> Result<(), i32> {
-    let addr = unsafe { parse_sockaddr(addr_ptr)? };
-    let mut sockets = SOCKETS.lock();
-    let socket = sockets.get_mut(&sockfd).ok_or(-9i32)?; // EBADF
-    socket.bind(addr)
+    let mut addr = unsafe { parse_sockaddr(addr_ptr)? };
+    if let SocketAddress::Inet(ip, port) = addr {
+        let port = if port == 0 {
+            NEXT_EPHEMERAL_PORT.fetch_add(1, Ordering::Relaxed)
+        } else {
+            port
+        };
+        addr = SocketAddress::Inet(ip, port);
+        let mut sockets = SOCKETS.lock();
+        let sock_type = sockets.get(&sockfd).ok_or(-9i32)?.sock_type;
+        let conflict = sockets.iter().any(|(id, s)| {
+            *id != sockfd
+                && s.sock_type == sock_type
+                && s.local_addr
+                    .as_ref()
+                    .is_some_and(|existing| bind_conflict(existing, ip, port))
+        });
+        if conflict {
+            return Err(-98); // EADDRINUSE
+        }
+        let socket = sockets.get_mut(&sockfd).ok_or(-9i32)?;
+        socket.bind(addr)
+    } else {
+        let mut sockets = SOCKETS.lock();
+        let socket = sockets.get_mut(&sockfd).ok_or(-9i32)?;
+        socket.bind(addr)
+    }
 }
 
 /// Listen on a socket
@@ -699,30 +1004,34 @@ pub fn sys_listen(sockfd: u32, backlog: u32) -> Result<(), i32> {
 pub fn sys_accept(sockfd: u32) -> Result<u32, i32> {
     let mut sockets = SOCKETS.lock();
     let socket = sockets.get_mut(&sockfd).ok_or(-9i32)?;
-    let new_socket = socket.accept()?;
-    let new_id = new_socket.id;
-    sockets.insert(new_id, new_socket);
-    Ok(new_id)
+    socket.accept()
 }
 
 /// Connect to a remote address
 pub fn sys_connect(sockfd: u32, addr_ptr: u64) -> Result<(), i32> {
     let addr = unsafe { parse_sockaddr(addr_ptr)? };
     let mut sockets = SOCKETS.lock();
+    if !sockets.contains_key(&sockfd) {
+        return Err(-9);
+    }
+    if let SocketAddress::Inet(ip, _) = &addr {
+        if is_loopback_ip(*ip) || is_local_or_loopback(*ip) {
+            return loopback_connect(&mut sockets, sockfd, addr);
+        }
+    }
     let socket = sockets.get_mut(&sockfd).ok_or(-9i32)?;
     socket.connect(addr)
 }
 
 /// Send data on a socket
 pub fn sys_sendto(sockfd: u32, buf: &[u8], addr_ptr: u64) -> Result<usize, i32> {
-    let mut sockets = SOCKETS.lock();
-    let socket = sockets.get_mut(&sockfd).ok_or(-9i32)?;
-    if addr_ptr != 0 {
-        let addr = unsafe { parse_sockaddr(addr_ptr)? };
-        socket.sendto(buf, &addr)
+    let dest = if addr_ptr != 0 {
+        Some(unsafe { parse_sockaddr(addr_ptr)? })
     } else {
-        socket.send(buf)
-    }
+        None
+    };
+    let mut sockets = SOCKETS.lock();
+    loopback_send(&mut sockets, sockfd, buf, dest)
 }
 
 /// Receive data from a socket
@@ -736,6 +1045,14 @@ pub fn sys_recvfrom(sockfd: u32, buf: &mut [u8]) -> Result<usize, i32> {
 pub fn sys_close_socket(sockfd: u32) -> Result<(), i32> {
     let mut sockets = SOCKETS.lock();
     if let Some(mut socket) = sockets.remove(&sockfd) {
+        if let Some(peer) = socket.peer_id {
+            if let Some(p) = sockets.get_mut(&peer) {
+                p.peer_id = None;
+                if p.state == SocketState::Connected {
+                    p.state = SocketState::Closing;
+                }
+            }
+        }
         socket.close();
         Ok(())
     } else {

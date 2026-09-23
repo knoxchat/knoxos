@@ -1,6 +1,6 @@
 # KnoxOS Production Readiness Status
 
-> **Last Updated**: 2026-09-20
+> **Last Updated**: 2026-09-23
 > **Version**: 0.2.1 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.1)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
 > **Codebase**: 609 Rust files in `kernel/src` · ~347,000 lines · 407 `pub mod` entries
@@ -54,7 +54,8 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 7. Kernel shell + terminal (parser, pipes, glob, env, 60+ builtins) running **inside the kernel**, not as `/bin/sh` in Ring 3.
 8. **Gate B2 hello** — static ELF `iretq`s to Ring 3, `sys_write`s `hello from userspace`, `sys_exit`s back to the kernel.
 9. **Gate B3–B6 scheduled Ring 3** — `execve(/bin/hello)` + `waitpid`; `fork` child runs and is reaped; SIGKILL / SIGSEGV / PTY Ctrl+C terminate user tasks; `/bin/sh` runs on a kernel PTY.
-10. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
+10. **Gate D1 loopback sockets** — UDP/TCP `send` copies into the peer `recv_buf` on `lo`; a Ring 3 program `sendto`/`recvfrom`s `ping` and prints `GATE_D1 loopback complete`.
+11. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
 
 ### Architectural blockers (must fix first)
 
@@ -63,7 +64,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 | **Scheduled Ring 3** | Hello is a CFS task with its own CR3; `execve`/`waitpid`/`fork`/`/bin/sh` run on the boot path. | Isolated GUI clients still need a display protocol (F1). |
 | **No timer preemption of Ring 3** | Timer sets `NEED_RESCHED`; switch happens in the executor or on syscall (`exit`/`wait`/`pause`). | A spinning user program would not yield until it syscalls. |
 | **Signal frames for handlers** | Default terminate/SIGKILL/SIGSEGV/PTY SIGINT work; custom handlers still lack a live `sigreturn`. | Catching SIGINT in a user handler is not done. |
-| **Sockets do not transmit** | `Socket::send` appends `send_buf`. `send_tcp_segment` is unused. VirtIO-net TX does not fill the avail ring. | No internet, no DHCP-applied IP, no real TCP. |
+| **Sockets do not transmit off-box** | Loopback `send` delivers to a peer `recv_buf`. `send_tcp_segment` is unused. VirtIO-net TX does not fill the avail ring. | LAN/internet, DHCP-applied IP, and real TCP over a NIC still missing. |
 | **AHCI/NVMe are fake I/O** | `read_sectors` zero-fills; `write_sectors` logs. | Bare metal disks do not persist. Only VirtIO-blk / ATA PIO do. |
 | **Default VFS is RAM** | Inodes are `Vec<u8>`. Disk is opt-in. | Reboot loses the “filesystem” unless persist/ext4 is used. |
 | **Security not on the deny path** | SELinux unused by VFS. Many syscalls `Ok(0)`. Caps unused in dispatch. | A Linux ABI surface without enforcement. |
@@ -97,7 +98,7 @@ Percentages are **production usefulness**, not lines of code.
 | 2 | Memory Management | Wired | 48% | **Critical** | Demand paging + CoW + buddy pool; no reclaim or OOM-on-alloc. |
 | 3 | Process & Scheduling | Wired | 62% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B6** scheduled Ring 3, `execve`/`waitpid`/`fork`/`/bin/sh` on a PTY, SIGKILL/SIGSEGV/PTY SIGINT. |
 | 4 | Filesystem & Storage | Wired | 42% | **Critical** | VirtIO-blk + ext4/FAT32 real; AHCI/NVMe fake; VFS default RAM. |
-| 5 | Networking | Stub→Wired | 22% | **Critical** | NIC code exists; sockets never put packets on the wire. |
+| 5 | Networking | Wired | 32% | **Critical** | Loopback `send`/`recv` live; NIC still does not put packets on the wire. |
 | 6 | Device Drivers | Wired | 28% | **Critical** | PCI, PS/2, UART, VirtIO-blk live; USB/GPU/storage mostly stub. |
 | 7 | GUI & Desktop | Live | 72% | Medium | Excellent in-kernel demo; not a multi-process display server. |
 | 8 | Shell & Terminal | Live | 80% | Medium | Real parser/PTY/glob; Ring 3 `/bin/sh` on a PTY; desktop terminal still in-kernel. |
@@ -112,8 +113,8 @@ Percentages are **production usefulness**, not lines of code.
 | 17 | Documentation | Wired | 35% | **Critical** | README + LICENSE + this file. Architecture guides still missing. |
 | 18 | CI/CD & Release | Wired | 30% | High | `.github/workflows/ci.yml` (fmt, clippy, size, QEMU boot); no signed releases. |
 
-**QEMU desktop demo readiness: ~74%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B6 scheduled userspace on the boot path).
-**Production OS readiness: ~44%** (Gate B2–B6: scheduled Ring 3, `execve`/`waitpid`/`fork`, fatal signals, `/bin/sh` on a PTY; Gates C–E still open).
+**QEMU desktop demo readiness: ~75%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B6 scheduled userspace; Gate D1 loopback sockets).
+**Production OS readiness: ~46%** (Gate B2–B6: scheduled Ring 3, `execve`/`waitpid`/`fork`, fatal signals, `/bin/sh` on a PTY; Gate D1 loopback; Gates C, D2–D4, E still open).
 
 ---
 
@@ -254,6 +255,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [ ] Mount table: ext4 really mounts; several FS types only `mkdir`
 - [ ] xattr / flock — in-kernel maps, not on-disk
 - [ ] NTFS — parses MFT from a provided buffer; **never calls the block layer**
+- [x] `fsync`/`fdatasync` — re-persist the fd's VFS file and issue VirtIO-blk FLUSH (no journal replay yet)
 
 ### Stub
 - [ ] **AHCI** — FIS built, then zero-fill / log success; fake IDENTIFY
@@ -263,19 +265,18 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [ ] OverlayFS / FUSE / NFS — not registered with VFS I/O
 - [ ] inotify / fanotify — `emit_event` never called from VFS
 - [ ] Quotas — counters, not enforced
-- [ ] `fsync` to hardware flush (cache + device)
 
 ### Perfect-OS next steps
 1. Make ext4 (or a single production FS) the root on VirtIO-blk by default, not RAM.
 2. Journal commit + crash recovery that is tested by killing QEMU mid-write.
 3. Complete VirtIO-blk DMA (guest-physical, not heap pointers) then AHCI DMA.
-4. Hook inotify on VFS mutate; implement `fsync`/`fdatasync`.
+4. Hook inotify on VFS mutate. Journal replay still missing (`fsync` already FLUSHes VirtIO-blk).
 
 ---
 
 ## 5. Networking Stack
 
-**Grade: Stub→Wired (22%)** · `net.rs`, `netint.rs`, `virtio_net.rs`, `e1000.rs`, `rtl8139.rs`, `dhcp.rs`, `dns.rs`
+**Grade: Wired (32%)** · `net.rs`, `netint.rs`, `virtio_net.rs`, `e1000.rs`, `rtl8139.rs`, `dhcp.rs`, `dns.rs`
 
 ### Wired (builders / closest-to-real NICs)
 - [x] Ethernet / ARP / IPv4 / UDP / TCP **header** construction
@@ -284,21 +285,21 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] DHCP DISCOVER/REQUEST **can be sent**; OFFER/ACK parse
 - [x] DNS A-query **can be sent**; response parse
 - [x] NTP packet build + UDP send helper
+- [x] **Loopback** — UDP `sendto` and TCP `connect`/`send` copy into the peer `recv_buf` on `127.0.0.1`; Gate D1 Ring 3 demo
 
 ### Stub (the path apps use)
-- [ ] **Socket send** — `send`/`sendto` only append `send_buf`; no NIC
-- [ ] **TCP connect** — simulated instant `Connected`; no SYN
+- [ ] **Socket send off-box** — non-loopback `send`/`sendto` still only append `send_buf`; no NIC
+- [ ] **TCP connect off-box** — non-loopback still simulated instant `Connected`; no SYN
 - [ ] **TCP retransmit / CUBIC / window** — structs in `net_production.rs`, unwired
 - [ ] **VirtIO-net TX** — does not write the avail ring
 - [ ] **VirtIO-net RX** — does not walk the used ring correctly
-- [ ] **Loopback** — `lo` exists; send does not copy to a peer recv buffer
 - [ ] **DHCP apply** — sets DNS only, not interface IP (`10.0.2.15` fake if no NIC)
 - [ ] IPv6 echo — builds packet, logs, no TX
 - [ ] TLS 1.3 — types; GCM/X.509 stub; handshake flagged done after one recv
 - [ ] Wi-Fi / WPA3 / bridge / VLAN / NAT — in-memory
 
 ### Perfect-OS next steps
-1. Loopback: `send` → peer `recv_buf` (unblocks sockets without hardware).
+1. ~~Loopback: `send` → peer `recv_buf`.~~ **D1 done** — kernel self-test + Ring 3 `sendto`/`recvfrom`.
 2. Fix VirtIO-net avail/used rings; TX one UDP ping.
 3. Wire `Socket` → `netint::send_*`; ARP then DHCP that **writes the interface IP**.
 4. TCP: SYN/ACK, seq/ack, RTO, then CUBIC. Not before packets move.
@@ -647,7 +648,7 @@ This **is** becoming an OS.
 
 | ID | Task | Done when |
 |----|------|-----------|
-| D1 | Loopback sockets | `send`/`recv` in userspace hello |
+| D1 | Loopback sockets | **Done** — kernel UDP/TCP self-test + Ring 3 `sendto`/`recvfrom` (`GATE_D1 loopback complete`) |
 | D2 | VirtIO-net avail/used correct | UDP echo vs QEMU user-net or second NIC |
 | D3 | DHCP applies IP + default route | `ip addr` matches QEMU |
 | D4 | DNS + TCP connect/retransmit | `curl`-equivalent GET `http://example.com` (or a test HTTP server) |
@@ -703,14 +704,14 @@ Do not:
 
 ## Progress tracker
 
-**Production OS: ~44%** · **QEMU desktop demo: ~74%**
+**Production OS: ~46%** · **QEMU desktop demo: ~75%**
 
 ```
 Kernel Core:        ███████████████░░░░░░░░░░  64%  Wired
 Memory Mgmt:        ████████████░░░░░░░░░░░░░  48%  Wired
 Process/Sched:      ███████████████░░░░░░░░░░  62%  Wired          ← B3–B6 live
 Filesystem:         ██████████░░░░░░░░░░░░░░░  42%  Wired
-Networking:         █████░░░░░░░░░░░░░░░░░░░░  22%  Stub→Wired   ← critical path
+Networking:         ████████░░░░░░░░░░░░░░░░░  32%  Wired         ← D1 loopback live
 Device Drivers:     ███████░░░░░░░░░░░░░░░░░░  28%  Wired
 GUI & Desktop:      ██████████████████░░░░░░░  72%  Live
 Shell & Terminal:   ████████████████████░░░░░  80%  Live
@@ -737,7 +738,8 @@ CI/CD:              ███████░░░░░░░░░░░░░
 | GUI | 85% | 72% | Honest: in-process, Wayland/GPU unused |
 | Shell | 90% | 80% | PTY/glob/env real; Ring 3 `/bin/sh` on a PTY; desktop terminal still in-kernel |
 | Docs / CI | 10% / 25% | 35% / 30% | README, LICENSE, GitHub Actions present; flake still missing |
-| **Overall production** | **~40%** | **~44%** | Gate B3–B6 wired on the live boot path; Gates C–E still open |
+| Networking | 22% | 32% | Gate D1 loopback `send`/`recv`; VirtIO-net still unwired |
+| **Overall production** | **~40%** | **~46%** | Gate B3–B6 + D1 on the live boot path; Gates C, D2–D4, E still open |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates to this file should tick **Gate** IDs, not module counts.
 

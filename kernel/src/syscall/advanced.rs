@@ -854,16 +854,41 @@ pub fn sys_fallocate(fd: i32, mode: i32, offset: i64, len: i64) -> SyscallResult
 // ── sync / fdatasync / syncfs / sync_file_range ─────────────────────
 
 pub fn sys_sync() -> SyscallResult {
-    Ok(0) // In-memory FS, nothing to sync
-}
-
-pub fn sys_fsync(fd: i32) -> SyscallResult {
-    let _ = fd;
+    // Persist already writes on VFS mutate; issue a device flush so `sync(2)`
+    // is a real barrier when VirtIO-blk is present.
+    let _ = crate::virtio_blk::flush();
     Ok(0)
 }
 
+pub fn sys_fsync(fd: i32) -> SyscallResult {
+    fsync_fd(fd)
+}
+
 pub fn sys_fdatasync(fd: i32) -> SyscallResult {
-    let _ = fd;
+    fsync_fd(fd)
+}
+
+fn fsync_fd(fd: i32) -> SyscallResult {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let (path, file_type) = {
+        let tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+        let file = table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
+        (file.path.clone(), file.file_type)
+    };
+    if file_type == crate::fd::FileType::Regular {
+        if let Some(data) = crate::vfs::read_file_dispatch(&path) {
+            let perms = {
+                let vfs = crate::vfs::VFS.lock();
+                vfs.resolve_path(&path)
+                    .and_then(|ino| vfs.get_inode(ino))
+                    .map(|i| i.permissions)
+                    .unwrap_or(0o644)
+            };
+            crate::persist::persist_file(&path, &data, perms);
+        }
+    }
+    let _ = crate::virtio_blk::flush();
     Ok(0)
 }
 
@@ -918,9 +943,10 @@ pub fn sys_tkill(tid: u32, sig: u32) -> SyscallResult {
 // ── rt_sigaction / rt_sigprocmask / rt_sigpending / rt_sigsuspend / rt_sigreturn / rt_sigtimedwait / rt_sigqueueinfo
 
 pub fn sys_rt_sigreturn() -> SyscallResult {
-    // The sigreturn trampoline restores the interrupted context
-    let pid = crate::scheduler::current_pid().unwrap_or(1);
-    serial_println!("[KnoxOS] rt_sigreturn for PID {}", pid);
+    let pid = crate::context::current_pid();
+    if crate::signals::sigreturn(pid).is_some() {
+        crate::usermode::request_resume_self();
+    }
     Ok(0)
 }
 

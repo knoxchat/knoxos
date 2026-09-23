@@ -440,6 +440,14 @@ mod syscall_abi_tests {
         assert!(fd >= -1000, "socket() returned unexpected: {}", fd);
     }
 
+    #[test_case]
+    fn test_loopback_udp_and_tcp_send_recv() {
+        assert!(
+            crate::net::loopback_self_test(),
+            "loopback UDP+TCP send must copy into the peer recv buffer"
+        );
+    }
+
     // ─── Filesystem meta syscalls ──────────────────────────────
 
     #[test_case]

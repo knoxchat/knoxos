@@ -360,6 +360,8 @@ pub const GATE_B4_MARKER: &str = "GATE_B4 fork complete";
 pub const GATE_B5_MARKER: &str = "GATE_B5 signals complete";
 /// `/bin/sh` ran in Ring 3 with a kernel PTY as its controlling terminal.
 pub const GATE_B6_MARKER: &str = "GATE_B6 sh complete";
+/// Loopback UDP send/recv from a Ring 3 program.
+pub const GATE_D1_MARKER: &str = "GATE_D1 loopback complete";
 
 /// Run the scheduled-userspace demonstrations; returns when they complete.
 pub fn run_gate_demos() {
@@ -367,11 +369,11 @@ pub fn run_gate_demos() {
         serial_println!("[user_task] Gate B3+ skipped: VMM not ready");
         return;
     }
-    serial_println!("[user_task] ── Gate B3–B6: scheduled Ring 3 ──");
+    serial_println!("[user_task] ── Gate B3–B6 + D1: scheduled Ring 3 ──");
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
-    serial_println!("[user_task] ── Gate B3–B6: done ──");
+    serial_println!("[user_task] ── Gate B3–B6 + D1: done ──");
 }
 
 extern "C" fn gate_boot_body() {
@@ -379,6 +381,7 @@ extern "C" fn gate_boot_body() {
     run_gate_b4();
     run_gate_b5();
     run_gate_b6();
+    run_gate_d1();
 }
 
 fn run_gate_b3() {
@@ -507,6 +510,31 @@ fn run_gate_b6() {
             reaped,
             saw_prompt,
             n
+        );
+    }
+}
+
+fn run_gate_d1() {
+    serial_println!("[user_task] Gate D1: loopback sockets send/recv");
+    let kernel_ok = crate::net::loopback_self_test();
+    if !kernel_ok {
+        serial_println!("[user_task] Gate D1 FAILED: kernel loopback self-test");
+        return;
+    }
+
+    let elf = crate::init::loopback_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "loopback") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    if reap_child(pid) {
+        serial_println!("[user_task] {} (pid={})", GATE_D1_MARKER, pid);
+    } else {
+        serial_println!(
+            "[user_task] Gate D1 FAILED: pid {} still present after yield",
+            pid
         );
     }
 }
