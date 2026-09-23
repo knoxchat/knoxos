@@ -326,7 +326,9 @@ pub struct TcpConnection {
     pub snd_nxt: u32, // Next sequence number to send
     pub snd_una: u32, // Oldest unacknowledged sequence number
     pub rcv_nxt: u32, // Next expected sequence number
-    pub rcv_wnd: u16, // Receive window size
+    pub rcv_wnd: u16, // Receive window we advertise
+    pub snd_wnd: u32, // Peer receive window
+    pub cc: crate::net_production::CongestionState,
     pub send_buf: Vec<u8>,
     pub recv_buf: Vec<u8>,
     pub last_tx_ticks: u64,
@@ -347,12 +349,22 @@ impl TcpConnection {
             snd_una: 1000,
             rcv_nxt: 0,
             rcv_wnd: 65535,
+            snd_wnd: 65535,
+            cc: crate::net_production::CongestionState::default(),
             send_buf: Vec::new(),
             recv_buf: Vec::new(),
             last_tx_ticks: 0,
             rexmit_count: 0,
             last_tx_ok: true,
         }
+    }
+
+    fn advertised_window(&self) -> u16 {
+        self.rcv_wnd
+    }
+
+    fn send_limit(&self) -> u32 {
+        self.cc.send_window().min(self.snd_wnd.max(1460))
     }
 }
 
@@ -538,7 +550,7 @@ impl Socket {
                     isn,
                     0,
                     TCP_SYN,
-                    65535,
+                    tcb.advertised_window(),
                     &[],
                 );
                 self.tcp_conn = Some(tcb);
@@ -1295,14 +1307,11 @@ fn process_tcp(ip_hdr: &Ipv4Header, data: &[u8]) {
         &[]
     };
 
-    serial_println!(
-        "[NET] TCP {}:{} -> {}:{} flags={:#x}",
-        Ipv4Address(ip_hdr.src_addr),
-        src_port,
-        Ipv4Address(ip_hdr.dst_addr),
-        dst_port,
-        flags
-    );
+    let window = if data.len() >= 16 {
+        u16::from_be_bytes([data[14], data[15]])
+    } else {
+        0
+    };
 
     let mut sockets = SOCKETS.lock();
     for (_, socket) in sockets.iter_mut() {
@@ -1327,7 +1336,13 @@ fn process_tcp(ip_hdr: &Ipv4Header, data: &[u8]) {
         if socket.state == SocketState::Connecting && flags & TCP_SYN != 0 && flags & TCP_ACK != 0 {
             if let Some(tcb) = socket.tcp_conn.as_mut() {
                 tcb.rcv_nxt = seq.wrapping_add(1);
+                let newly = ack.wrapping_sub(tcb.snd_una);
                 tcb.snd_una = ack;
+                if window != 0 {
+                    tcb.snd_wnd = window as u32;
+                }
+                tcb.cc.on_acked_inflight(newly);
+                tcb.cc.on_ack(newly.max(1), 1_000);
                 tcb.state = TcpState::Established;
                 socket.state = SocketState::Connected;
                 let src = tcb.local_port;
@@ -1335,6 +1350,7 @@ fn process_tcp(ip_hdr: &Ipv4Header, data: &[u8]) {
                 let dst_p = tcb.remote_port;
                 let snd = tcb.snd_nxt;
                 let rcv = tcb.rcv_nxt;
+                let adv = tcb.advertised_window();
                 drop(sockets);
                 let _ = crate::netint::send_tcp_segment(
                     dst_ip,
@@ -1343,7 +1359,7 @@ fn process_tcp(ip_hdr: &Ipv4Header, data: &[u8]) {
                     snd,
                     rcv,
                     TCP_ACK,
-                    65535,
+                    adv,
                     &[],
                 );
                 return;
@@ -1354,7 +1370,15 @@ fn process_tcp(ip_hdr: &Ipv4Header, data: &[u8]) {
             && flags & TCP_ACK != 0
         {
             if let Some(tcb) = socket.tcp_conn.as_mut() {
+                let newly = ack.wrapping_sub(tcb.snd_una);
                 tcb.snd_una = ack;
+                if window != 0 {
+                    tcb.snd_wnd = window as u32;
+                }
+                if newly > 0 && newly < 16 * 1024 * 1024 {
+                    tcb.cc.on_acked_inflight(newly);
+                    tcb.cc.on_ack(newly, 1_000);
+                }
                 if !payload.is_empty() {
                     tcb.rcv_nxt = seq.wrapping_add(payload.len() as u32);
                     socket.recv_buf.extend_from_slice(payload);
@@ -1653,14 +1677,21 @@ fn nic_send(sockfd: u32, buf: &[u8], dest: Option<SocketAddress>) -> Result<usiz
         if socket.state != SocketState::Connected {
             return Err(-107);
         }
-        let (seq, ack) = if let Some(tcb) = socket.tcp_conn.as_mut() {
+        let (seq, ack, window, send_len) = if let Some(tcb) = socket.tcp_conn.as_mut() {
+            let limit = tcb.send_limit() as usize;
+            if limit == 0 {
+                return Err(-11);
+            }
+            let n = buf.len().min(limit);
             let seq = tcb.snd_nxt;
-            tcb.snd_nxt = tcb.snd_nxt.wrapping_add(buf.len() as u32);
+            tcb.snd_nxt = tcb.snd_nxt.wrapping_add(n as u32);
+            tcb.cc.on_send(n as u32);
             tcb.last_tx_ticks = crate::interrupts::get_ticks();
-            (seq, tcb.rcv_nxt)
+            (seq, tcb.rcv_nxt, tcb.advertised_window(), n)
         } else {
-            (0, 0)
+            (0, 0, 65535, buf.len())
         };
+        let payload = &buf[..send_len];
         drop(sockets);
         if crate::netint::send_tcp_segment(
             dst_ip,
@@ -1669,10 +1700,10 @@ fn nic_send(sockfd: u32, buf: &[u8], dest: Option<SocketAddress>) -> Result<usiz
             seq,
             ack,
             TCP_PSH | TCP_ACK,
-            65535,
-            buf,
+            window,
+            payload,
         ) {
-            Ok(buf.len())
+            Ok(send_len)
         } else {
             Err(-101)
         }
@@ -1712,16 +1743,18 @@ pub fn tcp_rexmit_pending() -> u32 {
             }
             tcb.rexmit_count = tcb.rexmit_count.saturating_add(1);
             tcb.last_tx_ticks = now;
+            tcb.cc.on_loss();
             pending.push((
                 *sock_id,
                 tcb.remote_addr,
                 tcb.local_port,
                 tcb.remote_port,
                 tcb.snd_una,
+                tcb.advertised_window(),
             ));
         }
     }
-    for (sock_id, dst, src_port, dst_port, seq) in &pending {
+    for (sock_id, dst, src_port, dst_port, seq, window) in &pending {
         let ok = crate::netint::send_tcp_segment(
             *dst,
             *src_port,
@@ -1729,7 +1762,7 @@ pub fn tcp_rexmit_pending() -> u32 {
             *seq,
             0,
             TCP_SYN,
-            65535,
+            *window,
             &[],
         );
         if let Some(socket) = SOCKETS.lock().get_mut(sock_id) {

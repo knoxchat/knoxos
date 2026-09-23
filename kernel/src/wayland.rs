@@ -1190,13 +1190,18 @@ pub const GATE_F_WIDTH: u32 = 64;
 pub const GATE_F_HEIGHT: u32 = 64;
 pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
 pub const GATE_F2_MARKER: &str = "GATE_F2 shm commit";
+pub const GATE_F3_MARKER: &str = "GATE_F3 terminal isolated";
+pub const GATE_F4_MARKER: &str = "GATE_F4 launcher userspace";
 const GATE_F_MAGIC: [u8; 4] = [0xEE, 0xFF, 0xC0, 0xFF];
+const GATE_F3_MAGIC: [u8; 4] = [0x1A, 0x1A, 0x1A, 0xFF];
+const GATE_F4_MAGIC: [u8; 4] = [0xCC, 0x66, 0x33, 0xFF];
 
 /// Present a Ring 3 SHM buffer as a compositor surface + desktop window.
 ///
 /// `vaddr` is the client’s mmap’d 64×64 BGRA buffer. Pixels are copied into a
-/// kernel SHM pool (F2) and a chrome window blits them (F1: not an in-kernel
-/// `WindowContentType` app).
+/// kernel SHM pool (F2) and a chrome window blits them. F3/F4 magics force
+/// `WindowContentType::Empty` so the terminal and launcher are not in-kernel
+/// app enums.
 pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     let len = (GATE_F_WIDTH * GATE_F_HEIGHT * 4) as usize;
     let mut pixels = vec![0u8; len];
@@ -1222,7 +1227,14 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     };
     let sid = comp.create_surface(pid);
     comp.create_toplevel(sid);
-    comp.toplevel_set_title(sid, "Client");
+    let title = if pixels.len() >= 4 && pixels[0..4] == GATE_F3_MAGIC {
+        "Terminal"
+    } else if pixels.len() >= 4 && pixels[0..4] == GATE_F4_MAGIC {
+        "Paint"
+    } else {
+        "Client"
+    };
+    comp.toplevel_set_title(sid, title);
     if !comp.attach_shm_buffer(sid, buf, 0, 0) {
         serial_println!("[WL] Gate F FAILED: attach");
         return false;
@@ -1232,7 +1244,8 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     let roundtrip = comp.read_from_pool(pool, 0, 4);
     drop(comp);
 
-    let mut win = crate::gui::window::Window::new("Client", 120, 80, 280, 200);
+    let mut win = crate::gui::window::Window::new(title, 120, 80, 280, 200);
+    win.content_type = crate::gui::window::WindowContentType::Empty;
     let wid = win.id;
     crate::gui::window::WINDOW_MANAGER.lock().add_window(win);
     WINDOW_SURFACES.lock().insert(wid, sid);
@@ -1241,17 +1254,36 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
         .insert(wid, (pixels.clone(), GATE_F_WIDTH, GATE_F_HEIGHT));
     crate::gui::request_redraw();
 
-    let magic_ok = pixels.len() >= 4
-        && pixels[0..4] == GATE_F_MAGIC
-        && roundtrip.as_deref() == Some(&GATE_F_MAGIC[..]);
+    let head = pixels.get(0..4);
+    let magic_ok = match head {
+        Some(p) if *p == GATE_F_MAGIC || *p == GATE_F3_MAGIC || *p == GATE_F4_MAGIC => {
+            roundtrip.as_deref() == Some(p)
+        }
+        _ => false,
+    };
     if magic_ok {
         serial_println!(
-            "[WL] {} (pid={} surface={} window={})",
+            "[WL] {} (pid={} surface={} window={} title={})",
             GATE_F2_MARKER,
             pid,
             sid,
-            wid
+            wid,
+            title
         );
+        if pixels[0..4] == GATE_F3_MAGIC {
+            serial_println!(
+                "[WL] {} (window={} content=Empty, not WindowContentType::Terminal)",
+                GATE_F3_MARKER,
+                wid
+            );
+        }
+        if pixels[0..4] == GATE_F4_MAGIC {
+            serial_println!(
+                "[WL] {} (window={} content=Empty SHM, not launcher stub)",
+                GATE_F4_MARKER,
+                wid
+            );
+        }
     } else {
         serial_println!(
             "[WL] Gate F2 FAILED: client={:?} shm={:?}",

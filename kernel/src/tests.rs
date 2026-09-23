@@ -72,6 +72,17 @@ mod vfs_tests {
     }
 
     #[test_case]
+    fn test_persist_root_if_virtio() {
+        if !crate::virtio_blk::is_available() {
+            return;
+        }
+        assert!(
+            crate::persist::root_persist_self_test(),
+            "files outside old persist prefixes must round-trip through VirtIO-blk"
+        );
+    }
+
+    #[test_case]
     fn test_page_cache_writeback() {
         assert!(
             crate::page_cache::writeback_self_test(),
@@ -1398,6 +1409,25 @@ mod network_conformance_tests {
         assert!(
             crate::virtio_net::ping_self_test(),
             "virtio-net TX/RX used ring must deliver a UDP reply from QEMU"
+        );
+    }
+
+    #[test_case]
+    fn test_nvme_dma_if_present() {
+        if !crate::nvme::is_available() {
+            return;
+        }
+        assert!(
+            crate::nvme::dma_self_test(),
+            "NVMe PRP DMA write then read must round-trip"
+        );
+    }
+
+    #[test_case]
+    fn test_cubic_window() {
+        assert!(
+            crate::net_production::cubic_self_test(),
+            "CUBIC must grow on ACK, shrink on loss, and consume send window"
         );
     }
 

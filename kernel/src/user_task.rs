@@ -382,11 +382,11 @@ pub fn run_gate_demos() {
         serial_println!("[user_task] Gate B3+ skipped: VMM not ready");
         return;
     }
-    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1: scheduled Ring 3 ──");
+    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1–F4: scheduled Ring 3 ──");
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
-    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1: done ──");
+    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1–F4: done ──");
 }
 
 extern "C" fn gate_boot_body() {
@@ -398,6 +398,8 @@ extern "C" fn gate_boot_body() {
     run_gate_b7();
     run_gate_b8();
     run_gate_f1();
+    run_gate_f3();
+    run_gate_f4();
 }
 
 fn run_gate_b3() {
@@ -646,4 +648,44 @@ fn run_gate_f1() {
         pid,
         reaped
     );
+}
+
+fn run_gate_f3() {
+    serial_println!("[user_task] Gate F3: Ring 3 terminal SHM client");
+    let elf = crate::init::terminal_client_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "term") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate F3 pid={} reaped={} (marker from userspace)",
+        pid,
+        reaped
+    );
+}
+
+fn run_gate_f4() {
+    serial_println!("[user_task] Gate F4: Ring 3 launcher SHM client");
+    let elf = crate::init::launcher_client_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "paint") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate F4 pid={} reaped={} (marker from userspace)",
+        pid,
+        reaped
+    );
+}
+
+/// Spawn a Ring 3 SHM launcher without waiting (start-menu clicks).
+pub fn spawn_launcher_app(name: &str) {
+    let elf = crate::init::launcher_client_elf_data();
+    let _ = spawn_or_log(&elf, name);
 }

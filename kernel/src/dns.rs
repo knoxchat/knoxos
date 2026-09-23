@@ -683,4 +683,5 @@ pub fn init() {
         server[3]
     );
     let _ = crate::net::dns_tcp_self_test();
+    let _ = crate::net_production::cubic_self_test();
 }

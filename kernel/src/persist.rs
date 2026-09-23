@@ -34,36 +34,21 @@ const JRNL_HEADER_SIZE: usize = 40;
 /// This prevents OOM when persisting very large files like 125MB .deb packages
 const MAX_PERSIST_SIZE: usize = 64 * 1024 * 1024; // 64 MB
 
-/// Paths that should be persisted (user data directories)
-const PERSIST_PREFIXES: &[&str] = &["/home/", "/root/", "/tmp/", "/var/", "/opt/", "/usr/local/"];
+/// Paths that should NOT be persisted (virtual FS and boot-generated ELFs).
+/// Everything else — including `/etc` — is the RAM VFS root snapshot.
+const SKIP_PREFIXES: &[&str] = &["/dev/", "/proc/", "/sys/", "/run/", "/bin/", "/sbin/"];
 
-/// Paths that should NOT be persisted (system-generated)
-const SKIP_PREFIXES: &[&str] = &[
-    "/dev/",
-    "/proc/",
-    "/sys/",
-    "/bin/",
-    "/sbin/",
-    "/etc/hostname",
-    "/etc/os-release",
-    "/etc/passwd",
-];
-
-/// Check if a path should be persisted
+/// Check if a path should be persisted across reboot.
 fn should_persist(path: &str) -> bool {
-    // Skip system paths
+    if path == "/" || path.is_empty() {
+        return false;
+    }
     for skip in SKIP_PREFIXES {
-        if path.starts_with(skip) {
+        if path.starts_with(skip) || path == skip.trim_end_matches('/') {
             return false;
         }
     }
-    // Only persist user-data paths
-    for prefix in PERSIST_PREFIXES {
-        if path.starts_with(prefix) {
-            return true;
-        }
-    }
-    false
+    true
 }
 
 fn crc32(data: &[u8]) -> u32 {
@@ -631,6 +616,7 @@ pub fn init() {
     restore_all();
     let _ = roundtrip_self_test();
     let _ = journal_recovery_self_test();
+    let _ = root_persist_self_test();
 }
 
 /// Serial marker the integration test waits for once a file has been written
@@ -764,6 +750,58 @@ pub fn journal_recovery_self_test() -> bool {
         }
         None => {
             crate::serial_println!("[persist] Gate C2 FAILED: file missing after journal replay");
+            false
+        }
+    }
+}
+
+pub const GATE_C6_MARKER: &str = "GATE_C6 vfs persist";
+const GATE_C6_PATH: &str = "/etc/knoxos/gate_c6";
+const GATE_C6_PAYLOAD: &[u8] = b"knoxos-c6-root\n";
+
+/// Persist a file **outside** the old `/home`/`/var` prefixes (the RAM VFS
+/// root). Unlink, restore from VirtIO-blk, and require the bytes back.
+pub fn root_persist_self_test() -> bool {
+    if !crate::virtio_blk::is_available() {
+        crate::serial_println!("[persist] Gate C6 skipped: no virtio-blk");
+        return false;
+    }
+    if !should_persist(GATE_C6_PATH) {
+        crate::serial_println!("[persist] Gate C6 FAILED: /etc is still skipped");
+        return false;
+    }
+
+    crate::vfs::ensure_directory("/etc/knoxos");
+    if !crate::vfs::write_file_dispatch(GATE_C6_PATH, GATE_C6_PAYLOAD) {
+        crate::serial_println!("[persist] Gate C6 FAILED: could not write {}", GATE_C6_PATH);
+        return false;
+    }
+    if crate::vfs::remove_dispatch(GATE_C6_PATH).is_err() {
+        crate::serial_println!("[persist] Gate C6 FAILED: unlink {}", GATE_C6_PATH);
+        return false;
+    }
+    if crate::vfs::read_file_dispatch(GATE_C6_PATH).is_some() {
+        crate::serial_println!("[persist] Gate C6 FAILED: RAM copy survived unlink");
+        return false;
+    }
+
+    restore_all();
+
+    match crate::vfs::read_file_dispatch(GATE_C6_PATH) {
+        Some(data) if data.as_slice() == GATE_C6_PAYLOAD => {
+            crate::serial_println!("[persist] {}", GATE_C6_MARKER);
+            true
+        }
+        Some(data) => {
+            crate::serial_println!(
+                "[persist] Gate C6 FAILED: restored {} bytes, expected {}",
+                data.len(),
+                GATE_C6_PAYLOAD.len()
+            );
+            false
+        }
+        None => {
+            crate::serial_println!("[persist] Gate C6 FAILED: /etc file missing after restore");
             false
         }
     }

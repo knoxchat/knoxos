@@ -43,15 +43,19 @@ fi
 
 PERSIST_DISK="$PROJECT_ROOT/tests/c1-persist.img"
 AHCI_DISK="$PROJECT_ROOT/tests/c4-ahci.img"
-rm -f "$PERSIST_DISK" "$AHCI_DISK"
+NVME_DISK="$PROJECT_ROOT/tests/c5-nvme.img"
+rm -f "$PERSIST_DISK" "$AHCI_DISK" "$NVME_DISK"
 if command -v qemu-img >/dev/null 2>&1; then
     qemu-img create -f raw "$PERSIST_DISK" 64M >/dev/null
     qemu-img create -f raw "$AHCI_DISK" 64M >/dev/null
+    qemu-img create -f raw "$NVME_DISK" 64M >/dev/null
 else
     dd if=/dev/zero of="$PERSIST_DISK" bs=1m count=64 status=none 2>/dev/null \
         || dd if=/dev/zero of="$PERSIST_DISK" bs=1m count=64
     dd if=/dev/zero of="$AHCI_DISK" bs=1m count=64 status=none 2>/dev/null \
         || dd if=/dev/zero of="$AHCI_DISK" bs=1m count=64
+    dd if=/dev/zero of="$NVME_DISK" bs=1m count=64 status=none 2>/dev/null \
+        || dd if=/dev/zero of="$NVME_DISK" bs=1m count=64
 fi
 chmod +x "$PROJECT_ROOT/tests/d4_http.sh"
 echo "       Build OK"
@@ -70,6 +74,8 @@ QEMU_CMD=(qemu-system-x86_64
     -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK"
     -device ahci,id=ahci0
     -device ide-hd,drive=ahcidisk,bus=ahci0.0
+    -drive if=none,id=nvme0,format=raw,file="$NVME_DISK"
+    -device nvme,serial=knoxos,drive=nvme0
     -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$PROJECT_ROOT/tests/d4_http.sh"
     -device virtio-net-pci,netdev=net1,disable-modern=on
     -serial file:"$SERIAL_LOG"
@@ -172,6 +178,11 @@ check_marker "GATE_B7 sigreturn complete"
 check_marker "GATE_B8 timer preempt complete"
 check_marker "GATE_F1 client isolated"
 check_marker "GATE_F2 shm commit"
+check_marker "GATE_F3 terminal isolated"
+check_marker "GATE_F4 launcher userspace"
+check_marker "GATE_C5 nvme dma complete"
+check_marker "GATE_D5 cubic window"
+check_marker "GATE_C6 vfs persist"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

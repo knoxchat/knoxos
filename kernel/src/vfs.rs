@@ -983,10 +983,12 @@ fn install_builtin_binaries() {
     let mut vfs = VFS.lock();
     vfs.write_file("/sbin/init", &generate_init_elf());
     vfs.write_file("/bin/hello", &crate::init::hello_userspace_elf_data());
+    vfs.write_file("/bin/paint", &crate::init::launcher_client_elf_data());
+    vfs.write_file("/bin/term", &crate::init::terminal_client_elf_data());
     drop(vfs);
 
     crate::serial_println!(
-        "[VFS] Installed built-in binaries: /bin/sh, /bin/bash, /bin/ash, /sbin/init, /bin/hello"
+        "[VFS] Installed built-in binaries: /bin/sh, /bin/bash, /bin/ash, /sbin/init, /bin/hello, /bin/paint, /bin/term"
     );
 }
 

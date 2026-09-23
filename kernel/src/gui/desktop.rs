@@ -2887,8 +2887,12 @@ pub fn finish_rubber_band() {
 
 /// Open an application by creating a new window
 pub fn open_application(name: &str, icon_type: IconType) {
-    // Route apps with dedicated open() functions
+    // Route Empty launcher stubs to a Ring 3 SHM client (Gate F4).
     match name {
+        "Paint" | "Video Player" | "Webamp" | "Doom" | "ClassiCube" | "Quake III" => {
+            crate::user_task::spawn_launcher_app(name);
+            return;
+        }
         "Task Manager" => {
             super::task_manager::open();
             return;

@@ -457,13 +457,26 @@ pub fn sigreturn_userspace_elf_data() -> Vec<u8> {
 
 /// Gate F1: mmap a 64×64 BGRA buffer, fill a magic pixel, ioctl(/dev/wl0) present.
 pub fn display_client_elf_data() -> Vec<u8> {
-    // js offsets: fail at 0xB0
-    //   mmap js at 0x2E next 0x34 → 0x7C
-    //   open js at 0x65 next 0x6B → 0x45
-    //   ioctl js at 0x87 next 0x8D → 0x23
-    // lea path: insn 0x4F next 0x56, path 0xC0 → 0x6A
-    // lea marker: insn 0x9B next 0xA2, marker 0xC9 → 0x27
-    build_static_user_elf(&[
+    shm_present_client_elf(0xFFC0_FFEE, b"GATE_F1 client isolated\n")
+}
+
+/// Gate F3: same SHM present path, dark terminal pixels, isolated from
+/// `WindowContentType::Terminal`.
+pub fn terminal_client_elf_data() -> Vec<u8> {
+    shm_present_client_elf(0xFF1A_1A1A, b"GATE_F3 terminal isolated\n")
+}
+
+/// Gate F4: userspace launcher client (Paint) via SHM, not an Empty stub.
+pub fn launcher_client_elf_data() -> Vec<u8> {
+    shm_present_client_elf(0xFF33_66CC, b"GATE_F4 launcher userspace\n")
+}
+
+/// mmap + fill + ioctl(/dev/wl0) + write marker. Layout matches the Gate F1
+/// RIP offsets; only the fill dword and marker string/length change.
+fn shm_present_client_elf(fill: u32, marker: &[u8]) -> Vec<u8> {
+    let f = fill.to_le_bytes();
+    let n = (marker.len() as u32).to_le_bytes();
+    let mut code = alloc::vec![
         0x48, 0xC7, 0xC0, 0x09, 0x00, 0x00, 0x00, // mov rax, 9 (mmap)
         0x48, 0x31, 0xFF, // xor rdi, rdi
         0x48, 0xC7, 0xC6, 0x00, 0x40, 0x00, 0x00, // mov rsi, 0x4000
@@ -477,7 +490,7 @@ pub fn display_client_elf_data() -> Vec<u8> {
         0x49, 0x89, 0xC4, // mov r12, rax
         0x4C, 0x89, 0xE7, // mov rdi, r12
         0x48, 0xC7, 0xC1, 0x00, 0x10, 0x00, 0x00, // mov rcx, 0x1000
-        0xB8, 0xEE, 0xFF, 0xC0, 0xFF, // mov eax, 0xFFC0FFEE
+        0xB8, f[0], f[1], f[2], f[3], // mov eax, fill
         0xF3, 0xAB, // rep stosd
         0x48, 0xC7, 0xC0, 0x02, 0x00, 0x00, 0x00, // mov rax, 2 (open)
         0x48, 0x8D, 0x3D, 0x6A, 0x00, 0x00, 0x00, // lea rdi, [rip+path]
@@ -497,7 +510,7 @@ pub fn display_client_elf_data() -> Vec<u8> {
         0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
         0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
         0x48, 0x8D, 0x35, 0x27, 0x00, 0x00, 0x00, // lea rsi, [rip+marker]
-        0x48, 0xC7, 0xC2, 0x18, 0x00, 0x00, 0x00, // mov rdx, 24
+        0x48, 0xC7, 0xC2, n[0], n[1], n[2], n[3], // mov rdx, marker.len
         0x0F, 0x05, // syscall
         0x48, 0x31, 0xFF, // xor rdi, rdi
         0xEB, 0x07, // jmp exit
@@ -505,9 +518,9 @@ pub fn display_client_elf_data() -> Vec<u8> {
         0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, // exit: mov rax, 60
         0x0F, 0x05, // syscall
         b'/', b'd', b'e', b'v', b'/', b'w', b'l', b'0', 0, // path
-        b'G', b'A', b'T', b'E', b'_', b'F', b'1', b' ', b'c', b'l', b'i', b'e', b'n', b't', b' ',
-        b'i', b's', b'o', b'l', b'a', b't', b'e', b'd', b'\n',
-    ])
+    ];
+    code.extend_from_slice(marker);
+    build_static_user_elf(&code)
 }
 
 fn launch_hello_userspace() -> Result<(), &'static str> {

@@ -33,6 +33,8 @@ PERSISTENT_DISK="$SCRIPT_DIR/knoxos-storage.img"
 PERSISTENT_DISK_SIZE="20G"
 AHCI_DISK="$SCRIPT_DIR/knoxos-ahci.img"
 AHCI_DISK_SIZE="64M"
+NVME_DISK="$SCRIPT_DIR/knoxos-nvme.img"
+NVME_DISK_SIZE="64M"
 D4_HTTP="$SCRIPT_DIR/tests/d4_http.sh"
 
 # Auto-detect display backend for QEMU
@@ -163,6 +165,11 @@ ensure_persistent_disk() {
         log_step "Creating AHCI test disk ($AHCI_DISK_SIZE)..."
         qemu-img create -f raw "$AHCI_DISK" "$AHCI_DISK_SIZE" > /dev/null 2>&1
         log_success "AHCI disk created: $AHCI_DISK"
+    fi
+    if [ ! -f "$NVME_DISK" ]; then
+        log_step "Creating NVMe test disk ($NVME_DISK_SIZE)..."
+        qemu-img create -f raw "$NVME_DISK" "$NVME_DISK_SIZE" > /dev/null 2>&1
+        log_success "NVMe disk created: $NVME_DISK"
     fi
 }
 
@@ -300,6 +307,8 @@ run_qemu_bios() {
         -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
         -device ahci,id=ahci0 \
         -device ide-hd,drive=ahcidisk,bus=ahci0.0 \
+        -drive if=none,id=nvme0,format=raw,file="$NVME_DISK" \
+        -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
         -serial stdio \
@@ -363,6 +372,8 @@ run_qemu_uefi() {
         -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
         -device ahci,id=ahci0 \
         -device ide-hd,drive=ahcidisk,bus=ahci0.0 \
+        -drive if=none,id=nvme0,format=raw,file="$NVME_DISK" \
+        -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
         -serial stdio \
@@ -401,6 +412,8 @@ run_qemu_debug() {
         -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
         -device ahci,id=ahci0 \
         -device ide-hd,drive=ahcidisk,bus=ahci0.0 \
+        -drive if=none,id=nvme0,format=raw,file="$NVME_DISK" \
+        -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
         -serial stdio \

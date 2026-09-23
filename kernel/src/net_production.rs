@@ -215,26 +215,47 @@ impl CongestionState {
         }
     }
 
+    /// Bytes still allowed by cwnd (0 means the window is full).
+    pub fn send_window(&self) -> u32 {
+        self.cwnd.saturating_sub(self.bytes_in_flight)
+    }
+
+    pub fn on_send(&mut self, nbytes: u32) {
+        self.bytes_in_flight = self.bytes_in_flight.saturating_add(nbytes);
+    }
+
+    pub fn on_acked_inflight(&mut self, nbytes: u32) {
+        self.bytes_in_flight = self.bytes_in_flight.saturating_sub(nbytes);
+    }
+
     fn cubic_on_ack(&mut self, acked_bytes: u32) {
         if self.in_slow_start {
-            self.cwnd += acked_bytes;
+            self.cwnd = self.cwnd.saturating_add(acked_bytes);
             if self.cwnd >= self.ssthresh {
                 self.in_slow_start = false;
             }
             return;
         }
 
-        // CUBIC formula: W(t) = C*(t-K)^3 + W_max
-        // Simplified CUBIC growth
-        let mss = 1460u32;
-        let target = if self.cwnd < self.cubic_last_max_cwnd {
-            // Below last max — concave growth
-            self.cwnd + mss / 8
-        } else {
-            // Above last max — convex growth
-            self.cwnd + mss / 4
-        };
-        self.cwnd = target;
+        // RFC 8312 CUBIC: W(t) = C*(t-K)^3 + W_max, C=0.4, β=0.7.
+        // Time is in timer ticks; integer cube avoids libm.
+        let now = crate::interrupts::get_ticks();
+        if self.cubic_epoch_start == 0 {
+            self.cubic_epoch_start = now.max(1);
+            self.cubic_origin_point = self.cubic_last_max_cwnd.max(self.cwnd);
+        }
+        let mss = 1460i64;
+        let t = now.saturating_sub(self.cubic_epoch_start) as i64;
+        let wmax = self.cubic_origin_point.max(self.cwnd) as i64;
+        let k = (wmax / mss / 4).max(1);
+        let dt = t - k;
+        let cube = dt.saturating_mul(dt).saturating_mul(dt);
+        let w_cubic = (wmax + cube * mss / 40).clamp(2 * mss, 4 * 1024 * 1024) as u32;
+        let reno = self
+            .cwnd
+            .saturating_add((mss as u32).saturating_mul(acked_bytes) / self.cwnd.max(mss as u32));
+        let target = w_cubic.max(reno).max(2 * mss as u32);
+        self.cwnd = target.min(4 * 1024 * 1024);
     }
 
     fn bbr_on_ack(&mut self, _acked_bytes: u32, rtt_us: u64) {
@@ -598,6 +619,50 @@ pub fn enable_tfo(max_pending: u32) {
 
 pub fn set_ecn(enabled: bool) {
     NET_PRODUCTION.lock().set_ecn(enabled);
+}
+
+pub const GATE_D5_MARKER: &str = "GATE_D5 cubic window";
+
+/// Prove CUBIC grows on ACK, shrinks on loss, and the send window is live.
+pub fn cubic_self_test() -> bool {
+    let mut cc = CongestionState {
+        algorithm: CongestionAlgorithm::Cubic,
+        ..CongestionState::default()
+    };
+    let initial = cc.cwnd;
+    cc.on_ack(1460, 1_000);
+    if cc.cwnd <= initial {
+        serial_println!("[NET] Gate D5 FAILED: slow-start did not grow cwnd");
+        return false;
+    }
+    let grown = cc.cwnd;
+    cc.on_send(1460);
+    if cc.send_window() >= grown {
+        serial_println!("[NET] Gate D5 FAILED: inflight did not consume window");
+        return false;
+    }
+    cc.on_loss();
+    if cc.cwnd >= grown {
+        serial_println!("[NET] Gate D5 FAILED: loss did not cut cwnd (β=0.7)");
+        return false;
+    }
+    let after_loss = cc.cwnd;
+    cc.in_slow_start = false;
+    cc.cubic_epoch_start = 0;
+    cc.on_ack(1460, 2_000);
+    if cc.cwnd < after_loss {
+        serial_println!("[NET] Gate D5 FAILED: CUBIC CA shrank cwnd");
+        return false;
+    }
+    serial_println!(
+        "[NET] {} (cwnd {} -> {} -> {} -> {})",
+        GATE_D5_MARKER,
+        initial,
+        grown,
+        after_loss,
+        cc.cwnd
+    );
+    true
 }
 
 pub fn init() {
