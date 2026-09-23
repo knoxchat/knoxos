@@ -48,6 +48,17 @@ mod vfs_tests {
         vfs::ensure_directory("/etc/knoxos/test");
         assert!(vfs::write_file_dispatch("/etc/knoxos/test/conf", b"ok"));
     }
+
+    #[test_case]
+    fn test_persist_roundtrip_if_virtio() {
+        if !crate::virtio_blk::is_available() {
+            return;
+        }
+        assert!(
+            crate::persist::roundtrip_self_test(),
+            "virtio persist must restore a file after it is unlinked from RAM"
+        );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

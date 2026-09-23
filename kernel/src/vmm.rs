@@ -930,6 +930,16 @@ impl PhysicalFramePool {
         Some(addr)
     }
 
+    /// Allocate `2^order` consecutive 4 KiB frames. Used for virtio DMA regions.
+    pub fn allocate_order(&mut self, order: usize) -> Option<u64> {
+        if order > BUDDY_MAX_ORDER {
+            return None;
+        }
+        let addr = self.take_block(order)?;
+        self.allocated_frames += 1u64 << order;
+        Some(addr)
+    }
+
     /// Free a 4 KiB physical frame back to the pool
     pub fn free(&mut self, phys_addr: u64) {
         self.free_block(phys_addr & !0xFFF, 0);
@@ -963,6 +973,26 @@ lazy_static::lazy_static! {
 /// Allocate a physical frame from the global pool
 pub fn allocate_physical_frame() -> Option<u64> {
     FRAME_POOL.lock().allocate()
+}
+
+/// Allocate `count` consecutive 4 KiB physical frames (rounded up to a buddy order).
+pub fn allocate_contiguous_frames(count: usize) -> Option<u64> {
+    if count == 0 {
+        return None;
+    }
+    let mut order = 0;
+    while (1usize << order) < count {
+        order += 1;
+        if order > BUDDY_MAX_ORDER {
+            return None;
+        }
+    }
+    FRAME_POOL.lock().allocate_order(order)
+}
+
+/// Kernel virtual address for a physical frame (offset mapping).
+pub fn phys_to_virt(phys: u64) -> u64 {
+    phys + get_phys_mem_offset()
 }
 
 /// Free a physical frame back to the global pool

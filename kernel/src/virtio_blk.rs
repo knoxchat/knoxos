@@ -1,4 +1,3 @@
-use alloc::collections::VecDeque;
 use alloc::string::String;
 /// Virtio Block Device Driver — Persistent storage via QEMU virtio-blk
 ///
@@ -179,27 +178,19 @@ pub struct VirtioBlkDevice {
     /// Actual queue size from device
     pub queue_size: u16,
 
-    // ── Virtqueue memory (contiguous, DMA-safe) ──
-    /// Descriptor table (queue_size × 16 bytes)
-    desc_table: Vec<VirtqDesc>,
-    /// Available ring (4 + queue_size*2 + 2 bytes)
-    avail_ring: Vec<u8>,
-    /// Used ring (4 + queue_size*8 + 2 bytes)
-    used_ring: Vec<u8>,
-
-    /// Per-slot DMA buffers for request headers
-    request_headers: Vec<Vec<u8>>,
-    /// Per-slot DMA buffers for sector data
-    data_buffers: Vec<Vec<u8>>,
-    /// Per-slot DMA status bytes (device writes 0=OK, 1=IOERR, 2=UNSUPP)
-    status_buffers: Vec<u8>,
+    /// Guest-physical base of the contiguous virtqueue (desc + avail + used).
+    vq_phys: u64,
+    /// Offset of the available ring within the virtqueue
+    avail_off: usize,
+    /// Offset of the used ring within the virtqueue (page-aligned)
+    used_off: usize,
+    /// Guest-physical bounce buffer: 16-byte header + 512-byte sector + status
+    bounce_phys: u64,
 
     /// Avail ring index (shadows the ring's idx field)
     avail_idx: u16,
     /// Used ring index (last consumed)
     used_idx: u16,
-    /// Free descriptor list
-    free_descs: VecDeque<u16>,
 
     /// Statistics
     pub reads: u64,
@@ -222,15 +213,12 @@ impl VirtioBlkDevice {
             read_only: false,
             ready: false,
             queue_size: 0,
-            desc_table: Vec::new(),
-            avail_ring: Vec::new(),
-            used_ring: Vec::new(),
-            request_headers: Vec::new(),
-            data_buffers: Vec::new(),
-            status_buffers: Vec::new(),
+            vq_phys: 0,
+            avail_off: 0,
+            used_off: 0,
+            bounce_phys: 0,
             avail_idx: 0,
             used_idx: 0,
-            free_descs: VecDeque::new(),
             reads: 0,
             writes: 0,
             errors: 0,
@@ -238,26 +226,35 @@ impl VirtioBlkDevice {
         }
     }
 
-    // ── Avail ring helpers ──
+    fn vq_virt(&self) -> u64 {
+        crate::vmm::phys_to_virt(self.vq_phys)
+    }
+
+    fn bounce_virt(&self) -> u64 {
+        crate::vmm::phys_to_virt(self.bounce_phys)
+    }
+
+    fn desc_ptr(&self, i: u16) -> *mut VirtqDesc {
+        (self.vq_virt() as *mut VirtqDesc).wrapping_add(i as usize)
+    }
 
     fn avail_flags_ptr(&self) -> *mut u16 {
-        self.avail_ring.as_ptr() as *mut u16
+        (self.vq_virt() + self.avail_off as u64) as *mut u16
     }
     fn avail_idx_ptr(&self) -> *mut u16 {
-        unsafe { (self.avail_ring.as_ptr() as *mut u16).add(1) }
+        unsafe { self.avail_flags_ptr().add(1) }
     }
     fn avail_ring_entry(&self, i: u16) -> *mut u16 {
-        unsafe { (self.avail_ring.as_ptr() as *mut u16).add(2 + i as usize) }
+        unsafe { self.avail_flags_ptr().add(2 + i as usize) }
     }
 
-    // ── Used ring helpers ──
-
     fn used_idx_ptr(&self) -> *const u16 {
-        unsafe { (self.used_ring.as_ptr() as *const u16).add(1) }
+        unsafe { ((self.vq_virt() + self.used_off as u64) as *const u16).add(1) }
     }
     fn used_ring_elem(&self, i: u16) -> *const VirtqUsedElem {
         unsafe {
-            let base = (self.used_ring.as_ptr() as *const u16).add(2) as *const VirtqUsedElem;
+            let base = ((self.vq_virt() + self.used_off as u64) as *const u16).add(2)
+                as *const VirtqUsedElem;
             base.add(i as usize)
         }
     }
@@ -329,38 +326,49 @@ impl VirtioBlkDevice {
                 return false;
             }
 
-            // Use actual queue size (capped to our max)
-            self.queue_size = qs.min(BLK_QUEUE_SIZE);
+            // Legacy virtio: the device dictates queue size; the used ring is
+            // page-aligned after the descriptor table + available ring.
+            self.queue_size = qs;
             let qsz = self.queue_size as usize;
+            self.avail_off = 16 * qsz;
+            let avail_bytes = 6 + 2 * qsz;
+            self.used_off = (self.avail_off + avail_bytes + 4095) & !4095;
+            let used_bytes = 6 + 8 * qsz;
+            let vq_bytes = self.used_off + used_bytes;
+            let vq_pages = vq_bytes.div_ceil(4096);
 
-            // 7. Allocate DMA-safe virtqueue memory
-            // Descriptor table: qsz × 16 bytes
-            self.desc_table = alloc::vec![VirtqDesc { addr: 0, len: 0, flags: 0, next: 0 }; qsz];
-            // Available ring: flags(2) + idx(2) + ring(qsz*2) + used_event(2)
-            self.avail_ring = alloc::vec![0u8; 4 + qsz * 2 + 2];
-            // Used ring: flags(2) + idx(2) + ring(qsz*8) + avail_event(2)
-            self.used_ring = alloc::vec![0u8; 4 + qsz * 8 + 2];
+            let Some(vq_phys) = crate::vmm::allocate_contiguous_frames(vq_pages) else {
+                serial_println!(
+                    "[VIRTIO-BLK] No DMA frames for virtqueue ({} pages)",
+                    vq_pages
+                );
+                status_port.write(crate::virtio_net::VIRTIO_STATUS_FAILED);
+                return false;
+            };
+            let Some(bounce_phys) = crate::vmm::allocate_physical_frame() else {
+                serial_println!("[VIRTIO-BLK] No DMA frame for bounce buffer");
+                status_port.write(crate::virtio_net::VIRTIO_STATUS_FAILED);
+                return false;
+            };
+            self.vq_phys = vq_phys;
+            self.bounce_phys = bounce_phys;
 
-            // Per-slot DMA buffers
-            self.request_headers = Vec::with_capacity(qsz);
-            self.data_buffers = Vec::with_capacity(qsz);
-            self.status_buffers = alloc::vec![0xFFu8; qsz];
-            self.free_descs = VecDeque::with_capacity(qsz);
+            let vq_virt = crate::vmm::phys_to_virt(vq_phys);
+            let bounce_virt = crate::vmm::phys_to_virt(bounce_phys);
+            core::ptr::write_bytes(vq_virt as *mut u8, 0, vq_pages * 4096);
+            core::ptr::write_bytes(bounce_virt as *mut u8, 0, 4096);
 
-            for i in 0..qsz {
-                self.request_headers.push(alloc::vec![0u8; 16]);
-                self.data_buffers.push(alloc::vec![0u8; SECTOR_SIZE]);
-                self.free_descs.push_back(i as u16);
-            }
+            serial_println!(
+                "[VIRTIO-BLK] Virtqueue layout: qsz={} avail_off={} used_off={} pages={}",
+                qsz,
+                self.avail_off,
+                self.used_off,
+                vq_pages
+            );
 
-            // 8. Tell the device the virtqueue physical address
-            // Legacy virtio: QUEUE_ADDRESS register = physical page number of the
-            // contiguous virtqueue (desc + avail + used). Since we use separate allocs,
-            // we pass the descriptor table base; QEMU's legacy transport primarily
-            // looks at the descriptor addresses inside the descriptors themselves.
-            let desc_phys = self.desc_table.as_ptr() as u64;
+            // 8. Tell the device the virtqueue physical page number
             let mut queue_addr_port: Port<u32> = Port::new(base + VIRTIO_PCI_QUEUE_ADDRESS);
-            queue_addr_port.write((desc_phys / 4096) as u32);
+            queue_addr_port.write((vq_phys / 4096) as u32);
 
             // Initialize avail ring
             core::ptr::write_volatile(self.avail_flags_ptr(), 0u16); // no interrupt suppression
@@ -380,7 +388,7 @@ impl VirtioBlkDevice {
             serial_println!(
                 "[VIRTIO-BLK] Virtqueue: {} descriptors, DMA base={:#x}",
                 self.queue_size,
-                desc_phys
+                self.vq_phys
             );
             true
         }
@@ -395,67 +403,85 @@ impl VirtioBlkDevice {
         data_len: u32,
         device_writes_data: bool,
     ) -> bool {
-        // We need 3 consecutive free descriptors: [hdr] → [data] → [status]
-        if self.free_descs.len() < 3 {
-            serial_println!("[VIRTIO-BLK] No free descriptors");
-            return false;
+        const HDR_OFF: u64 = 0;
+        const DATA_OFF: u64 = 16;
+        const STATUS_OFF: u64 = 16 + SECTOR_SIZE as u64;
+
+        let bounce = self.bounce_virt();
+        let bounce_phys = self.bounce_phys;
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(header.to_bytes().as_ptr(), bounce as *mut u8, 16);
+            *(bounce as *mut u8).add(STATUS_OFF as usize) = 0xFF;
+            if data_len > 0 && !device_writes_data && !data_buf.is_null() {
+                core::ptr::copy_nonoverlapping(
+                    data_buf,
+                    (bounce as *mut u8).add(DATA_OFF as usize),
+                    data_len as usize,
+                );
+            }
         }
-        let d0 = self.free_descs.pop_front().unwrap();
-        let d1 = self.free_descs.pop_front().unwrap();
-        let d2 = self.free_descs.pop_front().unwrap();
+        core::sync::atomic::fence(Ordering::SeqCst);
 
-        // Slot index for per-request buffers (use d0)
-        let slot = d0 as usize;
+        // Serialized I/O: descriptors 0 → 1 → 2 (or 0 → 1 when there is no data).
+        unsafe {
+            let has_data = data_len > 0;
+            core::ptr::write_volatile(
+                self.desc_ptr(0),
+                VirtqDesc {
+                    addr: bounce_phys + HDR_OFF,
+                    len: 16,
+                    flags: VRING_DESC_F_NEXT,
+                    next: 1,
+                },
+            );
+            if has_data {
+                let data_flags = if device_writes_data {
+                    VRING_DESC_F_NEXT | VRING_DESC_F_WRITE
+                } else {
+                    VRING_DESC_F_NEXT
+                };
+                core::ptr::write_volatile(
+                    self.desc_ptr(1),
+                    VirtqDesc {
+                        addr: bounce_phys + DATA_OFF,
+                        len: data_len,
+                        flags: data_flags,
+                        next: 2,
+                    },
+                );
+                core::ptr::write_volatile(
+                    self.desc_ptr(2),
+                    VirtqDesc {
+                        addr: bounce_phys + STATUS_OFF,
+                        len: 1,
+                        flags: VRING_DESC_F_WRITE,
+                        next: 0,
+                    },
+                );
+            } else {
+                core::ptr::write_volatile(
+                    self.desc_ptr(1),
+                    VirtqDesc {
+                        addr: bounce_phys + STATUS_OFF,
+                        len: 1,
+                        flags: VRING_DESC_F_WRITE,
+                        next: 0,
+                    },
+                );
+            }
+        }
 
-        // Write request header into the slot's DMA buffer
-        let hdr_bytes = header.to_bytes();
-        self.request_headers[slot][..16].copy_from_slice(&hdr_bytes);
-
-        // Reset status byte (device will write 0 on success)
-        self.status_buffers[slot] = 0xFF;
-
-        // ── Descriptor 0: request header (device-readable) ──
-        self.desc_table[d0 as usize] = VirtqDesc {
-            addr: self.request_headers[slot].as_ptr() as u64,
-            len: 16,
-            flags: VRING_DESC_F_NEXT,
-            next: d1,
-        };
-
-        // ── Descriptor 1: data buffer ──
-        let data_flags = if device_writes_data {
-            VRING_DESC_F_NEXT | VRING_DESC_F_WRITE // device writes (read op)
-        } else {
-            VRING_DESC_F_NEXT // device reads (write op)
-        };
-        self.desc_table[d1 as usize] = VirtqDesc {
-            addr: data_buf as u64,
-            len: data_len,
-            flags: data_flags,
-            next: d2,
-        };
-
-        // ── Descriptor 2: status byte (device-writable) ──
-        self.desc_table[d2 as usize] = VirtqDesc {
-            addr: &self.status_buffers[slot] as *const u8 as u64,
-            len: 1,
-            flags: VRING_DESC_F_WRITE,
-            next: 0,
-        };
-
-        // ── Add chain head to available ring ──
         let avail_slot = self.avail_idx % self.queue_size;
         unsafe {
-            core::ptr::write_volatile(self.avail_ring_entry(avail_slot), d0);
+            core::ptr::write_volatile(self.avail_ring_entry(avail_slot), 0u16);
         }
-        // Memory barrier: ensure descriptors are visible before updating idx
         core::sync::atomic::fence(Ordering::Release);
         self.avail_idx = self.avail_idx.wrapping_add(1);
         unsafe {
             core::ptr::write_volatile(self.avail_idx_ptr(), self.avail_idx);
         }
 
-        // ── Notify device (kick queue 0) ──
         unsafe {
             let mut notify: crate::arch_compat::instructions::port::Port<u16> =
                 crate::arch_compat::instructions::port::Port::new(
@@ -464,12 +490,9 @@ impl VirtioBlkDevice {
             notify.write(0);
         }
 
-        // ── Poll for completion — check IRQ flag first, then ISR + used ring ──
         let mut completed = false;
         for iter in 0..500_000u32 {
-            // Fast path: check if the IRQ handler already signalled completion
             if VIRTIO_BLK_IRQ_PENDING.swap(false, Ordering::AcqRel) {
-                // IRQ handler cleared the ISR for us — just check the used ring
                 let device_used_idx = unsafe { core::ptr::read_volatile(self.used_idx_ptr()) };
                 if device_used_idx != self.used_idx {
                     while self.used_idx != device_used_idx {
@@ -483,7 +506,6 @@ impl VirtioBlkDevice {
                 }
             }
 
-            // Slow path: direct ISR poll (only every 64 iterations to reduce port I/O)
             if iter % 64 == 0 {
                 let isr = unsafe {
                     let mut isr_port: crate::arch_compat::instructions::port::Port<u8> =
@@ -508,7 +530,6 @@ impl VirtioBlkDevice {
                 }
             }
 
-            // Check used ring directly (device may complete without ISR in some QEMU configs)
             let device_used_idx = unsafe { core::ptr::read_volatile(self.used_idx_ptr()) };
             if device_used_idx != self.used_idx {
                 while self.used_idx != device_used_idx {
@@ -523,23 +544,27 @@ impl VirtioBlkDevice {
             core::hint::spin_loop();
         }
 
-        // Free descriptors
-        self.free_descs.push_back(d0);
-        self.free_descs.push_back(d1);
-        self.free_descs.push_back(d2);
-
         if !completed {
             serial_println!("[VIRTIO-BLK] Request timed out");
             self.errors += 1;
             return false;
         }
 
-        // Check status byte
-        let status = self.status_buffers[slot];
+        let status = unsafe { *(self.bounce_virt() as *const u8).add(STATUS_OFF as usize) };
         if status != VIRTIO_BLK_S_OK {
             serial_println!("[VIRTIO-BLK] Request failed with status={}", status);
             self.errors += 1;
             return false;
+        }
+
+        if data_len > 0 && device_writes_data && !data_buf.is_null() {
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    (self.bounce_virt() as *const u8).add(DATA_OFF as usize),
+                    data_buf,
+                    data_len as usize,
+                );
+            }
         }
 
         true
@@ -567,18 +592,11 @@ impl VirtioBlkDevice {
             let buf_offset = i * SECTOR_SIZE;
 
             let header = VirtioBlkReqHeader::read(sector);
-
-            // Point the data descriptor at our data_buffers slot
-            let slot = self.free_descs.front().copied().unwrap_or(0) as usize;
-            let data_ptr = self.data_buffers[slot].as_mut_ptr();
+            let data_ptr = buffer[buf_offset..].as_mut_ptr();
 
             if !self.submit_request(&header, data_ptr, SECTOR_SIZE as u32, true) {
                 return false;
             }
-
-            // Copy DMA buffer → caller's buffer
-            buffer[buf_offset..buf_offset + SECTOR_SIZE]
-                .copy_from_slice(&self.data_buffers[slot][..SECTOR_SIZE]);
         }
 
         self.reads += count as u64;
@@ -602,13 +620,7 @@ impl VirtioBlkDevice {
             let data_offset = i * SECTOR_SIZE;
 
             let header = VirtioBlkReqHeader::write(sector);
-
-            // Copy caller's data → DMA buffer
-            let slot = self.free_descs.front().copied().unwrap_or(0) as usize;
-            self.data_buffers[slot][..SECTOR_SIZE]
-                .copy_from_slice(&data[data_offset..data_offset + SECTOR_SIZE]);
-
-            let data_ptr = self.data_buffers[slot].as_mut_ptr();
+            let data_ptr = data[data_offset..].as_ptr() as *mut u8;
 
             if !self.submit_request(&header, data_ptr, SECTOR_SIZE as u32, false) {
                 return false;
@@ -626,10 +638,7 @@ impl VirtioBlkDevice {
         }
 
         let header = VirtioBlkReqHeader::flush();
-        // Flush uses a zero-length data descriptor (still need the chain)
-        let slot = self.free_descs.front().copied().unwrap_or(0) as usize;
-        let data_ptr = self.data_buffers[slot].as_mut_ptr();
-        self.submit_request(&header, data_ptr, 0, false)
+        self.submit_request(&header, core::ptr::null_mut(), 0, false)
     }
 
     /// Get device info string

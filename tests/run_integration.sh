@@ -40,6 +40,15 @@ if [ ! -f "$BIOS_IMG" ]; then
     echo "ERROR: BIOS image not found at $BIOS_IMG"
     exit 1
 fi
+
+PERSIST_DISK="$PROJECT_ROOT/tests/c1-persist.img"
+rm -f "$PERSIST_DISK"
+if command -v qemu-img >/dev/null 2>&1; then
+    qemu-img create -f raw "$PERSIST_DISK" 64M >/dev/null
+else
+    dd if=/dev/zero of="$PERSIST_DISK" bs=1m count=64 status=none 2>/dev/null \
+        || dd if=/dev/zero of="$PERSIST_DISK" bs=1m count=64
+fi
 echo "       Build OK"
 
 # 2. Boot QEMU with serial to file (headless, auto-exit on triple fault)
@@ -48,6 +57,7 @@ rm -f "$SERIAL_LOG"
 
 timeout "$TIMEOUT_SECS" qemu-system-x86_64 \
     -drive format=raw,file="$BIOS_IMG" \
+    -drive if=virtio,format=raw,file="$PERSIST_DISK" \
     -serial file:"$SERIAL_LOG" \
     -display none \
     -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
@@ -124,6 +134,7 @@ check_marker "GATE_B4 fork complete"
 check_marker "GATE_B5 signals complete"
 check_marker "GATE_B6 sh complete"
 check_marker "GATE_D1 loopback complete"
+check_marker "GATE_C1 persist complete"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

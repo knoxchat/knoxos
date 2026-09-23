@@ -515,4 +515,65 @@ fn collect_persistable_paths() -> Vec<(String, Vec<u8>, u16)> {
 pub fn init() {
     crate::serial_println!("[persist] Initializing persistent storage...");
     restore_all();
+    let _ = roundtrip_self_test();
+}
+
+/// Serial marker the integration test waits for once a file has been written
+/// to VirtIO-blk, dropped from the RAM VFS, and restored from disk.
+pub const GATE_C1_MARKER: &str = "GATE_C1 persist complete";
+
+const GATE_C1_PATH: &str = "/var/lib/knoxos/gate_c1";
+const GATE_C1_PAYLOAD: &[u8] = b"knoxos-c1-alive\n";
+
+/// Write a file to the persist blob store, drop it from the RAM VFS, then
+/// restore from disk. That is the one-boot equivalent of "survives reboot":
+/// the bytes come back from VirtIO-blk, not from the inode cache.
+pub fn roundtrip_self_test() -> bool {
+    if !crate::virtio_blk::is_available() {
+        crate::serial_println!("[persist] Gate C1 skipped: no virtio-blk");
+        return false;
+    }
+
+    // A previous boot already left the sentinel on disk.
+    if let Some(existing) = crate::vfs::read_file_dispatch(GATE_C1_PATH) {
+        if existing.as_slice() == GATE_C1_PAYLOAD {
+            crate::serial_println!("[persist] {}", GATE_C1_MARKER);
+            return true;
+        }
+    }
+
+    if !crate::vfs::write_file_dispatch(GATE_C1_PATH, GATE_C1_PAYLOAD) {
+        crate::serial_println!("[persist] Gate C1 FAILED: could not write {}", GATE_C1_PATH);
+        return false;
+    }
+
+    if crate::vfs::remove_dispatch(GATE_C1_PATH).is_err() {
+        crate::serial_println!("[persist] Gate C1 FAILED: unlink {}", GATE_C1_PATH);
+        return false;
+    }
+    if crate::vfs::read_file_dispatch(GATE_C1_PATH).is_some() {
+        crate::serial_println!("[persist] Gate C1 FAILED: RAM copy survived unlink");
+        return false;
+    }
+
+    restore_all();
+
+    match crate::vfs::read_file_dispatch(GATE_C1_PATH) {
+        Some(data) if data.as_slice() == GATE_C1_PAYLOAD => {
+            crate::serial_println!("[persist] {}", GATE_C1_MARKER);
+            true
+        }
+        Some(data) => {
+            crate::serial_println!(
+                "[persist] Gate C1 FAILED: restored {} bytes, expected {}",
+                data.len(),
+                GATE_C1_PAYLOAD.len()
+            );
+            false
+        }
+        None => {
+            crate::serial_println!("[persist] Gate C1 FAILED: file missing after restore");
+            false
+        }
+    }
 }
