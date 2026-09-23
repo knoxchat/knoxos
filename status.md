@@ -49,7 +49,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 2. GDT + TSS, IDT, PIC 8259, LAPIC timer, serial UART TX.
 3. 512 MiB kernel heap (`linked_list_allocator` + slab).
 4. PS/2 keyboard (IRQ1) and mouse (IRQ12); USB tablet when present.
-5. In-memory VFS with Linux FHS layout; **opt-in** VirtIO-blk + ATA PIO; ext4 and FAT32 can use that block layer. **Gate C1** persist blob store round-trips a file through VirtIO-blk (`GATE_C1 persist complete`).
+5. In-memory VFS with Linux FHS layout; **opt-in** VirtIO-blk + ATA PIO; ext4 and FAT32 can use that block layer. **Gate C1** persist blob store round-trips a file through VirtIO-blk (`GATE_C1 persist complete`). **Gate C2** write-ahead log replays a committed record after a simulated crash (`GATE_C2 journal recovered`).
 6. Software compositor: 32bpp BGRA, damage rects, window manager, taskbar, start menu, 17 in-process apps.
 7. Kernel shell + terminal (parser, pipes, glob, env, 60+ builtins) running **inside the kernel**, not as `/bin/sh` in Ring 3.
 8. **Gate B2 hello** — static ELF `iretq`s to Ring 3, `sys_write`s `hello from userspace`, `sys_exit`s back to the kernel.
@@ -66,7 +66,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 | **Signal frames for handlers** | Default terminate/SIGKILL/SIGSEGV/PTY SIGINT work; custom handlers still lack a live `sigreturn`. | Catching SIGINT in a user handler is not done. |
 | **Sockets do not transmit off-box** | Loopback `send` delivers to a peer `recv_buf`. `send_tcp_segment` is unused. VirtIO-net TX does not fill the avail ring. | LAN/internet, DHCP-applied IP, and real TCP over a NIC still missing. |
 | **AHCI/NVMe are fake I/O** | `read_sectors` zero-fills; `write_sectors` logs. | Bare metal disks do not persist. Only VirtIO-blk / ATA PIO do. |
-| **Default VFS is RAM** | Inodes are `Vec<u8>`. Persist blob store round-trips through VirtIO-blk (C1). | Reboot still loses anything not under persist prefixes unless ext4 is the root. |
+| **Default VFS is RAM** | Inodes are `Vec<u8>`. Persist blob store round-trips through VirtIO-blk (C1) with a WAL that replays after crash (C2). | Reboot still loses anything not under persist prefixes unless ext4 is the root. |
 | **Security not on the deny path** | SELinux unused by VFS. Many syscalls `Ok(0)`. Caps unused in dispatch. | A Linux ABI surface without enforcement. |
 | **Breadth without wiring** | 407 modules. GPU compositor, Wayland, KVM `vmlaunch`, overlayfs never on the live path. | Compile time and maintenance grow; capability does not. |
 
@@ -97,7 +97,7 @@ Percentages are **production usefulness**, not lines of code.
 | 1 | Kernel Core | Wired | 64% | High | Interrupts and timers work; GS base set; SMP APs halt; no NMI/MCE. |
 | 2 | Memory Management | Wired | 48% | **Critical** | Demand paging + CoW + buddy pool; no reclaim or OOM-on-alloc. |
 | 3 | Process & Scheduling | Wired | 62% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B6** scheduled Ring 3, `execve`/`waitpid`/`fork`/`/bin/sh` on a PTY, SIGKILL/SIGSEGV/PTY SIGINT. |
-| 4 | Filesystem & Storage | Wired | 48% | **Critical** | VirtIO-blk + persist C1 roundtrip; ext4/FAT32 real; AHCI/NVMe fake; VFS namespace still RAM. |
+| 4 | Filesystem & Storage | Wired | 52% | **Critical** | VirtIO-blk + persist C1 roundtrip + C2 WAL replay; ext4/FAT32 real; AHCI/NVMe fake; VFS namespace still RAM. |
 | 5 | Networking | Wired | 32% | **Critical** | Loopback `send`/`recv` live; NIC still does not put packets on the wire. |
 | 6 | Device Drivers | Wired | 28% | **Critical** | PCI, PS/2, UART, VirtIO-blk live; USB/GPU/storage mostly stub. |
 | 7 | GUI & Desktop | Live | 72% | Medium | Excellent in-kernel demo; not a multi-process display server. |
@@ -113,8 +113,8 @@ Percentages are **production usefulness**, not lines of code.
 | 17 | Documentation | Wired | 35% | **Critical** | README + LICENSE + this file. Architecture guides still missing. |
 | 18 | CI/CD & Release | Wired | 30% | High | `.github/workflows/ci.yml` (fmt, clippy, size, QEMU boot); no signed releases. |
 
-**QEMU desktop demo readiness: ~75%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B6 scheduled userspace; Gate D1 loopback sockets; Gate C1 persist).
-**Production OS readiness: ~48%** (Gate B2–B6, D1, C1; Gates C2–C4, D2–D4, E still open).
+**QEMU desktop demo readiness: ~75%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B6 scheduled userspace; Gate D1 loopback sockets; Gate C1 persist; Gate C2 journal replay).
+**Production OS readiness: ~50%** (Gate B2–B6, D1, C1–C2; Gates C3–C4, D2–D4, E still open).
 
 ---
 
@@ -237,7 +237,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 
 ## 4. Filesystem & Storage
 
-**Grade: Wired (42%)** · `vfs.rs`, `block.rs`, `virtio_blk.rs`, `ext4.rs`, `fat32.rs`, `persist.rs`, `partition.rs`
+**Grade: Wired (52%)** · `vfs.rs`, `block.rs`, `virtio_blk.rs`, `ext4.rs`, `fat32.rs`, `persist.rs`, `partition.rs`
 
 ### Live
 - [x] In-memory VFS (FHS tree, path walk, fds, metadata)
@@ -249,6 +249,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] GPT/MBR parse (`partition.rs`)
 - [x] `persist.rs` blob store on VirtIO-blk (`KNOXPERSIST`)
 - [x] **Gate C1 persist roundtrip** — write `/var/lib/knoxos/gate_c1`, unlink from RAM VFS, restore from VirtIO-blk
+- [x] **Gate C2 persist WAL** — committed journal record survives simulated crash; uncommitted is discarded (`GATE_C2 journal recovered`)
 - [x] 4 MB ramdisk always created
 
 ### Wired / partial
@@ -256,22 +257,22 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [ ] Mount table: ext4 really mounts; several FS types only `mkdir`
 - [ ] xattr / flock — in-kernel maps, not on-disk
 - [ ] NTFS — parses MFT from a provided buffer; **never calls the block layer**
-- [x] `fsync`/`fdatasync` — re-persist the fd's VFS file and issue VirtIO-blk FLUSH (no journal replay yet)
+- [x] `fsync`/`fdatasync` — re-persist the fd's VFS file through the WAL and issue VirtIO-blk FLUSH
 
 ### Stub
 - [ ] **AHCI** — FIS built, then zero-fill / log success; fake IDENTIFY
 - [ ] **NVMe** — `prp1: 0`; reads zero-fill; SMART hardcoded
 - [ ] Btrfs / ZFS / XFS / exFAT / CIFS — in-memory or AHCI/NVMe fallback
-- [ ] JBD2 journal replay — `replayed = 0`
+- [ ] JBD2 journal replay — `replayed = 0` (persist WAL is live; ext4 JBD2 is not)
 - [ ] OverlayFS / FUSE / NFS — not registered with VFS I/O
 - [ ] inotify / fanotify — `emit_event` never called from VFS
 - [ ] Quotas — counters, not enforced
 
 ### Perfect-OS next steps
 1. Make ext4 (or a single production FS) the root on VirtIO-blk by default, not RAM.
-2. Journal commit + crash recovery that is tested by killing QEMU mid-write.
+2. ~~Journal commit + crash recovery that is tested by killing QEMU mid-write.~~ **Done** for the persist blob WAL (in-boot: commit journal, skip checkpoint, restore replays). JBD2 still missing.
 3. ~~Complete VirtIO-blk DMA (guest-physical, not heap pointers).~~ **Done** — contiguous buddy frames + bounce buffer. AHCI DMA still missing.
-4. Hook inotify on VFS mutate. Journal replay still missing (`fsync` already FLUSHes VirtIO-blk).
+4. Hook inotify on VFS mutate. Page-cache writeback (C3) still whole-file replace.
 
 ---
 
@@ -641,7 +642,7 @@ This **is** becoming an OS.
 | ID | Task | Done when |
 |----|------|-----------|
 | C1 | Root on VirtIO-blk (ext4 or persist) | **Done** — persist blob store round-trips a file through VirtIO-blk (`GATE_C1 persist complete`). VFS namespace is still RAM. |
-| C2 | Journal + `fsync` | Kill `-9` QEMU during write; fsck/replay recovers |
+| C2 | Journal + `fsync` | **Done** — persist WAL round-trips a committed record after simulated crash (`GATE_C2 journal recovered`). Uncommitted discarded. |
 | C3 | Page cache writeback | Dirty pages flush; not whole-file replace only |
 | C4 | AHCI or NVMe **one** real DMA path | Bare metal disk read matches QEMU |
 
@@ -705,13 +706,13 @@ Do not:
 
 ## Progress tracker
 
-**Production OS: ~48%** · **QEMU desktop demo: ~75%**
+**Production OS: ~50%** · **QEMU desktop demo: ~75%**
 
 ```
 Kernel Core:        ███████████████░░░░░░░░░░  64%  Wired
 Memory Mgmt:        ████████████░░░░░░░░░░░░░  48%  Wired
 Process/Sched:      ███████████████░░░░░░░░░░  62%  Wired          ← B3–B6 live
-Filesystem:         ████████████░░░░░░░░░░░░░  48%  Wired         ← C1 persist live
+Filesystem:         █████████████░░░░░░░░░░░░  52%  Wired         ← C1 persist + C2 WAL
 Networking:         ████████░░░░░░░░░░░░░░░░░  32%  Wired         ← D1 loopback live
 Device Drivers:     ███████░░░░░░░░░░░░░░░░░░  28%  Wired
 GUI & Desktop:      ██████████████████░░░░░░░  72%  Live
@@ -735,12 +736,12 @@ CI/CD:              ███████░░░░░░░░░░░░░
 | Kernel Core | 95% | 64% | IOAPIC/SMP exist but APs idle; NMI/MCE still missing; GS base now set |
 | Process | 90% | 62% | Gate B3–B6 scheduled Ring 3; `execve`/`waitpid`/`fork`/`/bin/sh` on a PTY |
 | Binary compat | 40% | 42% | Static hello + scheduled `execve`/`fork` + `/bin/sh`; 452 numbers still ≠ 452 behaviors |
-| Filesystem | 35% | 48% | VirtIO-blk + ext4/FAT32 I/O; Gate C1 persist roundtrip |
+| Filesystem | 35% | 52% | VirtIO-blk + ext4/FAT32 I/O; Gate C1 persist roundtrip; Gate C2 persist WAL replay |
 | GUI | 85% | 72% | Honest: in-process, Wayland/GPU unused |
 | Shell | 90% | 80% | PTY/glob/env real; Ring 3 `/bin/sh` on a PTY; desktop terminal still in-kernel |
 | Docs / CI | 10% / 25% | 35% / 30% | README, LICENSE, GitHub Actions present; flake still missing |
 | Networking | 22% | 32% | Gate D1 loopback `send`/`recv`; VirtIO-net still unwired |
-| **Overall production** | **~40%** | **~48%** | Gate B3–B6 + D1 + C1 on the live boot path; C2–C4, D2–D4, E still open |
+| **Overall production** | **~40%** | **~50%** | Gate B3–B6 + D1 + C1–C2 on the live boot path; C3–C4, D2–D4, E still open |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates to this file should tick **Gate** IDs, not module counts.
 

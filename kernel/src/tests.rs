@@ -59,6 +59,28 @@ mod vfs_tests {
             "virtio persist must restore a file after it is unlinked from RAM"
         );
     }
+
+    #[test_case]
+    fn test_persist_journal_replay_if_virtio() {
+        if !crate::virtio_blk::is_available() {
+            return;
+        }
+        assert!(
+            crate::persist::journal_recovery_self_test(),
+            "committed journal must recover after simulated crash; uncommitted must not"
+        );
+    }
+
+    #[test_case]
+    fn test_persist_journal_replay_if_virtio() {
+        if !crate::virtio_blk::is_available() {
+            return;
+        }
+        assert!(
+            crate::persist::journal_recovery_self_test(),
+            "committed journal must recover after simulated crash; uncommitted must not"
+        );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

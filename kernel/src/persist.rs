@@ -1,7 +1,9 @@
 /// Persistent storage layer for KnoxOS VFS
 ///
 /// Uses the virtio-blk device to persist user files across reboots.
-/// Format: Simple header + file entries written sequentially.
+/// Format: Simple header + file entries written sequentially, plus a
+/// write-ahead log at the end of the disk so a crash after `fsync` of a
+/// committed journal record can be replayed (Gate C2).
 ///
 /// Disk layout:
 ///   Sector 0:     Magic header (KNOXPERSIST + entry count + total sectors used)
@@ -13,12 +15,21 @@
 ///                    - N bytes: path (UTF-8)
 ///                    - M bytes: file data
 ///                    - Padded to sector boundary (512 bytes)
+///   Last 256 sectors: single-slot WAL (`KNOXJRNL`). Committed records are
+///                    applied to the blob store on the next restore.
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
 const SECTOR_SIZE: usize = 512;
 const MAGIC: &[u8; 12] = b"KNOXPERSIST\0";
+const JOURNAL_MAGIC: &[u8; 12] = b"KNOXJRNL\0\0\0\0";
+/// One outstanding transaction; 128 KiB is enough for Gate C2 and typical files.
+const JOURNAL_SECTORS: u64 = 256;
+const JRNL_EMPTY: u32 = 0;
+const JRNL_WRITING: u32 = 1;
+const JRNL_COMMITTED: u32 = 2;
+const JRNL_HEADER_SIZE: usize = 40;
 /// Maximum file size to persist (files larger than this are kept in-memory only)
 /// This prevents OOM when persisting very large files like 125MB .deb packages
 const MAX_PERSIST_SIZE: usize = 64 * 1024 * 1024; // 64 MB
@@ -55,6 +66,276 @@ fn should_persist(path: &str) -> bool {
     false
 }
 
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &b in data {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// WAL lives in the last `JOURNAL_SECTORS` of the disk so blob-store data
+/// starting at sector 1 is not overwritten.
+fn journal_base() -> Option<u64> {
+    let cap = crate::virtio_blk::capacity();
+    if cap <= JOURNAL_SECTORS + 1 {
+        None
+    } else {
+        Some(cap - JOURNAL_SECTORS)
+    }
+}
+
+fn data_limit() -> u64 {
+    journal_base().unwrap_or_else(crate::virtio_blk::capacity)
+}
+
+fn read_store_header() -> Option<(u32, u64)> {
+    let mut header_buf = [0u8; SECTOR_SIZE];
+    if !crate::virtio_blk::read(0, 1, &mut header_buf) {
+        return None;
+    }
+    if &header_buf[0..12] == MAGIC {
+        let count = u32::from_le_bytes([
+            header_buf[12],
+            header_buf[13],
+            header_buf[14],
+            header_buf[15],
+        ]);
+        let next = u64::from_le_bytes([
+            header_buf[16],
+            header_buf[17],
+            header_buf[18],
+            header_buf[19],
+            header_buf[20],
+            header_buf[21],
+            header_buf[22],
+            header_buf[23],
+        ]);
+        Some((count, next))
+    } else {
+        Some((0u32, 1u64))
+    }
+}
+
+fn write_store_header(entry_count: u32, next_sector: u64) -> bool {
+    let mut new_header = [0u8; SECTOR_SIZE];
+    new_header[0..12].copy_from_slice(MAGIC);
+    new_header[12..16].copy_from_slice(&entry_count.to_le_bytes());
+    new_header[16..24].copy_from_slice(&next_sector.to_le_bytes());
+    crate::virtio_blk::write(0, 1, &new_header)
+}
+
+/// Append one blob-store entry and update the KNOXPERSIST header.
+fn apply_entry(path: &str, data: &[u8], permissions: u16, file_type: u16) -> bool {
+    let (entry_count, next_sector) = match read_store_header() {
+        Some(h) => h,
+        None => return false,
+    };
+
+    let path_bytes = path.as_bytes();
+    let entry_header_size = 4 + 4 + 2 + 2;
+    let entry_size = entry_header_size + path_bytes.len() + data.len();
+    let sectors_needed = entry_size.div_ceil(SECTOR_SIZE) as u64;
+
+    if next_sector < 1 || next_sector + sectors_needed > data_limit() {
+        crate::serial_println!("[persist] Disk full, cannot persist {}", path);
+        return false;
+    }
+
+    let buf_size = (sectors_needed as usize) * SECTOR_SIZE;
+    let mut entry_buf = vec![0u8; buf_size];
+    let mut offset = 0;
+
+    let path_len = path_bytes.len() as u32;
+    entry_buf[offset..offset + 4].copy_from_slice(&path_len.to_le_bytes());
+    offset += 4;
+    let data_len = data.len() as u32;
+    entry_buf[offset..offset + 4].copy_from_slice(&data_len.to_le_bytes());
+    offset += 4;
+    entry_buf[offset..offset + 2].copy_from_slice(&permissions.to_le_bytes());
+    offset += 2;
+    entry_buf[offset..offset + 2].copy_from_slice(&file_type.to_le_bytes());
+    offset += 2;
+    entry_buf[offset..offset + path_bytes.len()].copy_from_slice(path_bytes);
+    offset += path_bytes.len();
+    if !data.is_empty() {
+        entry_buf[offset..offset + data.len()].copy_from_slice(data);
+    }
+
+    if !crate::virtio_blk::write(next_sector, sectors_needed as usize, &entry_buf) {
+        crate::serial_println!("[persist] Failed to write entry for {}", path);
+        return false;
+    }
+
+    let new_count = entry_count + 1;
+    let new_next = next_sector + sectors_needed;
+    if !write_store_header(new_count, new_next) {
+        crate::serial_println!("[persist] Failed to update header");
+        return false;
+    }
+
+    crate::serial_println!(
+        "[persist] Saved {} ({} bytes, {} sectors at sector {})",
+        path,
+        data.len(),
+        sectors_needed,
+        next_sector
+    );
+    true
+}
+
+fn journal_write(path: &str, data: &[u8], permissions: u16, file_type: u16, state: u32) -> bool {
+    let Some(base) = journal_base() else {
+        return false;
+    };
+    let path_bytes = path.as_bytes();
+    let payload_len = path_bytes.len() + data.len();
+    let total = JRNL_HEADER_SIZE + payload_len;
+    let sectors = total.div_ceil(SECTOR_SIZE) as u64;
+    if sectors == 0 || sectors > JOURNAL_SECTORS {
+        return false;
+    }
+
+    let buf_size = (sectors as usize) * SECTOR_SIZE;
+    let mut buf = vec![0u8; buf_size];
+    buf[0..12].copy_from_slice(JOURNAL_MAGIC);
+    buf[12..16].copy_from_slice(&state.to_le_bytes());
+    buf[16..24].copy_from_slice(&1u64.to_le_bytes());
+    buf[24..28].copy_from_slice(&(path_bytes.len() as u32).to_le_bytes());
+    buf[28..32].copy_from_slice(&(data.len() as u32).to_le_bytes());
+    buf[32..34].copy_from_slice(&permissions.to_le_bytes());
+    buf[34..36].copy_from_slice(&file_type.to_le_bytes());
+    buf[JRNL_HEADER_SIZE..JRNL_HEADER_SIZE + path_bytes.len()].copy_from_slice(path_bytes);
+    if !data.is_empty() {
+        let data_off = JRNL_HEADER_SIZE + path_bytes.len();
+        buf[data_off..data_off + data.len()].copy_from_slice(data);
+    }
+    let crc = crc32(&buf[JRNL_HEADER_SIZE..JRNL_HEADER_SIZE + payload_len]);
+    buf[36..40].copy_from_slice(&crc.to_le_bytes());
+
+    crate::virtio_blk::write(base, sectors as usize, &buf)
+}
+
+fn journal_clear() -> bool {
+    let Some(base) = journal_base() else {
+        return false;
+    };
+    let mut buf = [0u8; SECTOR_SIZE];
+    buf[0..12].copy_from_slice(JOURNAL_MAGIC);
+    buf[12..16].copy_from_slice(&JRNL_EMPTY.to_le_bytes());
+    crate::virtio_blk::write(base, 1, &buf)
+}
+
+fn journal_read() -> Option<(u32, String, Vec<u8>, u16, u16)> {
+    let base = journal_base()?;
+    let mut first = [0u8; SECTOR_SIZE];
+    if !crate::virtio_blk::read(base, 1, &mut first) {
+        return None;
+    }
+    if &first[0..12] != JOURNAL_MAGIC {
+        return None;
+    }
+    let state = u32::from_le_bytes([first[12], first[13], first[14], first[15]]);
+    if state == JRNL_EMPTY {
+        return None;
+    }
+    let path_len = u32::from_le_bytes([first[24], first[25], first[26], first[27]]) as usize;
+    let data_len = u32::from_le_bytes([first[28], first[29], first[30], first[31]]) as usize;
+    let permissions = u16::from_le_bytes([first[32], first[33]]);
+    let file_type = u16::from_le_bytes([first[34], first[35]]);
+    let stored_crc = u32::from_le_bytes([first[36], first[37], first[38], first[39]]);
+
+    let payload_len = path_len.checked_add(data_len)?;
+    let total = JRNL_HEADER_SIZE.checked_add(payload_len)?;
+    let sectors = total.div_ceil(SECTOR_SIZE) as u64;
+    if path_len > 4096 || sectors == 0 || sectors > JOURNAL_SECTORS {
+        return None;
+    }
+
+    let buf_size = (sectors as usize) * SECTOR_SIZE;
+    let mut buf = vec![0u8; buf_size];
+    buf[..SECTOR_SIZE].copy_from_slice(&first);
+    if sectors > 1 {
+        let remaining = (sectors - 1) as usize;
+        if !crate::virtio_blk::read(
+            base + 1,
+            remaining,
+            &mut buf[SECTOR_SIZE..SECTOR_SIZE + remaining * SECTOR_SIZE],
+        ) {
+            return None;
+        }
+    }
+
+    let payload = &buf[JRNL_HEADER_SIZE..JRNL_HEADER_SIZE + payload_len];
+    if crc32(payload) != stored_crc {
+        crate::serial_println!("[persist] Journal CRC mismatch — treating as uncommitted");
+        return None;
+    }
+
+    let path = match core::str::from_utf8(&payload[..path_len]) {
+        Ok(p) => String::from(p),
+        Err(_) => return None,
+    };
+    let data = payload[path_len..].to_vec();
+    Some((state, path, data, permissions, file_type))
+}
+
+/// Apply a committed WAL record to the blob store. Uncommitted or torn
+/// records are discarded. Returns the number of transactions replayed.
+pub fn replay_journal() -> u32 {
+    match journal_read() {
+        Some((state, path, data, permissions, file_type)) if state == JRNL_COMMITTED => {
+            crate::serial_println!("[persist] Replaying committed journal for {}", path);
+            if apply_entry(&path, &data, permissions, file_type) {
+                let _ = journal_clear();
+                crate::virtio_blk::flush();
+                1
+            } else {
+                0
+            }
+        }
+        Some((state, path, _, _, _)) => {
+            crate::serial_println!(
+                "[persist] Discarding uncommitted journal (state={}, path={})",
+                state,
+                path
+            );
+            let _ = journal_clear();
+            crate::virtio_blk::flush();
+            0
+        }
+        None => 0,
+    }
+}
+
+fn commit_through_journal(path: &str, data: &[u8], permissions: u16, file_type: u16) -> bool {
+    if journal_write(path, data, permissions, file_type, JRNL_COMMITTED) {
+        crate::virtio_blk::flush();
+        if apply_entry(path, data, permissions, file_type) {
+            crate::virtio_blk::flush();
+            let _ = journal_clear();
+            crate::virtio_blk::flush();
+            return true;
+        }
+        // Apply failed after commit: leave the WAL for the next restore.
+        return false;
+    }
+    // Record did not fit in the journal slot — best-effort direct write.
+    if apply_entry(path, data, permissions, file_type) {
+        crate::virtio_blk::flush();
+        true
+    } else {
+        false
+    }
+}
+
 /// Persist a single file to disk immediately after it's written to VFS.
 /// This appends/updates the file in the persistent store.
 pub fn persist_file(path: &str, data: &[u8], permissions: u16) {
@@ -73,108 +354,7 @@ pub fn persist_file(path: &str, data: &[u8], permissions: u16) {
         );
         return;
     }
-
-    // Read the current header to find where to append
-    let mut header_buf = [0u8; SECTOR_SIZE];
-    if !crate::virtio_blk::read(0, 1, &mut header_buf) {
-        return;
-    }
-
-    let (entry_count, next_sector) = if &header_buf[0..12] == MAGIC {
-        let count = u32::from_le_bytes([
-            header_buf[12],
-            header_buf[13],
-            header_buf[14],
-            header_buf[15],
-        ]);
-        let next = u64::from_le_bytes([
-            header_buf[16],
-            header_buf[17],
-            header_buf[18],
-            header_buf[19],
-            header_buf[20],
-            header_buf[21],
-            header_buf[22],
-            header_buf[23],
-        ]);
-        (count, next)
-    } else {
-        // Initialize fresh header
-        (0u32, 1u64)
-    };
-
-    // Build the entry
-    let path_bytes = path.as_bytes();
-    let entry_header_size = 4 + 4 + 2 + 2; // path_len + data_len + perms + type
-    let entry_size = entry_header_size + path_bytes.len() + data.len();
-    let sectors_needed = entry_size.div_ceil(SECTOR_SIZE) as u64;
-
-    // Check capacity
-    let capacity = crate::virtio_blk::capacity();
-    if next_sector + sectors_needed > capacity {
-        crate::serial_println!("[persist] Disk full, cannot persist {}", path);
-        return;
-    }
-
-    // Build entry buffer (padded to sector boundary)
-    let buf_size = (sectors_needed as usize) * SECTOR_SIZE;
-    let mut entry_buf = vec![0u8; buf_size];
-    let mut offset = 0;
-
-    // Path length
-    let path_len = path_bytes.len() as u32;
-    entry_buf[offset..offset + 4].copy_from_slice(&path_len.to_le_bytes());
-    offset += 4;
-
-    // Data length
-    let data_len = data.len() as u32;
-    entry_buf[offset..offset + 4].copy_from_slice(&data_len.to_le_bytes());
-    offset += 4;
-
-    // Permissions
-    entry_buf[offset..offset + 2].copy_from_slice(&permissions.to_le_bytes());
-    offset += 2;
-
-    // File type (0 = Regular)
-    entry_buf[offset..offset + 2].copy_from_slice(&0u16.to_le_bytes());
-    offset += 2;
-
-    // Path
-    entry_buf[offset..offset + path_bytes.len()].copy_from_slice(path_bytes);
-    offset += path_bytes.len();
-
-    // Data
-    entry_buf[offset..offset + data.len()].copy_from_slice(data);
-
-    // Write entry to disk
-    if !crate::virtio_blk::write(next_sector, sectors_needed as usize, &entry_buf) {
-        crate::serial_println!("[persist] Failed to write entry for {}", path);
-        return;
-    }
-
-    // Update header
-    let new_count = entry_count + 1;
-    let new_next = next_sector + sectors_needed;
-    let mut new_header = [0u8; SECTOR_SIZE];
-    new_header[0..12].copy_from_slice(MAGIC);
-    new_header[12..16].copy_from_slice(&new_count.to_le_bytes());
-    new_header[16..24].copy_from_slice(&new_next.to_le_bytes());
-
-    if !crate::virtio_blk::write(0, 1, &new_header) {
-        crate::serial_println!("[persist] Failed to update header");
-        return;
-    }
-
-    // Flush to ensure data is on disk
-    crate::virtio_blk::flush();
-
-    crate::serial_println!(
-        "[persist] Saved {} ({} bytes, {} sectors at sector {})",
-        path,
-        data.len(),
-        sectors_needed,
-        next_sector
-    );
+    let _ = commit_through_journal(path, data, permissions, 0);
 }
 
 /// Persist a directory entry
@@ -185,81 +365,7 @@ pub fn persist_directory(path: &str, permissions: u16) {
     if !crate::virtio_blk::is_available() {
         return;
     }
-
-    let mut header_buf = [0u8; SECTOR_SIZE];
-    if !crate::virtio_blk::read(0, 1, &mut header_buf) {
-        return;
-    }
-
-    let (entry_count, next_sector) = if &header_buf[0..12] == MAGIC {
-        let count = u32::from_le_bytes([
-            header_buf[12],
-            header_buf[13],
-            header_buf[14],
-            header_buf[15],
-        ]);
-        let next = u64::from_le_bytes([
-            header_buf[16],
-            header_buf[17],
-            header_buf[18],
-            header_buf[19],
-            header_buf[20],
-            header_buf[21],
-            header_buf[22],
-            header_buf[23],
-        ]);
-        (count, next)
-    } else {
-        (0u32, 1u64)
-    };
-
-    let path_bytes = path.as_bytes();
-    let entry_header_size = 4 + 4 + 2 + 2;
-    let entry_size = entry_header_size + path_bytes.len();
-    let sectors_needed = entry_size.div_ceil(SECTOR_SIZE) as u64;
-
-    let capacity = crate::virtio_blk::capacity();
-    if next_sector + sectors_needed > capacity {
-        return;
-    }
-
-    let buf_size = (sectors_needed as usize) * SECTOR_SIZE;
-    let mut entry_buf = vec![0u8; buf_size];
-    let mut offset = 0;
-
-    let path_len = path_bytes.len() as u32;
-    entry_buf[offset..offset + 4].copy_from_slice(&path_len.to_le_bytes());
-    offset += 4;
-
-    // Data length = 0 for directories
-    entry_buf[offset..offset + 4].copy_from_slice(&0u32.to_le_bytes());
-    offset += 4;
-
-    entry_buf[offset..offset + 2].copy_from_slice(&permissions.to_le_bytes());
-    offset += 2;
-
-    // File type 1 = Directory
-    entry_buf[offset..offset + 2].copy_from_slice(&1u16.to_le_bytes());
-    offset += 2;
-
-    entry_buf[offset..offset + path_bytes.len()].copy_from_slice(path_bytes);
-
-    if !crate::virtio_blk::write(next_sector, sectors_needed as usize, &entry_buf) {
-        return;
-    }
-
-    let new_count = entry_count + 1;
-    let new_next = next_sector + sectors_needed;
-    let mut new_header = [0u8; SECTOR_SIZE];
-    new_header[0..12].copy_from_slice(MAGIC);
-    new_header[12..16].copy_from_slice(&new_count.to_le_bytes());
-    new_header[16..24].copy_from_slice(&new_next.to_le_bytes());
-
-    if !crate::virtio_blk::write(0, 1, &new_header) {
-        return;
-    }
-
-    crate::virtio_blk::flush();
+    let _ = commit_through_journal(path, &[], permissions, 1);
 }
 
 /// Restore all persisted files into the VFS on boot
@@ -267,6 +373,14 @@ pub fn restore_all() {
     if !crate::virtio_blk::is_available() {
         crate::serial_println!("[persist] No virtio-blk device, skipping restore");
         return;
+    }
+
+    let replayed = replay_journal();
+    if replayed > 0 {
+        crate::serial_println!(
+            "[persist] Replayed {} committed journal transaction(s)",
+            replayed
+        );
     }
 
     let mut header_buf = [0u8; SECTOR_SIZE];
@@ -516,6 +630,7 @@ pub fn init() {
     crate::serial_println!("[persist] Initializing persistent storage...");
     restore_all();
     let _ = roundtrip_self_test();
+    let _ = journal_recovery_self_test();
 }
 
 /// Serial marker the integration test waits for once a file has been written
@@ -573,6 +688,82 @@ pub fn roundtrip_self_test() -> bool {
         }
         None => {
             crate::serial_println!("[persist] Gate C1 FAILED: file missing after restore");
+            false
+        }
+    }
+}
+
+/// Serial marker once a committed WAL record is recovered after a simulated
+/// crash (journal flushed, blob-store checkpoint skipped).
+pub const GATE_C2_MARKER: &str = "GATE_C2 journal recovered";
+
+const GATE_C2_PATH: &str = "/var/lib/knoxos/gate_c2";
+const GATE_C2_PAYLOAD: &[u8] = b"knoxos-c2-alive\n";
+const GATE_C2_UNCOMMITTED_PATH: &str = "/var/lib/knoxos/gate_c2_uncommitted";
+const GATE_C2_UNCOMMITTED_PAYLOAD: &[u8] = b"should-not-survive\n";
+
+/// Commit a journal record without checkpointing the blob store, drop the RAM
+/// copy, then restore. That is the one-boot equivalent of `kill -9` after
+/// `fsync` of the WAL and before the home-store write: replay must recover
+/// committed data and must discard an uncommitted record.
+pub fn journal_recovery_self_test() -> bool {
+    if !crate::virtio_blk::is_available() {
+        crate::serial_println!("[persist] Gate C2 skipped: no virtio-blk");
+        return false;
+    }
+    if journal_base().is_none() {
+        crate::serial_println!("[persist] Gate C2 FAILED: disk too small for journal");
+        return false;
+    }
+
+    // Uncommitted (state=WRITING, no CRC-valid commit) must not appear.
+    if !journal_write(
+        GATE_C2_UNCOMMITTED_PATH,
+        GATE_C2_UNCOMMITTED_PAYLOAD,
+        0o644,
+        0,
+        JRNL_WRITING,
+    ) {
+        crate::serial_println!("[persist] Gate C2 FAILED: could not write uncommitted journal");
+        return false;
+    }
+    crate::virtio_blk::flush();
+    let _ = crate::vfs::remove_dispatch(GATE_C2_UNCOMMITTED_PATH);
+    restore_all();
+    if crate::vfs::read_file_dispatch(GATE_C2_UNCOMMITTED_PATH).is_some() {
+        crate::serial_println!("[persist] Gate C2 FAILED: uncommitted journal was applied");
+        return false;
+    }
+
+    // Crash window: WAL is committed and flushed; blob store is not updated.
+    if !journal_write(GATE_C2_PATH, GATE_C2_PAYLOAD, 0o644, 0, JRNL_COMMITTED) {
+        crate::serial_println!("[persist] Gate C2 FAILED: could not write committed journal");
+        return false;
+    }
+    crate::virtio_blk::flush();
+    let _ = crate::vfs::remove_dispatch(GATE_C2_PATH);
+    if crate::vfs::read_file_dispatch(GATE_C2_PATH).is_some() {
+        crate::serial_println!("[persist] Gate C2 FAILED: RAM copy survived unlink");
+        return false;
+    }
+
+    restore_all();
+
+    match crate::vfs::read_file_dispatch(GATE_C2_PATH) {
+        Some(data) if data.as_slice() == GATE_C2_PAYLOAD => {
+            crate::serial_println!("[persist] {}", GATE_C2_MARKER);
+            true
+        }
+        Some(data) => {
+            crate::serial_println!(
+                "[persist] Gate C2 FAILED: recovered {} bytes, expected {}",
+                data.len(),
+                GATE_C2_PAYLOAD.len()
+            );
+            false
+        }
+        None => {
+            crate::serial_println!("[persist] Gate C2 FAILED: file missing after journal replay");
             false
         }
     }
