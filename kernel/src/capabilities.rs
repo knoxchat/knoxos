@@ -202,10 +202,55 @@ pub fn init_process_caps(pid: u32, parent_pid: u32) {
 
 /// Initialize capabilities subsystem
 pub fn init() {
-    // Set up capabilities for initial processes
-    PROCESS_CAPS.lock().insert(0, ProcessCapabilities::root()); // kernel
-    PROCESS_CAPS.lock().insert(1, ProcessCapabilities::root()); // init
-    PROCESS_CAPS.lock().insert(2, ProcessCapabilities::user()); // desktop
+    PROCESS_CAPS.lock().insert(0, ProcessCapabilities::root());
+    PROCESS_CAPS.lock().insert(1, ProcessCapabilities::root());
+    PROCESS_CAPS.lock().insert(2, ProcessCapabilities::user());
 
     crate::serial_println!("[KnoxOS] Linux capabilities initialized");
+    let _ = bind_self_test();
+}
+
+pub fn check_net_bind(pid: u32, port: u16) -> Result<(), i32> {
+    if port == 0 || port >= 1024 {
+        return Ok(());
+    }
+    if has_capability(pid, Capability::CapNetBindService) {
+        Ok(())
+    } else {
+        Err(-1) // EPERM
+    }
+}
+
+/// Apply the execve capability transform: non-root loses the bounding-set
+/// privilege to bind privileged ports unless CapNetBindService is ambient.
+pub fn apply_exec_caps(pid: u32, uid: u32) {
+    if uid == 0 {
+        set_capabilities(pid, ProcessCapabilities::root());
+    } else {
+        set_capabilities(pid, ProcessCapabilities::user());
+    }
+}
+
+pub const GATE_E4_MARKER: &str = "GATE_E4 caps exec";
+
+pub fn bind_self_test() -> bool {
+    const USER_PID: u32 = 0xE4E4;
+    const ROOT_PID: u32 = 0xE4E5;
+    set_capabilities(USER_PID, ProcessCapabilities::user());
+    set_capabilities(ROOT_PID, ProcessCapabilities::root());
+    apply_exec_caps(USER_PID, 1000);
+    if check_net_bind(USER_PID, 80).is_ok() {
+        crate::serial_println!("[caps] Gate E4 FAILED: unprivileged bind :80 allowed");
+        return false;
+    }
+    if check_net_bind(USER_PID, 8080).is_err() {
+        crate::serial_println!("[caps] Gate E4 FAILED: high port denied");
+        return false;
+    }
+    if check_net_bind(ROOT_PID, 80).is_err() {
+        crate::serial_println!("[caps] Gate E4 FAILED: root bind :80 denied");
+        return false;
+    }
+    crate::serial_println!("[caps] {}", GATE_E4_MARKER);
+    true
 }

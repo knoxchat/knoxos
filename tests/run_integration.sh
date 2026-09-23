@@ -42,31 +42,50 @@ if [ ! -f "$BIOS_IMG" ]; then
 fi
 
 PERSIST_DISK="$PROJECT_ROOT/tests/c1-persist.img"
-rm -f "$PERSIST_DISK"
+AHCI_DISK="$PROJECT_ROOT/tests/c4-ahci.img"
+rm -f "$PERSIST_DISK" "$AHCI_DISK"
 if command -v qemu-img >/dev/null 2>&1; then
     qemu-img create -f raw "$PERSIST_DISK" 64M >/dev/null
+    qemu-img create -f raw "$AHCI_DISK" 64M >/dev/null
 else
     dd if=/dev/zero of="$PERSIST_DISK" bs=1m count=64 status=none 2>/dev/null \
         || dd if=/dev/zero of="$PERSIST_DISK" bs=1m count=64
+    dd if=/dev/zero of="$AHCI_DISK" bs=1m count=64 status=none 2>/dev/null \
+        || dd if=/dev/zero of="$AHCI_DISK" bs=1m count=64
 fi
+chmod +x "$PROJECT_ROOT/tests/d4_http.sh"
 echo "       Build OK"
 
 # 2. Boot QEMU with serial to file (headless, auto-exit on triple fault)
 echo "[2/4] Booting QEMU (timeout ${TIMEOUT_SECS}s)..."
 rm -f "$SERIAL_LOG"
 
-timeout "$TIMEOUT_SECS" qemu-system-x86_64 \
-    -drive format=raw,file="$BIOS_IMG" \
-    -drive if=virtio,format=raw,file="$PERSIST_DISK" \
-    -serial file:"$SERIAL_LOG" \
-    -display none \
-    -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
-    -m 2G \
-    -smp 2 \
-    -cpu qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt \
-    -no-reboot \
-    -no-shutdown \
-    2>/dev/null &
+QEMU_ERR="$PROJECT_ROOT/tests/qemu_stderr.log"
+rm -f "$QEMU_ERR"
+
+# GNU timeout is not on macOS; the wait loop below already kills QEMU.
+QEMU_CMD=(qemu-system-x86_64
+    -drive format=raw,file="$BIOS_IMG"
+    -drive if=virtio,format=raw,file="$PERSIST_DISK"
+    -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK"
+    -device ahci,id=ahci0
+    -device ide-hd,drive=ahcidisk,bus=ahci0.0
+    -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$PROJECT_ROOT/tests/d4_http.sh"
+    -device virtio-net-pci,netdev=net1,disable-modern=on
+    -serial file:"$SERIAL_LOG"
+    -display none
+    -device isa-debug-exit,iobase=0xf4,iosize=0x04
+    -m 2G
+    -smp 2
+    -cpu qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt
+    -no-reboot
+    -no-shutdown
+)
+if command -v timeout >/dev/null 2>&1; then
+    timeout "$TIMEOUT_SECS" "${QEMU_CMD[@]}" 2>"$QEMU_ERR" &
+else
+    "${QEMU_CMD[@]}" 2>"$QEMU_ERR" &
+fi
 QEMU_PID=$!
 
 # 3. Wait for boot marker or timeout
@@ -96,6 +115,10 @@ if [ "$BOOT_OK" != "true" ]; then
         echo "Last 20 lines of serial output:"
         tail -20 "$SERIAL_LOG"
     fi
+    if [ -s "$QEMU_ERR" ]; then
+        echo "QEMU stderr:"
+        cat "$QEMU_ERR"
+    fi
     exit 1
 fi
 
@@ -123,7 +146,7 @@ check_marker "Framebuffer initialized"
 check_marker "Boot splash displayed"
 check_marker "VFS initialized"
 check_marker "Scheduler initialized"
-check_marker "Networking stack initialized"
+check_marker "Network stack initialized"
 check_marker "Firewall initialized"
 check_marker "Settings persistence initialized"
 check_marker "Desktop Environment ready"
@@ -134,9 +157,20 @@ check_marker "GATE_B4 fork complete"
 check_marker "GATE_B5 signals complete"
 check_marker "GATE_B6 sh complete"
 check_marker "GATE_D1 loopback complete"
+check_marker "GATE_D2 virtio-net complete"
 check_marker "GATE_C1 persist complete"
 check_marker "GATE_C2 journal recovered"
 check_marker "GATE_C3 writeback complete"
+check_marker "GATE_C4 ahci dma complete"
+check_marker "GATE_D3 dhcp applied"
+check_marker "GATE_D4 dns tcp complete"
+check_marker "GATE_E1 wx aslr complete"
+check_marker "GATE_E2 csprng complete"
+check_marker "GATE_E3 seccomp deny"
+check_marker "GATE_E4 caps exec"
+check_marker "GATE_B7 sigreturn complete"
+check_marker "GATE_F1 client isolated"
+check_marker "GATE_F2 shm commit"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

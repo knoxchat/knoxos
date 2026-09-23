@@ -602,17 +602,17 @@ pub fn init() {
 
     // Register current version
     let current = ReleaseManifest {
-        version: SemVer::new(0, 2, 1),
+        version: SemVer::new(0, 2, 2),
         channel: ReleaseChannel::Stable,
         timestamp: crate::rtc::read_rtc().to_unix_timestamp() as u64,
         commit_hash: String::from("HEAD"),
         artifacts: Vec::new(),
         release_notes: String::from(
-            "KnoxOS v0.2.1 — Package management, MIDI, A2DP, performance tracking",
+            "KnoxOS v0.2.2 — Package management, MIDI, A2DP, performance tracking",
         ),
         min_upgrade_version: Some(SemVer::new(0, 1, 0)),
     };
     register_release(current);
 
-    serial_println!("[KnoxOS] Release signing subsystem initialized (v0.2.1)");
+    serial_println!("[KnoxOS] Release signing subsystem initialized (v0.2.2)");
 }

@@ -385,9 +385,11 @@ pub fn deliver_signals(pid: Pid) {
                         addr,
                         pid
                     );
-                    // Set up signal trampoline on user stack
+                    // Set up signal trampoline on user stack, then wake a
+                    // parked task so the handler actually runs.
                     drop(signals);
                     setup_signal_frame(pid, pending.signal, addr);
+                    crate::user_task::wake(pid);
                     return;
                 }
             }
@@ -499,20 +501,21 @@ fn setup_signal_frame(pid: Pid, signal: Signal, handler: u64) {
     }
     drop(signals);
 
-    // Push frame onto user stack (below current RSP)
-    let frame_size = core::mem::size_of::<SignalFrame>() as u64;
-    let new_rsp = (ctx.rsp - frame_size) & !0xF; // 16-byte aligned
-    let trampoline_addr = new_rsp; // Trampoline is at the start of the frame
+    // Interrupted syscalls resume with EINTR (-4) after the handler returns.
+    frame.saved_rax = (-4i64) as u64;
 
-    // Write frame to user stack memory
+    // Layout: SignalFrame at RSP. The handler must invoke rt_sigreturn
+    // (syscall 15) itself — the trampoline bytes live on a W^X stack and
+    // cannot be fetched as instructions.
+    let frame_size = core::mem::size_of::<SignalFrame>() as u64;
+    let new_rsp = ctx.rsp.saturating_sub(frame_size) & !0xF;
+
     let frame_bytes = unsafe {
         core::slice::from_raw_parts(
             &frame as *const SignalFrame as *const u8,
             core::mem::size_of::<SignalFrame>(),
         )
     };
-
-    // Write via VMM (safe mapping)
     crate::vmm::write_user_memory(pid, new_rsp, frame_bytes);
 
     // Block the delivered signal during handler execution
@@ -523,10 +526,9 @@ fn setup_signal_frame(pid: Pid, signal: Signal, handler: u64) {
     drop(signals);
 
     // Modify the user context:
-    // - RIP = handler address
-    // - RSP = new stack with signal frame
+    // - RIP = handler address (RX ELF text, not the W^X stack trampoline)
+    // - RSP = signal frame (rt_sigreturn reads this)
     // - RDI = signal number (first argument to handler)
-    // - Return address on stack = trampoline
     crate::context::set_user_context(pid, handler, new_rsp, signal as u64);
 
     serial_println!(

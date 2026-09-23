@@ -150,7 +150,7 @@ impl TestReport {
     pub fn new() -> Self {
         Self {
             platform: String::from("unknown"),
-            kernel_version: String::from("0.2.1"),
+            kernel_version: String::from("0.2.2"),
             timestamp: String::from("2026-03-02"),
             tests: Vec::new(),
             total_pass: 0,

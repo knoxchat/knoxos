@@ -967,7 +967,7 @@ pub fn init() {
     // /proc/sys/kernel/osrelease — fake Linux 6.1 for compat
     crate::vfs::create_file_dispatch("/proc/sys/kernel/osrelease", b"6.1.0-knoxos");
     // /proc/sys/kernel/version
-    crate::vfs::create_file_dispatch("/proc/sys/kernel/version", b"#1 SMP KnoxOS 0.2.1");
+    crate::vfs::create_file_dispatch("/proc/sys/kernel/version", b"#1 SMP KnoxOS 0.2.2");
 
     crate::serial_println!("[linux_compat] Linux binary compatibility layer initialized");
     crate::serial_println!("[linux_compat]   Interpreter: /lib64/ld-linux-x86-64.so.2");

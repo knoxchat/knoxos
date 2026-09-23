@@ -388,7 +388,7 @@ pub fn draw_login_screen(fb: &mut FrameBuffer) {
 
     // ── Footer — version / clock ──
     let footer_y = sh - 30;
-    let ver = "KnoxOS v0.2.1";
+    let ver = "KnoxOS v0.2.2";
     let ver_w = fonts::measure_string_width_compact(ver, 1) as i32;
     fonts::draw_string_compact(
         fb,

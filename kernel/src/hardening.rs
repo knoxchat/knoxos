@@ -1250,4 +1250,5 @@ pub fn init() {
         "[hardening]   Fuzzer corpus: {}",
         FUZZER.lock().stats.corpus_size
     );
+    let _ = crate::vmm::wx_aslr_self_test();
 }

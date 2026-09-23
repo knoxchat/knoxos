@@ -1096,13 +1096,17 @@ pub fn handle_syscall(
             memory::sys_mmap(arg1, arg2, arg3 as u32, arg4 as u32, arg5 as i32, arg6)
         }
         SyscallNumber::Mprotect | SyscallNumber::PkeyMprotect => {
-            // mprotect(addr, len, prot) — change memory protection
-            // Accept silently; fine-grained page table prot changes
-            // are recorded but not enforced on our flat memory model
-            let _addr = arg1;
-            let _len = arg2;
-            let _prot = arg3 as u32;
-            Ok(0)
+            let pid = crate::scheduler::current_pid().unwrap_or(1);
+            let r = crate::mmap::sys_mprotect(pid, arg1, arg2, arg3);
+            if r == 0 {
+                Ok(0)
+            } else if r == -13 {
+                Err(SyscallError::PermissionDenied)
+            } else if r == -22 {
+                Err(SyscallError::InvalidArgument)
+            } else {
+                Err(SyscallError::OutOfMemory)
+            }
         }
         SyscallNumber::Munmap => memory::sys_munmap(arg1, arg2),
         SyscallNumber::Brk => memory::sys_brk(arg1),

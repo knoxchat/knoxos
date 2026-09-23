@@ -847,7 +847,7 @@ fn copy_system_files(disk: &TargetDisk) {
     // Copy /etc files
     crate::vfs::create_file_dispatch("/mnt/target/etc/hostname", b"knoxos\n");
     crate::vfs::create_file_dispatch("/mnt/target/etc/os-release",
-        b"NAME=\"KnoxOS\"\nVERSION=\"0.2.1\"\nID=knoxos\nVERSION_ID=0.2.1\nPRETTY_NAME=\"KnoxOS 0.2.1\"\n");
+        b"NAME=\"KnoxOS\"\nVERSION=\"0.2.2\"\nID=knoxos\nVERSION_ID=0.2.2\nPRETTY_NAME=\"KnoxOS 0.2.2\"\n");
     crate::vfs::create_file_dispatch("/mnt/target/etc/passwd",
         b"root:x:0:0:root:/root:/bin/sh\nuser:x:1000:1000:User:/home/user:/bin/sh\nnobody:x:65534:65534:Nobody:/:/usr/sbin/nologin\n");
     crate::vfs::create_file_dispatch(

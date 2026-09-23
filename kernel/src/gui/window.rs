@@ -1170,7 +1170,11 @@ impl Window {
             WindowContentType::ImageViewer => {
                 super::image_viewer::draw_content(fb, self.id, content, self.scroll_y);
             }
-            WindowContentType::Empty => {}
+            WindowContentType::Empty => {
+                if let Some((pixels, w, h)) = crate::wayland::window_shm_pixels(self.id) {
+                    fb.blit_bgra(content.x, content.y, w, h, &pixels);
+                }
+            }
         }
     }
 

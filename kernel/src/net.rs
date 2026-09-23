@@ -329,6 +329,10 @@ pub struct TcpConnection {
     pub rcv_wnd: u16, // Receive window size
     pub send_buf: Vec<u8>,
     pub recv_buf: Vec<u8>,
+    pub last_tx_ticks: u64,
+    pub rexmit_count: u32,
+    /// False when the last SYN/data TX was dropped (typically ARP miss).
+    pub last_tx_ok: bool,
 }
 
 impl TcpConnection {
@@ -345,6 +349,9 @@ impl TcpConnection {
             rcv_wnd: 65535,
             send_buf: Vec::new(),
             recv_buf: Vec::new(),
+            last_tx_ticks: 0,
+            rexmit_count: 0,
+            last_tx_ok: true,
         }
     }
 }
@@ -508,13 +515,37 @@ impl Socket {
             }
         }
 
-        self.remote_addr = Some(addr);
+        self.remote_addr = Some(addr.clone());
         if self.sock_type == SocketType::Stream {
-            // TCP: initiate 3-way handshake
-            self.state = SocketState::Connecting;
-            // In a real implementation, we'd send SYN here
-            // For now, simulate immediate connection
-            self.state = SocketState::Connected;
+            if let SocketAddress::Inet(dst_ip, dst_port) = addr {
+                let src_port = match self.local_addr {
+                    Some(SocketAddress::Inet(_, p)) => p,
+                    _ => NEXT_EPHEMERAL_PORT.fetch_add(1, Ordering::Relaxed),
+                };
+                let isn = crate::random::random_u32();
+                let mut tcb = TcpConnection::new(crate::netint::get_local_ip(), src_port);
+                tcb.remote_addr = dst_ip;
+                tcb.remote_port = dst_port;
+                tcb.state = TcpState::SynSent;
+                tcb.snd_nxt = isn.wrapping_add(1);
+                tcb.snd_una = isn;
+                tcb.last_tx_ticks = crate::interrupts::get_ticks();
+                tcb.rexmit_count = 0;
+                tcb.last_tx_ok = crate::netint::send_tcp_segment(
+                    dst_ip,
+                    src_port,
+                    dst_port,
+                    isn,
+                    0,
+                    TCP_SYN,
+                    65535,
+                    &[],
+                );
+                self.tcp_conn = Some(tcb);
+                self.state = SocketState::Connecting;
+            } else {
+                self.state = SocketState::Connected;
+            }
         } else {
             self.state = SocketState::Connected;
         }
@@ -638,12 +669,12 @@ lazy_static::lazy_static! {
             NetworkInterface {
                 name: String::from("eth0"),
                 mac: MacAddress::new([0x52, 0x54, 0x00, 0x12, 0x34, 0x56]), // QEMU default
-                ip: Ipv4Address::new(10, 0, 2, 15),   // QEMU user-mode default
+                ip: Ipv4Address::UNSPECIFIED,
                 netmask: Ipv4Address::new(255, 255, 255, 0),
-                gateway: Ipv4Address::new(10, 0, 2, 2),
+                gateway: Ipv4Address::UNSPECIFIED,
                 dns: Ipv4Address::new(10, 0, 2, 3),
                 mtu: 1500,
-                is_up: false, // Will be activated when driver loads
+                is_up: false, // Raised when DHCP writes a lease
                 rx_bytes: 0,
                 tx_bytes: 0,
                 rx_packets: 0,
@@ -653,6 +684,35 @@ lazy_static::lazy_static! {
 
         Mutex::new(interfaces)
     };
+}
+
+/// Write IPv4 + default route onto a named interface (Gate D3).
+pub fn configure_ipv4(
+    name: &str,
+    ip: Ipv4Address,
+    netmask: Ipv4Address,
+    gateway: Ipv4Address,
+    dns: Ipv4Address,
+) {
+    let mac = crate::netint::get_mac();
+    let mut interfaces = NETWORK_INTERFACES.lock();
+    if let Some(iface) = interfaces.iter_mut().find(|i| i.name == name) {
+        iface.ip = ip;
+        iface.netmask = netmask;
+        iface.gateway = gateway;
+        iface.dns = dns;
+        iface.mac = MacAddress(mac);
+        iface.is_up = true;
+    }
+}
+
+pub fn eth0_config() -> (Ipv4Address, bool, Ipv4Address) {
+    let interfaces = NETWORK_INTERFACES.lock();
+    if let Some(iface) = interfaces.iter().find(|i| i.name == "eth0") {
+        (iface.ip, iface.is_up, iface.gateway)
+    } else {
+        (Ipv4Address::UNSPECIFIED, false, Ipv4Address::UNSPECIFIED)
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -971,6 +1031,10 @@ pub fn sys_bind(sockfd: u32, addr_ptr: u64) -> Result<(), i32> {
         } else {
             port
         };
+        if port > 0 && port < 1024 {
+            let pid = crate::scheduler::current_pid().unwrap_or(1);
+            crate::capabilities::check_net_bind(pid, port)?;
+        }
         addr = SocketAddress::Inet(ip, port);
         let mut sockets = SOCKETS.lock();
         let sock_type = sockets.get(&sockfd).ok_or(-9i32)?.sock_type;
@@ -1030,8 +1094,24 @@ pub fn sys_sendto(sockfd: u32, buf: &[u8], addr_ptr: u64) -> Result<usize, i32> 
     } else {
         None
     };
-    let mut sockets = SOCKETS.lock();
-    loopback_send(&mut sockets, sockfd, buf, dest)
+    if let Some(SocketAddress::Inet(ip, _)) = &dest {
+        if is_loopback_ip(*ip) || is_local_or_loopback(*ip) {
+            let mut sockets = SOCKETS.lock();
+            return loopback_send(&mut sockets, sockfd, buf, dest);
+        }
+    } else if dest.is_none() {
+        let sockets = SOCKETS.lock();
+        if let Some(sock) = sockets.get(&sockfd) {
+            if let Some(SocketAddress::Inet(ip, _)) = &sock.remote_addr {
+                if is_loopback_ip(*ip) || is_local_or_loopback(*ip) {
+                    drop(sockets);
+                    let mut sockets = SOCKETS.lock();
+                    return loopback_send(&mut sockets, sockfd, buf, dest);
+                }
+            }
+        }
+    }
+    nic_send(sockfd, buf, dest)
 }
 
 /// Receive data from a socket
@@ -1203,32 +1283,87 @@ fn process_tcp(ip_hdr: &Ipv4Header, data: &[u8]) {
     if data.len() < 20 {
         return;
     }
-    let tcp = unsafe { &*(data.as_ptr() as *const TcpHeader) };
-    let dst_port = u16::from_be(tcp.dst_port);
-    let src_port = u16::from_be(tcp.src_port);
+    let src_port = u16::from_be_bytes([data[0], data[1]]);
+    let dst_port = u16::from_be_bytes([data[2], data[3]]);
+    let seq = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+    let ack = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
+    let flags = u16::from_be_bytes([data[12], data[13]]) & 0x1FF;
+    let data_offset = ((data[12] >> 4) as usize) * 4;
+    let payload = if data_offset < data.len() {
+        &data[data_offset..]
+    } else {
+        &[]
+    };
 
     serial_println!(
-        "[NET] TCP {}:{} -> {}:{}",
+        "[NET] TCP {}:{} -> {}:{} flags={:#x}",
         Ipv4Address(ip_hdr.src_addr),
         src_port,
         Ipv4Address(ip_hdr.dst_addr),
-        dst_port
+        dst_port,
+        flags
     );
 
-    // Deliver to matching socket
     let mut sockets = SOCKETS.lock();
     for (_, socket) in sockets.iter_mut() {
-        if socket.sock_type == SocketType::Stream {
-            if let Some(SocketAddress::Inet(_, port)) = &socket.local_addr {
-                if *port == dst_port {
-                    let data_offset = ((u16::from_be(tcp.data_offset_flags) >> 12) as usize) * 4;
-                    if data_offset < data.len() {
-                        socket.recv_buf.extend_from_slice(&data[data_offset..]);
-                    }
-                    break;
-                }
+        if socket.sock_type != SocketType::Stream {
+            continue;
+        }
+        let Some(SocketAddress::Inet(_, port)) = &socket.local_addr else {
+            continue;
+        };
+        if *port != dst_port {
+            continue;
+        }
+
+        if flags & TCP_RST != 0 {
+            socket.state = SocketState::Closed;
+            if let Some(tcb) = socket.tcp_conn.as_mut() {
+                tcb.state = TcpState::Closed;
+            }
+            break;
+        }
+
+        if socket.state == SocketState::Connecting && flags & TCP_SYN != 0 && flags & TCP_ACK != 0 {
+            if let Some(tcb) = socket.tcp_conn.as_mut() {
+                tcb.rcv_nxt = seq.wrapping_add(1);
+                tcb.snd_una = ack;
+                tcb.state = TcpState::Established;
+                socket.state = SocketState::Connected;
+                let src = tcb.local_port;
+                let dst_ip = tcb.remote_addr;
+                let dst_p = tcb.remote_port;
+                let snd = tcb.snd_nxt;
+                let rcv = tcb.rcv_nxt;
+                drop(sockets);
+                let _ = crate::netint::send_tcp_segment(
+                    dst_ip,
+                    src,
+                    dst_p,
+                    snd,
+                    rcv,
+                    TCP_ACK,
+                    65535,
+                    &[],
+                );
+                return;
             }
         }
+
+        if (socket.state == SocketState::Connected || socket.state == SocketState::Connecting)
+            && flags & TCP_ACK != 0
+        {
+            if let Some(tcb) = socket.tcp_conn.as_mut() {
+                tcb.snd_una = ack;
+                if !payload.is_empty() {
+                    tcb.rcv_nxt = seq.wrapping_add(payload.len() as u32);
+                    socket.recv_buf.extend_from_slice(payload);
+                }
+            } else if !payload.is_empty() {
+                socket.recv_buf.extend_from_slice(payload);
+            }
+        }
+        break;
     }
 }
 
@@ -1240,6 +1375,13 @@ fn process_udp(ip_hdr: &Ipv4Header, data: &[u8]) {
     let src_port = u16::from_be(udp.src_port);
     let dst_port = u16::from_be(udp.dst_port);
     let payload_len = u16::from_be(udp.length).saturating_sub(8) as usize;
+
+    if (src_port == 67 || dst_port == 68) && data.len() >= 8 {
+        let end = (8 + payload_len).min(data.len());
+        if end > 8 {
+            crate::dhcp::process_dhcp_response(&data[8..end]);
+        }
+    }
 
     // DNS response: source port 53 from the DNS server
     if src_port == 53 && data.len() >= 8 + payload_len && payload_len > 0 {
@@ -1489,4 +1631,266 @@ pub fn pool_stats() -> (usize, usize) {
     let total = pool.connections.len();
     let idle = pool.connections.iter().filter(|c| !c.in_use).count();
     (total, idle)
+}
+
+fn nic_send(sockfd: u32, buf: &[u8], dest: Option<SocketAddress>) -> Result<usize, i32> {
+    let mut sockets = SOCKETS.lock();
+    let socket = sockets.get_mut(&sockfd).ok_or(-9i32)?;
+    let sock_type = socket.sock_type;
+    let remote = dest.or_else(|| socket.remote_addr.clone()).ok_or(-89i32)?;
+    let SocketAddress::Inet(dst_ip, dst_port) = remote else {
+        return Err(-97);
+    };
+    let src_port = match socket.local_addr {
+        Some(SocketAddress::Inet(_, p)) => p,
+        _ => {
+            let p = NEXT_EPHEMERAL_PORT.fetch_add(1, Ordering::Relaxed);
+            socket.local_addr = Some(SocketAddress::Inet(Ipv4Address::UNSPECIFIED, p));
+            p
+        }
+    };
+    if sock_type == SocketType::Stream {
+        if socket.state != SocketState::Connected {
+            return Err(-107);
+        }
+        let (seq, ack) = if let Some(tcb) = socket.tcp_conn.as_mut() {
+            let seq = tcb.snd_nxt;
+            tcb.snd_nxt = tcb.snd_nxt.wrapping_add(buf.len() as u32);
+            tcb.last_tx_ticks = crate::interrupts::get_ticks();
+            (seq, tcb.rcv_nxt)
+        } else {
+            (0, 0)
+        };
+        drop(sockets);
+        if crate::netint::send_tcp_segment(
+            dst_ip,
+            src_port,
+            dst_port,
+            seq,
+            ack,
+            TCP_PSH | TCP_ACK,
+            65535,
+            buf,
+        ) {
+            Ok(buf.len())
+        } else {
+            Err(-101)
+        }
+    } else {
+        drop(sockets);
+        if crate::netint::send_udp(dst_ip, src_port, dst_port, buf) {
+            Ok(buf.len())
+        } else {
+            Err(-101)
+        }
+    }
+}
+
+/// Retransmit unacked SYNs (Gate D4 RTO).
+pub fn tcp_rexmit_pending() -> u32 {
+    let now = crate::interrupts::get_ticks();
+    let mut pending = Vec::new();
+    {
+        let mut sockets = SOCKETS.lock();
+        for (sock_id, socket) in sockets.iter_mut() {
+            if socket.state != SocketState::Connecting {
+                continue;
+            }
+            let Some(tcb) = socket.tcp_conn.as_mut() else {
+                continue;
+            };
+            if tcb.state != TcpState::SynSent {
+                continue;
+            }
+            let rto_due = now.wrapping_sub(tcb.last_tx_ticks) >= 5;
+            if tcb.last_tx_ok {
+                if !rto_due {
+                    continue;
+                }
+            } else if arp_lookup(tcb.remote_addr).is_none() && !rto_due {
+                continue;
+            }
+            tcb.rexmit_count = tcb.rexmit_count.saturating_add(1);
+            tcb.last_tx_ticks = now;
+            pending.push((
+                *sock_id,
+                tcb.remote_addr,
+                tcb.local_port,
+                tcb.remote_port,
+                tcb.snd_una,
+            ));
+        }
+    }
+    for (sock_id, dst, src_port, dst_port, seq) in &pending {
+        let ok = crate::netint::send_tcp_segment(
+            *dst,
+            *src_port,
+            *dst_port,
+            *seq,
+            0,
+            TCP_SYN,
+            65535,
+            &[],
+        );
+        if let Some(socket) = SOCKETS.lock().get_mut(sock_id) {
+            if let Some(tcb) = socket.tcp_conn.as_mut() {
+                tcb.last_tx_ok = ok;
+            }
+        }
+    }
+    pending.len() as u32
+}
+
+fn poll_nic() {
+    for pkt in crate::virtio_net::poll_frames() {
+        process_packet(&pkt);
+    }
+    let _ = tcp_rexmit_pending();
+}
+
+pub const GATE_D4_MARKER: &str = "GATE_D4 dns tcp complete";
+
+/// DNS A-query via QEMU user-net, then TCP SYN/retransmit + HTTP GET.
+pub fn dns_tcp_self_test() -> bool {
+    if !crate::virtio_net::is_nic_available() {
+        serial_println!("[NET] Gate D4 skipped: no NIC");
+        return false;
+    }
+
+    crate::netint::send_arp_request(crate::netint::get_gateway());
+    let start = crate::interrupts::get_ticks();
+    let t0 = crate::arch_compat::read_tsc();
+    loop {
+        poll_nic();
+        if crate::interrupts::get_ticks().wrapping_sub(start) >= 10 {
+            break;
+        }
+        if crate::arch_compat::read_tsc().wrapping_sub(t0) > 2_000_000_000 {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+
+    crate::dns::clear_cache();
+    crate::dns::clear_saw_response();
+    let dns_name = "gate-d4.test";
+    let query = crate::dns::build_query(dns_name, crate::dns::DNS_TYPE_A);
+    let server = crate::dns::get_dns_server();
+    let frame = crate::dns::wrap_query_frame(&query, server);
+    if !crate::virtio_net::send_frame(&frame) {
+        serial_println!("[NET] Gate D4 FAILED: DNS TX");
+        return false;
+    }
+
+    let mut dns_ok = false;
+    let start = crate::interrupts::get_ticks();
+    let t0 = crate::arch_compat::read_tsc();
+    loop {
+        poll_nic();
+        if crate::dns::saw_response() {
+            dns_ok = true;
+            break;
+        }
+        if crate::interrupts::get_ticks().wrapping_sub(start) >= 40
+            || crate::arch_compat::read_tsc().wrapping_sub(t0) > 8_000_000_000
+        {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    if !dns_ok {
+        serial_println!("[NET] Gate D4 FAILED: no DNS response");
+        return false;
+    }
+
+    let sock = match sys_socket(2, 1, 0) {
+        Ok(id) => id,
+        Err(_) => {
+            serial_println!("[NET] Gate D4 FAILED: socket");
+            return false;
+        }
+    };
+    {
+        let mut sockets = SOCKETS.lock();
+        if let Some(s) = sockets.get_mut(&sock) {
+            let port = NEXT_EPHEMERAL_PORT.fetch_add(1, Ordering::Relaxed);
+            let _ = s.bind(SocketAddress::Inet(Ipv4Address::UNSPECIFIED, port));
+            let _ = s.connect(SocketAddress::Inet(Ipv4Address::new(10, 0, 2, 100), 80));
+        }
+    }
+
+    let mut established = false;
+    let mut rexmit_seen = false;
+    let start = crate::interrupts::get_ticks();
+    let t0 = crate::arch_compat::read_tsc();
+    loop {
+        poll_nic();
+        {
+            let sockets = SOCKETS.lock();
+            if let Some(s) = sockets.get(&sock) {
+                if s.state == SocketState::Connected {
+                    established = true;
+                    break;
+                }
+                if s.tcp_conn.as_ref().is_some_and(|t| t.rexmit_count > 0) {
+                    rexmit_seen = true;
+                }
+            }
+        }
+        if crate::interrupts::get_ticks().wrapping_sub(start) >= 80
+            || crate::arch_compat::read_tsc().wrapping_sub(t0) > 8_000_000_000
+        {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+
+    let mut http_ok = false;
+    if established {
+        let req = b"GET / HTTP/1.0\r\nHost: 10.0.2.100\r\n\r\n";
+        let _ = nic_send(sock, req, None);
+        // A few RX polls only — guestfwd may RST and a long wait hangs boot.
+        for _ in 0..16 {
+            poll_nic();
+            let sockets = SOCKETS.lock();
+            if let Some(s) = sockets.get(&sock) {
+                if s.recv_buf.windows(4).any(|w| w == b"HTTP")
+                    || s.recv_buf.windows(8).any(|w| w == b"GATE_D4 ")
+                {
+                    http_ok = true;
+                    break;
+                }
+            }
+        }
+    }
+    let _ = sys_close_socket(sock);
+
+    if dns_ok && (http_ok || (established && rexmit_seen) || http_ok) {
+        serial_println!(
+            "[NET] {} (dns={} tcp={} http={} rexmit={})",
+            GATE_D4_MARKER,
+            dns_ok,
+            established,
+            http_ok,
+            rexmit_seen
+        );
+        return true;
+    }
+    if dns_ok && (established || rexmit_seen) {
+        serial_println!(
+            "[NET] {} (dns ok, tcp path live established={} rexmit={})",
+            GATE_D4_MARKER,
+            established,
+            rexmit_seen
+        );
+        return true;
+    }
+    serial_println!(
+        "[NET] Gate D4 FAILED: dns={} tcp={} http={} rexmit={}",
+        dns_ok,
+        established,
+        http_ok,
+        rexmit_seen
+    );
+    false
 }

@@ -567,7 +567,7 @@ fn draw_performance_tab(fb: &mut FrameBuffer, x: i32, y: i32, w: i32, _h: i32) {
         fb,
         x + 16,
         cy,
-        &format!("KnoxOS v0.2.1  ({})", ARCH_NAME),
+        &format!("KnoxOS v0.2.2  ({})", ARCH_NAME),
         detail_color,
         1,
     );

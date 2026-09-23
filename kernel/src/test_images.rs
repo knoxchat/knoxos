@@ -55,7 +55,7 @@ impl TestImageConfig {
         Self {
             image_type: TestImageType::QemuDisk,
             name: String::from("knoxos-test"),
-            version: String::from("0.2.1"),
+            version: String::from("0.2.2"),
             size_mb: 2048,
             include_desktop: true,
             include_network: true,
@@ -71,7 +71,7 @@ impl TestImageConfig {
         Self {
             image_type: TestImageType::OciContainer,
             name: String::from("knoxos/test"),
-            version: String::from("0.2.1"),
+            version: String::from("0.2.2"),
             size_mb: 512,
             include_desktop: false,
             include_network: true,
@@ -87,7 +87,7 @@ impl TestImageConfig {
         Self {
             image_type: TestImageType::KernelOnly,
             name: String::from("knoxos-kernel-test"),
-            version: String::from("0.2.1"),
+            version: String::from("0.2.2"),
             size_mb: 64,
             include_desktop: false,
             include_network: false,

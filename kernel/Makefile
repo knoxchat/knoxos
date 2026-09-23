@@ -23,7 +23,12 @@ QEMU_ARGS = -serial stdio \
 	-m 2G \
 	-cpu qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt \
 	-smp 2 \
-	-drive if=virtio,format=raw,file=$(PERSISTENT_DISK)
+	-netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:../tests/d4_http.sh \
+	-device virtio-net-pci,netdev=net1,disable-modern=on \
+	-drive if=virtio,format=raw,file=$(PERSISTENT_DISK) \
+	-drive if=none,id=ahcidisk,format=raw,file=../knoxos-ahci.img \
+	-device ahci,id=ahci0 \
+	-device ide-hd,drive=ahcidisk,bus=ahci0.0
 
 # OVMF firmware for UEFI booting (adjust path for your system)
 # macOS (Homebrew): brew install qemu  (includes OVMF)

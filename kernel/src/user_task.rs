@@ -91,6 +91,13 @@ pub fn spawn_elf(
 
     crate::fd::create_fd_table(pid);
     crate::signals::create_process_signals(pid);
+    let uid = crate::process::PROCESS_TABLE
+        .lock()
+        .get_process(pid)
+        .map(|p| p.uid)
+        .unwrap_or(0);
+    crate::capabilities::init_process_caps(pid, parent);
+    crate::capabilities::apply_exec_caps(pid, uid);
     let _ = crate::pgrp::setpgid(pid, pid);
 
     let cr3 = crate::vmm::get_cr3(pid).unwrap_or(0);
@@ -362,6 +369,10 @@ pub const GATE_B5_MARKER: &str = "GATE_B5 signals complete";
 pub const GATE_B6_MARKER: &str = "GATE_B6 sh complete";
 /// Loopback UDP send/recv from a Ring 3 program.
 pub const GATE_D1_MARKER: &str = "GATE_D1 loopback complete";
+/// Custom SIGINT handler returned via rt_sigreturn.
+pub const GATE_B7_MARKER: &str = "GATE_B7 sigreturn complete";
+/// Ring 3 client presented a buffer; not an in-kernel WindowContentType app.
+pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
 
 /// Run the scheduled-userspace demonstrations; returns when they complete.
 pub fn run_gate_demos() {
@@ -369,11 +380,11 @@ pub fn run_gate_demos() {
         serial_println!("[user_task] Gate B3+ skipped: VMM not ready");
         return;
     }
-    serial_println!("[user_task] ── Gate B3–B6 + D1: scheduled Ring 3 ──");
+    serial_println!("[user_task] ── Gate B3–B7 + D1 + F1: scheduled Ring 3 ──");
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
-    serial_println!("[user_task] ── Gate B3–B6 + D1: done ──");
+    serial_println!("[user_task] ── Gate B3–B7 + D1 + F1: done ──");
 }
 
 extern "C" fn gate_boot_body() {
@@ -382,6 +393,8 @@ extern "C" fn gate_boot_body() {
     run_gate_b5();
     run_gate_b6();
     run_gate_d1();
+    run_gate_b7();
+    run_gate_f1();
 }
 
 fn run_gate_b3() {
@@ -537,4 +550,43 @@ fn run_gate_d1() {
             pid
         );
     }
+}
+
+fn run_gate_b7() {
+    serial_println!("[user_task] Gate B7: SIGINT handler + rt_sigreturn");
+    let elf = crate::init::sigreturn_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sigreturn") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let _ = crate::signals::kill(pid, crate::signals::Signal::SIGINT, 0);
+    crate::signals::deliver_signals(pid);
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate B7 pid={} reaped={} (marker from userspace)",
+        pid,
+        reaped
+    );
+}
+
+fn run_gate_f1() {
+    serial_println!("[user_task] Gate F1: Ring 3 SHM client present");
+    let elf = crate::init::display_client_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "wl-client") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate F1 pid={} reaped={} (marker from userspace)",
+        pid,
+        reaped
+    );
 }

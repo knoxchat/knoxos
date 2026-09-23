@@ -1389,6 +1389,50 @@ mod network_conformance_tests {
         assert_eq!(qtype, dns::DNS_TYPE_A);
         assert_eq!(qclass, dns::DNS_CLASS_IN);
     }
+
+    #[test_case]
+    fn test_virtio_net_ping_if_nic() {
+        if !crate::virtio_net::is_nic_available() {
+            return;
+        }
+        assert!(
+            crate::virtio_net::ping_self_test(),
+            "virtio-net TX/RX used ring must deliver a UDP reply from QEMU"
+        );
+    }
+
+    #[test_case]
+    fn test_ahci_dma_if_present() {
+        if !crate::ahci::is_available() {
+            return;
+        }
+        assert!(
+            crate::ahci::dma_self_test(),
+            "AHCI DMA write then read must round-trip"
+        );
+    }
+
+    #[test_case]
+    fn test_dhcp_applies_ip_if_nic() {
+        if !crate::virtio_net::is_nic_available() {
+            return;
+        }
+        assert!(
+            crate::dhcp::apply_self_test(),
+            "DHCP ACK must write eth0 IP and default route"
+        );
+    }
+
+    #[test_case]
+    fn test_dns_tcp_if_nic() {
+        if !crate::virtio_net::is_nic_available() {
+            return;
+        }
+        assert!(
+            crate::net::dns_tcp_self_test(),
+            "DNS response plus TCP connect/retransmit must succeed"
+        );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1417,6 +1461,44 @@ mod security_tests {
         assert_ne!(canary, 0);
         assert!(ssp::verify_thread_canary(3, canary));
         assert!(!ssp::verify_thread_canary(3, canary ^ 0xFF));
+    }
+
+    #[test_case]
+    fn test_chacha20_rfc8439_and_getrandom() {
+        assert!(crate::random::csprng_self_test());
+    }
+
+    #[test_case]
+    fn test_seccomp_denies_listed_syscall() {
+        assert!(crate::seccomp::deny_self_test());
+    }
+
+    #[test_case]
+    fn test_unprivileged_net_bind_fails() {
+        assert!(crate::capabilities::bind_self_test());
+    }
+
+    #[test_case]
+    fn test_wx_aslr_user_maps() {
+        assert!(crate::vmm::wx_aslr_self_test());
+    }
+
+    #[test_case]
+    fn test_wayland_shm_pool_roundtrip() {
+        assert!(
+            crate::wayland::shm_pool_self_test(),
+            "SHM pool write must round-trip pixel bytes"
+        );
+    }
+
+    #[test_case]
+    fn test_signal_trampoline_bytes() {
+        let frame = crate::signals::SignalFrame::new(2);
+        assert_eq!(
+            &frame.trampoline[0..9],
+            &[0x48, 0xC7, 0xC0, 0x0F, 0x00, 0x00, 0x00, 0x0F, 0x05]
+        );
+        assert_eq!(frame.signo, 2);
     }
 
     #[test_case]

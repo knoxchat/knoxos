@@ -19,6 +19,7 @@ pub fn sys_socket(domain: i32, sock_type: i32, _protocol: i32) -> SyscallResult 
 
 pub fn sys_bind(sockfd: i32, addr_ptr: u64, _addrlen: u32) -> SyscallResult {
     crate::net::sys_bind(sockfd as u32, addr_ptr).map_err(|e| match e {
+        -1 => SyscallError::PermissionDenied,
         -98 => SyscallError::AddressInUse,
         -99 => SyscallError::AddressNotAvailable,
         _ => SyscallError::InvalidArgument,

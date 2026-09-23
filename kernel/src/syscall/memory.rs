@@ -57,10 +57,21 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, _off: u64) 
         let result = crate::vmm::mmap(pid, addr, len, prot as u64, flags as u64);
         if result >= 0 {
             Ok(result as u64)
+        } else if result == -13 {
+            Err(SyscallError::PermissionDenied)
         } else {
             Err(SyscallError::OutOfMemory)
         }
     } else {
+        const PROT_WRITE: u32 = 0x2;
+        const PROT_EXEC: u32 = 0x4;
+        if crate::hardening::check_wx_violation(crate::hardening::ProtFlags {
+            read: prot & 0x1 != 0,
+            write: prot & PROT_WRITE != 0,
+            exec: prot & PROT_EXEC != 0,
+        }) {
+            return Err(SyscallError::PermissionDenied);
+        }
         if flags & MAP_FIXED != 0 {
             return Err(SyscallError::InvalidArgument);
         }

@@ -455,4 +455,68 @@ pub fn get_stats(pid: Pid) -> Option<(SeccompMode, u64)> {
 /// Initialize seccomp subsystem
 pub fn init() {
     serial_println!("[KnoxOS] Seccomp-BPF syscall filtering initialized");
+    let _ = deny_self_test();
+}
+
+pub const GATE_E3_MARKER: &str = "GATE_E3 seccomp deny";
+
+/// Helper: deny listed syscalls with EPERM (errno 1)
+pub fn build_errno_filter(blocked_syscalls: &[u32], errno: u16) -> Vec<BpfInsn> {
+    let mut program = Vec::new();
+    program.push(BpfInsn {
+        code: BPF_LD | BPF_W | BPF_ABS,
+        jt: 0,
+        jf: 0,
+        k: SECCOMP_DATA_NR,
+    });
+    for (i, &nr) in blocked_syscalls.iter().enumerate() {
+        let remaining = blocked_syscalls.len() - i - 1;
+        program.push(BpfInsn {
+            code: BPF_JMP | BPF_JEQ | BPF_K,
+            jt: (remaining + 1) as u8,
+            jf: 0,
+            k: nr,
+        });
+    }
+    program.push(BpfInsn {
+        code: BPF_RET | BPF_K,
+        jt: 0,
+        jf: 0,
+        k: SECCOMP_RET_ALLOW,
+    });
+    program.push(BpfInsn {
+        code: BPF_RET | BPF_K,
+        jt: 0,
+        jf: 0,
+        k: SECCOMP_RET_ERRNO | (errno as u32),
+    });
+    program
+}
+
+/// Install a filter that denies getpid (39) with EPERM and prove it.
+pub fn deny_self_test() -> bool {
+    const TEST_PID: Pid = 0xE3E3;
+    const GETPID: u32 = 39;
+    create_process_seccomp(TEST_PID);
+    let filter = build_errno_filter(&[GETPID], 1);
+    if seccomp_set_mode_filter(TEST_PID, filter).is_err() {
+        serial_println!("[seccomp] Gate E3 FAILED: could not install filter");
+        return false;
+    }
+    match check_syscall(TEST_PID, GETPID as u64, [0; 6]) {
+        Err(-1) => {}
+        other => {
+            serial_println!("[seccomp] Gate E3 FAILED: getpid => {:?}", other);
+            destroy_process_seccomp(TEST_PID);
+            return false;
+        }
+    }
+    if check_syscall(TEST_PID, 1, [0; 6]).is_err() {
+        serial_println!("[seccomp] Gate E3 FAILED: write was denied");
+        destroy_process_seccomp(TEST_PID);
+        return false;
+    }
+    destroy_process_seccomp(TEST_PID);
+    serial_println!("[seccomp] {}", GATE_E3_MARKER);
+    true
 }

@@ -99,6 +99,7 @@ impl VirtualFS {
         vfs.create_file_under(dev, "tty", FileType::CharDevice, &[], 0o666);
         vfs.create_file_under(dev, "console", FileType::CharDevice, &[], 0o600);
         vfs.create_file_under(dev, "fb0", FileType::CharDevice, &[], 0o660);
+        vfs.create_file_under(dev, "wl0", FileType::CharDevice, &[], 0o666);
 
         // /etc files
         vfs.create_file_under(etc, "hostname", FileType::Regular, b"knoxos\n", 0o644);

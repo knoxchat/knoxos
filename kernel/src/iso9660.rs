@@ -1162,7 +1162,7 @@ impl KnoxOsIsoBuilder {
         self.builder.add_file("/install/install.sh", installer);
 
         // Add OS metadata
-        let readme = b"KnoxOS - AI-Native Operating System\n\nVersion: 0.2.1\nDate: February 2026\n\nTo install:\n  1. Boot from this ISO\n  2. Run /install/install.sh\n  3. Follow the prompts\n\nFor more information: https://knoxos.org\n";
+        let readme = b"KnoxOS - AI-Native Operating System\n\nVersion: 0.2.2\nDate: February 2026\n\nTo install:\n  1. Boot from this ISO\n  2. Run /install/install.sh\n  3. Follow the prompts\n\nFor more information: https://knoxos.org\n";
         self.builder.add_file("/README.TXT", readme.to_vec());
 
         // Add license
@@ -1184,13 +1184,13 @@ impl KnoxOsIsoBuilder {
     /// Create the installer shell script
     fn create_installer_script(&self) -> Vec<u8> {
         let script = r#"#!/bin/sh
-# KnoxOS Installer v0.2.1
+# KnoxOS Installer v0.2.2
 # Automated installation script for bare-metal deployment
 # Supports BIOS and UEFI boot, GPT partitioning, ext4 root
 
 set -e
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 KERNEL_PATH="/boot/knoxos-kernel"
 
 # ── Colors ──
@@ -1343,10 +1343,10 @@ fi
 echo "knoxos" > /mnt/etc/hostname
 cat > /mnt/etc/os-release << 'EOF'
 NAME="KnoxOS"
-VERSION="0.2.1"
+VERSION="0.2.2"
 ID=knoxos
-PRETTY_NAME="KnoxOS 0.2.1 (AI-Native)"
-VERSION_ID=0.2.1
+PRETTY_NAME="KnoxOS 0.2.2 (AI-Native)"
+VERSION_ID=0.2.2
 HOME_URL="https://knoxos.org"
 EOF
 cat > /mnt/etc/fstab << EOF

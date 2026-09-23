@@ -31,6 +31,9 @@ QEMU_CPUS="2"
 # Persistent storage disk image (survives reboots)
 PERSISTENT_DISK="$SCRIPT_DIR/knoxos-storage.img"
 PERSISTENT_DISK_SIZE="20G"
+AHCI_DISK="$SCRIPT_DIR/knoxos-ahci.img"
+AHCI_DISK_SIZE="64M"
+D4_HTTP="$SCRIPT_DIR/tests/d4_http.sh"
 
 # Auto-detect display backend for QEMU
 # zoom-to-fit allows the QEMU window to be resized freely
@@ -155,6 +158,11 @@ ensure_persistent_disk() {
         fi
     else
         log_success "Persistent storage disk found: $PERSISTENT_DISK"
+    fi
+    if [ ! -f "$AHCI_DISK" ]; then
+        log_step "Creating AHCI test disk ($AHCI_DISK_SIZE)..."
+        qemu-img create -f raw "$AHCI_DISK" "$AHCI_DISK_SIZE" > /dev/null 2>&1
+        log_success "AHCI disk created: $AHCI_DISK"
     fi
 }
 
@@ -289,6 +297,11 @@ run_qemu_bios() {
     $QEMU \
         -drive format=raw,file="$bios_img" \
         -drive if=virtio,format=raw,file="$PERSISTENT_DISK" \
+        -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
+        -device ahci,id=ahci0 \
+        -device ide-hd,drive=ahcidisk,bus=ahci0.0 \
+        -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
+        -device virtio-net-pci,netdev=net1,disable-modern=on \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \
@@ -347,6 +360,11 @@ run_qemu_uefi() {
         -bios "$ovmf" \
         -drive format=raw,file="$uefi_img" \
         -drive if=virtio,format=raw,file="$PERSISTENT_DISK" \
+        -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
+        -device ahci,id=ahci0 \
+        -device ide-hd,drive=ahcidisk,bus=ahci0.0 \
+        -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
+        -device virtio-net-pci,netdev=net1,disable-modern=on \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \
@@ -380,6 +398,11 @@ run_qemu_debug() {
     $QEMU \
         -drive format=raw,file="$bios_img" \
         -drive if=virtio,format=raw,file="$PERSISTENT_DISK" \
+        -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
+        -device ahci,id=ahci0 \
+        -device ide-hd,drive=ahcidisk,bus=ahci0.0 \
+        -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
+        -device virtio-net-pci,netdev=net1,disable-modern=on \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \

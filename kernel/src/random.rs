@@ -69,6 +69,7 @@ fn mix64(mut x: u64) -> u64 {
 }
 
 /// XorShift128+ for fast mixing
+#[allow(dead_code)]
 fn xorshift128plus(s0: &mut u64, s1: &mut u64) -> u64 {
     let mut x = *s0;
     let y = *s1;
@@ -172,31 +173,23 @@ fn generate_bytes(pool: &mut EntropyPool, buf: &mut [u8]) {
         reseed_csprng(pool);
     }
 
-    let mut pos = 0;
-    while pos < buf.len() {
-        // Simple CSPRNG: mix key + counter
-        pool.csprng_counter = pool.csprng_counter.wrapping_add(1);
-        let mut s0 = pool.csprng_key[0] ^ pool.csprng_counter;
-        let mut s1 = pool.csprng_key[1] ^ pool.csprng_counter.wrapping_mul(0x6c62272e07bb0142);
-        let val1 = xorshift128plus(&mut s0, &mut s1);
-        let val2 = mix64(pool.csprng_key[2].wrapping_add(pool.csprng_counter));
-
-        let bytes1 = val1.to_le_bytes();
-        let bytes2 = val2.to_le_bytes();
-
-        for &b in bytes1.iter().chain(bytes2.iter()) {
-            if pos >= buf.len() {
-                break;
-            }
-            buf[pos] = b;
-            pos += 1;
-        }
+    let mut key = [0u8; 32];
+    for i in 0..4 {
+        key[i * 8..(i + 1) * 8].copy_from_slice(&pool.csprng_key[i].to_le_bytes());
     }
+    let mut nonce = [0u8; 12];
+    nonce[..8].copy_from_slice(&pool.csprng_counter.to_le_bytes());
+    buf.fill(0);
+    crate::crypto::chacha20(&key, &nonce, 1, buf);
+    pool.csprng_counter = pool.csprng_counter.wrapping_add(1);
 
-    // Periodically reseed
     if pool.csprng_counter.is_multiple_of(1024) && pool.entropy_bits >= 128 {
         reseed_csprng(pool);
     }
+}
+
+pub fn is_initialized() -> bool {
+    INITIALIZED.load(Ordering::Relaxed)
 }
 
 /// Read from /dev/urandom (non-blocking, always succeeds)
@@ -342,6 +335,8 @@ pub fn init() {
 
     INITIALIZED.store(true, Ordering::Release);
 
+    crate::vmm::reseed_aslr(random_u64());
+
     let rdrand_str = if has_rdrand { "RDRAND" } else { "software" };
     let rdseed_str = if has_rdseed { "+RDSEED" } else { "" };
     serial_println!(
@@ -351,6 +346,29 @@ pub fn init() {
         rdrand_str,
         rdseed_str,
     );
+    let _ = csprng_self_test();
+}
+
+pub const GATE_E2_MARKER: &str = "GATE_E2 csprng complete";
+
+/// RFC 8439 known-answer + getrandom fills a non-zero buffer.
+pub fn csprng_self_test() -> bool {
+    if !crate::crypto::chacha20_rfc8439_kat() {
+        serial_println!("[random] Gate E2 FAILED: ChaCha20 known-answer mismatch");
+        return false;
+    }
+    let mut a = [0u8; 64];
+    let mut b = [0u8; 64];
+    if getrandom(&mut a, GRND_NONBLOCK).is_err() || getrandom(&mut b, 0).is_err() {
+        serial_println!("[random] Gate E2 FAILED: getrandom");
+        return false;
+    }
+    if a.iter().all(|&x| x == 0) || a == b {
+        serial_println!("[random] Gate E2 FAILED: getrandom not random");
+        return false;
+    }
+    serial_println!("[random] {}", GATE_E2_MARKER);
+    true
 }
 
 // ═══════════════════════════════════════════════════════════════════════

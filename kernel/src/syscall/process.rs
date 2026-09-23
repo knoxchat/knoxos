@@ -107,6 +107,12 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
     }
 
     crate::signals::exec_reset_signals(pid);
+    let uid = crate::process::PROCESS_TABLE
+        .lock()
+        .get_process(pid)
+        .map(|p| p.uid)
+        .unwrap_or(0);
+    crate::capabilities::apply_exec_caps(pid, uid);
 
     // Point this PID's context at the new image without freeing the kernel
     // stack the syscall is using. `request_resume_self` re-enters Ring 3

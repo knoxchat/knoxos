@@ -176,6 +176,24 @@ pub fn sys_fcntl(fd: i32, cmd: i32, arg: u64) -> SyscallResult {
 }
 
 pub fn sys_ioctl(fd: i32, request: u32, arg: u64) -> SyscallResult {
+    const WL_PRESENT: u32 = 0x574C_0001;
+    if request == WL_PRESENT {
+        let pid = crate::context::current_pid();
+        let path = {
+            let tables = crate::fd::PROCESS_FD_TABLES.lock();
+            tables
+                .get(&pid)
+                .and_then(|t| t.get(fd))
+                .map(|f| f.path.clone())
+        };
+        if path.as_deref() == Some("/dev/wl0") {
+            if crate::wayland::present_user_buffer(pid, arg) {
+                return Ok(0);
+            }
+            return Err(SyscallError::IoError);
+        }
+    }
+
     let _ = fd;
     match request {
         0x5413 => {

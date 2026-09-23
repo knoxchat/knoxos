@@ -11,7 +11,7 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use spin::Mutex;
 
 use crate::serial_println;
@@ -183,6 +183,7 @@ lazy_static::lazy_static! {
 
 /// Transaction ID counter
 static NEXT_TX_ID: AtomicU16 = AtomicU16::new(1);
+static SAW_RESPONSE: AtomicBool = AtomicBool::new(false);
 
 /// Set the DNS server address
 pub fn set_dns_server(server: [u8; 4]) {
@@ -475,6 +476,9 @@ pub fn resolve(name: &str) -> Option<Vec<[u8; 4]>> {
 
 /// Process a DNS response (called by network stack)
 pub fn process_dns_response(data: &[u8]) {
+    if parse_response(data).is_some() {
+        SAW_RESPONSE.store(true, Ordering::Relaxed);
+    }
     if let Some(response) = parse_response(data) {
         let rcode = response.header.flags & DNS_FLAG_RCODE;
 
@@ -532,9 +536,29 @@ pub fn process_dns_response(data: &[u8]) {
 }
 
 /// Wrap DNS packet in UDP/IP/Ethernet
+pub fn wrap_query_frame(dns_payload: &[u8], server_ip: [u8; 4]) -> Vec<u8> {
+    wrap_dns_in_udp(dns_payload, server_ip)
+}
+
+pub fn saw_response() -> bool {
+    SAW_RESPONSE.load(Ordering::Relaxed)
+}
+
+pub fn clear_saw_response() {
+    SAW_RESPONSE.store(false, Ordering::Relaxed);
+}
+
+/// Wrap DNS packet in UDP/IP/Ethernet
 fn wrap_dns_in_udp(dns_payload: &[u8], server_ip: [u8; 4]) -> Vec<u8> {
     let src_mac = crate::virtio_net::get_mac().unwrap_or([0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
-    let src_ip = crate::dhcp::DHCP_LEASE.lock().ip_address;
+    let src_ip = {
+        let ip = crate::dhcp::DHCP_LEASE.lock().ip_address;
+        if ip == [0, 0, 0, 0] {
+            crate::netint::get_local_ip().0
+        } else {
+            ip
+        }
+    };
 
     let mut frame = Vec::with_capacity(14 + 20 + 8 + dns_payload.len());
 
@@ -658,4 +682,5 @@ pub fn init() {
         server[2],
         server[3]
     );
+    let _ = crate::net::dns_tcp_self_test();
 }

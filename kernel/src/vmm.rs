@@ -83,12 +83,25 @@ pub fn init_aslr_seed() {
     ASLR_SEED.store(tsc, core::sync::atomic::Ordering::Relaxed);
 }
 
+/// Mix extra entropy into the ASLR stream (ChaCha20 `getrandom` once it exists).
+pub fn reseed_aslr(extra: u64) {
+    let mut seed = ASLR_SEED.load(core::sync::atomic::Ordering::Relaxed);
+    seed ^= extra;
+    if seed == 0 {
+        seed = 0xA5A5_A5A5_5A5A_5A5A;
+    }
+    ASLR_SEED.store(seed, core::sync::atomic::Ordering::Relaxed);
+}
+
 /// Get a random page-aligned offset within [0, range)
 fn aslr_offset(range: u64) -> u64 {
     if !ASLR_ENABLED || range == 0 {
         return 0;
     }
     let mut seed = ASLR_SEED.load(core::sync::atomic::Ordering::Relaxed);
+    if crate::random::is_initialized() {
+        seed ^= crate::random::random_u64();
+    }
     if seed == 0 {
         seed = 0xDEADBEEF_CAFEBABE;
     }
@@ -354,6 +367,14 @@ impl AddressSpace {
         let size = page_align_up(size);
         let num_pages = size / PAGE_SIZE;
 
+        if crate::hardening::check_wx_violation(crate::hardening::ProtFlags {
+            read: prot.read,
+            write: prot.write,
+            exec: prot.execute,
+        }) {
+            return None;
+        }
+
         // Determine the virtual address
         let vaddr = if flags.fixed && addr != 0 {
             page_align_down(addr)
@@ -458,6 +479,14 @@ impl AddressSpace {
 
     /// Change protection of a memory region
     pub fn mprotect(&mut self, addr: u64, size: u64, prot: ProtFlags) -> bool {
+        if crate::hardening::check_wx_violation(crate::hardening::ProtFlags {
+            read: prot.read,
+            write: prot.write,
+            exec: prot.execute,
+        }) {
+            return false;
+        }
+
         let addr = page_align_down(addr);
         let size = page_align_up(size);
         let end = addr + size;
@@ -995,6 +1024,39 @@ pub fn phys_to_virt(phys: u64) -> u64 {
     phys + get_phys_mem_offset()
 }
 
+/// Map `bytes` of MMIO at `phys` into the kernel page tables (uncached).
+/// Returns the offset-mapped virtual address, or `None` if VMM is not ready.
+pub fn map_mmio(phys: u64, bytes: usize) -> Option<u64> {
+    if bytes == 0 {
+        return None;
+    }
+    let offset = get_phys_mem_offset();
+    if offset == 0 {
+        return None;
+    }
+    let cr3 = KERNEL_CR3.load(Ordering::Relaxed);
+    if cr3 == 0 {
+        return None;
+    }
+    let phys_aligned = phys & !0xFFF;
+    let end = phys.saturating_add(bytes as u64);
+    let mut page = phys_aligned;
+    let flags = PageTableFlags::PRESENT
+        | PageTableFlags::WRITABLE
+        | PageTableFlags::NO_EXECUTE
+        | PageTableFlags::NO_CACHE;
+    while page < end {
+        let vaddr = page + offset;
+        unsafe {
+            map_page_in_table(cr3, vaddr, page, flags);
+            #[cfg(target_arch = "x86_64")]
+            core::arch::asm!("invlpg [{}]", in(reg) vaddr, options(nostack, preserves_flags));
+        }
+        page += PAGE_SIZE;
+    }
+    Some(phys + offset)
+}
+
 /// Free a physical frame back to the global pool
 pub fn free_physical_frame(phys_addr: u64) {
     FRAME_POOL.lock().free(phys_addr);
@@ -1409,6 +1471,13 @@ pub fn get_cr3(pid: Pid) -> Option<u64> {
 /// Perform mmap for a process
 pub fn mmap(pid: Pid, addr: u64, size: u64, prot: u64, flags: u64) -> i64 {
     let prot_flags = ProtFlags::from_mmap_prot(prot);
+    if crate::hardening::check_wx_violation(crate::hardening::ProtFlags {
+        read: prot_flags.read,
+        write: prot_flags.write,
+        exec: prot_flags.execute,
+    }) {
+        return -13; // EACCES
+    }
     let mmap_flags = MmapFlags::from_linux(flags);
 
     let mut spaces = ADDRESS_SPACES.lock();
@@ -1572,6 +1641,88 @@ pub fn init(phys_mem_offset: u64) {
         "[VMM]   ASLR: {}",
         if ASLR_ENABLED { "enabled" } else { "disabled" }
     );
+}
+
+/// Serial marker once user maps refuse W+X and ASLR randomizes layout.
+pub const GATE_E1_MARKER: &str = "GATE_E1 wx aslr complete";
+
+/// Gate E1: `mprotect`/`mmap` RWX is denied, NX is the default for data, and
+/// two address spaces get different ASLR bases.
+pub fn wx_aslr_self_test() -> bool {
+    let wx = ProtFlags {
+        read: true,
+        write: true,
+        execute: true,
+    };
+    if !crate::hardening::check_wx_violation(crate::hardening::ProtFlags {
+        read: true,
+        write: true,
+        exec: true,
+    }) {
+        serial_println!("[VMM] Gate E1 FAILED: W^X policy did not deny RWX");
+        return false;
+    }
+
+    let Some(mut space) = AddressSpace::new(0x0000_E001) else {
+        serial_println!("[VMM] Gate E1 FAILED: could not allocate address space");
+        return false;
+    };
+    let flags = MmapFlags {
+        shared: false,
+        anonymous: true,
+        fixed: false,
+        populate: false,
+    };
+    if space.mmap_anonymous(0, PAGE_SIZE, wx, flags).is_some() {
+        serial_println!("[VMM] Gate E1 FAILED: RWX mmap succeeded");
+        return false;
+    }
+
+    let rw = ProtFlags {
+        read: true,
+        write: true,
+        execute: false,
+    };
+    let Some(mapped) = space.mmap_anonymous(0, PAGE_SIZE, rw, flags) else {
+        serial_println!("[VMM] Gate E1 FAILED: RW mmap denied");
+        return false;
+    };
+    let Some(vma) = space.find_vma(mapped) else {
+        serial_println!("[VMM] Gate E1 FAILED: RW VMA missing");
+        return false;
+    };
+    if vma.prot.execute {
+        serial_println!("[VMM] Gate E1 FAILED: RW map was executable");
+        return false;
+    }
+    if !vma
+        .prot
+        .to_page_flags()
+        .contains(PageTableFlags::NO_EXECUTE)
+    {
+        serial_println!("[VMM] Gate E1 FAILED: NX bit not set on data map");
+        return false;
+    }
+    if space.mprotect(mapped, PAGE_SIZE, wx) {
+        serial_println!("[VMM] Gate E1 FAILED: mprotect RWX succeeded");
+        return false;
+    }
+
+    let Some(a) = AddressSpace::new(0x0000_E002) else {
+        serial_println!("[VMM] Gate E1 FAILED: second address space");
+        return false;
+    };
+    let Some(b) = AddressSpace::new(0x0000_E003) else {
+        serial_println!("[VMM] Gate E1 FAILED: third address space");
+        return false;
+    };
+    if a.mmap_next == b.mmap_next && a.brk == b.brk {
+        serial_println!("[VMM] Gate E1 FAILED: ASLR produced identical layouts");
+        return false;
+    }
+
+    serial_println!("[VMM] {}", GATE_E1_MARKER);
+    true
 }
 
 /// Pre-allocate physical frames into the VMM pool

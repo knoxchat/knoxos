@@ -290,6 +290,14 @@ pub fn sys_mprotect(pid: Pid, addr: u64, length: u64, prot: u64) -> i64 {
         return -22; // EINVAL
     }
 
+    if crate::hardening::check_wx_violation(crate::hardening::ProtFlags {
+        read: prot & PROT_READ != 0,
+        write: prot & PROT_WRITE != 0,
+        exec: prot & PROT_EXEC != 0,
+    }) {
+        return -13; // EACCES — W^X
+    }
+
     // Delegate to VMM address space
     let mut spaces = crate::vmm::ADDRESS_SPACES.lock();
     if let Some(space) = spaces.get_mut(&pid) {

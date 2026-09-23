@@ -1354,7 +1354,7 @@ fn configure_system() {
 fn finalize_install() {
     crate::vfs::create_file_dispatch(
         "/mnt/target/etc/knoxos-release",
-        b"NAME=\"KnoxOS\"\nVERSION=\"0.2.1\"\nID=knoxos\n",
+        b"NAME=\"KnoxOS\"\nVERSION=\"0.2.2\"\nID=knoxos\n",
     );
     let mut st = INSTALLER_STATE.lock();
     st.append_log("Syncing disk caches...");

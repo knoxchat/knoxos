@@ -694,7 +694,7 @@ impl SecureBootState {
         self.add_to_db(db_cert);
 
         // Step 4: Sign and verify our own bootloader
-        let bootloader_data = b"KnoxOS Bootloader v0.2.1";
+        let bootloader_data = b"KnoxOS Bootloader v0.2.2";
         let _bl_sig = self.sign_efi_binary(bootloader_data);
 
         // Step 5: Enable enforcement

@@ -49,14 +49,17 @@ pub const VRING_DESC_F_NEXT: u16 = 1; // Buffer continues in next descriptor
 pub const VRING_DESC_F_WRITE: u16 = 2; // Buffer is write-only (device writes)
 pub const VRING_DESC_F_INDIRECT: u16 = 4; // Buffer contains indirect descriptors
 
-/// Virtio net header size
-pub const VIRTIO_NET_HDR_SIZE: usize = 12;
+/// Virtio-net header without `VIRTIO_NET_F_MRG_RXBUF` (10 bytes).
+pub const VIRTIO_NET_HDR_SIZE: usize = 10;
 
 /// Queue sizes
 pub const VIRTQUEUE_SIZE: u16 = 256;
 pub const RX_BUFFER_SIZE: usize = 2048;
 pub const TX_BUFFER_SIZE: usize = 2048;
 pub const MAX_PACKET_SIZE: usize = 1514; // Ethernet MTU + header
+const BOUNCE_LEN: usize = 2048;
+const RX_SLOTS: u16 = 16;
+const TX_SLOTS: u16 = 1;
 
 // ─── Virtio Data Structures ────────────────────────────────────────────
 
@@ -99,15 +102,6 @@ pub struct VirtqDesc {
     pub next: u16,  // Next descriptor index (if VRING_DESC_F_NEXT)
 }
 
-/// Virtqueue available ring
-#[repr(C, align(2))]
-#[derive(Debug)]
-pub struct VirtqAvail {
-    pub flags: u16,
-    pub idx: u16,
-    pub ring: [u16; 256], // Up to VIRTQUEUE_SIZE entries
-}
-
 /// Virtqueue used element
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -116,84 +110,128 @@ pub struct VirtqUsedElem {
     pub len: u32, // Total bytes written
 }
 
-/// Virtqueue used ring
-#[repr(C, align(4))]
-#[derive(Debug)]
-pub struct VirtqUsed {
-    pub flags: u16,
-    pub idx: u16,
-    pub ring: [VirtqUsedElem; 256],
+/// Guest-physical virtqueue + bounce buffers (same layout as virtio-blk).
+struct DmaQueue {
+    index: u16,
+    size: u16,
+    vq_phys: u64,
+    avail_off: usize,
+    used_off: usize,
+    bounce_phys: u64,
+    bounce_count: u16,
+    avail_idx: u16,
+    used_idx: u16,
 }
 
-/// A virtqueue (circular buffer for I/O)
-pub struct Virtqueue {
-    /// Queue index (0=RX, 1=TX, 2=Control)
-    pub queue_index: u16,
-    /// Queue size (number of descriptors)
-    pub size: u16,
-    /// Descriptor table
-    pub descriptors: Vec<VirtqDesc>,
-    /// Available ring index tracking
-    pub avail_idx: u16,
-    /// Used ring index tracking
-    pub used_idx: u16,
-    /// Free descriptor list
-    pub free_descs: VecDeque<u16>,
-    /// RX/TX buffers
-    pub buffers: Vec<Vec<u8>>,
-    /// Number of used buffers
-    pub num_used: u16,
-}
-
-impl Virtqueue {
-    pub fn new(queue_index: u16, size: u16) -> Self {
-        let mut descriptors = Vec::with_capacity(size as usize);
-        let mut buffers = Vec::with_capacity(size as usize);
-        let mut free_descs = VecDeque::with_capacity(size as usize);
-
-        for i in 0..size {
-            let buf_size = if queue_index == 0 {
-                RX_BUFFER_SIZE
-            } else {
-                TX_BUFFER_SIZE
-            };
-            let buffer = alloc::vec![0u8; buf_size];
-
-            descriptors.push(VirtqDesc {
-                addr: buffer.as_ptr() as u64,
-                len: buf_size as u32,
-                flags: if queue_index == 0 {
-                    VRING_DESC_F_WRITE
-                } else {
-                    0
-                },
-                next: 0,
-            });
-
-            buffers.push(buffer);
-            free_descs.push_back(i);
-        }
-
+impl DmaQueue {
+    fn empty() -> Self {
         Self {
-            queue_index,
-            size,
-            descriptors,
+            index: 0,
+            size: 0,
+            vq_phys: 0,
+            avail_off: 0,
+            used_off: 0,
+            bounce_phys: 0,
+            bounce_count: 0,
             avail_idx: 0,
             used_idx: 0,
-            free_descs,
-            buffers,
-            num_used: 0,
         }
     }
 
-    /// Allocate a descriptor from the free list
-    pub fn alloc_desc(&mut self) -> Option<u16> {
-        self.free_descs.pop_front()
+    fn setup(index: u16, qsz: u16, bounce_count: u16) -> Option<Self> {
+        if qsz == 0 || bounce_count == 0 || bounce_count > qsz {
+            return None;
+        }
+        let qsz_n = qsz as usize;
+        let avail_off = 16 * qsz_n;
+        let avail_bytes = 6 + 2 * qsz_n;
+        let used_off = (avail_off + avail_bytes + 4095) & !4095;
+        let used_bytes = 6 + 8 * qsz_n;
+        let vq_pages = (used_off + used_bytes).div_ceil(4096);
+        let bounce_pages = (bounce_count as usize * BOUNCE_LEN).div_ceil(4096).max(1);
+
+        let vq_phys = crate::vmm::allocate_contiguous_frames(vq_pages)?;
+        let bounce_phys = crate::vmm::allocate_contiguous_frames(bounce_pages)?;
+        let vq_virt = crate::vmm::phys_to_virt(vq_phys);
+        let bounce_virt = crate::vmm::phys_to_virt(bounce_phys);
+        unsafe {
+            core::ptr::write_bytes(vq_virt as *mut u8, 0, vq_pages * 4096);
+            core::ptr::write_bytes(bounce_virt as *mut u8, 0, bounce_pages * 4096);
+        }
+        Some(Self {
+            index,
+            size: qsz,
+            vq_phys,
+            avail_off,
+            used_off,
+            bounce_phys,
+            bounce_count,
+            avail_idx: 0,
+            used_idx: 0,
+        })
     }
 
-    /// Free a descriptor back to the free list
-    pub fn free_desc(&mut self, idx: u16) {
-        self.free_descs.push_back(idx);
+    fn vq_virt(&self) -> u64 {
+        crate::vmm::phys_to_virt(self.vq_phys)
+    }
+
+    fn desc_ptr(&self, i: u16) -> *mut VirtqDesc {
+        (self.vq_virt() as *mut VirtqDesc).wrapping_add(i as usize)
+    }
+
+    fn avail_flags_ptr(&self) -> *mut u16 {
+        (self.vq_virt() + self.avail_off as u64) as *mut u16
+    }
+
+    fn avail_idx_ptr(&self) -> *mut u16 {
+        unsafe { self.avail_flags_ptr().add(1) }
+    }
+
+    fn avail_ring_entry(&self, i: u16) -> *mut u16 {
+        unsafe { self.avail_flags_ptr().add(2 + i as usize) }
+    }
+
+    fn used_idx_ptr(&self) -> *const u16 {
+        unsafe { ((self.vq_virt() + self.used_off as u64) as *const u16).add(1) }
+    }
+
+    fn used_ring_elem(&self, i: u16) -> *const VirtqUsedElem {
+        unsafe {
+            let base = ((self.vq_virt() + self.used_off as u64) as *const u16).add(2)
+                as *const VirtqUsedElem;
+            base.add(i as usize)
+        }
+    }
+
+    fn bounce_phys_i(&self, i: u16) -> u64 {
+        self.bounce_phys + (i as u64) * BOUNCE_LEN as u64
+    }
+
+    fn bounce_virt_i(&self, i: u16) -> u64 {
+        crate::vmm::phys_to_virt(self.bounce_phys_i(i))
+    }
+
+    fn push_avail(&mut self, desc: u16) {
+        let slot = self.avail_idx % self.size;
+        unsafe {
+            core::ptr::write_volatile(self.avail_ring_entry(slot), desc);
+        }
+        core::sync::atomic::fence(Ordering::Release);
+        self.avail_idx = self.avail_idx.wrapping_add(1);
+        unsafe {
+            core::ptr::write_volatile(self.avail_idx_ptr(), self.avail_idx);
+        }
+    }
+
+    fn pop_used(&mut self) -> Option<VirtqUsedElem> {
+        let device_used = unsafe { core::ptr::read_volatile(self.used_idx_ptr()) };
+        if device_used == self.used_idx {
+            return None;
+        }
+        let slot = self.used_idx % self.size;
+        let elem = unsafe { core::ptr::read_volatile(self.used_ring_elem(slot)) };
+        self.used_idx = self.used_idx.wrapping_add(1);
+        Some(elem)
     }
 }
 
@@ -261,10 +299,10 @@ pub struct VirtioNetDevice {
     pub mac: [u8; 6],
     /// Feature bits negotiated
     pub features: u64,
-    /// RX virtqueue
-    pub rx_queue: Virtqueue,
+    /// RX virtqueue (guest-physical desc/avail/used + bounce)
+    rx_queue: DmaQueue,
     /// TX virtqueue
-    pub tx_queue: Virtqueue,
+    tx_queue: DmaQueue,
     /// Is device initialized and ready
     pub ready: bool,
     /// Received packet queue (for driver->stack handoff)
@@ -287,8 +325,8 @@ impl VirtioNetDevice {
             irq,
             mac: [0; 6],
             features: 0,
-            rx_queue: Virtqueue::new(0, VIRTQUEUE_SIZE),
-            tx_queue: Virtqueue::new(1, VIRTQUEUE_SIZE),
+            rx_queue: DmaQueue::empty(),
+            tx_queue: DmaQueue::empty(),
             ready: false,
             rx_packets: VecDeque::new(),
             tx_count: 0,
@@ -344,7 +382,7 @@ impl VirtioNetDevice {
                 self.mac[5]
             );
 
-            // 7. Set up RX queue
+            // 7. Set up RX queue (guest-physical desc + avail + used)
             let mut queue_select: Port<u16> = Port::new(base + VIRTIO_PCI_QUEUE_SELECT);
             queue_select.write(0); // RX queue
 
@@ -358,10 +396,16 @@ impl VirtioNetDevice {
                 return false;
             }
 
-            // Provide queue physical address (page-aligned, divided by 4096)
-            let rx_desc_addr = self.rx_queue.descriptors.as_ptr() as u64;
+            let rx_slots = RX_SLOTS.min(rx_size);
+            let Some(rxq) = DmaQueue::setup(0, rx_size, rx_slots) else {
+                serial_println!("[VIRTIO-NET] No DMA frames for RX virtqueue");
+                status_port.write(VIRTIO_STATUS_FAILED);
+                return false;
+            };
+            self.rx_queue = rxq;
+
             let mut queue_addr_port: Port<u32> = Port::new(base + VIRTIO_PCI_QUEUE_ADDRESS);
-            queue_addr_port.write((rx_desc_addr / 4096) as u32);
+            queue_addr_port.write((self.rx_queue.vq_phys / 4096) as u32);
 
             // 8. Set up TX queue
             queue_select.write(1); // TX queue
@@ -369,130 +413,142 @@ impl VirtioNetDevice {
             let tx_size = queue_size_port.read();
             serial_println!("[VIRTIO-NET] TX queue size: {}", tx_size);
 
-            if tx_size > 0 {
-                let tx_desc_addr = self.tx_queue.descriptors.as_ptr() as u64;
-                queue_addr_port.write((tx_desc_addr / 4096) as u32);
+            if tx_size == 0 {
+                serial_println!("[VIRTIO-NET] TX queue not available");
+                status_port.write(VIRTIO_STATUS_FAILED);
+                return false;
             }
 
-            // 9. Populate RX queue with buffers
-            for i in 0..self.rx_queue.size.min(rx_size) {
-                if let Some(desc_idx) = self.rx_queue.alloc_desc() {
-                    self.rx_queue.descriptors[desc_idx as usize].addr =
-                        self.rx_queue.buffers[desc_idx as usize].as_ptr() as u64;
-                    self.rx_queue.descriptors[desc_idx as usize].len = RX_BUFFER_SIZE as u32;
-                    self.rx_queue.descriptors[desc_idx as usize].flags = VRING_DESC_F_WRITE;
-                    self.rx_queue.avail_idx = self.rx_queue.avail_idx.wrapping_add(1);
-                }
+            let tx_slots = TX_SLOTS.min(tx_size);
+            let Some(txq) = DmaQueue::setup(1, tx_size, tx_slots) else {
+                serial_println!("[VIRTIO-NET] No DMA frames for TX virtqueue");
+                status_port.write(VIRTIO_STATUS_FAILED);
+                return false;
+            };
+            self.tx_queue = txq;
+            queue_addr_port.write((self.tx_queue.vq_phys / 4096) as u32);
+
+            // 9. Arm RX descriptors and publish them on the avail ring
+            for i in 0..self.rx_queue.bounce_count {
+                core::ptr::write_volatile(
+                    self.rx_queue.desc_ptr(i),
+                    VirtqDesc {
+                        addr: self.rx_queue.bounce_phys_i(i),
+                        len: BOUNCE_LEN as u32,
+                        flags: VRING_DESC_F_WRITE,
+                        next: 0,
+                    },
+                );
+                self.rx_queue.push_avail(i);
             }
 
-            // 10. Mark driver ready
+            // 10. Mark driver ready, then kick RX so the device can fill buffers
             status_port
                 .write(VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_DRIVER_OK);
 
             self.ready = true;
             self.link_up = true;
+            self.notify_queue(0);
 
             serial_println!("[VIRTIO-NET] Device initialized successfully");
+            serial_println!(
+                "[VIRTIO-NET] DMA RX qsz={} slots={} TX qsz={} pfn_rx={:#x} pfn_tx={:#x}",
+                self.rx_queue.size,
+                self.rx_queue.bounce_count,
+                self.tx_queue.size,
+                self.rx_queue.vq_phys / 4096,
+                self.tx_queue.vq_phys / 4096
+            );
             serial_println!("[VIRTIO-NET] Features: {:#x}", self.features);
             true
         }
     }
 
-    /// Send a packet through the virtio-net device using real virtqueue DMA
-    pub fn send_packet(&mut self, data: &[u8]) -> bool {
-        if !self.ready || data.len() > MAX_PACKET_SIZE {
-            return false;
-        }
-
-        // Get a free TX descriptor
-        let desc_idx = match self.tx_queue.alloc_desc() {
-            Some(idx) => idx,
-            None => {
-                // Try to reclaim used TX descriptors first
-                self.reclaim_tx_descriptors();
-                match self.tx_queue.alloc_desc() {
-                    Some(idx) => idx,
-                    None => {
-                        serial_println!("[VIRTIO-NET] TX queue full");
-                        return false;
-                    }
-                }
-            }
-        };
-
-        // Copy packet data with virtio-net header prepended
-        let buf = &mut self.tx_queue.buffers[desc_idx as usize];
-        let header = VirtioNetHeader::empty();
-        let header_bytes = unsafe {
-            core::slice::from_raw_parts(
-                &header as *const VirtioNetHeader as *const u8,
-                VIRTIO_NET_HDR_SIZE,
-            )
-        };
-
-        buf[..VIRTIO_NET_HDR_SIZE].copy_from_slice(header_bytes);
-        buf[VIRTIO_NET_HDR_SIZE..VIRTIO_NET_HDR_SIZE + data.len()].copy_from_slice(data);
-
-        // Update descriptor — device reads (no WRITE flag)
-        let total_len = (VIRTIO_NET_HDR_SIZE + data.len()) as u32;
-        self.tx_queue.descriptors[desc_idx as usize].addr =
-            self.tx_queue.buffers[desc_idx as usize].as_ptr() as u64;
-        self.tx_queue.descriptors[desc_idx as usize].len = total_len;
-        self.tx_queue.descriptors[desc_idx as usize].flags = 0; // Device reads
-
-        // Memory barrier before making descriptor visible
-        core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
-
-        // Add to available ring
-        // avail_idx mod queue_size gives the slot in the ring
-        self.tx_queue.avail_idx = self.tx_queue.avail_idx.wrapping_add(1);
-
-        // Notify device (TX queue = queue index 1)
+    fn notify_queue(&self, queue: u16) {
         unsafe {
+            let mut sel: crate::arch_compat::instructions::port::Port<u16> =
+                crate::arch_compat::instructions::port::Port::new(
+                    self.io_base + VIRTIO_PCI_QUEUE_SELECT,
+                );
+            sel.write(queue);
             let mut notify: crate::arch_compat::instructions::port::Port<u16> =
                 crate::arch_compat::instructions::port::Port::new(
                     self.io_base + VIRTIO_PCI_QUEUE_NOTIFY,
                 );
-            notify.write(1);
+            notify.write(queue);
         }
-
-        self.tx_count += 1;
-
-        // Poll briefly for completion so the descriptor can be reused quickly
-        for _ in 0..1000 {
-            let isr = unsafe {
-                let mut isr_port: crate::arch_compat::instructions::port::Port<u8> =
-                    crate::arch_compat::instructions::port::Port::new(
-                        self.io_base + VIRTIO_PCI_ISR_STATUS,
-                    );
-                isr_port.read()
-            };
-            if isr & 1 != 0 {
-                self.tx_queue.free_desc(desc_idx);
-                return true;
-            }
-            core::hint::spin_loop();
-        }
-
-        // Even if we timed out, free the descriptor (device may still process it)
-        self.tx_queue.free_desc(desc_idx);
-        true
     }
 
-    /// Reclaim TX descriptors that the device has consumed
-    fn reclaim_tx_descriptors(&mut self) {
-        // Check ISR to clear interrupt
+    fn ack_isr(&self) -> u8 {
         unsafe {
             let mut isr: crate::arch_compat::instructions::port::Port<u8> =
                 crate::arch_compat::instructions::port::Port::new(
                     self.io_base + VIRTIO_PCI_ISR_STATUS,
                 );
-            let _ = isr.read();
+            isr.read()
         }
     }
 
+    /// Send a packet through the virtio-net device using real virtqueue DMA
+    pub fn send_packet(&mut self, data: &[u8]) -> bool {
+        if !self.ready || data.is_empty() || data.len() > MAX_PACKET_SIZE {
+            return false;
+        }
+        if self.tx_queue.bounce_count == 0 {
+            return false;
+        }
+
+        // Serialized TX: drain any leftover used entry before reuse.
+        while self.tx_queue.pop_used().is_some() {}
+
+        let total_len = VIRTIO_NET_HDR_SIZE + data.len();
+        if total_len > BOUNCE_LEN {
+            return false;
+        }
+
+        let bounce = self.tx_queue.bounce_virt_i(0) as *mut u8;
+        unsafe {
+            core::ptr::write_bytes(bounce, 0, VIRTIO_NET_HDR_SIZE);
+            core::ptr::copy_nonoverlapping(
+                data.as_ptr(),
+                bounce.add(VIRTIO_NET_HDR_SIZE),
+                data.len(),
+            );
+            core::ptr::write_volatile(
+                self.tx_queue.desc_ptr(0),
+                VirtqDesc {
+                    addr: self.tx_queue.bounce_phys_i(0),
+                    len: total_len as u32,
+                    flags: 0,
+                    next: 0,
+                },
+            );
+        }
+        self.tx_queue.push_avail(0);
+        self.notify_queue(1);
+        self.tx_count += 1;
+
+        if !self.wait_tx_used(500_000) {
+            serial_println!("[VIRTIO-NET] TX used ring did not advance");
+            return false;
+        }
+        true
+    }
+
+    fn wait_tx_used(&mut self, spins: u32) -> bool {
+        for i in 0..spins {
+            if i % 64 == 0 {
+                let _ = self.ack_isr();
+            }
+            if self.tx_queue.pop_used().is_some() {
+                return true;
+            }
+            core::hint::spin_loop();
+        }
+        self.tx_queue.pop_used().is_some()
+    }
+
     /// Process received packets (called from interrupt handler or poll)
-    /// Uses ISR-based polling and walks the used ring properly
     pub fn poll_rx(&mut self) -> Vec<Vec<u8>> {
         let mut packets = Vec::new();
 
@@ -500,51 +556,45 @@ impl VirtioNetDevice {
             return packets;
         }
 
-        // Check ISR status — reading it also acknowledges the interrupt
-        let isr_status = unsafe {
-            let mut isr: crate::arch_compat::instructions::port::Port<u8> =
-                crate::arch_compat::instructions::port::Port::new(
-                    self.io_base + VIRTIO_PCI_ISR_STATUS,
-                );
-            isr.read()
-        };
+        let _ = self.ack_isr();
 
-        if isr_status & 1 != 0 {
-            // Walk RX buffers checking for received data
-            for i in 0..self.rx_queue.size {
-                let desc = &self.rx_queue.descriptors[i as usize];
-                // The device writes the actual length used into the descriptor
-                // A freshly armed buffer has len = RX_BUFFER_SIZE
-                // After device fills it, the used ring entry has the actual length
-                if desc.len > VIRTIO_NET_HDR_SIZE as u32 && desc.len < RX_BUFFER_SIZE as u32 {
-                    let buf = &self.rx_queue.buffers[i as usize];
-                    let data_len = desc.len as usize - VIRTIO_NET_HDR_SIZE;
-                    if data_len > 0 && data_len <= MAX_PACKET_SIZE {
-                        let packet =
-                            buf[VIRTIO_NET_HDR_SIZE..VIRTIO_NET_HDR_SIZE + data_len].to_vec();
-                        packets.push(packet);
-                        self.rx_count += 1;
-                    }
-
-                    // Re-arm: reset buffer and descriptor for next receive
-                    self.rx_queue.descriptors[i as usize].addr =
-                        self.rx_queue.buffers[i as usize].as_ptr() as u64;
-                    self.rx_queue.descriptors[i as usize].len = RX_BUFFER_SIZE as u32;
-                    self.rx_queue.descriptors[i as usize].flags = VRING_DESC_F_WRITE;
-                    self.rx_queue.avail_idx = self.rx_queue.avail_idx.wrapping_add(1);
-                }
+        while let Some(elem) = self.rx_queue.pop_used() {
+            let id = elem.id as u16;
+            if id >= self.rx_queue.bounce_count {
+                continue;
             }
-
-            // Notify device that we've returned RX buffers
-            if !packets.is_empty() {
+            let n = elem.len as usize;
+            if n > VIRTIO_NET_HDR_SIZE {
+                let data_len = (n - VIRTIO_NET_HDR_SIZE).min(MAX_PACKET_SIZE);
+                let src = self.rx_queue.bounce_virt_i(id) as *const u8;
+                let mut packet = alloc::vec![0u8; data_len];
                 unsafe {
-                    let mut notify: crate::arch_compat::instructions::port::Port<u16> =
-                        crate::arch_compat::instructions::port::Port::new(
-                            self.io_base + VIRTIO_PCI_QUEUE_NOTIFY,
-                        );
-                    notify.write(0); // RX queue = 0
+                    core::ptr::copy_nonoverlapping(
+                        src.add(VIRTIO_NET_HDR_SIZE),
+                        packet.as_mut_ptr(),
+                        data_len,
+                    );
                 }
+                packets.push(packet);
+                self.rx_count += 1;
             }
+
+            unsafe {
+                core::ptr::write_volatile(
+                    self.rx_queue.desc_ptr(id),
+                    VirtqDesc {
+                        addr: self.rx_queue.bounce_phys_i(id),
+                        len: BOUNCE_LEN as u32,
+                        flags: VRING_DESC_F_WRITE,
+                        next: 0,
+                    },
+                );
+            }
+            self.rx_queue.push_avail(id);
+        }
+
+        if !packets.is_empty() {
+            self.notify_queue(0);
         }
 
         packets
@@ -777,11 +827,104 @@ pub fn get_stats() -> Option<(u64, u64, bool)> {
 
 /// Handle NIC interrupt
 pub fn handle_interrupt() {
-    // Poll for received packets and feed them to the network stack
-    let packets = poll_frames();
+    // try_lock: TX/RX may already hold VIRTIO_NET while polling the used ring.
+    let Some(mut guard) = VIRTIO_NET.try_lock() else {
+        return;
+    };
+    let packets = if let Some(ref mut dev) = *guard {
+        dev.poll_rx()
+    } else {
+        Vec::new()
+    };
+    drop(guard);
     for packet in packets {
         crate::net::process_packet(&packet);
     }
+}
+
+/// Serial marker once a TX avail/used round-trip delivers a UDP reply
+/// from QEMU user-net (DHCP OFFER).
+pub const GATE_D2_MARKER: &str = "GATE_D2 virtio-net complete";
+
+fn looks_like_dhcp_reply(frame: &[u8]) -> bool {
+    // Ethernet(14) + IPv4(20) + UDP(8)
+    if frame.len() < 42 {
+        return false;
+    }
+    if frame[12] != 0x08 || frame[13] != 0x00 {
+        return false;
+    }
+    if frame[23] != 17 {
+        return false;
+    }
+    let src_port = u16::from_be_bytes([frame[34], frame[35]]);
+    let dst_port = u16::from_be_bytes([frame[36], frame[37]]);
+    src_port == 67 || dst_port == 68
+}
+
+/// TX a DHCP DISCOVER through the virtqueue and wait for a UDP reply.
+/// That is Gate D2: avail/used rings move a real packet vs QEMU user-net.
+pub fn ping_self_test() -> bool {
+    if !is_nic_available() {
+        serial_println!("[VIRTIO-NET] Gate D2 skipped: no NIC");
+        return false;
+    }
+    let Some(mac) = get_mac() else {
+        serial_println!("[VIRTIO-NET] Gate D2 FAILED: no MAC");
+        return false;
+    };
+
+    let discover = crate::dhcp::build_discover(mac);
+    let frame = crate::dhcp::wrap_dhcp_packet(&discover, mac);
+    let rx_before = get_stats().map(|s| s.1).unwrap_or(0);
+
+    if !send_frame(&frame) {
+        serial_println!("[VIRTIO-NET] Gate D2 FAILED: TX used ring did not complete");
+        return false;
+    }
+    serial_println!(
+        "[VIRTIO-NET] Gate D2 TX complete ({} byte DHCP DISCOVER)",
+        frame.len()
+    );
+
+    let start_ticks = crate::interrupts::get_ticks();
+    let mut spins = 0u32;
+    loop {
+        let packets = poll_frames();
+        for pkt in packets {
+            if looks_like_dhcp_reply(&pkt) {
+                serial_println!(
+                    "[VIRTIO-NET] {} ({} byte UDP reply)",
+                    GATE_D2_MARKER,
+                    pkt.len()
+                );
+                crate::net::process_packet(&pkt);
+                return true;
+            }
+            crate::net::process_packet(&pkt);
+        }
+        let rx_now = get_stats().map(|s| s.1).unwrap_or(0);
+        if rx_now > rx_before {
+            serial_println!(
+                "[VIRTIO-NET] {} (RX used ring advanced, {} frames)",
+                GATE_D2_MARKER,
+                rx_now - rx_before
+            );
+            return true;
+        }
+        spins = spins.wrapping_add(1);
+        if spins > 20_000_000 {
+            break;
+        }
+        let elapsed = crate::interrupts::get_ticks().wrapping_sub(start_ticks);
+        if elapsed >= 40 {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+
+    serial_println!("[VIRTIO-NET] Gate D2 FAILED: no UDP reply on RX used ring");
+    false
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1038,6 +1181,7 @@ pub fn init() {
                 "[VIRTIO-NET]   Multiqueue: ready (max {} pairs)",
                 MAX_QUEUE_PAIRS
             );
+            let _ = ping_self_test();
         } else {
             serial_println!("[VIRTIO-NET] Failed to initialize device");
         }

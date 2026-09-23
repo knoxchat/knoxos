@@ -747,7 +747,7 @@ fn generate_ai_response(input: &str) -> ChatMessage {
     if lower.contains("system") && (lower.contains("info") || lower.contains("status")) {
         let sys = crate::sysinfo::get_sysinfo();
         let info_str = alloc::format!(
-            "OS: KnoxOS v0.2.1\nKernel: Rust bare-metal {}\nProcesses: {}\nRAM: {} MiB total, {} MiB free\nUptime: {}s",
+            "OS: KnoxOS v0.2.2\nKernel: Rust bare-metal {}\nProcesses: {}\nRAM: {} MiB total, {} MiB free\nUptime: {}s",
             ARCH_NAME,
             sys.procs,
             sys.totalram / (1024 * 1024),

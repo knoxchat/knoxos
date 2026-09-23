@@ -21,7 +21,7 @@ pub fn sys_sigaction(sig: u32, act_ptr: u64, oldact_ptr: u64) -> SyscallResult {
         return Err(SyscallError::InvalidArgument);
     }
 
-    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let pid = crate::context::current_pid();
     let mut signals = crate::signals::PROCESS_SIGNALS.lock();
     let ps = signals.get_mut(&pid).ok_or(SyscallError::NoSuchProcess)?;
 
@@ -42,15 +42,23 @@ pub fn sys_sigaction(sig: u32, act_ptr: u64, oldact_ptr: u64) -> SyscallResult {
             sa_restorer: 0,
             sa_mask: 0,
         };
-        unsafe {
-            core::ptr::write(oldact_ptr as *mut LinuxSigaction, old_sa);
-        }
+        let bytes = unsafe {
+            core::slice::from_raw_parts(
+                &old_sa as *const LinuxSigaction as *const u8,
+                core::mem::size_of::<LinuxSigaction>(),
+            )
+        };
+        crate::vmm::write_user_memory(pid, oldact_ptr, bytes);
     }
 
     // Set new action if provided
     if act_ptr != 0 {
-        let sa = unsafe { *(act_ptr as *const LinuxSigaction) };
-        let disp = match sa.sa_handler {
+        let mut raw = [0u8; 32];
+        crate::vmm::read_user_memory(pid, act_ptr, &mut raw);
+        let mut handler_bytes = [0u8; 8];
+        handler_bytes.copy_from_slice(&raw[0..8]);
+        let sa_handler = u64::from_le_bytes(handler_bytes);
+        let disp = match sa_handler {
             0 => crate::signals::SignalDisposition::Default,
             1 => crate::signals::SignalDisposition::Ignore,
             addr => crate::signals::SignalDisposition::Handler(addr),

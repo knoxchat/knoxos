@@ -1,7 +1,7 @@
 # KnoxOS Production Readiness Status
 
 > **Last Updated**: 2026-09-23
-> **Version**: 0.2.1 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.1)
+> **Version**: 0.2.2 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.2)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
 > **Codebase**: 609 Rust files in `kernel/src` · ~347,000 lines · 407 `pub mod` entries
 > **Honesty rule**: a module that compiles is not a feature. Only **Live** work counts toward production.
@@ -49,25 +49,31 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 2. GDT + TSS, IDT, PIC 8259, LAPIC timer, serial UART TX.
 3. 512 MiB kernel heap (`linked_list_allocator` + slab).
 4. PS/2 keyboard (IRQ1) and mouse (IRQ12); USB tablet when present.
-5. In-memory VFS with Linux FHS layout; **opt-in** VirtIO-blk + ATA PIO; ext4 and FAT32 can use that block layer. **Gate C1** persist blob store round-trips a file through VirtIO-blk (`GATE_C1 persist complete`). **Gate C2** write-ahead log replays a committed record after a simulated crash (`GATE_C2 journal recovered`). **Gate C3** dirty page writeback overlays a 4 KiB range without replacing sibling pages (`GATE_C3 writeback complete`).
+5. In-memory VFS with Linux FHS layout; **opt-in** VirtIO-blk + ATA PIO; ext4 and FAT32 can use that block layer. **Gate C1** persist blob store round-trips a file through VirtIO-blk (`GATE_C1 persist complete`). **Gate C2** write-ahead log replays a committed record after a simulated crash (`GATE_C2 journal recovered`). **Gate C3** dirty page writeback overlays a 4 KiB range without replacing sibling pages (`GATE_C3 writeback complete`). **Gate C4** AHCI command-list DMA write/read round-trips a sector vs QEMU (`GATE_C4 ahci dma complete`).
 6. Software compositor: 32bpp BGRA, damage rects, window manager, taskbar, start menu, 17 in-process apps.
 7. Kernel shell + terminal (parser, pipes, glob, env, 60+ builtins) running **inside the kernel**, not as `/bin/sh` in Ring 3.
 8. **Gate B2 hello** — static ELF `iretq`s to Ring 3, `sys_write`s `hello from userspace`, `sys_exit`s back to the kernel.
 9. **Gate B3–B6 scheduled Ring 3** — `execve(/bin/hello)` + `waitpid`; `fork` child runs and is reaped; SIGKILL / SIGSEGV / PTY Ctrl+C terminate user tasks; `/bin/sh` runs on a kernel PTY.
 10. **Gate D1 loopback sockets** — UDP/TCP `send` copies into the peer `recv_buf` on `lo`; a Ring 3 program `sendto`/`recvfrom`s `ping` and prints `GATE_D1 loopback complete`.
-11. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
+11. **Gate D2 virtio-net** — TX writes the avail ring with guest-physical bounce buffers; RX walks the used ring; a DHCP DISCOVER gets a UDP reply from QEMU user-net (`GATE_D2 virtio-net complete`).
+12. **Gate D3 DHCP apply** — DISCOVER/OFFER/REQUEST/ACK writes `eth0` IPv4 + default route (`GATE_D3 dhcp applied`).
+13. **Gate D4 DNS + TCP** — UDP DNS to QEMU user-net; TCP SYN/ACK plus RTO retransmit; HTTP GET to `10.0.2.100` (`GATE_D4 dns tcp complete`).
+14. **Gate E1–E4 enforcement** — W^X/`mprotect` RWX denied + ASLR; ChaCha20 `getrandom`; seccomp EPERM; unprivileged bind `<1024` fails.
+15. **Gate B7 sigreturn** — Ring 3 `rt_sigaction(SIGINT)` handler `ret`s into a trampoline; `rt_sigreturn` restores `pause` (`GATE_B7 sigreturn complete`).
+16. **Gate F1–F2 isolated client** — Ring 3 program mmaps a 64×64 BGRA buffer, `ioctl(/dev/wl0)` presents it; compositor SHM round-trips the pixels and a chrome window blits them (`GATE_F1 client isolated`, `GATE_F2 shm commit`).
+17. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
 
 ### Architectural blockers (must fix first)
 
 | Blocker | Evidence | Why it blocks a perfect OS |
 |---------|----------|----------------------------|
-| **Scheduled Ring 3** | Hello is a CFS task with its own CR3; `execve`/`waitpid`/`fork`/`/bin/sh` run on the boot path. | Isolated GUI clients still need a display protocol (F1). |
+| **Scheduled Ring 3** | Hello is a CFS task with its own CR3; `execve`/`waitpid`/`fork`/`/bin/sh` run on the boot path. | Desktop apps other than the Gate F demo are still in-kernel. |
 | **No timer preemption of Ring 3** | Timer sets `NEED_RESCHED`; switch happens in the executor or on syscall (`exit`/`wait`/`pause`). | A spinning user program would not yield until it syscalls. |
-| **Signal frames for handlers** | Default terminate/SIGKILL/SIGSEGV/PTY SIGINT work; custom handlers still lack a live `sigreturn`. | Catching SIGINT in a user handler is not done. |
-| **Sockets do not transmit off-box** | Loopback `send` delivers to a peer `recv_buf`. `send_tcp_segment` is unused. VirtIO-net TX does not fill the avail ring. | LAN/internet, DHCP-applied IP, and real TCP over a NIC still missing. |
-| **AHCI/NVMe are fake I/O** | `read_sectors` zero-fills; `write_sectors` logs. | Bare metal disks do not persist. Only VirtIO-blk / ATA PIO do. |
+| **Signal frames for handlers** | Default terminate plus a live SIGINT handler + `rt_sigreturn` (B7). | Catching SIGINT in a user handler is done. |
+| **Sockets do not transmit off-box** | Loopback `send` delivers to a peer `recv_buf`. VirtIO-net TX/RX rings are live (D2). DHCP writes `eth0`. DNS + TCP SYN/retransmit/HTTP are live (D4). | CUBIC/window still unwired. |
+| **AHCI DMA is live; NVMe is fake** | AHCI command-list + PRDT round-trips a sector (C4). NVMe `prp1: 0`; reads zero-fill. | Bare-metal NVMe still missing. |
 | **Default VFS is RAM** | Inodes are `Vec<u8>`. Persist blob store round-trips through VirtIO-blk (C1) with a WAL that replays after crash (C2). | Reboot still loses anything not under persist prefixes unless ext4 is the root. |
-| **Security not on the deny path** | SELinux unused by VFS. Many syscalls `Ok(0)`. Caps unused in dispatch. | A Linux ABI surface without enforcement. |
+| **Security not on the deny path** | SELinux unused by VFS. Many syscalls `Ok(0)`. | W^X, ChaCha20 `getrandom`, seccomp EPERM, and CapNetBindService are live (E1–E4). |
 | **Breadth without wiring** | 407 modules. GPU compositor, Wayland, KVM `vmlaunch`, overlayfs never on the live path. | Compile time and maintenance grow; capability does not. |
 
 ---
@@ -96,25 +102,25 @@ Percentages are **production usefulness**, not lines of code.
 |---|-----------|-------|--------|----------|----------------|
 | 1 | Kernel Core | Wired | 64% | High | Interrupts and timers work; GS base set; SMP APs halt; no NMI/MCE. |
 | 2 | Memory Management | Wired | 48% | **Critical** | Demand paging + CoW + buddy pool; no reclaim or OOM-on-alloc. |
-| 3 | Process & Scheduling | Wired | 62% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B6** scheduled Ring 3, `execve`/`waitpid`/`fork`/`/bin/sh` on a PTY, SIGKILL/SIGSEGV/PTY SIGINT. |
-| 4 | Filesystem & Storage | Wired | 56% | **Critical** | VirtIO-blk + persist C1 roundtrip + C2 WAL replay + C3 page writeback; ext4/FAT32 real; AHCI/NVMe fake; VFS namespace still RAM. |
-| 5 | Networking | Wired | 32% | **Critical** | Loopback `send`/`recv` live; NIC still does not put packets on the wire. |
-| 6 | Device Drivers | Wired | 28% | **Critical** | PCI, PS/2, UART, VirtIO-blk live; USB/GPU/storage mostly stub. |
-| 7 | GUI & Desktop | Live | 72% | Medium | Excellent in-kernel demo; not a multi-process display server. |
-| 8 | Shell & Terminal | Live | 80% | Medium | Real parser/PTY/glob; Ring 3 `/bin/sh` on a PTY; desktop terminal still in-kernel. |
-| 9 | Security & Cryptography | Wired | 28% | **Critical** | AES/SHA software exists; MAC/W^X/CSPRNG not production. |
+| 3 | Process & Scheduling | Wired | 66% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B7** scheduled Ring 3, `execve`/`waitpid`/`fork`/`/bin/sh`, SIGKILL/SIGSEGV/PTY SIGINT, live `rt_sigreturn`. |
+| 4 | Filesystem & Storage | Wired | 62% | **Critical** | VirtIO-blk + persist C1–C3 + AHCI DMA (C4); ext4/FAT32 real; NVMe fake; VFS namespace still RAM. |
+| 5 | Networking | Wired | 58% | **Critical** | Loopback live; VirtIO-net D2; DHCP applies eth0 (D3); DNS + TCP SYN/RTO/HTTP (D4). |
+| 6 | Device Drivers | Wired | 34% | **Critical** | PCI, PS/2, UART, VirtIO-blk, AHCI DMA live; USB/GPU/NVMe mostly stub. |
+| 7 | GUI & Desktop | Live | 76% | Medium | In-kernel demo plus one Ring 3 SHM client (F1–F2); terminal still `WindowContentType`. |
+| 8 | Shell & Terminal | Live | 82% | Medium | Real parser/PTY/glob; Ring 3 `/bin/sh` on a PTY; live `sigreturn`; desktop terminal still in-kernel. |
+| 9 | Security & Cryptography | Wired | 42% | **Critical** | AES/SHA software; W^X + ChaCha20 CSPRNG + seccomp deny + CapNetBindService live (E1–E4). |
 | 10 | System Services | Wired | 28% | High | In-kernel units and in-memory D-Bus; no real supervision. |
 | 11 | Virtualization & Containers | Stub | 12% | Low | VMX `asm` unused; containers are comments. |
 | 12 | AI/ML | Wired | 22% | Low | GGUF parse + naive CPU; GPU matmul unused. |
-| 13 | Binary Compatibility | Wired | 42% | **Critical** | Static hello `iretq`s; `execve` replaces CR3 and runs; `fork` child runs; `/bin/sh` on a PTY. |
+| 13 | Binary Compatibility | Wired | 45% | **Critical** | Static hello `iretq`s; `execve`/`fork`/`/bin/sh`; live `rt_sigaction` + `rt_sigreturn`. |
 | 14 | Internationalization & Fonts | Live | 68% | Low | TTF, CJK, RTL on the compositor; locale loading partial. |
 | 15 | Build System & Tooling | Live | 75% | Medium | Make/QEMU work; `flake.nix` missing. |
-| 16 | Testing & Quality | Wired | 32% | **Critical** | Real VFS/widget/DNS/buddy tests; `assert!(true)` tests removed. |
+| 16 | Testing & Quality | Wired | 40% | **Critical** | Real VFS/widget/DNS/buddy tests; C4/D3–D4/E1–E4/F2 self-tests; `assert!(true)` tests removed. |
 | 17 | Documentation | Wired | 35% | **Critical** | README + LICENSE + this file. Architecture guides still missing. |
 | 18 | CI/CD & Release | Wired | 30% | High | `.github/workflows/ci.yml` (fmt, clippy, size, QEMU boot); no signed releases. |
 
-**QEMU desktop demo readiness: ~75%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B6 scheduled userspace; Gate D1 loopback sockets; Gate C1 persist; Gate C2 journal replay; Gate C3 page writeback).
-**Production OS readiness: ~51%** (Gate B2–B6, D1, C1–C3; Gates C4, D2–D4, E still open).
+**QEMU desktop demo readiness: ~82%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B7 scheduled userspace; Gate D1–D4 packets; Gate C1–C4 storage; Gate E1–E4 enforcement; Gate F1–F2 one isolated client).
+**Production OS readiness: ~61%** (Gate B2–B7, C1–C4, D1–D4, E1–E4, F1–F2). `./tests/run_integration.sh` **33/33** on QEMU (2026-09-23).
 
 ---
 
@@ -200,7 +206,7 @@ The real MMU work is in **`vmm.rs`**, not a buddy allocator.
 
 ## 3. Process & Scheduling
 
-**Grade: Wired (62%)** · `scheduler.rs`, `process.rs`, `context.rs`, `usermode.rs`, `signals.rs`, `user_task.rs`
+**Grade: Wired (66%)** · `scheduler.rs`, `process.rs`, `context.rs`, `usermode.rs`, `signals.rs`, `user_task.rs`
 
 Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate B3–B6 then run **scheduled** Ring 3 tasks with their own CR3: `execve`+`waitpid`, `fork`+child, SIGKILL/SIGSEGV/PTY SIGINT, and `/bin/sh` on a PTY.
 
@@ -218,6 +224,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] **`deliver_signals`** called from `deferred_schedule`; SIGKILL/default-terminate actually retire the task
 - [x] **Gate B2 one-shot Ring 3** — static hello ELF mapped into current CR3, `iretq`, `sys_write` to serial, `sys_exit` returns to kernel
 - [x] **Gate B3–B6 scheduled Ring 3** — `execve`+`waitpid`, `fork` child, SIGKILL / SIGSEGV / PTY SIGINT, `/bin/sh` on a PTY
+- [x] **Gate B7 live `sigreturn`** — `rt_sigaction` handler runs in Ring 3, `ret`s into trampoline, `rt_sigreturn` resumes `pause`
 
 ### Stub (control plane)
 - [x] **Scheduled Ring 3** — `user_task::spawn_elf` builds a CFS task with its own CR3; boot path `execve`s `/bin/hello`, then `/bin/sh` on a PTY
@@ -231,13 +238,13 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 1. ~~Save/restore full `iretq` frame + `fxsave`/`fxrstor` in `context.rs`.~~ (kernel threads done)
 2. ~~Per-CPU TSS RSP0 + `GS_BASE` / `KERNEL_GS_BASE`.~~ (BSP only; APs still share TSS)
 3. ~~First userspace: map a static `hello` ELF, `iretq`, `sys_write` to serial, `sys_exit`.~~ (Gate B2)
-4. Then `fork` + `execve` + `waitpid` + SIGCHLD + Ctrl+C via PTY. **B3–B6 wired on the boot path.** Isolated GUI clients (Gate F) are next.
+4. Then `fork` + `execve` + `waitpid` + SIGCHLD + Ctrl+C via PTY. **B3–B7 wired on the boot path.** Isolated GUI clients (Gate F) have a first SHM client; the in-kernel terminal remains.
 
 ---
 
 ## 4. Filesystem & Storage
 
-**Grade: Wired (56%)** · `vfs.rs`, `block.rs`, `virtio_blk.rs`, `ext4.rs`, `fat32.rs`, `persist.rs`, `partition.rs`, `page_cache.rs`
+**Grade: Wired (62%)** · `vfs.rs`, `block.rs`, `virtio_blk.rs`, `ext4.rs`, `fat32.rs`, `persist.rs`, `partition.rs`, `page_cache.rs`, `ahci.rs`
 
 ### Live
 - [x] In-memory VFS (FHS tree, path walk, fds, metadata)
@@ -251,6 +258,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] **Gate C1 persist roundtrip** — write `/var/lib/knoxos/gate_c1`, unlink from RAM VFS, restore from VirtIO-blk
 - [x] **Gate C2 persist WAL** — committed journal record survives simulated crash; uncommitted is discarded (`GATE_C2 journal recovered`)
 - [x] **Gate C3 page cache writeback** — dirty 4 KiB page overlays backing file at offset; sibling pages survive (`GATE_C3 writeback complete`)
+- [x] **Gate C4 AHCI DMA** — command list + PRDT write then read a marker sector (`GATE_C4 ahci dma complete`)
 - [x] 4 MB ramdisk always created
 
 ### Wired / partial
@@ -261,7 +269,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] `fsync`/`fdatasync` — flush dirty page-cache pages, re-persist the fd's VFS file through the WAL, and issue VirtIO-blk FLUSH
 
 ### Stub
-- [ ] **AHCI** — FIS built, then zero-fill / log success; fake IDENTIFY
+- [x] **AHCI** — HBA reset, port start, command-list + PRDT DMA read/write (C4); IDENTIFY parsed
 - [ ] **NVMe** — `prp1: 0`; reads zero-fill; SMART hardcoded
 - [ ] Btrfs / ZFS / XFS / exFAT / CIFS — in-memory or AHCI/NVMe fallback
 - [ ] JBD2 journal replay — `replayed = 0` (persist WAL is live; ext4 JBD2 is not)
@@ -272,14 +280,14 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 ### Perfect-OS next steps
 1. Make ext4 (or a single production FS) the root on VirtIO-blk by default, not RAM.
 2. ~~Journal commit + crash recovery that is tested by killing QEMU mid-write.~~ **Done** for the persist blob WAL (in-boot: commit journal, skip checkpoint, restore replays). JBD2 still missing.
-3. ~~Complete VirtIO-blk DMA (guest-physical, not heap pointers).~~ **Done** — contiguous buddy frames + bounce buffer. AHCI DMA still missing.
+3. ~~Complete VirtIO-blk DMA (guest-physical, not heap pointers).~~ **Done** — contiguous buddy frames + bounce buffer. ~~AHCI DMA still missing.~~ **C4 done.**
 4. Hook inotify on VFS mutate. Page-cache writeback (C3) overlays dirty pages.
 
 ---
 
 ## 5. Networking Stack
 
-**Grade: Wired (32%)** · `net.rs`, `netint.rs`, `virtio_net.rs`, `e1000.rs`, `rtl8139.rs`, `dhcp.rs`, `dns.rs`
+**Grade: Wired (58%)** · `net.rs`, `netint.rs`, `virtio_net.rs`, `e1000.rs`, `rtl8139.rs`, `dhcp.rs`, `dns.rs`
 
 ### Wired (builders / closest-to-real NICs)
 - [x] Ethernet / ARP / IPv4 / UDP / TCP **header** construction
@@ -289,35 +297,39 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] DNS A-query **can be sent**; response parse
 - [x] NTP packet build + UDP send helper
 - [x] **Loopback** — UDP `sendto` and TCP `connect`/`send` copy into the peer `recv_buf` on `127.0.0.1`; Gate D1 Ring 3 demo
+- [x] **Gate D2 VirtIO-net rings** — guest-physical avail/used; TX DHCP DISCOVER; RX UDP reply from QEMU user-net (`GATE_D2 virtio-net complete`)
+- [x] **Gate D3 DHCP apply** — ACK writes `eth0` IPv4, mask, gateway (`GATE_D3 dhcp applied`)
+- [x] **Gate D4 DNS + TCP** — UDP DNS parse; SYN/ACK + RTO; HTTP GET (`GATE_D4 dns tcp complete`)
 
 ### Stub (the path apps use)
-- [ ] **Socket send off-box** — non-loopback `send`/`sendto` still only append `send_buf`; no NIC
-- [ ] **TCP connect off-box** — non-loopback still simulated instant `Connected`; no SYN
-- [ ] **TCP retransmit / CUBIC / window** — structs in `net_production.rs`, unwired
-- [ ] **VirtIO-net TX** — does not write the avail ring
-- [ ] **VirtIO-net RX** — does not walk the used ring correctly
-- [ ] **DHCP apply** — sets DNS only, not interface IP (`10.0.2.15` fake if no NIC)
+- [x] **Socket send off-box** — non-loopback `send`/`sendto` goes through `netint` + VirtIO-net
+- [x] **TCP connect off-box** — SYN sent; SYN-ACK completes; RTO retransmits
+- [ ] **TCP CUBIC / window** — structs in `net_production.rs`, unwired
+- [x] **VirtIO-net TX** — writes avail ring with guest-physical bounce; waits for used
+- [x] **VirtIO-net RX** — walks the used ring and re-arms buffers
+- [x] **DHCP apply** — writes interface IP + DNS + default route
 - [ ] IPv6 echo — builds packet, logs, no TX
 - [ ] TLS 1.3 — types; GCM/X.509 stub; handshake flagged done after one recv
 - [ ] Wi-Fi / WPA3 / bridge / VLAN / NAT — in-memory
 
 ### Perfect-OS next steps
 1. ~~Loopback: `send` → peer `recv_buf`.~~ **D1 done** — kernel self-test + Ring 3 `sendto`/`recvfrom`.
-2. Fix VirtIO-net avail/used rings; TX one UDP ping.
-3. Wire `Socket` → `netint::send_*`; ARP then DHCP that **writes the interface IP**.
-4. TCP: SYN/ACK, seq/ack, RTO, then CUBIC. Not before packets move.
+2. ~~Fix VirtIO-net avail/used rings; TX one UDP ping.~~ **D2 done** — DHCP DISCOVER TX + UDP reply RX vs QEMU user-net.
+3. ~~Wire `Socket` → `netint::send_*`; ARP then DHCP that **writes the interface IP**.~~ **D3 done.**
+4. ~~TCP: SYN/ACK, seq/ack, RTO, then CUBIC.~~ **SYN/ACK + RTO + HTTP GET done (D4).** CUBIC still later.
 
 ---
 
 ## 6. Device Drivers
 
-**Grade: Wired (28%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `i915.rs`, …
+**Grade: Wired (34%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `i915.rs`, …
 
 ### Live
 - [x] PCI config `0xCF8`/`0xCFC`, BDF scan, BAR decode
 - [x] PS/2 keyboard + mouse (interrupt-driven)
 - [x] UART TX
 - [x] VirtIO-blk
+- [x] AHCI command-list DMA (C4)
 - [x] VGA/BGA framebuffer from bootloader
 - [x] RTC, HPET registers (timer path uses APIC + PIT)
 
@@ -337,8 +349,8 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 
 ### Perfect-OS next steps
 1. One storage, one net, one GPU scanout, one USB HID — **finished**, not 40 started.
-2. Storage: VirtIO-blk production-quality, then AHCI DMA.
-3. Net: VirtIO-net rings, then e1000.
+2. Storage: VirtIO-blk production-quality; AHCI DMA live (C4); NVMe next.
+3. Net: VirtIO-net rings + DHCP + DNS/TCP live (D2–D4); e1000 still unused by sockets.
 4. Display: VirtIO-GPU 2D resource + scanout **or** keep software FB until Ring 3 exists.
 5. Input: USB HID interrupt-IN so the desktop works without PS/2.
 
@@ -346,7 +358,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 
 ## 7. GUI & Desktop Environment
 
-**Grade: Live (72%)** · `gui/` 161 files, ~91,700 lines
+**Grade: Live (76%)** · `gui/` 161 files, ~91,700 lines
 
 The compositor is the most complete **product** in the tree. It is not a Unix display server.
 
@@ -361,9 +373,9 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 - [x] **17 real in-process apps**: Terminal, Files, Browser (tag HTML), AI Assistant, Editor, Settings, Task Manager, Calculator, Image Viewer, Log Viewer, Calendar, Disk Utility, Bluetooth manager, Software Updater, Software Center, Archive Manager, Setup Wizard
 
 ### Unused / stub
-- [ ] **Wayland** — `wayland_server.rs` object model; no bind/listen; `init` not called from `main.rs`
+- [ ] **Wayland** — object model plus a live `/dev/wl0` present ioctl; one Ring 3 SHM client (F1–F2); no bind/listen Unix socket
 - [ ] **GPU compositor** — `gpu_compositor.rs` never invoked; desktop software-blits
-- [ ] **Client isolation** — `WindowContentType` enum dispatch in the kernel
+- [x] **Client isolation (demo)** — Gate F Ring 3 client paints SHM; in-kernel apps still `WindowContentType`
 - [ ] Hardware cursor probed (`hw_cursor::init`); desktop still draws a software cursor
 - [ ] VSync module unused; pacing is TSC ~60 FPS
 - [ ] Start-menu **Paint / Video Player / Webamp / Doom / ClassiCube / Quake III** open `Empty` windows
@@ -378,7 +390,7 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 
 ## 8. Shell & Terminal
 
-**Grade: Live (80%)** · `shell/`, `terminal/`, `pty.rs`, `tty.rs`
+**Grade: Live (82%)** · `shell/`, `terminal/`, `pty.rs`, `tty.rs`
 
 ### Live
 - [x] Parser: pipes, redirects, background, quoting
@@ -390,7 +402,8 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 
 ### Remaining (userspace-shaped)
 - [x] Shell as `/bin/sh` in Ring 3 attached to a PTY slave
-- [ ] Full VT100/xterm-256 + `sigreturn`
+- [x] Live `sigreturn` for a custom SIGINT handler (B7)
+- [ ] Full VT100/xterm-256
 - [ ] Here-docs, functions, `~/.profile` once a real home exists on disk
 - [ ] Job control against **processes**, not kernel windows
 
@@ -398,30 +411,30 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 
 ## 9. Security & Cryptography
 
-**Grade: Wired (28%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
+**Grade: Wired (42%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
 
 ### Wired
 - [x] AES-128/256 block + CBC (software)
 - [x] SHA-256 / SHA-512
-- [x] ChaCha20 block function
+- [x] ChaCha20 block function + RFC 8439 known-answer (E2)
 - [x] dm-crypt AES-XTS / LUKS **structures** + sector crypto helpers
-- [x] `seccomp::check_syscall` is called from `handle_syscall` (filters often empty)
-- [x] Entropy pool + RDRAND mix (output is **xorshift128+**, not ChaCha20 CSPRNG)
+- [x] `seccomp::check_syscall` denies listed syscalls with EPERM (E3)
+- [x] Entropy pool + RDRAND mix; **ChaCha20 CSPRNG** for `getrandom` (E2)
 - [x] `__stack_chk_fail` + canary (`ssp.rs`); compiler SSP not shown enabled
 - [x] Unix permission bits on VFS inodes
+- [x] W^X + NX on user maps; `mprotect` RWX fails; ASLR randomizes (E1)
+- [x] CapNetBindService on `bind`; unprivileged `:80` fails; dropped on exec (E4)
 
 ### Stub / unused
 - [ ] AES-GCM, Poly1305, TLS 1.3 key schedule, X.509 chain verify
 - [ ] RSA / ECDSA / Ed25519 / X25519 production-quality
 - [ ] SELinux / AppArmor / Landlock — not hooked in VFS/net
-- [ ] Capabilities — not checked on exec/syscall deny
-- [ ] W^X enforcement on page tables
 - [ ] Kernel lockdown, secure wipe on free, IMA
 
 ### Perfect-OS next steps
-1. Replace xorshift userspace RNG with ChaCha20 from a real entropy pool (RDRAND + jitter + timings).
-2. W^X + NX on user maps the day Ring 3 boots.
-3. Deny-by-default seccomp for desktop apps; capabilities on `execve`.
+1. ~~Replace xorshift userspace RNG with ChaCha20 from a real entropy pool (RDRAND + jitter + timings).~~ **E2 done.**
+2. ~~W^X + NX on user maps the day Ring 3 boots.~~ **E1 done.**
+3. ~~Deny-by-default seccomp for desktop apps; capabilities on `execve`.~~ Seccomp EPERM + CapNetBindService live; desktop default-deny still later.
 4. MAC only after VFS disk is real (labels must persist).
 
 ---
@@ -485,7 +498,7 @@ Nice-to-have. Not on the path to a perfect OS.
 
 ## 13. Binary Compatibility & Runtime
 
-**Grade: Wired (42%)** · `elf.rs`, `dynlink.rs`, `syscall/mod.rs`, `vdso.rs`
+**Grade: Wired (45%)** · `elf.rs`, `dynlink.rs`, `syscall/mod.rs`, `vdso.rs`
 
 Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not** 95.8% compatibility. Many arms return `Ok(0)` or ignore flags (`mprotect` “not enforced on our flat memory model”).
 
@@ -503,11 +516,11 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 - [ ] `dlopen` that maps `.so` via VMM (`ldknoxos.rs` fake base)
 - [ ] TLS (initial-exec / general-dynamic)
 - [ ] glibc/musl ABI for Ring 3
-- [x] Signal trampoline + `rt_sigreturn` (frame builder exists; default actions terminate)
+- [x] Signal trampoline + `rt_sigreturn` (custom SIGINT handler returns to `pause`)
 - [x] Working `fork` child that runs
 
 ### Perfect-OS next steps
-~~Ship **static musl hello** first.~~ Gate B2 hello is an in-kernel generated static ELF. ~~B6 PTY + `/bin/sh`.~~ Next: dynamic linking, then isolated GUI clients (Gate F).
+~~Ship **static musl hello** first.~~ Gate B2 hello is an in-kernel generated static ELF. ~~B6 PTY + `/bin/sh`.~~ ~~Live `sigreturn`.~~ Next: dynamic linking, then more isolated GUI clients (F3–F4).
 
 ---
 
@@ -637,6 +650,7 @@ This **is** becoming an OS.
 | B4 | `fork` CoW + child runs | **Done** — child writes `fork child ran`, parent `wait4`s (`GATE_B4 fork complete`) |
 | B5 | Signals: SIGKILL, SIGSEGV, SIGINT from PTY | **Done** — parked `pause` + SIGKILL; null-deref SIGSEGV; PTY Ctrl+C (`GATE_B5 signals complete`) |
 | B6 | PTY + `/bin/sh` (even a tiny static shell) | **Done** — boot spawns `/bin/sh` on a kernel PTY; serial shows `$ ` then `GATE_B6 sh complete` |
+| B7 | Custom handler + live `rt_sigreturn` | **Done** — SIGINT handler `ret`s into trampoline; `pause` resumes (`GATE_B7 sigreturn complete`) |
 
 ### Gate C — Durable storage (4–8 weeks)
 
@@ -645,34 +659,34 @@ This **is** becoming an OS.
 | C1 | Root on VirtIO-blk (ext4 or persist) | **Done** — persist blob store round-trips a file through VirtIO-blk (`GATE_C1 persist complete`). VFS namespace is still RAM. |
 | C2 | Journal + `fsync` | **Done** — persist WAL round-trips a committed record after simulated crash (`GATE_C2 journal recovered`). Uncommitted discarded. |
 | C3 | Page cache writeback | **Done** — dirty middle page flushes via `pwrite_file`; sibling pages survive (`GATE_C3 writeback complete`) |
-| C4 | AHCI or NVMe **one** real DMA path | Bare metal disk read matches QEMU |
+| C4 | AHCI or NVMe **one** real DMA path | **Done** — AHCI command-list + PRDT write/read round-trip (`GATE_C4 ahci dma complete`). NVMe still fake. |
 
 ### Gate D — Packets (4–8 weeks)
 
 | ID | Task | Done when |
 |----|------|-----------|
 | D1 | Loopback sockets | **Done** — kernel UDP/TCP self-test + Ring 3 `sendto`/`recvfrom` (`GATE_D1 loopback complete`) |
-| D2 | VirtIO-net avail/used correct | UDP echo vs QEMU user-net or second NIC |
-| D3 | DHCP applies IP + default route | `ip addr` matches QEMU |
-| D4 | DNS + TCP connect/retransmit | `curl`-equivalent GET `http://example.com` (or a test HTTP server) |
+| D2 | VirtIO-net avail/used correct | **Done** — DHCP DISCOVER TX + UDP reply RX vs QEMU user-net (`GATE_D2 virtio-net complete`) |
+| D3 | DHCP applies IP + default route | **Done** — ACK writes `eth0` IPv4 + gateway (`GATE_D3 dhcp applied`) |
+| D4 | DNS + TCP connect/retransmit | **Done** — UDP DNS + SYN/ACK + RTO + HTTP GET (`GATE_D4 dns tcp complete`) |
 
 ### Gate E — Enforcement (3–6 weeks)
 
 | ID | Task | Done when |
 |----|------|-----------|
-| E1 | W^X + NX + ASLR on user maps | `mprotect` RWX fails; mapping randomizes |
-| E2 | ChaCha20 CSPRNG `getrandom` | Statistical and known-answer tests |
-| E3 | Seccomp actually denies | Listed syscall returns EPERM |
-| E4 | Caps on exec | Unprivileged net-bind fails |
+| E1 | W^X + NX + ASLR on user maps | **Done** — `mmap`/`mprotect` RWX denied; NX on data; ASLR bases differ (`GATE_E1 wx aslr complete`) |
+| E2 | ChaCha20 CSPRNG `getrandom` | **Done** — RFC 8439 KAT + `getrandom` (`GATE_E2 csprng complete`) |
+| E3 | Seccomp actually denies | **Done** — listed syscall returns EPERM (`GATE_E3 seccomp deny`) |
+| E4 | Caps on exec | **Done** — unprivileged bind `:80` fails; dropped on exec (`GATE_E4 caps exec`) |
 
 ### Gate F — Real desktop (ongoing, after B)
 
 | ID | Task | Done when |
 |----|------|-----------|
-| F1 | One Wayland client (or custom protocol) out of process | Terminal is not `WindowContentType` |
-| F2 | SHM / DMA-BUF to compositor | Tear-free damage path |
-| F3 | VirtIO-GPU scanout or keep FB but clients isolated | GPU optional |
-| F4 | Remove Empty launcher stubs or implement them as userspace |
+| F1 | One Wayland client (or custom protocol) out of process | **Done** — Ring 3 `/dev/wl0` present (`GATE_F1 client isolated`). In-kernel terminal is still `WindowContentType`. |
+| F2 | SHM / DMA-BUF to compositor | **Done** — client mmap copied into a kernel SHM pool; compositor round-trips magic pixels (`GATE_F2 shm commit`) |
+| F3 | VirtIO-GPU scanout or keep FB but clients isolated | GPU optional; FB scanout of the SHM window is live |
+| F4 | Remove Empty launcher stubs or implement them as userspace | Not started |
 
 ### Gate G — Quality bar (parallel from day one)
 
@@ -707,25 +721,25 @@ Do not:
 
 ## Progress tracker
 
-**Production OS: ~51%** · **QEMU desktop demo: ~75%**
+**Production OS: ~61%** · **QEMU desktop demo: ~82%**
 
 ```
 Kernel Core:        ███████████████░░░░░░░░░░  64%  Wired
 Memory Mgmt:        ████████████░░░░░░░░░░░░░  48%  Wired
-Process/Sched:      ███████████████░░░░░░░░░░  62%  Wired          ← B3–B6 live
-Filesystem:         ██████████████░░░░░░░░░░░  56%  Wired         ← C1 persist + C2 WAL + C3 writeback
-Networking:         ████████░░░░░░░░░░░░░░░░░  32%  Wired         ← D1 loopback live
-Device Drivers:     ███████░░░░░░░░░░░░░░░░░░  28%  Wired
-GUI & Desktop:      ██████████████████░░░░░░░  72%  Live
-Shell & Terminal:   ████████████████████░░░░░  80%  Live
-Security:           ███████░░░░░░░░░░░░░░░░░░  28%  Wired
+Process/Sched:      ████████████████░░░░░░░░░  66%  Wired          ← B3–B7 live
+Filesystem:         ███████████████░░░░░░░░░░  62%  Wired         ← C1–C4 (AHCI DMA)
+Networking:         ██████████████░░░░░░░░░░░  58%  Wired         ← D1–D4
+Device Drivers:     ████████░░░░░░░░░░░░░░░░░  34%  Wired         ← AHCI DMA
+GUI & Desktop:      ███████████████████░░░░░░  76%  Live          ← F1–F2 SHM client
+Shell & Terminal:   ████████████████████░░░░░  82%  Live          ← sigreturn
+Security:           ██████████░░░░░░░░░░░░░░░  42%  Wired         ← E1–E4
 System Services:    ███████░░░░░░░░░░░░░░░░░░  28%  Wired
 Virtualization:     ███░░░░░░░░░░░░░░░░░░░░░░  12%  Stub
 AI/ML:              █████░░░░░░░░░░░░░░░░░░░░  22%  Wired
-Binary Compat:      ██████████░░░░░░░░░░░░░░░  42%  Wired        ← execve + fork + /bin/sh
+Binary Compat:      ███████████░░░░░░░░░░░░░░  45%  Wired        ← execve + fork + sigreturn
 i18n & Fonts:       █████████████████░░░░░░░░  68%  Live
 Build System:       ███████████████████░░░░░░  75%  Live
-Testing:            ████████░░░░░░░░░░░░░░░░░  32%  Wired
+Testing:            ██████████░░░░░░░░░░░░░░░  40%  Wired
 Documentation:      ████████░░░░░░░░░░░░░░░░░  35%  Wired
 CI/CD:              ███████░░░░░░░░░░░░░░░░░░  30%  Wired
 ```
@@ -735,14 +749,15 @@ CI/CD:              ███████░░░░░░░░░░░░░
 | Subsystem | Old | Now | Why |
 |-----------|-----|-----|-----|
 | Kernel Core | 95% | 64% | IOAPIC/SMP exist but APs idle; NMI/MCE still missing; GS base now set |
-| Process | 90% | 62% | Gate B3–B6 scheduled Ring 3; `execve`/`waitpid`/`fork`/`/bin/sh` on a PTY |
-| Binary compat | 40% | 42% | Static hello + scheduled `execve`/`fork` + `/bin/sh`; 452 numbers still ≠ 452 behaviors |
-| Filesystem | 35% | 56% | VirtIO-blk + ext4/FAT32 I/O; Gate C1 persist roundtrip; Gate C2 persist WAL replay; Gate C3 page writeback |
-| GUI | 85% | 72% | Honest: in-process, Wayland/GPU unused |
-| Shell | 90% | 80% | PTY/glob/env real; Ring 3 `/bin/sh` on a PTY; desktop terminal still in-kernel |
+| Process | 90% | 66% | Gate B3–B7 scheduled Ring 3; `execve`/`waitpid`/`fork`/`/bin/sh`; live `sigreturn` |
+| Binary compat | 40% | 45% | Static hello + scheduled `execve`/`fork` + `/bin/sh` + `rt_sigreturn`; 452 numbers still ≠ 452 behaviors |
+| Filesystem | 35% | 62% | VirtIO-blk + C1–C3 persist/WAL/writeback + C4 AHCI DMA |
+| GUI | 85% | 76% | One Ring 3 SHM client (F1–F2); remaining apps still in-process |
+| Shell | 90% | 82% | PTY/glob/env real; Ring 3 `/bin/sh`; live `sigreturn`; desktop terminal still in-kernel |
 | Docs / CI | 10% / 25% | 35% / 30% | README, LICENSE, GitHub Actions present; flake still missing |
-| Networking | 22% | 32% | Gate D1 loopback `send`/`recv`; VirtIO-net still unwired |
-| **Overall production** | **~40%** | **~51%** | Gate B3–B6 + D1 + C1–C3 on the live boot path; C4, D2–D4, E still open |
+| Networking | 22% | 58% | D1 loopback; D2 VirtIO-net; D3 DHCP apply; D4 DNS+TCP |
+| Security | 15% | 42% | E1 W^X/ASLR; E2 ChaCha20; E3 seccomp EPERM; E4 CapNetBindService |
+| **Overall production** | **~40%** | **~61%** | Gates B3–B7 + C1–C4 + D1–D4 + E1–E4 + F1–F2 on the live boot path |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates to this file should tick **Gate** IDs, not module counts.
 

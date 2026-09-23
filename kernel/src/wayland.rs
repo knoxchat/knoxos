@@ -1018,6 +1018,10 @@ impl Compositor {
 
 lazy_static::lazy_static! {
     pub static ref COMPOSITOR: Mutex<Compositor> = Mutex::new(Compositor::new());
+    /// Desktop window id → Wayland surface id for Ring 3 SHM clients.
+    static ref WINDOW_SURFACES: Mutex<BTreeMap<u32, u32>> = Mutex::new(BTreeMap::new());
+    /// Copied SHM pixels so the GUI can blit without locking the compositor.
+    static ref WINDOW_PIXELS: Mutex<BTreeMap<u32, (Vec<u8>, u32, u32)>> = Mutex::new(BTreeMap::new());
 }
 
 static WAYLAND_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -1179,6 +1183,103 @@ pub fn surface_count() -> usize {
 /// Get the number of active SHM pools
 pub fn pool_count() -> usize {
     COMPOSITOR.lock().shm_pools.len()
+}
+
+/// Gate F client buffer: 64×64 BGRA, magic first pixel `EE FF C0 FF`.
+pub const GATE_F_WIDTH: u32 = 64;
+pub const GATE_F_HEIGHT: u32 = 64;
+pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
+pub const GATE_F2_MARKER: &str = "GATE_F2 shm commit";
+const GATE_F_MAGIC: [u8; 4] = [0xEE, 0xFF, 0xC0, 0xFF];
+
+/// Present a Ring 3 SHM buffer as a compositor surface + desktop window.
+///
+/// `vaddr` is the client’s mmap’d 64×64 BGRA buffer. Pixels are copied into a
+/// kernel SHM pool (F2) and a chrome window blits them (F1: not an in-kernel
+/// `WindowContentType` app).
+pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
+    let len = (GATE_F_WIDTH * GATE_F_HEIGHT * 4) as usize;
+    let mut pixels = vec![0u8; len];
+    crate::vmm::read_user_memory(pid, vaddr, &mut pixels);
+
+    let mut comp = COMPOSITOR.lock();
+    let pool = comp.create_shm_pool(-1, len, pid);
+    if !comp.write_to_pool(pool, 0, &pixels) {
+        serial_println!("[WL] Gate F FAILED: SHM pool write");
+        return false;
+    }
+    let Some(buf) = comp.create_shm_buffer(
+        pool,
+        0,
+        GATE_F_WIDTH,
+        GATE_F_HEIGHT,
+        GATE_F_WIDTH * 4,
+        PixelFormat::Bgra8888,
+        pid,
+    ) else {
+        serial_println!("[WL] Gate F FAILED: SHM buffer");
+        return false;
+    };
+    let sid = comp.create_surface(pid);
+    comp.create_toplevel(sid);
+    comp.toplevel_set_title(sid, "Client");
+    if !comp.attach_shm_buffer(sid, buf, 0, 0) {
+        serial_println!("[WL] Gate F FAILED: attach");
+        return false;
+    }
+    comp.surface_damage(sid, 0, 0, GATE_F_WIDTH as i32, GATE_F_HEIGHT as i32);
+    comp.surface_commit(sid);
+    let roundtrip = comp.read_from_pool(pool, 0, 4);
+    drop(comp);
+
+    let mut win = crate::gui::window::Window::new("Client", 120, 80, 280, 200);
+    let wid = win.id;
+    crate::gui::window::WINDOW_MANAGER.lock().add_window(win);
+    WINDOW_SURFACES.lock().insert(wid, sid);
+    WINDOW_PIXELS
+        .lock()
+        .insert(wid, (pixels.clone(), GATE_F_WIDTH, GATE_F_HEIGHT));
+    crate::gui::request_redraw();
+
+    let magic_ok = pixels.len() >= 4
+        && pixels[0..4] == GATE_F_MAGIC
+        && roundtrip.as_deref() == Some(&GATE_F_MAGIC[..]);
+    if magic_ok {
+        serial_println!(
+            "[WL] {} (pid={} surface={} window={})",
+            GATE_F2_MARKER,
+            pid,
+            sid,
+            wid
+        );
+    } else {
+        serial_println!(
+            "[WL] Gate F2 FAILED: client={:?} shm={:?}",
+            pixels.get(0..4),
+            roundtrip.as_deref()
+        );
+    }
+    magic_ok
+}
+
+/// SHM pixels for a desktop window that was created from a Ring 3 present.
+pub fn window_shm_pixels(window_id: u32) -> Option<(Vec<u8>, u32, u32)> {
+    WINDOW_PIXELS.lock().get(&window_id).cloned()
+}
+
+/// Kernel-only SHM pool write/read round-trip (no Ring 3).
+pub fn shm_pool_self_test() -> bool {
+    let len = 64;
+    let mut payload = vec![0u8; len];
+    payload[0..4].copy_from_slice(&GATE_F_MAGIC);
+    let mut comp = COMPOSITOR.lock();
+    let pool = comp.create_shm_pool(-1, len, 0);
+    if !comp.write_to_pool(pool, 0, &payload) {
+        return false;
+    }
+    let back = comp.read_from_pool(pool, 0, 4);
+    comp.destroy_shm_pool(pool);
+    back.as_deref() == Some(&GATE_F_MAGIC[..])
 }
 
 /// Initialize the Wayland compositor layer with real SHM buffer exchange

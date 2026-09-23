@@ -565,12 +565,24 @@ fn apply_configuration() {
         return;
     }
 
-    // Update the DNS resolver with obtained servers
+    let ip = crate::net::Ipv4Address(lease.ip_address);
+    let mask = crate::net::Ipv4Address(lease.subnet_mask);
+    let gw = crate::net::Ipv4Address(lease.gateway);
+    let dns = if lease.dns_servers.is_empty() {
+        crate::net::Ipv4Address::new(10, 0, 2, 3)
+    } else {
+        crate::net::Ipv4Address(lease.dns_servers[0])
+    };
+    drop(lease);
+
+    crate::net::configure_ipv4("eth0", ip, mask, gw, dns);
+
+    let lease = DHCP_LEASE.lock();
     if !lease.dns_servers.is_empty() {
-        let dns = lease.dns_servers[0];
-        crate::dns::set_dns_server(dns);
+        crate::dns::set_dns_server(lease.dns_servers[0]);
     }
 
+    serial_println!("[DHCP] Interface eth0 {}/{} gw {}", ip, mask, gw);
     serial_println!("[DHCP] Network configuration applied");
 }
 
@@ -634,12 +646,10 @@ pub fn get_lease() -> Option<(String, String, String, Vec<String>)> {
 pub fn init() {
     serial_println!("[DHCP] DHCP client initialized");
 
-    // If NIC is available, start DHCP discovery
     if crate::virtio_net::is_nic_available() {
-        send_discover();
+        let _ = apply_self_test();
     } else {
         serial_println!("[DHCP] No NIC available, using static configuration");
-        // Set default QEMU user-mode networking config
         let mut lease = DHCP_LEASE.lock();
         lease.ip_address = [10, 0, 2, 15];
         lease.subnet_mask = [255, 255, 255, 0];
@@ -648,5 +658,79 @@ pub fn init() {
         lease.state = DhcpState::Bound;
         lease.lease_time = 86400;
         DHCP_CONFIGURED.store(true, Ordering::Relaxed);
+        drop(lease);
+        apply_configuration();
     }
+}
+
+pub const GATE_D3_MARKER: &str = "GATE_D3 dhcp applied";
+
+fn poll_dhcp_frames() {
+    for pkt in crate::virtio_net::poll_frames() {
+        crate::net::process_packet(&pkt);
+    }
+}
+
+/// DISCOVER → OFFER → REQUEST → ACK, then write IP + default route on eth0.
+pub fn apply_self_test() -> bool {
+    if !crate::virtio_net::is_nic_available() {
+        serial_println!("[DHCP] Gate D3 skipped: no NIC");
+        return false;
+    }
+
+    if DHCP_LEASE.lock().state != DhcpState::Bound {
+        send_discover();
+        let start = crate::interrupts::get_ticks();
+        let mut spins = 0u32;
+        loop {
+            poll_dhcp_frames();
+            if DHCP_LEASE.lock().is_valid() {
+                break;
+            }
+            spins = spins.wrapping_add(1);
+            if spins > 20_000_000 {
+                break;
+            }
+            if crate::interrupts::get_ticks().wrapping_sub(start) >= 80 {
+                break;
+            }
+            core::hint::spin_loop();
+        }
+    }
+
+    if !DHCP_LEASE.lock().is_valid() {
+        serial_println!("[DHCP] Gate D3 FAILED: no ACK (lease not bound)");
+        return false;
+    }
+
+    apply_configuration();
+
+    let (iface_ip, iface_up, gateway) = crate::net::eth0_config();
+    let lease_ip = DHCP_LEASE.lock().ip_address;
+    if !iface_up || iface_ip.0 != lease_ip || iface_ip.0 == [0, 0, 0, 0] {
+        serial_println!(
+            "[DHCP] Gate D3 FAILED: eth0 {:?} up={} lease {:?}",
+            iface_ip.0,
+            iface_up,
+            lease_ip
+        );
+        return false;
+    }
+    if gateway.0 == [0, 0, 0, 0] {
+        serial_println!("[DHCP] Gate D3 FAILED: no default route");
+        return false;
+    }
+    serial_println!(
+        "[DHCP] {} ({}.{}.{}.{} gw {}.{}.{}.{})",
+        GATE_D3_MARKER,
+        iface_ip.0[0],
+        iface_ip.0[1],
+        iface_ip.0[2],
+        iface_ip.0[3],
+        gateway.0[0],
+        gateway.0[1],
+        gateway.0[2],
+        gateway.0[3]
+    );
+    true
 }

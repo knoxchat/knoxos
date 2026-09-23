@@ -122,7 +122,7 @@ pub fn draw_splash(fb: &mut FrameBuffer) {
     );
 
     // ── Version string ──────────────────────────────────────────────
-    let version = "v0.2.1";
+    let version = "v0.2.2";
     let v_w = version.len() as i32 * fonts::FONT_WIDTH as i32;
     let v_x = (w - v_w) / 2;
     let v_y = tl_y + (fonts::FONT_HEIGHT as i32 * tl_scale as i32) + 8;
@@ -237,7 +237,7 @@ pub enum BootMenuEntry {
 impl BootMenuEntry {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::NormalBoot => "KnoxOS v0.2.1",
+            Self::NormalBoot => "KnoxOS v0.2.2",
             Self::RecoveryShell => "KnoxOS Recovery Shell",
             Self::SafeGraphics => "KnoxOS (Safe Graphics)",
             Self::VerboseBoot => "KnoxOS (Verbose)",
