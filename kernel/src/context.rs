@@ -138,6 +138,75 @@ impl CpuContext {
     }
 }
 
+/// GPRs + hardware IRET frame captured by a naked IRQ stub.
+///
+/// Layout matches the stack after the APIC-timer naked handler pushes
+/// `r15` … `rax` on top of the CPU-pushed `RIP/CS/RFLAGS/RSP/SS`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct IrqFrame {
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rbp: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
+    pub rip: u64,
+    pub cs: u64,
+    pub rflags: u64,
+    pub rsp: u64,
+    pub ss: u64,
+}
+
+impl CpuContext {
+    /// Copy user GPRs + IRET frame from an IRQ, then FXSAVE.
+    pub fn apply_irq_frame(&mut self, frame: &IrqFrame) {
+        self.rax = frame.rax;
+        self.rbx = frame.rbx;
+        self.rcx = frame.rcx;
+        self.rdx = frame.rdx;
+        self.rsi = frame.rsi;
+        self.rdi = frame.rdi;
+        self.rbp = frame.rbp;
+        self.r8 = frame.r8;
+        self.r9 = frame.r9;
+        self.r10 = frame.r10;
+        self.r11 = frame.r11;
+        self.r12 = frame.r12;
+        self.r13 = frame.r13;
+        self.r14 = frame.r14;
+        self.r15 = frame.r15;
+        self.rip = frame.rip;
+        self.rsp = frame.rsp;
+        self.rflags = frame.rflags | 0x200;
+        self.cs = frame.cs;
+        self.ss = frame.ss;
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            let fx = core::ptr::addr_of_mut!(self.fxsave_area) as u64;
+            core::arch::asm!(
+                "fxsave64 [{}]",
+                in(reg) fx,
+                options(nostack)
+            );
+            self.fpu_initialized = true;
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            self.fpu_initialized = true;
+        }
+    }
+}
+
 /// Per-process context storage
 pub struct ProcessContext {
     /// CPU state first so it inherits 16-byte alignment from `CpuContext`
@@ -442,6 +511,7 @@ pub unsafe extern "C" fn enter_context(new: *const CpuContext) {
         "mov rsp, [rdx + 7*8]",
         "mov rsi, [rdx + 4*8]",
         "mov rdi, [rdx + 5*8]",
+        "mov rdx, [rdx + 3*8]",
         "jmp rax",
         // Ring 3 target: rebuild the iretq frame (SS, RSP, RFLAGS, CS, RIP).
         "4:",
@@ -474,6 +544,7 @@ pub unsafe extern "C" fn enter_context(new: *const CpuContext) {
         "mov rax, [rdx + 0*8]",
         "mov rsi, [rdx + 4*8]",
         "mov rdi, [rdx + 5*8]",
+        "mov rdx, [rdx + 3*8]",
         // The syscall `swapgs` expects GS_BASE to hold the user value here.
         "swapgs",
         "iretq",

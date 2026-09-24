@@ -386,6 +386,8 @@ pub const MSR_APIC_BASE: u32 = 0x1B;
 /// Maximum number of CPUs supported
 pub const MAX_CPUS: usize = 16;
 
+const _: () = assert!(MAX_CPUS == crate::gdt::MAX_CPUS);
+
 /// Per-CPU data structure
 #[derive(Debug)]
 pub struct PerCpuData {
@@ -765,6 +767,8 @@ pub const AP_STACK_BASE: u64 = 0x0000_0000_0080_0000; // 8MB mark
 
 /// Flag set by AP to signal it's alive
 static AP_ALIVE: AtomicBool = AtomicBool::new(false);
+/// `str` value the first AP loaded (proves a distinct TSS, not the BSP's).
+static AP_TSS_SEL: AtomicU32 = AtomicU32::new(0);
 
 /// Real-mode → protected-mode → long-mode AP trampoline code
 /// This machine code is copied to AP_TRAMPOLINE_ADDR (below 1MB)
@@ -1179,18 +1183,27 @@ pub fn start_ap(apic_id: u32, cpu_index: u32) {
 /// avoid issues with function prologues when the GDT/IDT haven't been
 /// loaded yet.
 extern "C" fn ap_entry_64(apic_id: u32) {
-    // Load the kernel's GDT so segment selectors match the BSP.
-    // Use init_ap() to skip TSS loading (BSP's ltr set the Busy bit).
-    crate::gdt::init_ap();
+    // Claim a CPU index first so we load the matching per-CPU TSS.
+    let cpu_index = CPUS_STARTED.fetch_add(1, Ordering::Relaxed);
 
-    // Load the kernel's IDT so exceptions are handled properly.
+    crate::gdt::init_ap(cpu_index);
     crate::interrupts::init_idt();
-
-    // Initialize this AP's local APIC.
     init_lapic();
 
-    // Set up per-CPU data
-    let cpu_index = CPUS_STARTED.fetch_add(1, Ordering::Relaxed);
+    let mut kernel_rsp: u64 = 0;
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        core::arch::asm!("mov {}, rsp", out(reg) kernel_rsp, options(nostack));
+    }
+    crate::usermode::program_ap_gs(cpu_index, apic_id, kernel_rsp);
+
+    let mut tr: u16 = 0;
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        core::arch::asm!("str {0:x}", out(reg) tr, options(nostack, nomem));
+    }
+    AP_TSS_SEL.store(tr as u32, Ordering::SeqCst);
+
     {
         let mut cpus = CPU_DATA.lock();
         if (cpu_index as usize) < MAX_CPUS {
@@ -1594,6 +1607,54 @@ pub fn timer_interrupt() {
     }
 }
 
+pub const GATE_I1_MARKER: &str = "GATE_I1 smp online";
+
+/// Prove GS is per-CPU, the BSP TSS is loaded, and at least one AP came up
+/// with its own TSS (QEMU `-smp 2`).
+pub fn smp_self_test() -> bool {
+    let gs = crate::usermode::gs_base();
+    let expected_gs = crate::usermode::cpu_local_ptr(0) as u64;
+    let cpu = crate::usermode::current_cpu_index();
+    let mut tr: u16 = 0;
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        core::arch::asm!("str {0:x}", out(reg) tr, options(nostack, nomem));
+    }
+    let bsp_sel = crate::gdt::tss_selector(0).0;
+    let online = online_cpus();
+    let ap_tr = AP_TSS_SEL.load(Ordering::SeqCst) as u16;
+    let ap_sel = crate::gdt::tss_selector(1).0;
+
+    let gs_ok = gs == expected_gs && cpu == 0;
+    let tss_ok = tr == bsp_sel && bsp_sel != 0;
+    let ap_ok = online >= 2 && ap_tr == ap_sel && ap_sel != 0 && ap_sel != bsp_sel;
+
+    if gs_ok && tss_ok && ap_ok {
+        serial_println!(
+            "[SMP] {} (online={} gs={:#x} tr={:#x} ap_tr={:#x})",
+            GATE_I1_MARKER,
+            online,
+            gs,
+            tr,
+            ap_tr
+        );
+        true
+    } else {
+        serial_println!(
+            "[SMP] Gate I1 FAILED: online={} gs={:#x}/{:#x} cpu={} tr={:#x}/{:#x} ap_tr={:#x}/{:#x}",
+            online,
+            gs,
+            expected_gs,
+            cpu,
+            tr,
+            bsp_sel,
+            ap_tr,
+            ap_sel
+        );
+        false
+    }
+}
+
 /// Initialize APIC and SMP subsystem
 pub fn init(phys_mem_offset: u64) {
     PHYS_OFFSET.store(phys_mem_offset, Ordering::Relaxed);
@@ -1690,4 +1751,5 @@ pub fn init(phys_mem_offset: u64) {
         CPUS_STARTED.load(Ordering::Relaxed)
     );
     serial_println!("[APIC]   I/O APIC: enabled, PIC: masked");
+    let _ = smp_self_test();
 }

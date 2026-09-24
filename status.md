@@ -65,13 +65,16 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 18. **Gate F1–F4 isolated clients** — Ring 3 program mmaps a 64×64 BGRA buffer, `ioctl(/dev/wl0)` presents it; compositor SHM round-trips the pixels (`GATE_F1 client isolated`, `GATE_F2 shm commit`). A Ring 3 terminal client presents as Empty+SHM, not `WindowContentType::Terminal` (`GATE_F3 terminal isolated`). Empty launcher stubs are gone; Paint is a Ring 3 SHM client (`GATE_F4 launcher userspace`).
 19. **Gate H1–H4** — CoW write-fault copies (H1); file-backed mmap faults one page (H2); inotify sees VFS write/unlink (H3); guarded kernel stack + OOM from empty buddy pool (H4).
 20. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
+21. **Gate I1 SMP online** — per-CPU TSS + GS-relative `CpuLocal`; AP INIT/SIPI reaches 64-bit, loads its own TSS, then `HLT` (`GATE_I1 smp online`).
+22. **Gate I2 IRQ GPRs** — naked APIC-timer stub saves all GPRs + FXSAVE; spinner `rbx` magic survives preemption (`GATE_I2 irq gprs`).
 
 ### Architectural blockers (must fix first)
 
 | Blocker | Evidence | Why it blocks a perfect OS |
 |---------|----------|----------------------------|
 | **Scheduled Ring 3** | Hello is a CFS task with its own CR3; `execve`/`waitpid`/`fork`/`/bin/sh` run on the boot path. | Desktop apps other than the Gate F demo are still in-kernel. |
-| **Ring 3 timer preemption** | APIC timer saves the IRET frame and `enter_context`s the next task (`GATE_B8 timer preempt complete`). | Done for the spinning-user case. FPU/GPR save from IRQ is still incomplete. |
+| **Ring 3 timer preemption** | Naked APIC-timer stub saves GPRs + FXSAVE then `enter_context`s (`GATE_B8` + `GATE_I2 irq gprs`). | Done for the spinning-user case. |
+| **SMP** | INIT/SIPI trampoline; AP loads per-CPU TSS + GS and `HLT`s (`GATE_I1 smp online`). | APs do not yet run Ring 3 tasks. |
 | **Signal frames for handlers** | Default terminate plus a live SIGINT handler + `rt_sigreturn` (B7). | Catching SIGINT in a user handler is done. |
 | **Sockets do not transmit off-box** | Loopback `send` delivers to a peer `recv_buf`. VirtIO-net TX/RX rings are live (D2). DHCP writes `eth0`. DNS + TCP SYN/retransmit/HTTP are live (D4). CUBIC cwnd limits send (D5). | Off-box TCP is live; CUBIC is wired. |
 | **AHCI and NVMe DMA are live** | AHCI command-list + PRDT round-trips a sector (C4). NVMe admin/I/O queues + PRP bounce round-trip a sector (C5). | Bare-metal beyond QEMU still unproven. |
@@ -103,9 +106,9 @@ Percentages are **production usefulness**, not lines of code.
 
 | # | Subsystem | Grade | Live % | Priority | One-line truth |
 |---|-----------|-------|--------|----------|----------------|
-| 1 | Kernel Core | Wired | 70% | High | Interrupts and timers work; GS base set; NMI/MCE handlers; MADT IOAPIC + ISO; firmware cmdline. |
+| 1 | Kernel Core | Wired | 78% | High | Interrupts and timers work; GS-relative CpuLocal; per-CPU TSS; MADT IOAPIC + ISO; AP online then HLT. |
 | 2 | Memory Management | Wired | 58% | **Critical** | Demand paging + CoW #PF (H1) + file-backed fault-in (H2); OOM on frame alloc; guarded kernel stacks (H4). |
-| 3 | Process & Scheduling | Wired | 66% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B7** scheduled Ring 3, `execve`/`waitpid`/`fork`/`/bin/sh`, SIGKILL/SIGSEGV/PTY SIGINT, live `rt_sigreturn`. |
+| 3 | Process & Scheduling | Wired | 72% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B8** scheduled Ring 3; IRQ GPR+FPU save (I2). |
 | 4 | Filesystem & Storage | Wired | 72% | **Critical** | VirtIO-blk + persist C1–C6 + AHCI/NVMe DMA; inotify on VFS mutate (H3). |
 | 5 | Networking | Wired | 64% | **Critical** | Loopback live; VirtIO-net D2; DHCP applies eth0 (D3); DNS + TCP SYN/RTO/HTTP (D4); CUBIC cwnd (D5). |
 | 6 | Device Drivers | Wired | 40% | **Critical** | PCI, PS/2, UART, VirtIO-blk, AHCI DMA, NVMe DMA live; USB/GPU mostly stub. |
@@ -118,18 +121,18 @@ Percentages are **production usefulness**, not lines of code.
 | 13 | Binary Compatibility | Wired | 45% | **Critical** | Static hello `iretq`s; `execve`/`fork`/`/bin/sh`; live `rt_sigaction` + `rt_sigreturn`. |
 | 14 | Internationalization & Fonts | Live | 68% | Low | TTF, CJK, RTL on the compositor; locale loading partial. |
 | 15 | Build System & Tooling | Live | 75% | Medium | Make/QEMU work; `flake.nix` missing. |
-| 16 | Testing & Quality | Wired | 44% | **Critical** | Real VFS/widget/DNS/buddy tests; C4–C6/D3–D5/E1–E4/F2–F4/H1–H4 self-tests; `assert!(true)` tests removed. |
-| 17 | Documentation | Wired | 35% | **Critical** | README + LICENSE + this file. Architecture guides still missing. |
+| 16 | Testing & Quality | Wired | 46% | **Critical** | Real VFS/widget/DNS/buddy tests; C4–C6/D3–D5/E1–E4/F2–F4/H1–H4/I1–I2 self-tests; `assert!(true)` tests removed. |
+| 17 | Documentation | Wired | 42% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + this file. Architecture guides still missing. |
 | 18 | CI/CD & Release | Wired | 30% | High | `.github/workflows/ci.yml` (fmt, clippy, size, QEMU boot); no signed releases. |
 
-**QEMU desktop demo readiness: ~86%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B8 scheduled userspace; Gate D1–D5 packets; Gate C1–C6 storage; Gate E1–E4 enforcement; Gate F1–F4 isolated clients; Gate H1–H4 memory/VFS).
-**Production OS readiness: ~67%** (Gate B2–B8, C1–C6, D1–D5, E1–E4, F1–F4, H1–H4). `./tests/run_integration.sh` **43/43** on QEMU (2026-09-25).
+**QEMU desktop demo readiness: ~87%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B8 scheduled userspace; Gate D1–D5 packets; Gate C1–C6 storage; Gate E1–E4 enforcement; Gate F1–F4 isolated clients; Gate H1–H4 memory/VFS; Gate I1–I2 SMP + IRQ GPRs).
+**Production OS readiness: ~70%** (Gate B2–B8, C1–C6, D1–D5, E1–E4, F1–F4, H1–H4, I1–I2). `./tests/run_integration.sh` **45/45** on QEMU (2026-09-25).
 
 ---
 
 ## 1. Kernel Core
 
-**Grade: Wired (70%)** · `gdt.rs`, `interrupts.rs`, `smp.rs`, `apic_timer.rs`, `acpi_tables.rs`, `cmdline.rs`
+**Grade: Wired (78%)** · `gdt.rs`, `interrupts.rs`, `smp.rs`, `apic_timer.rs`, `acpi_tables.rs`, `cmdline.rs`
 
 ### Live
 - [x] GDT + TSS load on BSP (`gdt::init`)
@@ -146,8 +149,8 @@ Percentages are **production usefulness**, not lines of code.
 
 ### Wired but incomplete
 - [x] **IOAPIC** — MADT address + interrupt-source overrides applied after ACPI parse (IRQ0→GSI 2 on QEMU); all IRQs still to BSP
-- [ ] **SMP** — real INIT/SIPI trampoline 16→32→64; APs then `HLT`; `balance_load` never called; no per-AP TSS
-- [ ] **Per-CPU data** — `CPU_DATA` mutex array, not GS-relative (syscall GS scratch is programmed on BSP)
+- [x] **SMP** — real INIT/SIPI trampoline 16→32→64; AP loads per-CPU TSS + GS then `HLT` (`GATE_I1 smp online`); `balance_load` called from `deferred_schedule`
+- [x] **Per-CPU data** — GS-relative `CpuLocal` (`gs:[0]`/`gs:[8]` syscall scratch + `gs:[24]` cpu index); `CPU_DATA` mutex remains for stats
 - [x] **Command line** — real `key=value` parser; QEMU fw_cfg cmdline when present, else a documented default
 - [ ] **x86_64 / aarch64 / riscv64** — x86_64 boots; other arches compile with shims
 
@@ -162,7 +165,7 @@ Percentages are **production usefulness**, not lines of code.
 - [ ] **Nested IRQ / TPR** — not used from ISRs
 
 ### Perfect-OS next steps
-1. Per-CPU TSS + GS base + exception stacks before SMP is useful.
+1. ~~Per-CPU TSS + GS base + exception stacks before SMP is useful.~~ **Done** (I1) — each CPU has TSS + IST stacks; GS points at `CpuLocal`.
 2. ~~Wire MADT IOAPIC address and interrupt source overrides.~~ **Done** — `smp::apply_madt_ioapic` after ACPI parse.
 3. ~~Add NMI and MCE handlers that log and recover or panic cleanly.~~ **Done** — NMI logs; MCE panics.
 4. ~~Pass the real bootloader command line into `cmdline::parse`.~~ **Done** when fw_cfg has one; otherwise the documented default.
@@ -212,7 +215,7 @@ The real MMU work is in **`vmm.rs`**, not a buddy allocator.
 
 ## 3. Process & Scheduling
 
-**Grade: Wired (66%)** · `scheduler.rs`, `process.rs`, `context.rs`, `usermode.rs`, `signals.rs`, `user_task.rs`
+**Grade: Wired (72%)** · `scheduler.rs`, `process.rs`, `context.rs`, `usermode.rs`, `signals.rs`, `user_task.rs`
 
 Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate B3–B6 then run **scheduled** Ring 3 tasks with their own CR3: `execve`+`waitpid`, `fork`+child, SIGKILL/SIGSEGV/PTY SIGINT, and `/bin/sh` on a PTY.
 
@@ -234,15 +237,15 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 
 ### Stub (control plane)
 - [x] **Scheduled Ring 3** — `user_task::spawn_elf` builds a CFS task with its own CR3; boot path `execve`s `/bin/hello`, then `/bin/sh` on a PTY
-- [ ] **Preemption of userspace** — timer still defers to the executor; Ring 3 yields by syscall (`exit`/`wait`/`pause`)
+- [x] **Preemption of userspace** — naked APIC-timer stub saves GPRs + FXSAVE; spinner `rbx` magic survives (`GATE_I2 irq gprs`)
 - [x] **`wait4` blocking** — parks a Ring 3 parent until the child exits
-- [ ] **SMP load balance / affinity** — stored, not enforced; APs idle
+- [ ] **SMP load balance / affinity** — `enqueue_balanced` + `balance_load` from `deferred_schedule`; APs still `HLT` instead of running Ring 3
 - [ ] **sched_ext / eBPF** — not eBPF
 - [ ] **Threads** — metadata only; `thread_join` → EAGAIN
 
 ### Perfect-OS next steps (this is the critical path)
 1. ~~Save/restore full `iretq` frame + `fxsave`/`fxrstor` in `context.rs`.~~ (kernel threads done)
-2. ~~Per-CPU TSS RSP0 + `GS_BASE` / `KERNEL_GS_BASE`.~~ (BSP only; APs still share TSS)
+2. ~~Per-CPU TSS RSP0 + `GS_BASE` / `KERNEL_GS_BASE`.~~ **Done** (I1) — each CPU has a TSS; GS points at `CpuLocal`.
 3. ~~First userspace: map a static `hello` ELF, `iretq`, `sys_write` to serial, `sys_exit`.~~ (Gate B2)
 4. Then `fork` + `execve` + `waitpid` + SIGCHLD + Ctrl+C via PTY. **B3–B7 wired on the boot path.** Isolated GUI clients (Gate F) have a first SHM client; the in-kernel terminal remains.
 
@@ -573,12 +576,12 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 
 ## 16. Testing & Quality
 
-**Grade: Wired (44%)**
+**Grade: Wired (46%)**
 
 ### Exists
 - [x] `#[test_case]` framework + QEMU exit ports
 - [x] Real tests: VFS read/write, allocator Box/Vec, some path tests (~subset of 103 `#[test_case]`)
-- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C6 / D1–D5 / E1–E4 / F1–F4 / H1–H4 markers
+- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C6 / D1–D5 / E1–E4 / F1–F4 / H1–H4 / I1–I2 markers
 
 ### Harmful
 - [x] **`assert!(true)` tests removed** — widgets, VFS stress, DNS, TCP flags, creds, buddy, path normalize are real assertions
@@ -596,14 +599,14 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 
 ## 17. Documentation
 
-**Grade: Wired (35%)**
+**Grade: Wired (42%)**
 
 | Artifact | Status |
 |----------|--------|
 | `status.md` | This file (updated 2026-09-25) |
 | `README.md` | Present — honesty paragraph, `./run.sh`, architecture sketch |
 | `LICENSE` | MIT |
-| `BUILDING.md` / `CONTRIBUTING.md` | Missing |
+| `BUILDING.md` / `CONTRIBUTING.md` | Present |
 | Architecture / syscall / driver / GUI guides | Missing |
 | `cargo doc` published | Missing |
 | Changelog | Missing |
@@ -711,6 +714,13 @@ This **is** becoming an OS.
 | H3 | inotify from VFS | **Done** — write/unlink emit events a watch can read (`GATE_H3 inotify`) |
 | H4 | Guarded stacks + OOM on alloc | **Done** — unmapped guard page allocated; empty buddy pool calls `trigger_oom` (`GATE_H4 guard oom`) |
 
+### Gate I — Per-CPU + SMP + IRQ context (after H)
+
+| ID | Task | Done when |
+|----|------|-----------|
+| I1 | Per-CPU TSS + GS `CpuLocal`; AP online | **Done** — BSP `str` matches TSS[0]; GS_BASE → `CpuLocal[0]`; AP loads a distinct TSS (`GATE_I1 smp online`) |
+| I2 | IRQ saves GPRs + FXSAVE | **Done** — spinner `mov rbx, magic; jmp $`; after timer preempt, saved `rbx` and FXSAVE area are live (`GATE_I2 irq gprs`) |
+
 ### Gate G — Quality bar (parallel from day one)
 
 | ID | Task | Done when |
@@ -744,12 +754,12 @@ Do not:
 
 ## Progress tracker
 
-**Production OS: ~67%** · **QEMU desktop demo: ~86%**
+**Production OS: ~70%** · **QEMU desktop demo: ~87%**
 
 ```
-Kernel Core:        █████████████████░░░░░░░░  70%  Wired         ← NMI/MCE + MADT IOAPIC
+Kernel Core:        ███████████████████░░░░░░  78%  Wired         ← I1 per-CPU TSS + GS + AP
 Memory Mgmt:        ██████████████░░░░░░░░░░░  58%  Wired         ← H1–H4 CoW/mmap/OOM/guards
-Process/Sched:      ████████████████░░░░░░░░░  66%  Wired          ← B3–B8 live
+Process/Sched:      ██████████████████░░░░░░░  72%  Wired         ← B3–B8 + I2 IRQ GPRs
 Filesystem:         ██████████████████░░░░░░░  72%  Wired         ← C1–C6 + inotify H3
 Networking:         ████████████████░░░░░░░░░  64%  Wired         ← D1–D5
 Device Drivers:     ██████████░░░░░░░░░░░░░░░  40%  Wired         ← AHCI + NVMe DMA
@@ -762,26 +772,28 @@ AI/ML:              █████░░░░░░░░░░░░░░░
 Binary Compat:      ███████████░░░░░░░░░░░░░░  45%  Wired        ← execve + fork + sigreturn
 i18n & Fonts:       █████████████████░░░░░░░░  68%  Live
 Build System:       ███████████████████░░░░░░  75%  Live
-Testing:            ███████████░░░░░░░░░░░░░░  44%  Wired         ← 43/43 integration
-Documentation:      ████████░░░░░░░░░░░░░░░░░  35%  Wired
+Testing:            ███████████░░░░░░░░░░░░░░  46%  Wired         ← 45/45 integration
+Documentation:      ██████████░░░░░░░░░░░░░░░  42%  Wired         ← BUILDING + CONTRIBUTING
 CI/CD:              ███████░░░░░░░░░░░░░░░░░░  30%  Wired
+```
+
 ```
 
 ### Score change vs 2026-03-15
 
 | Subsystem | Old | Now | Why |
 |-----------|-----|-----|-----|
-| Kernel Core | 95% | 70% | NMI/MCE handlers; MADT IOAPIC + ISO; firmware cmdline; APs still idle |
-| Process | 90% | 66% | Gate B3–B8 scheduled Ring 3; `execve`/`waitpid`/`fork`/`/bin/sh`; live `sigreturn` |
+| Kernel Core | 95% | 78% | Per-CPU TSS + GS CpuLocal; AP INIT/SIPI online (I1); NMI/MCE; MADT IOAPIC |
+| Process | 90% | 72% | Gate B3–B8 scheduled Ring 3; IRQ GPR+FPU save (I2) |
 | Binary compat | 40% | 45% | Static hello + scheduled `execve`/`fork` + `/bin/sh` + `rt_sigreturn`; 452 numbers still ≠ 452 behaviors |
 | Memory | — | 58% | H1 CoW #PF; H2 file-backed fault-in; H4 OOM-on-alloc + guarded stacks |
 | Filesystem | 35% | 72% | VirtIO-blk + C1–C6 + inotify on VFS mutate (H3) |
 | GUI | 85% | 82% | Ring 3 SHM clients (F1–F4); remaining apps still in-process |
 | Shell | 90% | 82% | PTY/glob/env real; Ring 3 `/bin/sh`; live `sigreturn`; desktop terminal still in-kernel for PTY I/O |
-| Docs / CI | 10% / 25% | 35% / 30% | README, LICENSE, GitHub Actions present; flake still missing |
+| Docs / CI | 10% / 25% | 42% / 30% | README, LICENSE, BUILDING, CONTRIBUTING, GitHub Actions; flake still missing |
 | Networking | 22% | 64% | D1 loopback; D2 VirtIO-net; D3 DHCP apply; D4 DNS+TCP; D5 CUBIC |
 | Security | 15% | 42% | E1 W^X/ASLR; E2 ChaCha20; E3 seccomp EPERM; E4 CapNetBindService |
-| **Overall production** | **~40%** | **~67%** | Gates B3–B8 + C1–C6 + D1–D5 + E1–E4 + F1–F4 + H1–H4 on the live boot path |
+| **Overall production** | **~40%** | **~70%** | Gates B3–B8 + C1–C6 + D1–D5 + E1–E4 + F1–F4 + H1–H4 + I1–I2 on the live boot path |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates to this file should tick **Gate** IDs, not module counts.
 

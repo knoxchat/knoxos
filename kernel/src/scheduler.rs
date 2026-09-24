@@ -494,8 +494,9 @@ pub fn user_preempt_count() -> u64 {
 /// If the timer interrupted Ring 3 and the slice expired, switch away.
 ///
 /// Must be called after EOI. Never returns when a switch is performed.
-pub fn maybe_preempt_user(rip: u64, cs: u64, rflags: u64, rsp: u64, ss: u64) {
-    if cs & 3 != 3 {
+/// `frame` is the naked IRQ stub's saved GPRs + IRET frame (kernel GS live).
+pub fn maybe_preempt_user(frame: &crate::context::IrqFrame) {
+    if frame.cs & 3 != 3 {
         return;
     }
     if !is_preemption_enabled() {
@@ -514,11 +515,7 @@ pub fn maybe_preempt_user(rip: u64, cs: u64, rflags: u64, rsp: u64, ss: u64) {
         return;
     };
     if let Some(pc) = contexts.iter_mut().find(|pc| pc.pid == current) {
-        pc.context.rip = rip;
-        pc.context.rsp = rsp;
-        pc.context.rflags = rflags | 0x200;
-        pc.context.cs = cs;
-        pc.context.ss = ss;
+        pc.context.apply_irq_frame(frame);
     }
     let desktop_ok = contexts
         .iter()
@@ -560,7 +557,7 @@ pub fn maybe_preempt_user(rip: u64, cs: u64, rflags: u64, rsp: u64, ss: u64) {
         "[sched] preempt user {} -> {} rip={:#x}",
         current,
         next,
-        rip
+        frame.rip
     );
     crate::context::set_current_pid(next);
     crate::context::program_kernel_stack(next);
@@ -579,6 +576,7 @@ pub fn deferred_schedule() {
         return;
     }
     CURRENT_TIME_SLICE.store(DEFAULT_TIME_SLICE, Ordering::Relaxed);
+    crate::smp::balance_load();
 
     let current = crate::context::current_pid();
     crate::signals::deliver_signals(current);

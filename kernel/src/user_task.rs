@@ -373,6 +373,8 @@ pub const GATE_D1_MARKER: &str = "GATE_D1 loopback complete";
 pub const GATE_B7_MARKER: &str = "GATE_B7 sigreturn complete";
 /// Timer IRQ switched a spinning Ring 3 task that never syscalled.
 pub const GATE_B8_MARKER: &str = "GATE_B8 timer preempt complete";
+/// Timer IRQ saved user GPRs + FXSAVE (spinner RBX magic survived).
+pub const GATE_I2_MARKER: &str = "GATE_I2 irq gprs";
 /// Ring 3 client presented a buffer; not an in-kernel WindowContentType app.
 pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
 
@@ -607,6 +609,30 @@ fn run_gate_b8() {
         crate::apic_timer::total_ticks()
     );
     let preempts = crate::scheduler::user_preempt_count().saturating_sub(before);
+
+    let snap = crate::context::snapshot(spinner);
+    let gpr_ok = snap
+        .as_ref()
+        .map(|c| {
+            c.rbx == crate::init::SPIN_RBX_MAGIC
+                && c.fpu_initialized
+                && c.fxsave_area.iter().any(|&b| b != 0)
+        })
+        .unwrap_or(false);
+    if gpr_ok {
+        serial_println!(
+            "[user_task] {} (rbx={:#x} fxsave)",
+            GATE_I2_MARKER,
+            crate::init::SPIN_RBX_MAGIC
+        );
+    } else {
+        let rbx = snap.map(|c| c.rbx).unwrap_or(0);
+        serial_println!(
+            "[user_task] Gate I2 FAILED: spinner rbx={:#x} want={:#x}",
+            rbx,
+            crate::init::SPIN_RBX_MAGIC
+        );
+    }
 
     // Spinner never exits; kill it so it cannot steal the CPU again.
     terminate(spinner, -(crate::signals::Signal::SIGKILL as i32));

@@ -187,6 +187,8 @@ check_marker "GATE_H1 cow fault"
 check_marker "GATE_H2 mmap fault"
 check_marker "GATE_H3 inotify"
 check_marker "GATE_H4 guard oom"
+check_marker "GATE_I1 smp online"
+check_marker "GATE_I2 irq gprs"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

@@ -14,6 +14,9 @@ use pic8259::ChainedPics;
 #[cfg(target_arch = "x86_64")]
 use spin::Mutex;
 #[cfg(target_arch = "x86_64")]
+#[cfg(target_arch = "x86_64")]
+use x86_64::VirtAddr;
+#[cfg(target_arch = "x86_64")]
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 #[cfg(target_arch = "x86_64")]
@@ -89,8 +92,12 @@ lazy_static! {
         idt[InterruptIndex::PrimaryATA.as_u8()].set_handler_fn(ata_irq_handler);
         idt[InterruptIndex::SecondaryATA.as_u8()].set_handler_fn(ata_irq_handler);
 
-        // APIC timer vector (0x40 = 64) — per-core preemption timer
-        idt[crate::apic_timer::TIMER_VECTOR].set_handler_fn(apic_timer_interrupt_handler);
+        // APIC timer vector (0x40 = 64) — naked stub saves GPRs + FXSAVE on preempt
+        unsafe {
+            idt[crate::apic_timer::TIMER_VECTOR].set_handler_addr(VirtAddr::new(
+                apic_timer_interrupt_naked as *const () as u64,
+            ));
+        }
 
         idt
     };
@@ -411,31 +418,75 @@ extern "x86-interrupt" fn virtio_irq_handler(_stack_frame: InterruptStackFrame) 
 
 // ─── APIC Timer IRQ Handler (vector 0x40) ────────────────────────────
 
+/// Naked stub: save every GPR on top of the hardware IRET frame, swapgs if
+/// the interrupted CS was Ring 3, then hand a [`crate::context::IrqFrame`]
+/// to Rust. `iretq` restores the frame if we do not switch tasks.
+#[unsafe(naked)]
 #[cfg(target_arch = "x86_64")]
-extern "x86-interrupt" fn apic_timer_interrupt_handler(stack_frame: InterruptStackFrame) {
-    crate::apic_timer::handle_interrupt();
+unsafe extern "C" fn apic_timer_interrupt_naked() {
+    core::arch::naked_asm!(
+        "push r15",
+        "push r14",
+        "push r13",
+        "push r12",
+        "push r11",
+        "push r10",
+        "push r9",
+        "push r8",
+        "push rbp",
+        "push rdi",
+        "push rsi",
+        "push rdx",
+        "push rcx",
+        "push rbx",
+        "push rax",
+        // CS is IrqFrame.cs at offset 128.
+        "mov rax, [rsp + 128]",
+        "and rax, 3",
+        "jz 2f",
+        "swapgs",
+        "2:",
+        "cld",
+        "sub rsp, 8",
+        "lea rdi, [rsp + 8]",
+        "call {}",
+        "add rsp, 8",
+        "mov rax, [rsp + 128]",
+        "and rax, 3",
+        "jz 3f",
+        "swapgs",
+        "3:",
+        "pop rax",
+        "pop rbx",
+        "pop rcx",
+        "pop rdx",
+        "pop rsi",
+        "pop rdi",
+        "pop rbp",
+        "pop r8",
+        "pop r9",
+        "pop r10",
+        "pop r11",
+        "pop r12",
+        "pop r13",
+        "pop r14",
+        "pop r15",
+        "iretq",
+        sym apic_timer_irq_inner,
+    );
+}
 
-    let cs = stack_frame.code_segment.0 as u64;
-    if cs & 3 != 3 {
+#[cfg(target_arch = "x86_64")]
+extern "C" fn apic_timer_irq_inner(frame: &crate::context::IrqFrame) {
+    crate::apic_timer::handle_interrupt();
+    if frame.cs & 3 != 3 {
         return;
     }
-    // Hardware IRQs do not swapgs. Kernel GS must be live before we touch
-    // per-CPU state or `enter_context` (which swapgs's again on the way to
-    // Ring 3). If we return, restore user GS for `iretq`.
-    unsafe {
-        core::arch::asm!("swapgs", options(nomem, nostack));
-    }
-    crate::scheduler::maybe_preempt_user(
-        stack_frame.instruction_pointer.as_u64(),
-        cs,
-        stack_frame.cpu_flags.bits(),
-        stack_frame.stack_pointer.as_u64(),
-        stack_frame.stack_segment.0 as u64,
-    );
-    unsafe {
-        core::arch::asm!("swapgs", options(nomem, nostack));
-    }
+    crate::scheduler::maybe_preempt_user(frame);
 }
+
+#[cfg(not(target_arch = "x86_64"))]
+extern "C" fn apic_timer_interrupt_naked() {}
 
 // ─── ATA Disk IRQ Handler (IRQ 14 / 15) ─────────────────────────────
 

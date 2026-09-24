@@ -311,11 +311,18 @@ pub fn fork_userspace_elf_data() -> Vec<u8> {
     ])
 }
 
+/// Magic RBX the Gate I2 spinner loads before `jmp $`.
+pub const SPIN_RBX_MAGIC: u64 = 0x0123_4567_89AB_CDEF;
+
 /// Infinite `jmp $` — never syscalls, so only a timer can switch it out.
+/// Loads a distinctive RBX so IRQ preemption can prove GPR save (Gate I2).
 pub fn spin_userspace_elf_data() -> Vec<u8> {
-    // Infinite `jmp $` — never syscalls; only a timer can switch it out.
+    // mov rbx, SPIN_RBX_MAGIC; jmp $
     // Do not `sti` here: Ring 3 STI #GPs unless IOPL=3.
-    build_static_user_elf(&[0xEB, 0xFE])
+    build_static_user_elf(&[
+        0x48, 0xBB, 0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01, // mov rbx, magic
+        0xEB, 0xFE, // jmp $
+    ])
 }
 
 /// Write `preempt writer ran` then `exit(0)`.

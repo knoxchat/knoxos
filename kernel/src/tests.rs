@@ -1534,6 +1534,23 @@ mod security_tests {
     }
 
     #[test_case]
+    fn test_percpu_gs_layout() {
+        assert_eq!(
+            core::mem::offset_of!(crate::usermode::CpuLocal, user_rsp),
+            0
+        );
+        assert_eq!(
+            core::mem::offset_of!(crate::usermode::CpuLocal, kernel_rsp),
+            8
+        );
+        assert_eq!(
+            core::mem::offset_of!(crate::usermode::CpuLocal, cpu_index),
+            24
+        );
+        assert_eq!(core::mem::size_of::<crate::context::IrqFrame>(), 160);
+    }
+
+    #[test_case]
     fn test_wayland_shm_pool_roundtrip() {
         assert!(
             crate::wayland::shm_pool_self_test(),

@@ -35,21 +35,105 @@ const MSR_KERNEL_GS_BASE: u32 = 0xC000_0102;
 
 /// Per-CPU GS scratch used by `syscall_entry` (`swapgs` then gs:[0]/gs:[8]).
 ///
-/// `user_rip` (offset 16) is the Ring 3 resume point the CPU put in RCX; it is
-/// stashed here because a handler that blocks the task (`wait4`) needs it long
-/// after the register was reused.
-#[repr(C)]
-struct SyscallGs {
-    user_rsp: u64,
-    kernel_rsp: u64,
-    user_rip: u64,
+/// Layout is ABI for the naked syscall stub — do not reorder the first three
+/// fields. `user_rip` (offset 16) is the Ring 3 resume point the CPU put in
+/// RCX; it is stashed here because a handler that blocks the task (`wait4`)
+/// needs it long after the register was reused.
+///
+/// `cpu_index` lives at offset 24 so `current_cpu_index` can read `gs:[24]`
+/// without taking the old `CPU_DATA` mutex.
+#[repr(C, align(64))]
+#[derive(Clone, Copy)]
+pub struct CpuLocal {
+    pub user_rsp: u64,
+    pub kernel_rsp: u64,
+    pub user_rip: u64,
+    pub cpu_index: u32,
+    pub apic_id: u32,
 }
 
-static mut SYSCALL_GS: SyscallGs = SyscallGs {
+const _: () = {
+    assert!(core::mem::offset_of!(CpuLocal, user_rsp) == 0);
+    assert!(core::mem::offset_of!(CpuLocal, kernel_rsp) == 8);
+    assert!(core::mem::offset_of!(CpuLocal, user_rip) == 16);
+    assert!(core::mem::offset_of!(CpuLocal, cpu_index) == 24);
+};
+
+const CPU_LOCAL_COUNT: usize = crate::gdt::MAX_CPUS;
+
+static mut CPU_LOCAL: [CpuLocal; CPU_LOCAL_COUNT] = [CpuLocal {
     user_rsp: 0,
     kernel_rsp: 0,
     user_rip: 0,
-};
+    cpu_index: 0,
+    apic_id: 0,
+}; CPU_LOCAL_COUNT];
+
+static GS_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Pointer to this CPU's GS block (valid after [`init_syscall`] / [`program_ap_gs`]).
+pub fn cpu_local_ptr(cpu: usize) -> *mut CpuLocal {
+    let cpu = cpu.min(CPU_LOCAL_COUNT - 1);
+    // SAFETY: `CPU_LOCAL` is never relocated; each CPU writes only its slot.
+    unsafe { core::ptr::addr_of_mut!(CPU_LOCAL[cpu]) }
+}
+
+/// CPU index from `gs:[24]`, or 0 before GS is programmed.
+pub fn current_cpu_index() -> u32 {
+    if !GS_READY.load(core::sync::atomic::Ordering::Acquire) {
+        return 0;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        let idx: u32;
+        unsafe {
+            core::arch::asm!(
+                "mov {:e}, dword ptr gs:[24]",
+                out(reg) idx,
+                options(nostack, preserves_flags)
+            );
+        }
+        if (idx as usize) < CPU_LOCAL_COUNT {
+            idx
+        } else {
+            0
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        0
+    }
+}
+
+/// Kernel GS_BASE currently loaded on this CPU.
+pub fn gs_base() -> u64 {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        rdmsr(MSR_GS_BASE)
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        0
+    }
+}
+
+/// Program GS on an Application Processor. Offsets 0/8/16 stay syscall ABI.
+pub fn program_ap_gs(cpu_index: u32, apic_id: u32, kernel_rsp: u64) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        let cpu = (cpu_index as usize).min(CPU_LOCAL_COUNT - 1);
+        let slot = cpu_local_ptr(cpu);
+        (*slot).cpu_index = cpu_index;
+        (*slot).apic_id = apic_id;
+        (*slot).kernel_rsp = kernel_rsp;
+        crate::gdt::set_privilege_stack_top_cpu(cpu, kernel_rsp);
+        wrmsr(MSR_GS_BASE, slot as u64);
+        wrmsr(MSR_KERNEL_GS_BASE, 0);
+        GS_READY.store(true, core::sync::atomic::Ordering::Release);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = (cpu_index, apic_id, kernel_rsp);
+}
 
 /// EFER bits
 const EFER_SCE: u64 = 1 << 0; // System Call Extensions enable
@@ -83,15 +167,20 @@ pub fn init_syscall() {
         wrmsr(MSR_SFMASK, 0x200 | 0x100); // IF | TF
 
         // Kernel GS: syscall_entry does swapgs then gs:[0]=user RSP, gs:[8]=kernel RSP.
-        // In kernel, GS_BASE points at SYSCALL_GS. KERNEL_GS_BASE is the user GS (0).
-        // jump_to_user_mode swapgs's before iretq so syscall's swapgs is correct.
-        SYSCALL_GS.kernel_rsp = crate::gdt::privilege_stack_top();
-        wrmsr(MSR_GS_BASE, core::ptr::addr_of!(SYSCALL_GS) as u64);
+        // In kernel, GS_BASE points at this CPU's CpuLocal. KERNEL_GS_BASE is the
+        // user GS (0). jump_to_user_mode swapgs's before iretq so syscall's swapgs
+        // is correct.
+        let slot = cpu_local_ptr(0);
+        (*slot).cpu_index = 0;
+        (*slot).apic_id = 0;
+        (*slot).kernel_rsp = crate::gdt::privilege_stack_top();
+        wrmsr(MSR_GS_BASE, slot as u64);
         wrmsr(MSR_KERNEL_GS_BASE, 0);
+        GS_READY.store(true, core::sync::atomic::Ordering::Release);
     }
 
     serial_println!("[KnoxOS] syscall/sysret initialized for user-mode transitions");
-    serial_println!("[KnoxOS]   KERNEL_GS_BASE programmed (syscall swapgs-safe)");
+    serial_println!("[KnoxOS]   GS_BASE → CpuLocal[0] (syscall swapgs-safe)");
 }
 
 /// Read a Model-Specific Register
@@ -258,7 +347,7 @@ fn syscall_redirect_dispatch() {
 pub fn current_user_rsp() -> u64 {
     #[cfg(target_arch = "x86_64")]
     {
-        // SAFETY: `gs` points at SYSCALL_GS while executing in the kernel.
+        // SAFETY: `gs` points at this CPU's CpuLocal while executing in the kernel.
         let rsp: u64;
         unsafe {
             core::arch::asm!(
@@ -280,7 +369,7 @@ pub fn current_user_rsp() -> u64 {
 pub fn pending_user_rip() -> u64 {
     #[cfg(target_arch = "x86_64")]
     {
-        // SAFETY: `gs` points at SYSCALL_GS while executing in the kernel.
+        // SAFETY: `gs` points at this CPU's CpuLocal while executing in the kernel.
         let rip: u64;
         unsafe {
             core::arch::asm!(
@@ -318,7 +407,8 @@ pub fn set_kernel_stack(top: u64) {
     #[cfg(target_arch = "x86_64")]
     unsafe {
         crate::gdt::set_privilege_stack_top(top);
-        SYSCALL_GS.kernel_rsp = top;
+        let slot = cpu_local_ptr(current_cpu_index() as usize);
+        (*slot).kernel_rsp = top;
     }
     #[cfg(not(target_arch = "x86_64"))]
     let _ = top;
