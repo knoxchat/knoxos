@@ -8,7 +8,7 @@ use alloc::format;
 ///   - Downstream device enumeration through hub ports
 ///   - Hub depth tracking for nested topology
 ///
-/// Integrates with the main xHCI driver in usb.rs for device enumeration.
+/// Integrates with the main xHCI driver in the usb module for device enumeration.
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
