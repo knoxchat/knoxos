@@ -821,6 +821,7 @@ pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
         }
     }
     let mut vfs = VFS.lock();
+    let existed = vfs.resolve_path(path).is_some();
     let ok = vfs.write_file(path, data);
     let (ino, perms) = vfs
         .resolve_path(path)
@@ -838,6 +839,13 @@ pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
             crate::page_cache::register_inode(ino, path);
             crate::page_cache::set_file_size(ino, data.len() as u64);
         }
+        let name = path.rsplit('/').next().filter(|s| !s.is_empty());
+        let mask = if existed {
+            crate::inotify::IN_MODIFY
+        } else {
+            crate::inotify::IN_CREATE
+        };
+        crate::inotify::emit_event(path, mask, name);
     }
     ok
 }
@@ -899,7 +907,13 @@ pub fn remove_dispatch(path: &str) -> Result<(), i32> {
         crate::page_cache::unregister_inode(ino);
     }
     let mut vfs = VFS.lock();
-    vfs.unlink(path)
+    let result = vfs.unlink(path);
+    drop(vfs);
+    if result.is_ok() {
+        let name = path.rsplit('/').next().filter(|s| !s.is_empty());
+        crate::inotify::emit_event(path, crate::inotify::IN_DELETE, name);
+    }
+    result
 }
 
 /// Create a symbolic link

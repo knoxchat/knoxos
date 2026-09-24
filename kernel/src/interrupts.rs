@@ -72,6 +72,8 @@ lazy_static! {
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         idt.stack_segment_fault
             .set_handler_fn(stack_segment_fault_handler);
+        idt.non_maskable_interrupt.set_handler_fn(nmi_handler);
+        idt.machine_check.set_handler_fn(machine_check_handler);
 
         // Hardware interrupt handlers
         idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
@@ -118,6 +120,17 @@ extern "x86-interrupt" fn double_fault_handler(
 ) -> ! {
     serial_println!("[EXCEPTION] DOUBLE FAULT\n{:#?}", stack_frame);
     panic!("DOUBLE FAULT\n{:#?}", stack_frame);
+}
+
+#[cfg(target_arch = "x86_64")]
+extern "x86-interrupt" fn nmi_handler(stack_frame: InterruptStackFrame) {
+    serial_println!("[EXCEPTION] NMI\n{:#?}", stack_frame);
+}
+
+#[cfg(target_arch = "x86_64")]
+extern "x86-interrupt" fn machine_check_handler(stack_frame: InterruptStackFrame) -> ! {
+    serial_println!("[EXCEPTION] MACHINE CHECK\n{:#?}", stack_frame);
+    panic!("MACHINE CHECK\n{:#?}", stack_frame);
 }
 
 #[cfg(target_arch = "x86_64")]

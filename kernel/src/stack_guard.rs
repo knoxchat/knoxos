@@ -65,7 +65,9 @@ pub fn alloc_guarded_stack(pid: u64) -> Option<(u64, StackInfo)> {
     unmap_guard_page(guard_base);
 
     // Map the usable stack pages with RW + NX
-    map_stack_pages(stack_base, KERNEL_STACK_SIZE);
+    if !map_stack_pages(stack_base, KERNEL_STACK_SIZE) {
+        return None;
+    }
 
     let info = StackInfo {
         guard_base,
@@ -141,8 +143,10 @@ pub fn handle_stack_overflow(fault_addr: u64) {
 
 // ── Stack region management ──────────────────────────────────────────
 
-/// Base address for kernel stack allocations
-const STACK_REGION_BASE: u64 = 0x0000_7000_0000_0000;
+/// Base address for kernel stack allocations.
+/// Same L4 slot as the kernel heap (`0x4444_4444_0000`, L4 136) so new
+/// mappings are visible in every cloned user CR3.
+const STACK_REGION_BASE: u64 = 0x0000_4445_0000_0000;
 static NEXT_STACK_ADDR: AtomicU64 = AtomicU64::new(STACK_REGION_BASE);
 
 fn alloc_stack_region(size: usize) -> Option<u64> {
@@ -180,45 +184,29 @@ fn unmap_guard_page(addr: u64) {
 
 /// Map the usable stack pages with READ_WRITE and NO_EXECUTE flags.
 /// Allocates physical frames and creates page table entries for the
-/// stack region above the guard page.
-fn map_stack_pages(base: u64, size: usize) {
-    #[cfg(not(target_arch = "x86_64"))]
-    use crate::arch_compat::VirtAddr;
-    #[cfg(target_arch = "x86_64")]
-    use crate::arch_compat::structures::paging::VirtAddr;
-    #[cfg(not(target_arch = "x86_64"))]
-    use crate::arch_compat::structures::paging::{FrameAllocator, Mapper, Page, Size4KiB};
-    #[cfg(target_arch = "x86_64")]
-    use x86_64::structures::paging::{FrameAllocator, Mapper, Page, Size4KiB};
-
-    let phys_offset = crate::vmm::get_phys_mem_offset();
-    if phys_offset == 0 {
-        // VMM not initialized yet — stacks allocated before VMM init
-        // will use the kernel heap instead (which is already mapped).
-        return;
+/// stack region above the guard page. Uses the kernel CR3 so the mapping
+/// lands in the shared heap L4 slot.
+fn map_stack_pages(base: u64, size: usize) -> bool {
+    let cr3 = crate::vmm::get_kernel_cr3();
+    if cr3 == 0 || crate::vmm::get_phys_mem_offset() == 0 {
+        return false;
     }
-
-    // Map each 4KiB page in the stack region
-    let start_page = Page::<Size4KiB>::containing_address(VirtAddr::new(base));
-    let end_page = Page::<Size4KiB>::containing_address(VirtAddr::new(base + size as u64 - 1));
 
     let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;
-
-    for page in Page::range_inclusive(start_page, end_page) {
-        // Try to get a frame from the VMM frame pool
-        if let Some(phys_addr) = crate::vmm::allocate_physical_frame() {
-            unsafe {
-                // Map using the kernel's current CR3 page table
-                let (cr3_frame, _) = crate::arch_compat::registers::control::Cr3::read();
-                crate::vmm::map_page_in_table_pub(
-                    cr3_frame.start_address().as_u64(),
-                    page.start_address().as_u64(),
-                    phys_addr,
-                    flags,
-                );
-            }
+    let mut mapped = 0usize;
+    let mut page = base;
+    let end = base + size as u64;
+    while page < end {
+        let Some(phys_addr) = crate::vmm::allocate_physical_frame() else {
+            return mapped > 0;
+        };
+        unsafe {
+            crate::vmm::map_page_in_table_pub(cr3, page, phys_addr, flags);
         }
+        mapped += 1;
+        page += GUARD_PAGE_SIZE as u64;
     }
+    true
 }
 
 fn unmap_stack_pages(base: u64, size: usize) {
@@ -241,4 +229,51 @@ pub fn init() {
         GUARD_PAGES,
         KERNEL_STACK_SIZE / 1024
     );
+    let _ = guard_oom_self_test();
+}
+
+/// Serial marker once a guarded kernel stack is allocated and a failed
+/// frame alloc runs the OOM killer.
+pub const GATE_H4_MARKER: &str = "GATE_H4 guard oom";
+
+const GATE_H4_VICTIM: crate::process::Pid = 0x0000_0E04;
+
+/// Allocate a guarded stack (unmapped guard, mapped usable pages) and prove
+/// `allocate_physical_frame` invokes the OOM killer when the buddy pool is empty.
+pub fn guard_oom_self_test() -> bool {
+    let Some((stack_top, info)) = alloc_guarded_stack(GATE_H4_VICTIM as u64) else {
+        crate::serial_println!("[stack_guard] Gate H4 FAILED: alloc_guarded_stack");
+        return false;
+    };
+    if stack_top == 0 || !is_guard_page_fault(info.guard_base) {
+        crate::serial_println!("[stack_guard] Gate H4 FAILED: guard page not registered");
+        return false;
+    }
+    if is_guard_page_fault(info.stack_base) {
+        crate::serial_println!("[stack_guard] Gate H4 FAILED: usable stack marked as guard");
+        return false;
+    }
+
+    crate::oom::register_process(GATE_H4_VICTIM);
+    crate::oom::update_memory(GATE_H4_VICTIM, 1_000_000);
+    let _ = crate::oom::set_oom_score_adj(GATE_H4_VICTIM, 1000);
+
+    let stolen = crate::vmm::steal_frame_pool();
+    let kills_before = crate::oom::stats().0;
+    let _ = crate::vmm::allocate_physical_frame();
+    crate::vmm::restore_frame_pool(stolen);
+    let (kills_after, last_killed, _) = crate::oom::stats();
+
+    if kills_after <= kills_before || last_killed != Some(GATE_H4_VICTIM) {
+        crate::serial_println!(
+            "[stack_guard] Gate H4 FAILED: OOM did not select dummy (kills {} -> {}, last={:?})",
+            kills_before,
+            kills_after,
+            last_killed
+        );
+        return false;
+    }
+
+    crate::serial_println!("[stack_guard] {}", GATE_H4_MARKER);
+    true
 }

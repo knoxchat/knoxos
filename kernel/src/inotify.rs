@@ -163,37 +163,102 @@ pub fn emit_event(path: &str, mask: u32, name: Option<&str>) {
 
     let mut instances = INOTIFY_INSTANCES.lock();
     for instance in instances.values_mut() {
-        for watch in instance.watches.values() {
-            // Check if this watch matches the event
-            if watch.mask & mask != 0 {
-                // Check if path matches (exact match or parent directory)
-                let matches = watch.path == path
-                    || path.starts_with(&watch.path)
-                    || path.rsplit('/').nth(1).is_some_and(|parent| {
-                        let parent_path = if parent.is_empty() { "/" } else { parent };
-                        watch.path == parent_path
-                    });
-
-                if matches {
-                    let event = InotifyEvent {
-                        wd: watch.wd,
-                        mask,
-                        cookie: if mask & IN_MOVE != 0 {
-                            COOKIE.fetch_add(1, core::sync::atomic::Ordering::Relaxed)
-                        } else {
-                            0
-                        },
-                        len: name.map_or(0, |n| n.len() as u32),
-                        name: name.map_or(String::new(), String::from),
-                    };
-                    instance.events.push(event);
-                }
+        let watches: Vec<(i32, String, u32)> = instance
+            .watches
+            .values()
+            .map(|w| (w.wd, w.path.clone(), w.mask))
+            .collect();
+        for (wd, watch_path, watch_mask) in watches {
+            if watch_mask & mask == 0 {
+                continue;
             }
+            if !path_matches_watch(&watch_path, path) {
+                continue;
+            }
+            let event = InotifyEvent {
+                wd,
+                mask,
+                cookie: if mask & IN_MOVE != 0 {
+                    COOKIE.fetch_add(1, core::sync::atomic::Ordering::Relaxed)
+                } else {
+                    0
+                },
+                len: name.map_or(0, |n| n.len() as u32),
+                name: name.map_or(String::new(), String::from),
+            };
+            instance.events.push(event);
         }
     }
+}
+
+fn parent_dir(path: &str) -> &str {
+    let path = path.trim_end_matches('/');
+    match path.rfind('/') {
+        Some(0) => "/",
+        Some(i) => &path[..i],
+        None => "",
+    }
+}
+
+fn path_matches_watch(watch_path: &str, event_path: &str) -> bool {
+    watch_path == event_path || parent_dir(event_path) == watch_path
+}
+
+fn basename(path: &str) -> Option<&str> {
+    path.rsplit('/').next().filter(|s| !s.is_empty())
 }
 
 /// Initialize inotify subsystem
 pub fn init() {
     crate::serial_println!("[KnoxOS] inotify filesystem notification initialized");
+}
+
+/// Serial marker once a VFS write/unlink is visible to an inotify watch.
+pub const GATE_H3_MARKER: &str = "GATE_H3 inotify";
+
+const GATE_H3_DIR: &str = "/var/lib/knoxos";
+const GATE_H3_PATH: &str = "/var/lib/knoxos/gate_h3";
+const GATE_H3_PAYLOAD: &[u8] = b"knoxos-h3\n";
+
+/// Watch a directory, write and unlink a file, and prove events were queued.
+pub fn vfs_watch_self_test() -> bool {
+    let Ok(fd) = inotify_init() else {
+        crate::serial_println!("[inotify] Gate H3 FAILED: inotify_init");
+        return false;
+    };
+    let Ok(_wd) = inotify_add_watch(fd, GATE_H3_DIR, IN_CREATE | IN_MODIFY | IN_DELETE) else {
+        crate::serial_println!("[inotify] Gate H3 FAILED: add_watch");
+        inotify_close(fd);
+        return false;
+    };
+
+    if !crate::vfs::write_file_dispatch(GATE_H3_PATH, GATE_H3_PAYLOAD) {
+        crate::serial_println!("[inotify] Gate H3 FAILED: write");
+        inotify_close(fd);
+        return false;
+    }
+    let created = inotify_read(fd).unwrap_or_default();
+    let saw_create = created
+        .iter()
+        .any(|e| e.mask & (IN_CREATE | IN_MODIFY) != 0);
+    if !saw_create {
+        crate::serial_println!("[inotify] Gate H3 FAILED: no create/modify event");
+        inotify_close(fd);
+        return false;
+    }
+
+    if crate::vfs::remove_dispatch(GATE_H3_PATH).is_err() {
+        crate::serial_println!("[inotify] Gate H3 FAILED: unlink");
+        inotify_close(fd);
+        return false;
+    }
+    let deleted = inotify_read(fd).unwrap_or_default();
+    inotify_close(fd);
+    if !deleted.iter().any(|e| e.mask & IN_DELETE != 0) {
+        crate::serial_println!("[inotify] Gate H3 FAILED: no delete event");
+        return false;
+    }
+
+    crate::serial_println!("[inotify] {}", GATE_H3_MARKER);
+    true
 }

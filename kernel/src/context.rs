@@ -155,6 +155,21 @@ impl ProcessContext {
     /// Allocate a new process context with kernel stack
     pub fn new(pid: Pid) -> Self {
         const KERNEL_STACK_SIZE: usize = 32 * 1024;
+        if crate::vmm::ready() {
+            if let Some((stack_top, _)) = crate::stack_guard::alloc_guarded_stack(pid as u64) {
+                let mut context = CpuContext::new();
+                let aligned = stack_top & !0xF;
+                context.rsp = aligned.saturating_sub(8);
+                context.rbp = context.rsp;
+                return Self {
+                    context,
+                    pid,
+                    kernel_stack_top: stack_top,
+                    kernel_stack: Vec::new(),
+                    in_user_mode: false,
+                };
+            }
+        }
         let kernel_stack = alloc::vec![0u8; KERNEL_STACK_SIZE];
         let stack_top = kernel_stack.as_ptr() as u64 + KERNEL_STACK_SIZE as u64;
 

@@ -438,6 +438,10 @@ static CPUS_STARTED: AtomicU32 = AtomicU32::new(1);
 static APIC_AVAILABLE: AtomicBool = AtomicBool::new(false);
 /// Physical memory offset for MMIO access
 static PHYS_OFFSET: AtomicU64 = AtomicU64::new(0);
+/// I/O APIC MMIO physical base (MADT when present, else 0xFEC00000)
+static IOAPIC_PHYS: AtomicU64 = AtomicU64::new(IOAPIC_BASE);
+/// I/O APIC GSI base from MADT
+static IOAPIC_GSI_BASE: AtomicU32 = AtomicU32::new(0);
 /// APIC timer frequency (ticks per second)
 static TIMER_FREQUENCY: AtomicU32 = AtomicU32::new(0);
 
@@ -600,7 +604,7 @@ pub fn disable_legacy_pic() {
 /// Read an I/O APIC register
 unsafe fn ioapic_read(reg: u32) -> u32 {
     let phys_offset = PHYS_OFFSET.load(Ordering::Relaxed);
-    let base = phys_offset + IOAPIC_BASE;
+    let base = phys_offset + IOAPIC_PHYS.load(Ordering::Relaxed);
     let select = base as *mut u32;
     let data = (base + IOAPIC_REG_DATA as u64) as *mut u32;
     core::ptr::write_volatile(select, reg);
@@ -610,7 +614,7 @@ unsafe fn ioapic_read(reg: u32) -> u32 {
 /// Write an I/O APIC register
 unsafe fn ioapic_write(reg: u32, value: u32) {
     let phys_offset = PHYS_OFFSET.load(Ordering::Relaxed);
-    let base = phys_offset + IOAPIC_BASE;
+    let base = phys_offset + IOAPIC_PHYS.load(Ordering::Relaxed);
     let select = base as *mut u32;
     let data = (base + IOAPIC_REG_DATA as u64) as *mut u32;
     core::ptr::write_volatile(select, reg);
@@ -680,6 +684,71 @@ pub fn init_ioapic() {
     }
 
     serial_println!("[IOAPIC] I/O APIC initialized, IRQs routed to BSP");
+}
+
+/// Apply MADT I/O APIC address and interrupt-source overrides.
+/// Called after `acpi_tables::init` so IRQ0→GSI 2 (typical QEMU) is honored.
+pub fn apply_madt_ioapic() {
+    let Some(info) = crate::acpi_tables::get_info() else {
+        serial_println!("[IOAPIC] No ACPI MADT; keeping default {:#x}", IOAPIC_BASE);
+        return;
+    };
+
+    if let Some(io) = info.io_apics.first() {
+        IOAPIC_PHYS.store(io.address as u64, Ordering::Relaxed);
+        IOAPIC_GSI_BASE.store(io.gsi_base, Ordering::Relaxed);
+        serial_println!(
+            "[IOAPIC] MADT address={:#x} gsi_base={} ({} override(s))",
+            io.address,
+            io.gsi_base,
+            info.interrupt_overrides.len()
+        );
+    }
+
+    for ov in &info.interrupt_overrides {
+        serial_println!(
+            "[IOAPIC] ISO bus={} IRQ{} -> GSI {} flags={:#x}",
+            ov.bus,
+            ov.irq_source,
+            ov.gsi,
+            ov.flags
+        );
+    }
+
+    unsafe {
+        let version = ioapic_read(IOAPIC_REG_VERSION);
+        let max_redir = ((version >> 16) & 0xFF) as u8;
+        for i in 0..=max_redir {
+            let reg = IOAPIC_RED_TABLE_BASE + (i as u32) * 2;
+            ioapic_write(reg, 0x10000);
+        }
+
+        let bsp_id = get_apic_id() as u8;
+        let gsi_base = IOAPIC_GSI_BASE.load(Ordering::Relaxed);
+        let pin = |irq: u8| -> u8 {
+            let gsi = info
+                .interrupt_overrides
+                .iter()
+                .find(|o| o.irq_source == irq)
+                .map(|o| o.gsi)
+                .unwrap_or(irq as u32);
+            gsi.saturating_sub(gsi_base) as u8
+        };
+
+        ioapic_route_irq(pin(0), 0x20, bsp_id);
+        ioapic_route_irq(pin(1), 0x21, bsp_id);
+        ioapic_route_irq(pin(3), 0x23, bsp_id);
+        ioapic_route_irq(pin(4), 0x24, bsp_id);
+        ioapic_route_irq(pin(8), 0x28, bsp_id);
+        ioapic_route_irq(pin(9), 0x29, bsp_id);
+        ioapic_route_irq(pin(10), 0x2A, bsp_id);
+        ioapic_route_irq(pin(11), 0x2B, bsp_id);
+        ioapic_route_irq(pin(12), 0x2C, bsp_id);
+        ioapic_route_irq(pin(14), 0x2E, bsp_id);
+        ioapic_route_irq(pin(15), 0x2F, bsp_id);
+    }
+
+    serial_println!("[IOAPIC] MADT redirection table programmed");
 }
 
 // ─── SMP — Application Processor Startup ────────────────────────────────

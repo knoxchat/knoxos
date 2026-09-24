@@ -431,6 +431,36 @@ impl AddressSpace {
         Some(vaddr)
     }
 
+    /// Map a file-backed region. Pages are demand-filled from VFS/page cache
+    /// unless `flags.populate` is set (Gate H2).
+    pub fn mmap_file(
+        &mut self,
+        addr: u64,
+        size: u64,
+        prot: ProtFlags,
+        flags: MmapFlags,
+        path: &str,
+        offset: u64,
+    ) -> Option<u64> {
+        let vaddr = self.mmap_anonymous(addr, size, prot, flags)?;
+        if let Some(vma) = self.find_vma_mut(vaddr) {
+            vma.mapping_type = MappingType::FileBacked;
+            vma.file_path = Some(String::from(path));
+            vma.file_offset = offset;
+            vma.flags.anonymous = false;
+        }
+        if flags.populate {
+            let pages = page_align_up(size) / PAGE_SIZE;
+            for i in 0..pages {
+                let page_addr = vaddr + i * PAGE_SIZE;
+                if let Some(frame) = unsafe { get_mapped_frame(self.cr3, page_addr) } {
+                    fill_file_backed_page(path, offset + i * PAGE_SIZE, frame);
+                }
+            }
+        }
+        Some(vaddr)
+    }
+
     /// Unmap pages from this address space
     pub fn munmap(&mut self, addr: u64, size: u64) -> bool {
         let addr = page_align_down(addr);
@@ -670,10 +700,17 @@ impl AddressSpace {
             child.add_vma(child_vma);
         }
 
-        // Flush TLB after modifying parent page tables
+        // Flush TLB only if this address space is on the CPU. A self-test
+        // fork of a detached space must not `mov cr3` onto tables that Drop
+        // will free (that left the kernel running on a recycled L4).
         unsafe {
             #[cfg(target_arch = "x86_64")]
-            core::arch::asm!("mov cr3, {}", in(reg) self.cr3, options(nostack, preserves_flags));
+            {
+                let (current, _) = Cr3::read();
+                if current.start_address().as_u64() == self.cr3 {
+                    core::arch::asm!("mov cr3, {}", in(reg) self.cr3, options(nostack, preserves_flags));
+                }
+            }
         }
 
         Some(child)
@@ -719,20 +756,28 @@ impl AddressSpace {
 
     /// Handle a demand-paging fault: the page belongs to a valid VMA but has
     /// no physical backing yet (lazy allocation from mmap without MAP_POPULATE).
+    /// File-backed VMAs fill one page from the page cache / VFS, not the whole file.
     /// Returns true if a new frame was allocated and mapped.
     pub fn handle_demand_fault(&mut self, fault_addr: u64) -> bool {
         let page_addr = page_align_down(fault_addr);
 
         // Check if this page lies inside a VMA that could be lazily backed
-        let (prot_flags, mapping_type) = if let Some(vma) = self.find_vma(page_addr) {
-            // Guard pages must NOT be demand-faulted (that's a stack overflow)
-            if vma.mapping_type == MappingType::Guard {
-                return false;
-            }
-            (vma.prot.to_page_flags(), vma.mapping_type)
-        } else {
-            return false; // No VMA covers this address
-        };
+        let (prot_flags, mapping_type, file_path, file_offset, vma_start) =
+            if let Some(vma) = self.find_vma(page_addr) {
+                // Guard pages must NOT be demand-faulted (that's a stack overflow)
+                if vma.mapping_type == MappingType::Guard {
+                    return false;
+                }
+                (
+                    vma.prot.to_page_flags(),
+                    vma.mapping_type,
+                    vma.file_path.clone(),
+                    vma.file_offset,
+                    vma.start,
+                )
+            } else {
+                return false; // No VMA covers this address
+            };
 
         // Only demand-fault Anonymous / Data / Heap / Shared pages
         match mapping_type {
@@ -757,6 +802,12 @@ impl AddressSpace {
             unsafe {
                 map_page_in_table(self.cr3, page_addr, frame, prot_flags);
                 zero_physical_frame(frame);
+            }
+            if mapping_type == MappingType::FileBacked {
+                if let Some(path) = file_path.as_deref() {
+                    let off = file_offset + (page_addr - vma_start);
+                    fill_file_backed_page(path, off, frame);
+                }
             }
             serial_println!(
                 "[VMM] Demand-paged {:#x} (type={:?})",
@@ -993,14 +1044,45 @@ impl PhysicalFramePool {
     pub fn allocated(&self) -> u64 {
         self.allocated_frames
     }
+
+    /// Remove every free buddy block as 4 KiB frames (for the OOM self-test).
+    /// Does not change `total_frames`.
+    pub fn steal_free_frames(&mut self) -> Vec<u64> {
+        let mut out = Vec::new();
+        for order in (0..=BUDDY_MAX_ORDER).rev() {
+            while let Some(addr) = self.free[order].pop() {
+                let n = 1u64 << order;
+                for i in 0..n {
+                    out.push(addr + i * PAGE_SIZE);
+                }
+            }
+        }
+        out
+    }
+
+    /// Return frames taken by [`steal_free_frames`] without bumping `total_frames`.
+    pub fn restore_free_frames(&mut self, frames: Vec<u64>) {
+        for phys in frames {
+            self.free_block(phys & !0xFFF, 0);
+        }
+    }
 }
 
 lazy_static::lazy_static! {
     pub static ref FRAME_POOL: Mutex<PhysicalFramePool> = Mutex::new(PhysicalFramePool::new());
 }
 
-/// Allocate a physical frame from the global pool
+/// Allocate a physical frame from the global pool.
+/// On failure, shrink the page cache then run the OOM killer and retry once.
 pub fn allocate_physical_frame() -> Option<u64> {
+    if let Some(addr) = FRAME_POOL.lock().allocate() {
+        return Some(addr);
+    }
+    let _ = crate::page_cache::shrink(64);
+    if let Some(addr) = FRAME_POOL.lock().allocate() {
+        return Some(addr);
+    }
+    crate::oom::trigger_oom();
     FRAME_POOL.lock().allocate()
 }
 
@@ -1357,6 +1439,39 @@ unsafe fn copy_physical_frame(src_phys: u64, dst_phys: u64) {
     core::ptr::copy_nonoverlapping(src, dst, PAGE_SIZE as usize);
 }
 
+unsafe fn copy_to_physical_frame(phys_addr: u64, data: &[u8]) {
+    let offset = PHYS_MEM_OFFSET.load(Ordering::Relaxed);
+    if offset == 0 || data.is_empty() {
+        return;
+    }
+    let ptr = (offset + phys_addr) as *mut u8;
+    let n = data.len().min(PAGE_SIZE as usize);
+    core::ptr::copy_nonoverlapping(data.as_ptr(), ptr, n);
+}
+
+unsafe fn read_physical_frame_byte(phys_addr: u64, offset_in_page: usize) -> u8 {
+    let offset = PHYS_MEM_OFFSET.load(Ordering::Relaxed);
+    if offset == 0 {
+        return 0;
+    }
+    *((offset + phys_addr + offset_in_page as u64) as *const u8)
+}
+
+/// Fill one 4 KiB physical frame from the page cache (or VFS) at `file_offset`.
+fn fill_file_backed_page(path: &str, file_offset: u64, frame_phys: u64) {
+    let mut buf = [0u8; PAGE_SIZE as usize];
+    let n = if let Some(ino) = crate::page_cache::register_path(path) {
+        crate::page_cache::read(ino, file_offset, &mut buf).unwrap_or(0)
+    } else {
+        crate::vfs::pread_file(path, file_offset, &mut buf).unwrap_or(0)
+    };
+    if n > 0 {
+        unsafe {
+            copy_to_physical_frame(frame_phys, &buf[..n]);
+        }
+    }
+}
+
 // ─── Helper Functions ───────────────────────────────────────────────────
 
 /// Align address down to page boundary
@@ -1489,6 +1604,37 @@ pub fn mmap(pid: Pid, addr: u64, size: u64, prot: u64, flags: u64) -> i64 {
     -12 // ENOMEM
 }
 
+/// File-backed mmap: VMA is registered immediately; pages fault in from VFS.
+pub fn mmap_file(
+    pid: Pid,
+    addr: u64,
+    size: u64,
+    prot: u64,
+    flags: u64,
+    path: &str,
+    offset: u64,
+) -> i64 {
+    let prot_flags = ProtFlags::from_mmap_prot(prot);
+    if crate::hardening::check_wx_violation(crate::hardening::ProtFlags {
+        read: prot_flags.read,
+        write: prot_flags.write,
+        exec: prot_flags.execute,
+    }) {
+        return -13; // EACCES
+    }
+    let mmap_flags = MmapFlags::from_linux(flags);
+
+    let mut spaces = ADDRESS_SPACES.lock();
+    if let Some(addr_space) = spaces.get_mut(&pid) {
+        if let Some(mapped_addr) =
+            addr_space.mmap_file(addr, size, prot_flags, mmap_flags, path, offset)
+        {
+            return mapped_addr as i64;
+        }
+    }
+    -12 // ENOMEM
+}
+
 /// Perform munmap for a process
 pub fn munmap(pid: Pid, addr: u64, size: u64) -> i64 {
     let mut spaces = ADDRESS_SPACES.lock();
@@ -1520,6 +1666,21 @@ pub fn get_phys_mem_offset() -> u64 {
 /// Whether the VMM has been initialised (physical memory is mapped).
 pub fn ready() -> bool {
     PHYS_MEM_OFFSET.load(Ordering::Relaxed) != 0
+}
+
+/// Kernel L4 physical address used for kernel-stack mappings.
+pub fn get_kernel_cr3() -> u64 {
+    KERNEL_CR3.load(Ordering::Relaxed)
+}
+
+/// Drain the buddy free lists (Gate H4 OOM self-test). Caller must restore.
+pub fn steal_frame_pool() -> Vec<u64> {
+    FRAME_POOL.lock().steal_free_frames()
+}
+
+/// Put frames from [`steal_frame_pool`] back on the free lists.
+pub fn restore_frame_pool(frames: Vec<u64>) {
+    FRAME_POOL.lock().restore_free_frames(frames);
 }
 
 /// Public wrapper to map a page in a process's page table.
@@ -1725,6 +1886,87 @@ pub fn wx_aslr_self_test() -> bool {
     true
 }
 
+/// Serial marker once a forked address space write-faults a CoW page and the
+/// parent keeps the original bytes.
+pub const GATE_H1_MARKER: &str = "GATE_H1 cow fault";
+
+/// Gate H1 / A4: fork marks the page read-only, a write copies it, and the
+/// parent's contents are unchanged.
+pub fn cow_fault_self_test() -> bool {
+    const PARENT: Pid = 0x0000_A401;
+    const CHILD: Pid = 0x0000_A402;
+
+    let Some(mut parent) = AddressSpace::new(PARENT) else {
+        serial_println!("[VMM] Gate H1 FAILED: parent address space");
+        return false;
+    };
+    let flags = MmapFlags {
+        shared: false,
+        anonymous: true,
+        fixed: false,
+        populate: true,
+    };
+    let Some(addr) = parent.mmap_anonymous(0, PAGE_SIZE, ProtFlags::RW, flags) else {
+        serial_println!("[VMM] Gate H1 FAILED: mmap");
+        return false;
+    };
+    let Some(parent_frame) = (unsafe { get_mapped_frame(parent.cr3, addr) }) else {
+        serial_println!("[VMM] Gate H1 FAILED: parent page not mapped");
+        return false;
+    };
+    unsafe {
+        copy_to_physical_frame(parent_frame, &[0xA4, 0x01]);
+    }
+
+    let Some(mut child) = parent.fork(CHILD) else {
+        serial_println!("[VMM] Gate H1 FAILED: fork");
+        return false;
+    };
+    if !child.cow_pages.contains_key(&addr) {
+        serial_println!("[VMM] Gate H1 FAILED: child has no CoW tracking");
+        return false;
+    }
+    if !child.handle_cow_fault(addr) {
+        serial_println!("[VMM] Gate H1 FAILED: CoW fault not handled");
+        return false;
+    }
+    let Some(child_frame) = (unsafe { get_mapped_frame(child.cr3, addr) }) else {
+        serial_println!("[VMM] Gate H1 FAILED: child page missing after CoW");
+        return false;
+    };
+    if child_frame == parent_frame {
+        serial_println!("[VMM] Gate H1 FAILED: child still shares parent frame");
+        return false;
+    }
+    unsafe {
+        copy_to_physical_frame(child_frame, &[0xB4, 0x02]);
+    }
+    let parent_byte = unsafe { read_physical_frame_byte(parent_frame, 0) };
+    let child_byte = unsafe { read_physical_frame_byte(child_frame, 0) };
+    if parent_byte != 0xA4 {
+        serial_println!(
+            "[VMM] Gate H1 FAILED: parent byte {:#x} (want 0xA4)",
+            parent_byte
+        );
+        return false;
+    }
+    if child_byte != 0xB4 {
+        serial_println!(
+            "[VMM] Gate H1 FAILED: child byte {:#x} (want 0xB4)",
+            child_byte
+        );
+        return false;
+    }
+
+    // Make sure Drop cannot free the live CR3 if fork switched us.
+    unsafe {
+        activate_cr3(KERNEL_CR3.load(Ordering::Relaxed));
+    }
+
+    serial_println!("[VMM] {}", GATE_H1_MARKER);
+    true
+}
+
 /// Pre-allocate physical frames into the VMM pool
 /// Called after the bootloader frame allocator is available
 pub fn populate_frame_pool(
@@ -1749,6 +1991,7 @@ pub fn populate_frame_pool(
     );
     drop(pool);
     snapshot_kernel_l4();
+    let _ = cow_fault_self_test();
 }
 
 /// Copy the boot L4 into a private template used by [`clone_kernel_mappings`].

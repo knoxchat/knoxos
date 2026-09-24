@@ -412,8 +412,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("Heap initialization failed");
     serial_println!("[KnoxOS] Heap allocator initialized (512 MiB heap)");
 
-    // Parse kernel command line AFTER heap init (parse allocates String/BTreeMap)
-    cmdline::parse("root=/dev/vda1 init=/sbin/init console=ttyS0,115200 loglevel=4");
+    // Parse kernel command line AFTER heap init (parse allocates String/BTreeMap).
+    // Prefer a firmware/QEMU fw_cfg string when the bootloader protocol has none.
+    let cmdline_str = cmdline::from_firmware().unwrap_or_else(|| {
+        alloc::string::String::from(
+            "root=/dev/vda1 init=/sbin/init console=ttyS0,115200 loglevel=4",
+        )
+    });
+    cmdline::parse(&cmdline_str);
 
     // Initialize input queues AFTER heap but BEFORE enabling interrupts
     // so interrupt handlers can push data immediately
@@ -961,6 +967,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize ACPI table parsing (RSDP/RSDT/XSDT/MADT/FADT/HPET/MCFG)
     acpi_tables::init(phys_mem_offset.as_u64());
+    if !cmdline::has_flag("noapic") {
+        smp::apply_madt_ioapic();
+    }
 
     // Initialize HPET high precision event timer
     hpet::init();

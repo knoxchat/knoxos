@@ -198,6 +198,65 @@ pub fn parse(cmdline: &str) {
     *CMDLINE.lock() = parsed;
 }
 
+/// Read the firmware/QEMU fw_cfg kernel command line when present.
+pub fn from_firmware() -> Option<String> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        read_fw_cfg_cmdline()
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        None
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn read_fw_cfg_cmdline() -> Option<String> {
+    use x86_64::instructions::port::Port;
+    const FW_CFG_PORT_SEL: u16 = 0x510;
+    const FW_CFG_PORT_DATA: u16 = 0x511;
+    const FW_CFG_SIGNATURE: u16 = 0x0000;
+    const FW_CFG_CMDLINE_SIZE: u16 = 0x0014;
+    const FW_CFG_CMDLINE_DATA: u16 = 0x0015;
+
+    unsafe {
+        let mut sel: Port<u16> = Port::new(FW_CFG_PORT_SEL);
+        let mut data: Port<u8> = Port::new(FW_CFG_PORT_DATA);
+
+        sel.write(FW_CFG_SIGNATURE);
+        let mut sig = [0u8; 4];
+        for b in &mut sig {
+            *b = data.read();
+        }
+        if &sig != b"QEMU" {
+            return None;
+        }
+
+        sel.write(FW_CFG_CMDLINE_SIZE);
+        let mut size_bytes = [0u8; 4];
+        for b in &mut size_bytes {
+            *b = data.read();
+        }
+        let size = u32::from_le_bytes(size_bytes) as usize;
+        if size == 0 || size > 4096 {
+            return None;
+        }
+
+        sel.write(FW_CFG_CMDLINE_DATA);
+        let mut buf = Vec::with_capacity(size);
+        for _ in 0..size {
+            buf.push(data.read());
+        }
+        while buf.last() == Some(&0) {
+            buf.pop();
+        }
+        if buf.is_empty() {
+            return None;
+        }
+        String::from_utf8(buf).ok()
+    }
+}
+
 /// Get a parameter value
 pub fn get(key: &str) -> Option<String> {
     CMDLINE.lock().get(key).map(String::from)

@@ -158,41 +158,31 @@ pub fn sys_mmap(
         return result;
     }
 
-    // File-backed mapping
-    let file_path = resolve_fd_to_path(pid, fd as i32);
-    if file_path.is_none() {
-        return -9; // EBADF
-    }
-    let file_path = file_path.unwrap();
+    // File-backed mapping — do not copy the whole file. Pages fault in from
+    // VFS / the page cache (Gate H2). Empty files are allowed (zero-fill).
+    let file_path = match resolve_fd_to_path(pid, fd as i32) {
+        Some(p) => p,
+        None => return -9, // EBADF
+    };
 
-    // Read file data from VFS
-    let file_data = crate::vfs::read_file_dispatch(&file_path).unwrap_or_default();
-    if file_data.is_empty() && !file_path.starts_with("/dev/") {
-        serial_println!("[mmap] File not found or empty: {}", file_path);
-        return -2; // ENOENT
+    if !file_path.starts_with("/dev/") {
+        let exists = {
+            let vfs = crate::vfs::VFS.lock();
+            vfs.resolve_path(&file_path).is_some()
+        };
+        if !exists {
+            serial_println!("[mmap] File not found: {}", file_path);
+            return -2; // ENOENT
+        }
     }
 
-    // Allocate virtual address space via VMM
-    let mapped_addr = crate::vmm::mmap(pid, addr, aligned_length, prot, flags);
+    let mapped_addr =
+        crate::vmm::mmap_file(pid, addr, aligned_length, prot, flags, &file_path, offset);
     if mapped_addr < 0 {
         return mapped_addr;
     }
 
     let vaddr = mapped_addr as u64;
-
-    // Copy file data into the mapped region (page cache simulation)
-    let copy_len = file_data.len().min(aligned_length as usize);
-    if copy_len > 0 {
-        // For /dev/zero, pages are already zero-filled by VMM
-        if !file_path.starts_with("/dev/zero") {
-            let off = offset as usize;
-            let end = file_data.len().min(off + copy_len);
-            if off < end {
-                let data_to_copy = &file_data[off..end];
-                crate::vmm::write_user_memory(pid, vaddr, data_to_copy);
-            }
-        }
-    }
 
     // Populate page cache entries
     let pages = aligned_length / 4096;
@@ -588,4 +578,84 @@ pub fn init() {
     serial_println!("[KnoxOS] Memory-mapped file subsystem initialized");
     serial_println!("[mmap] Supports: anonymous, file-backed, shared, private, MAP_FIXED");
     serial_println!("[mmap] Syscalls: mmap, munmap, mprotect, msync, madvise");
+    let _ = file_fault_self_test();
+    let _ = crate::inotify::vfs_watch_self_test();
+}
+
+/// Serial marker once a file-backed mmap faults in one page and leaves
+/// sibling pages unmapped (not a whole-file copy).
+pub const GATE_H2_MARKER: &str = "GATE_H2 mmap fault";
+
+const GATE_H2_PATH: &str = "/var/lib/knoxos/gate_h2";
+const GATE_H2_PID: crate::process::Pid = 0x0000_B202;
+
+/// Map a 3-page file without MAP_POPULATE, fault only the middle page, and
+/// prove the first page was never copied in.
+pub fn file_fault_self_test() -> bool {
+    const PAGE: usize = 4096;
+    let mut original = alloc::vec![0u8; PAGE * 3];
+    original[..PAGE].fill(b'A');
+    original[PAGE..PAGE * 2].fill(b'B');
+    original[PAGE * 2..].fill(b'C');
+
+    if !crate::vfs::write_file_dispatch(GATE_H2_PATH, &original) {
+        serial_println!("[mmap] Gate H2 FAILED: could not write {}", GATE_H2_PATH);
+        return false;
+    }
+
+    if !crate::vmm::create_address_space(GATE_H2_PID) {
+        serial_println!("[mmap] Gate H2 FAILED: address space");
+        return false;
+    }
+
+    let mapped = crate::vmm::mmap_file(
+        GATE_H2_PID,
+        0,
+        (PAGE * 3) as u64,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE,
+        GATE_H2_PATH,
+        0,
+    );
+    if mapped < 0 {
+        serial_println!("[mmap] Gate H2 FAILED: mmap_file {}", mapped);
+        crate::vmm::destroy_address_space(GATE_H2_PID);
+        return false;
+    }
+    let vaddr = mapped as u64;
+
+    let mut first = [0u8; 8];
+    crate::vmm::read_user_memory(GATE_H2_PID, vaddr, &mut first);
+    if first[0] == b'A' {
+        serial_println!("[mmap] Gate H2 FAILED: whole file copied at mmap");
+        crate::vmm::destroy_address_space(GATE_H2_PID);
+        return false;
+    }
+
+    if !crate::vmm::handle_page_fault(GATE_H2_PID, vaddr + PAGE as u64, false) {
+        serial_println!("[mmap] Gate H2 FAILED: middle page not demand-faulted");
+        crate::vmm::destroy_address_space(GATE_H2_PID);
+        return false;
+    }
+
+    let mut middle = [0u8; 8];
+    crate::vmm::read_user_memory(GATE_H2_PID, vaddr + PAGE as u64, &mut middle);
+    let mut first_after = [0u8; 8];
+    crate::vmm::read_user_memory(GATE_H2_PID, vaddr, &mut first_after);
+    crate::vmm::destroy_address_space(GATE_H2_PID);
+
+    if middle[0] != b'B' {
+        serial_println!(
+            "[mmap] Gate H2 FAILED: middle page is {:#x}, want 'B'",
+            middle[0]
+        );
+        return false;
+    }
+    if first_after[0] == b'A' {
+        serial_println!("[mmap] Gate H2 FAILED: sibling page was populated");
+        return false;
+    }
+
+    serial_println!("[mmap] {}", GATE_H2_MARKER);
+    true
 }

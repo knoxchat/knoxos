@@ -1514,6 +1514,26 @@ mod security_tests {
     }
 
     #[test_case]
+    fn test_cow_page_fault_copies() {
+        assert!(crate::vmm::cow_fault_self_test());
+    }
+
+    #[test_case]
+    fn test_file_backed_mmap_faults_one_page() {
+        assert!(crate::mmap::file_fault_self_test());
+    }
+
+    #[test_case]
+    fn test_inotify_sees_vfs_mutate() {
+        assert!(crate::inotify::vfs_watch_self_test());
+    }
+
+    #[test_case]
+    fn test_guard_stack_and_oom_from_alloc() {
+        assert!(crate::stack_guard::guard_oom_self_test());
+    }
+
+    #[test_case]
     fn test_wayland_shm_pool_roundtrip() {
         assert!(
             crate::wayland::shm_pool_self_test(),
