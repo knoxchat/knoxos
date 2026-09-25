@@ -1974,9 +1974,11 @@ pub fn sys_get_robust_list(pid: i32, head_ptr: u64, len_ptr: u64) -> SyscallResu
 }
 
 pub fn sys_getcpu(cpu: u64, node: u64, _cache: u64) -> SyscallResult {
+    let idx = crate::usermode::current_cpu_index();
+    crate::smp::note_user_syscall(idx, crate::context::current_pid());
     if cpu != 0 {
         unsafe {
-            *(cpu as *mut u32) = 0;
+            *(cpu as *mut u32) = idx;
         }
     }
     if node != 0 {

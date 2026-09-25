@@ -14,6 +14,18 @@ use crate::serial_println;
 pub const IDLE_PID: Pid = 0;
 /// In-kernel desktop / executor PID
 pub const DESKTOP_PID: Pid = 2;
+/// Reserved PIDs for per-CPU AP idle threads (`0x7F00 + cpu_index`).
+pub const AP_IDLE_PID_BASE: Pid = 0x7F00;
+
+/// Idle kernel thread PID for an Application Processor.
+pub fn ap_idle_pid(cpu: u32) -> Pid {
+    AP_IDLE_PID_BASE.saturating_add(cpu)
+}
+
+/// Whether `pid` is a reserved AP idle thread, not a user or desktop task.
+pub fn is_ap_idle_pid(pid: Pid) -> bool {
+    pid >= AP_IDLE_PID_BASE && pid < AP_IDLE_PID_BASE + crate::gdt::MAX_CPUS as u32
+}
 
 /// CPU register state for context switching.
 /// `fxsave_area` is 16-byte aligned (FXSAVE requirement).
@@ -584,10 +596,27 @@ pub fn snapshot(pid: Pid) -> Option<CpuContext> {
 /// Must be called with `PROCESS_CONTEXTS` **not** held. The pointed-to
 /// context must outlive the jump (the Box in the table does).
 pub unsafe fn abandon_current_and_enter(next_pid: Pid) {
+    enter_task(next_pid, true);
+}
+
+/// Enter `next_pid` without claiming the global CFS `current` slot.
+///
+/// Application Processors use this so a Ring 3 task on CPU 1 does not
+/// overwrite the BSP's desktop `SCHEDULER.current`.
+///
+/// # Safety
+/// Same as [`abandon_current_and_enter`].
+pub unsafe fn enter_task_local(next_pid: Pid) {
+    enter_task(next_pid, false);
+}
+
+unsafe fn enter_task(next_pid: Pid, claim_global: bool) {
     let Some(new_ptr) = runnable_context_ptr(next_pid) else {
         return;
     };
-    crate::scheduler::set_running(next_pid);
+    if claim_global {
+        crate::scheduler::set_running(next_pid);
+    }
     set_current_pid(next_pid);
     program_kernel_stack(next_pid);
     enter_context(new_ptr);
@@ -720,14 +749,19 @@ pub fn destroy_process_context(pid: Pid) {
     PROCESS_CONTEXTS.lock().retain(|pc| pc.pid != pid);
 }
 
-/// Get current process PID
+/// Get current process PID (this CPU, via GS when programmed).
 pub fn current_pid() -> u32 {
+    let local = crate::usermode::cpu_local_pid();
+    if local != 0 {
+        return local;
+    }
     CURRENT_PID.load(Ordering::Relaxed)
 }
 
-/// Set current process PID
+/// Set current process PID on this CPU.
 pub fn set_current_pid(pid: u32) {
     CURRENT_PID.store(pid, Ordering::Relaxed);
+    crate::usermode::set_cpu_local_pid(pid);
 }
 
 pub fn switch_count() -> u64 {
@@ -932,6 +966,16 @@ pub fn init() {
     serial_println!("[KnoxOS] Context switching initialized");
     serial_println!("[KnoxOS]   Idle thread PID={} (HLT)", IDLE_PID);
     self_test_rip_switch();
+}
+
+/// Kernel idle threads for Application Processors. Each AP `enter_context`s
+/// its idle PID after a Ring 3 task exits so the BSP can reap the user stack.
+pub fn create_ap_idle_contexts(num_cpus: u32) {
+    for cpu in 1..num_cpus.min(crate::gdt::MAX_CPUS as u32) {
+        let pid = ap_idle_pid(cpu);
+        create_kernel_thread_context(pid, crate::smp::ap_idle_loop as *const () as u64);
+        serial_println!("[context] AP idle PID={} for CPU {}", pid, cpu);
+    }
 }
 
 /// Get a copy of the user context for a process (for signal delivery)

@@ -244,6 +244,13 @@ pub fn send_eoi() {
 
 /// Handle APIC timer interrupt — called from IDT handler
 pub fn handle_interrupt() {
+    // APs fire their own LVT timer. Do not drive BSP ticks, GUI pacing, or
+    // the global NEED_RESCHED from those IRQs.
+    if crate::usermode::current_cpu_index() != 0 {
+        send_eoi();
+        return;
+    }
+
     let apic_ticks = TIMER_TICKS.fetch_add(1, Ordering::Relaxed) + 1;
 
     // Increment the global TICK_COUNT that get_ticks() reads.

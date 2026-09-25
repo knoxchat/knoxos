@@ -276,6 +276,11 @@ pub fn deliver_wait_result(parent: Pid, child: Pid, status: i32) {
 /// The desktop executor is the fallback: it always has a saved context once it
 /// has run, and it keeps the GUI alive while every user task is blocked.
 fn resume_next_or_return() {
+    if crate::usermode::current_cpu_index() != 0 {
+        crate::smp::ap_after_user_exit();
+        return;
+    }
+
     let picked = {
         let mut sched = crate::scheduler::SCHEDULER.lock();
         sched.clear_current();
@@ -283,7 +288,10 @@ fn resume_next_or_return() {
     };
 
     if let Some(next) = picked {
-        if next != crate::context::IDLE_PID && crate::context::has_runnable_context(next) {
+        if next != crate::context::IDLE_PID
+            && !crate::context::is_ap_idle_pid(next)
+            && crate::context::has_runnable_context(next)
+        {
             unsafe {
                 crate::context::abandon_current_and_enter(next);
             }
@@ -321,7 +329,11 @@ unsafe fn run_until_desktop(pid: Pid) {
             sched.schedule()
         };
         match next {
-            Some(n) if n > DESKTOP_PID && crate::context::has_runnable_context(n) => {
+            Some(n)
+                if n > DESKTOP_PID
+                    && !crate::context::is_ap_idle_pid(n)
+                    && crate::context::has_runnable_context(n) =>
+            {
                 crate::context::switch_to(n);
             }
             _ => break,
@@ -375,6 +387,8 @@ pub const GATE_B7_MARKER: &str = "GATE_B7 sigreturn complete";
 pub const GATE_B8_MARKER: &str = "GATE_B8 timer preempt complete";
 /// Timer IRQ saved user GPRs + FXSAVE (spinner RBX magic survived).
 pub const GATE_I2_MARKER: &str = "GATE_I2 irq gprs";
+/// Application Processor ran a Ring 3 task (`getcpu` reported CPU 1).
+pub const GATE_I3_MARKER: &str = "GATE_I3 ap ring3";
 /// Ring 3 client presented a buffer; not an in-kernel WindowContentType app.
 pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
 
@@ -399,6 +413,7 @@ extern "C" fn gate_boot_body() {
     run_gate_d1();
     run_gate_b7();
     run_gate_b8();
+    run_gate_i3();
     run_gate_f1();
     run_gate_f3();
     run_gate_f4();
@@ -656,6 +671,73 @@ fn run_gate_b8() {
             "[user_task] Gate B8 FAILED: no timer preempt (writer_reaped={})",
             writer_reaped
         );
+    }
+}
+
+fn run_gate_i3() {
+    serial_println!("[user_task] Gate I3: AP runs Ring 3");
+    if crate::smp::online_cpus() < 2 {
+        serial_println!("[user_task] Gate I3 skipped: only one CPU online");
+        return;
+    }
+
+    crate::smp::clear_last_user_cpu();
+    let elf = crate::init::ap_ring3_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "ap-ring3") else {
+        return;
+    };
+    if crate::scheduler::set_cpu_affinity(pid, 1 << 1).is_err() {
+        serial_println!("[user_task] Gate I3 FAILED: affinity pin");
+        terminate(pid, -(crate::signals::Signal::SIGKILL as i32));
+        let _ = reap_child(pid);
+        return;
+    }
+    crate::smp::enqueue_on_cpu(1, pid);
+
+    let start = crate::apic_timer::total_ticks();
+    loop {
+        let cpu = crate::smp::last_user_cpu();
+        let idle = crate::smp::ap_in_idle(1);
+        let zombie = crate::process::PROCESS_TABLE
+            .lock()
+            .get_process(pid)
+            .is_none_or(|p| p.state == crate::process::ProcessState::Zombie);
+        if cpu == 1 && idle && zombie {
+            break;
+        }
+        if crate::apic_timer::total_ticks().saturating_sub(start) > 300 {
+            serial_println!(
+                "[user_task] Gate I3 timeout: last_cpu={} idle={} zombie={}",
+                cpu,
+                idle,
+                zombie
+            );
+            break;
+        }
+        core::hint::spin_loop();
+    }
+
+    let cpu = crate::smp::last_user_cpu();
+    let reaped = reap_child(pid);
+    if cpu == 1 && reaped {
+        serial_println!(
+            "[user_task] {} (pid={} cpu={} last_pid={})",
+            GATE_I3_MARKER,
+            pid,
+            cpu,
+            crate::smp::last_user_pid()
+        );
+    } else {
+        serial_println!(
+            "[user_task] Gate I3 FAILED: pid={} reaped={} cpu={} (want 1)",
+            pid,
+            reaped,
+            cpu
+        );
+        if crate::context::has_runnable_context(pid) {
+            terminate(pid, -(crate::signals::Signal::SIGKILL as i32));
+            let _ = reap_child(pid);
+        }
     }
 }
 

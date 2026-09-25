@@ -50,6 +50,8 @@ pub struct CpuLocal {
     pub user_rip: u64,
     pub cpu_index: u32,
     pub apic_id: u32,
+    /// Currently running PID on this CPU (`gs:[32]`).
+    pub current_pid: u32,
 }
 
 const _: () = {
@@ -57,6 +59,7 @@ const _: () = {
     assert!(core::mem::offset_of!(CpuLocal, kernel_rsp) == 8);
     assert!(core::mem::offset_of!(CpuLocal, user_rip) == 16);
     assert!(core::mem::offset_of!(CpuLocal, cpu_index) == 24);
+    assert!(core::mem::offset_of!(CpuLocal, current_pid) == 32);
 };
 
 const CPU_LOCAL_COUNT: usize = crate::gdt::MAX_CPUS;
@@ -67,6 +70,7 @@ static mut CPU_LOCAL: [CpuLocal; CPU_LOCAL_COUNT] = [CpuLocal {
     user_rip: 0,
     cpu_index: 0,
     apic_id: 0,
+    current_pid: 0,
 }; CPU_LOCAL_COUNT];
 
 static GS_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
@@ -121,11 +125,13 @@ pub fn gs_base() -> u64 {
 pub fn program_ap_gs(cpu_index: u32, apic_id: u32, kernel_rsp: u64) {
     #[cfg(target_arch = "x86_64")]
     unsafe {
+        program_syscall_msrs();
         let cpu = (cpu_index as usize).min(CPU_LOCAL_COUNT - 1);
         let slot = cpu_local_ptr(cpu);
         (*slot).cpu_index = cpu_index;
         (*slot).apic_id = apic_id;
         (*slot).kernel_rsp = kernel_rsp;
+        (*slot).current_pid = 0;
         crate::gdt::set_privilege_stack_top_cpu(cpu, kernel_rsp);
         wrmsr(MSR_GS_BASE, slot as u64);
         wrmsr(MSR_KERNEL_GS_BASE, 0);
@@ -135,36 +141,76 @@ pub fn program_ap_gs(cpu_index: u32, apic_id: u32, kernel_rsp: u64) {
     let _ = (cpu_index, apic_id, kernel_rsp);
 }
 
+/// This CPU's current PID from `gs:[32]`, or 0 before GS is programmed.
+pub fn cpu_local_pid() -> u32 {
+    if !GS_READY.load(core::sync::atomic::Ordering::Acquire) {
+        return 0;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        let pid: u32;
+        unsafe {
+            core::arch::asm!(
+                "mov {:e}, dword ptr gs:[32]",
+                out(reg) pid,
+                options(nostack, preserves_flags)
+            );
+        }
+        pid
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        0
+    }
+}
+
+/// Write this CPU's current PID at `gs:[32]`.
+pub fn set_cpu_local_pid(pid: u32) {
+    if !GS_READY.load(core::sync::atomic::Ordering::Acquire) {
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        core::arch::asm!(
+            "mov dword ptr gs:[32], {:e}",
+            in(reg) pid,
+            options(nostack, preserves_flags)
+        );
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = pid;
+}
+
 /// EFER bits
 const EFER_SCE: u64 = 1 << 0; // System Call Extensions enable
 const EFER_NXE: u64 = 1 << 11; // NX enable (required before NO_EXECUTE PTEs)
+
+/// Program per-CPU syscall MSRs (EFER.SCE, STAR, LSTAR, SFMASK).
+///
+/// These are not shared across cores. An AP that `iretq`s to Ring 3 without
+/// this will `#UD` on the first `syscall`.
+pub fn program_syscall_msrs() {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        let efer = rdmsr(MSR_EFER);
+        wrmsr(MSR_EFER, efer | EFER_SCE | EFER_NXE);
+
+        // STAR: kernel CS/SS base in 47:32, user CS/SS base in 63:48.
+        // sysret sets CS = STAR[63:48]+16 | RPL3, SS = STAR[63:48]+8 | RPL3.
+        let kernel_base: u64 = 0x08;
+        let user_base: u64 = 0x10;
+        let star = (user_base << 48) | (kernel_base << 32);
+        wrmsr(MSR_STAR, star);
+        wrmsr(MSR_LSTAR, syscall_entry as *const () as u64);
+        wrmsr(MSR_SFMASK, 0x200 | 0x100); // IF | TF
+    }
+}
 
 /// Initialize syscall/sysret mechanism
 pub fn init_syscall() {
     #[cfg(target_arch = "x86_64")]
     unsafe {
-        // Enable SCE (System Call Extensions) and NXE in EFER MSR
-        let efer = rdmsr(MSR_EFER);
-        wrmsr(MSR_EFER, efer | EFER_SCE | EFER_NXE);
-
-        // Set up STAR MSR:
-        // Bits 47:32 = kernel CS/SS base (CS = STAR[47:32], SS = STAR[47:32]+8)
-        // Bits 63:48 = user CS/SS base (CS = STAR[63:48]+16, SS = STAR[63:48]+8)
-        // sysret sets: CS = STAR[63:48]+16 | RPL3,  SS = STAR[63:48]+8 | RPL3
-        // With user_base = 0x10:  CS = 0x10+16 = 0x20 | 3 = 0x23 (user code, GDT index 4)
-        //                         SS = 0x10+8  = 0x18 | 3 = 0x1B (user data, GDT index 3)
-        // Kernel: CS = 0x08, SS = 0x10
-        let kernel_base: u64 = 0x08; // Kernel CS = 0x08, SS = 0x10
-        let user_base: u64 = 0x10; // User CS = 0x10+16=0x20 (0x23 with RPL3), SS = 0x10+8=0x18 (0x1B with RPL3)
-        let star = (user_base << 48) | (kernel_base << 32);
-        wrmsr(MSR_STAR, star);
-
-        // Set LSTAR to syscall entry point
-        wrmsr(MSR_LSTAR, syscall_entry as *const () as u64);
-
-        // Set SFMASK - flags to clear on syscall entry
-        // Clear IF (interrupt flag) and TF (trap flag) on syscall entry
-        wrmsr(MSR_SFMASK, 0x200 | 0x100); // IF | TF
+        program_syscall_msrs();
 
         // Kernel GS: syscall_entry does swapgs then gs:[0]=user RSP, gs:[8]=kernel RSP.
         // In kernel, GS_BASE points at this CPU's CpuLocal. KERNEL_GS_BASE is the
@@ -174,6 +220,7 @@ pub fn init_syscall() {
         (*slot).cpu_index = 0;
         (*slot).apic_id = 0;
         (*slot).kernel_rsp = crate::gdt::privilege_stack_top();
+        (*slot).current_pid = 0;
         wrmsr(MSR_GS_BASE, slot as u64);
         wrmsr(MSR_KERNEL_GS_BASE, 0);
         GS_READY.store(true, core::sync::atomic::Ordering::Release);
@@ -315,6 +362,10 @@ extern "C" fn syscall_handler_wrapper(
     arg5: u64,
     arg6: u64,
 ) -> i64 {
+    let cpu = current_cpu_index();
+    if cpu != 0 {
+        crate::smp::note_user_syscall(cpu, crate::context::current_pid());
+    }
     let ret = crate::syscall::handle_syscall(number, arg1, arg2, arg3, arg4, arg5, arg6);
     if redirect_pending() {
         syscall_redirect_dispatch();

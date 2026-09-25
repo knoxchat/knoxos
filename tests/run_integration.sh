@@ -189,6 +189,7 @@ check_marker "GATE_H3 inotify"
 check_marker "GATE_H4 guard oom"
 check_marker "GATE_I1 smp online"
 check_marker "GATE_I2 irq gprs"
+check_marker "GATE_I3 ap ring3"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

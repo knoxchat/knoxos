@@ -154,6 +154,15 @@ extern "x86-interrupt" fn page_fault_handler(
     let is_write = error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE);
     let is_user = error_code.contains(PageFaultErrorCode::USER_MODE);
 
+    // Hardware does not swapgs on #PF. Kernel GS must be live before we
+    // read `gs:[32]` (current PID) or `gs:[24]` (CPU index).
+    if is_user {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            core::arch::asm!("swapgs", options(nomem, nostack));
+        }
+    }
+
     // Check stack guard page first — immediately report stack overflow
     if crate::stack_guard::is_guard_page_fault(fault_addr.as_u64()) {
         crate::stack_guard::handle_stack_overflow(fault_addr.as_u64());
@@ -172,6 +181,12 @@ extern "x86-interrupt" fn page_fault_handler(
 
     if has_as && crate::vmm::handle_page_fault(pid, fault_addr.as_u64(), is_write) {
         // VMM handled it (CoW, guard page, etc.) — resume
+        if is_user {
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                core::arch::asm!("swapgs", options(nomem, nostack));
+            }
+        }
         return;
     }
 
@@ -188,13 +203,9 @@ extern "x86-interrupt" fn page_fault_handler(
     serial_println!("{:#?}", stack_frame);
 
     if is_user && pid > crate::context::DESKTOP_PID {
-        // Kill the user process instead of halting the kernel. swapgs so
-        // `enter_context` sees kernel GS — the CPU does not swapgs on #PF.
+        // Kill the user process instead of halting the kernel. GS is already
+        // the kernel value from the entry swapgs.
         serial_println!("[page_fault] SIGSEGV PID {} at {:?}", pid, fault_addr);
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            core::arch::asm!("swapgs", options(nomem, nostack));
-        }
         crate::user_task::finish_current(pid, -(crate::signals::Signal::SIGSEGV as i32));
         hlt_loop();
     } else {
@@ -212,6 +223,14 @@ extern "x86-interrupt" fn general_protection_fault_handler(
         error_code,
         stack_frame
     );
+
+    let from_user = (stack_frame.code_segment.rpl() as u8) == 3;
+    if from_user {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            core::arch::asm!("swapgs", options(nomem, nostack));
+        }
+    }
 
     // If this was a user-mode process, kill it gracefully instead of halting
     let pid = crate::context::current_pid();
@@ -239,6 +258,14 @@ extern "x86-interrupt" fn general_protection_fault_handler(
 #[cfg(target_arch = "x86_64")]
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
     serial_println!("[EXCEPTION] INVALID OPCODE\n{:#?}", stack_frame);
+
+    let from_user = (stack_frame.code_segment.rpl() as u8) == 3;
+    if from_user {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            core::arch::asm!("swapgs", options(nomem, nostack));
+        }
+    }
 
     // Kill user processes gracefully
     let pid = crate::context::current_pid();

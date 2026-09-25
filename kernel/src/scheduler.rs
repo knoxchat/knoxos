@@ -307,6 +307,8 @@ impl Scheduler {
     /// Pick the next process to run (CFS: smallest vruntime wins)
     /// Priority order: SCHED_DEADLINE (EDF) > SCHED_FIFO/RR > CFS Normal/Batch > Idle
     pub fn schedule(&mut self) -> Option<Pid> {
+        let cpu_bit = 1u64 << crate::usermode::current_cpu_index().min(63);
+
         // Put current process back in the run queue
         if let Some(mut current) = self.current.take() {
             current.time_slice = current.effective_time_slice();
@@ -317,12 +319,17 @@ impl Scheduler {
             return Some(self.idle_pid);
         }
 
+        let allowed = |s: &SchedInfo| {
+            !crate::context::is_ap_idle_pid(s.pid) && (s.cpu_affinity & cpu_bit) != 0
+        };
+
         // 1. SCHED_DEADLINE: pick earliest absolute deadline (EDF) that isn't throttled
         let dl_idx = self
             .run_queue
             .iter()
             .enumerate()
             .filter(|(_, s)| s.policy == SchedPolicy::Deadline)
+            .filter(|(_, s)| allowed(s))
             .filter(|(_, s)| s.deadline_params.as_ref().is_some_and(|d| !d.throttled))
             .min_by_key(|(_, s)| {
                 s.deadline_params
@@ -350,6 +357,7 @@ impl Scheduler {
             .iter()
             .enumerate()
             .filter(|(_, s)| s.policy == SchedPolicy::Fifo || s.policy == SchedPolicy::RoundRobin)
+            .filter(|(_, s)| allowed(s))
             .min_by_key(|(_, s)| s.priority) // lower nice = higher priority
             .map(|(i, _)| i);
 
@@ -367,24 +375,27 @@ impl Scheduler {
         let non_idle_count = self
             .run_queue
             .iter()
-            .filter(|s| s.policy != SchedPolicy::Idle)
+            .filter(|s| s.policy != SchedPolicy::Idle && allowed(s))
             .count();
         let min_idx = if non_idle_count > 0 {
             self.run_queue
                 .iter()
                 .enumerate()
-                .filter(|(_, s)| s.policy != SchedPolicy::Idle)
+                .filter(|(_, s)| s.policy != SchedPolicy::Idle && allowed(s))
                 .min_by_key(|(_, s)| s.vruntime)
                 .map(|(i, _)| i)
         } else {
             self.run_queue
                 .iter()
                 .enumerate()
+                .filter(|(_, s)| allowed(s))
                 .min_by_key(|(_, s)| s.vruntime)
                 .map(|(i, _)| i)
         };
 
-        let min_idx = min_idx.unwrap();
+        let Some(min_idx) = min_idx else {
+            return Some(self.idle_pid);
+        };
 
         if let Some(mut next) = self.run_queue.remove(min_idx) {
             next.time_slice = next.effective_time_slice();
@@ -497,6 +508,10 @@ pub fn user_preempt_count() -> u64 {
 /// `frame` is the naked IRQ stub's saved GPRs + IRET frame (kernel GS live).
 pub fn maybe_preempt_user(frame: &crate::context::IrqFrame) {
     if frame.cs & 3 != 3 {
+        return;
+    }
+    // APs must not steal the in-kernel desktop (single-threaded compositor).
+    if crate::usermode::current_cpu_index() != 0 {
         return;
     }
     if !is_preemption_enabled() {
@@ -621,10 +636,13 @@ pub fn timer_tick() -> bool {
 
 /// Get current running PID
 pub fn current_pid() -> Option<Pid> {
+    let ctx = crate::context::current_pid();
+    if ctx != 0 && !crate::context::is_ap_idle_pid(ctx) {
+        return Some(ctx);
+    }
     if let Some(pid) = SCHEDULER.lock().current_pid() {
         return Some(pid);
     }
-    let ctx = crate::context::current_pid();
     if ctx == 0 { None } else { Some(ctx) }
 }
 
@@ -697,6 +715,7 @@ pub fn add_process(pid: Pid, priority: i32) {
 /// Remove a process from the scheduler
 pub fn remove_process(pid: Pid) {
     SCHEDULER.lock().remove_process(pid);
+    crate::smp::remove_from_runqueues(pid);
 }
 
 /// Check if a process exists in the scheduler (any state)

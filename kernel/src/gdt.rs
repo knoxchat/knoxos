@@ -243,6 +243,12 @@ pub fn init_ap(cpu_index: u32) {
     unsafe {
         CS::set_reg(GDT.1.code_selector);
         DS::set_reg(GDT.1.data_selector);
+        #[cfg(target_arch = "x86_64")]
+        {
+            use x86_64::instructions::segmentation::{ES, SS};
+            ES::set_reg(GDT.1.data_selector);
+            SS::set_reg(GDT.1.data_selector);
+        }
         load_tss(GDT.1.tss_selectors[cpu]);
     }
 }

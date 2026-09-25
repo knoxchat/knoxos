@@ -1229,19 +1229,9 @@ extern "C" fn ap_entry_64(apic_id: u32) {
 
     serial_println!("[SMP] AP {} online (APIC ID {})", cpu_index, apic_id);
 
-    // AP idle loop — will be scheduled by the per-CPU scheduler
-    loop {
-        let cpu_idx = cpu_index as usize;
-        if let Some(pid) = dequeue_from_cpu(cpu_idx) {
-            let mut cpus = CPU_DATA.lock();
-            if let Some(cpu) = cpus.get_mut(cpu_idx) {
-                cpu.current_pid = pid;
-                cpu.context_switches += 1;
-            }
-            drop(cpus);
-        }
-        crate::arch_compat::instructions::interrupts::hlt();
-    }
+    // Real idle: wait for the BSP to calibrate `apic_timer`, then STI and
+    // run any Ring 3 task queued on this CPU (Gate I3). Never HLT with IF=0.
+    ap_idle_loop();
 }
 
 /// AP entry point (called when an AP starts up in 64-bit mode)
@@ -1249,6 +1239,116 @@ extern "C" fn ap_entry_64(apic_id: u32) {
 pub fn ap_entry(_apic_id: u32) {
     // All logic is now in ap_entry_64 directly.
     // This stub is kept for any external callers.
+}
+
+/// Reserved AP idle threads live at `context::ap_idle_pid`.
+static LAST_USER_CPU: AtomicU32 = AtomicU32::new(0);
+static LAST_USER_PID: AtomicU32 = AtomicU32::new(0);
+static AP_IN_IDLE: AtomicU32 = AtomicU32::new(0);
+static AP_TIMER_STARTED: AtomicU32 = AtomicU32::new(0);
+
+/// Record that a Ring 3 syscall ran on `cpu`. Gate I3 reads this.
+pub fn note_user_syscall(cpu: u32, pid: u32) {
+    LAST_USER_CPU.store(cpu, Ordering::Release);
+    LAST_USER_PID.store(pid, Ordering::Release);
+}
+
+pub fn last_user_cpu() -> u32 {
+    LAST_USER_CPU.load(Ordering::Acquire)
+}
+
+pub fn last_user_pid() -> u32 {
+    LAST_USER_PID.load(Ordering::Acquire)
+}
+
+pub fn clear_last_user_cpu() {
+    LAST_USER_CPU.store(0, Ordering::Release);
+    LAST_USER_PID.store(0, Ordering::Release);
+}
+
+pub fn ap_in_idle(cpu: u32) -> bool {
+    let bit = 1u32 << cpu.min(31);
+    AP_IN_IDLE.load(Ordering::Acquire) & bit != 0
+}
+
+fn set_ap_idle_flag(cpu: u32, idle: bool) {
+    let bit = 1u32 << cpu.min(31);
+    if idle {
+        AP_IN_IDLE.fetch_or(bit, Ordering::Release);
+    } else {
+        AP_IN_IDLE.fetch_and(!bit, Ordering::Release);
+    }
+}
+
+/// AP idle: start this core's LAPIC timer, then run queued Ring 3 tasks.
+pub extern "C" fn ap_idle_loop() -> ! {
+    let cpu = crate::usermode::current_cpu_index();
+    crate::context::set_current_pid(crate::context::ap_idle_pid(cpu));
+    loop {
+        set_ap_idle_flag(cpu, true);
+        maybe_start_ap_timer(cpu);
+        try_enter_ap_task(cpu);
+        if crate::apic_timer::is_initialized() {
+            crate::arch_compat::instructions::interrupts::hlt();
+        } else {
+            core::hint::spin_loop();
+        }
+    }
+}
+
+fn maybe_start_ap_timer(cpu: u32) {
+    if !crate::apic_timer::is_initialized() {
+        return;
+    }
+    let bit = 1u32 << cpu.min(31);
+    if AP_TIMER_STARTED.load(Ordering::Relaxed) & bit != 0 {
+        return;
+    }
+    crate::apic_timer::start_periodic(10_000);
+    AP_TIMER_STARTED.fetch_or(bit, Ordering::Release);
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        core::arch::asm!("sti", options(nomem, nostack));
+    }
+}
+
+fn try_enter_ap_task(cpu: u32) {
+    while let Some(pid) = dequeue_from_cpu(cpu as usize) {
+        if pid <= crate::context::DESKTOP_PID || crate::context::is_ap_idle_pid(pid) {
+            continue;
+        }
+        if !crate::context::has_runnable_context(pid) {
+            continue;
+        }
+        {
+            let mut cpus = CPU_DATA.lock();
+            if let Some(slot) = cpus.get_mut(cpu as usize) {
+                slot.current_pid = pid;
+                slot.context_switches += 1;
+            }
+        }
+        set_ap_idle_flag(cpu, false);
+        unsafe {
+            crate::context::enter_task_local(pid);
+        }
+    }
+}
+
+/// After a Ring 3 task exits on an AP: run the next queued task or idle.
+/// Never returns (enters the AP idle context / another user task).
+pub fn ap_after_user_exit() {
+    let cpu = crate::usermode::current_cpu_index();
+    try_enter_ap_task(cpu);
+    let idle = crate::context::ap_idle_pid(cpu);
+    crate::context::set_current_pid(idle);
+    if crate::context::has_runnable_context(idle) {
+        set_ap_idle_flag(cpu, true);
+        unsafe {
+            crate::context::enter_task_local(idle);
+        }
+    }
+    // Fallback if the idle context was never created.
+    ap_idle_loop();
 }
 
 // ─── Per-CPU Run Queues ─────────────────────────────────────────────────
@@ -1284,22 +1384,9 @@ lazy_static::lazy_static! {
 
 /// Enqueue a process on the least-loaded CPU
 pub fn enqueue_balanced(pid: u32) {
-    let mut queues = PER_CPU_RUNQUEUES.lock();
-    let online = CPUS_STARTED.load(Ordering::Relaxed) as usize;
-    let online = online.max(1).min(queues.len());
-
-    // Find the CPU with the lowest load
-    let mut min_load = u64::MAX;
-    let mut target_cpu = 0;
-    for i in 0..online {
-        if queues[i].load < min_load {
-            min_load = queues[i].load;
-            target_cpu = i;
-        }
-    }
-
-    queues[target_cpu].queue.push_back(pid);
-    queues[target_cpu].load += 1;
+    // Default new tasks stay on the BSP. APs only run tasks that were
+    // explicitly pinned with [`enqueue_on_cpu`] (Gate I3).
+    enqueue_on_cpu(0, pid);
 }
 
 /// Enqueue a process on a specific CPU
@@ -1323,45 +1410,21 @@ pub fn dequeue_from_cpu(cpu: usize) -> Option<u32> {
     None
 }
 
+/// Drop `pid` from every per-CPU shadow queue.
+pub fn remove_from_runqueues(pid: u32) {
+    let mut queues = PER_CPU_RUNQUEUES.lock();
+    for q in queues.iter_mut() {
+        let before = q.queue.len();
+        q.queue.retain(|p| *p != pid);
+        q.load = q.load.saturating_sub((before - q.queue.len()) as u64);
+    }
+}
+
 /// CPU load balancing — steal work from overloaded CPUs
 /// Called periodically (e.g., every 100ms) from BSP timer
 pub fn balance_load() {
-    let mut queues = PER_CPU_RUNQUEUES.lock();
-    let online = CPUS_STARTED.load(Ordering::Relaxed) as usize;
-    let online = online.max(1).min(queues.len());
-
-    if online < 2 {
-        return; // Nothing to balance with one CPU
-    }
-
-    // Find most-loaded and least-loaded CPUs
-    let mut max_load = 0u64;
-    let mut max_cpu = 0;
-    let mut min_load = u64::MAX;
-    let mut min_cpu = 0;
-
-    for i in 0..online {
-        if queues[i].load > max_load {
-            max_load = queues[i].load;
-            max_cpu = i;
-        }
-        if queues[i].load < min_load {
-            min_load = queues[i].load;
-            min_cpu = i;
-        }
-    }
-
-    // Steal half the difference if imbalance > 1
-    if max_load > min_load + 1 && max_cpu != min_cpu {
-        let steal_count = (max_load - min_load) / 2;
-        for _ in 0..steal_count {
-            if let Some(pid) = queues[max_cpu].queue.pop_back() {
-                queues[min_cpu].queue.push_back(pid);
-                queues[max_cpu].load = queues[max_cpu].load.saturating_sub(1);
-                queues[min_cpu].load += 1;
-            }
-        }
-    }
+    // Per-CPU queues are the AP dispatch source. Stealing would pull a
+    // CPU-1-pinned Ring 3 task onto the BSP and fail Gate I3.
 }
 
 /// Get per-CPU load statistics
@@ -1719,6 +1782,7 @@ pub fn init(phys_mem_offset: u64) {
     // Start Application Processors
     if num > 1 {
         serial_println!("[SMP] Starting {} Application Processor(s)...", num - 1);
+        crate::context::create_ap_idle_contexts(num);
 
         // Identity-map low memory for the AP trampoline
         let mut cr3: u64 = 0;
