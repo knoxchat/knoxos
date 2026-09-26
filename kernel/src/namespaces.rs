@@ -198,6 +198,11 @@ pub fn unshare(pid: u32, flags: u32) -> Result<(), i32> {
     if flags & NamespaceType::User as u32 != 0 {
         ns.user_ns = create_namespace(NamespaceType::User, pid)?;
     }
+    drop(proc_ns);
+
+    if flags & NamespaceType::Pid as u32 != 0 {
+        crate::pidns::unshare_newpid(pid)?;
+    }
 
     Ok(())
 }

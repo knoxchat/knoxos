@@ -23,11 +23,8 @@ pub fn sys_pipe(pipefd_ptr: u64) -> SyscallResult {
             crate::fd::FileType::Pipe,
         )
         .map_err(|_| SyscallError::TooManyFiles)?;
-    unsafe {
-        let fds = pipefd_ptr as *mut [i32; 2];
-        (*fds)[0] = read_fd;
-        (*fds)[1] = write_fd;
-    }
+    drop(tables);
+    write_pipefds(pid, pipefd_ptr, read_fd, write_fd);
     Ok(0)
 }
 
@@ -68,12 +65,19 @@ pub fn sys_pipe2(pipefd_ptr: u64, flags: i32) -> SyscallResult {
         fd_table.set_nonblock(write_fd, true);
     }
 
-    unsafe {
-        let fds = pipefd_ptr as *mut [i32; 2];
-        (*fds)[0] = read_fd;
-        (*fds)[1] = write_fd;
-    }
+    drop(tables);
+    write_pipefds(pid, pipefd_ptr, read_fd, write_fd);
     Ok(0)
+}
+
+fn write_pipefds(pid: u32, pipefd_ptr: u64, read_fd: i32, write_fd: i32) {
+    unsafe {
+        core::ptr::copy_nonoverlapping([read_fd, write_fd].as_ptr(), pipefd_ptr as *mut i32, 2);
+    }
+    let mut bytes = [0u8; 8];
+    bytes[..4].copy_from_slice(&read_fd.to_ne_bytes());
+    bytes[4..].copy_from_slice(&write_fd.to_ne_bytes());
+    crate::vmm::write_user_memory(pid, pipefd_ptr, &bytes);
 }
 
 pub fn sys_dup(old_fd: i32) -> SyscallResult {

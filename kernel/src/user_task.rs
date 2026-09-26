@@ -92,6 +92,7 @@ pub fn spawn_elf(
     crate::fd::create_fd_table(pid);
     crate::signals::create_process_signals(pid);
     crate::namespaces::inherit_namespaces(pid, parent);
+    let _ = crate::pidns::on_fork(parent, pid);
     let uid = crate::process::PROCESS_TABLE
         .lock()
         .get_process(pid)
@@ -328,6 +329,22 @@ pub fn deliver_join_result(tid: u32, status: i64) {
     wake(joiner);
 }
 
+/// Park the current task in `futex(FUTEX_WAIT)` until a matching wake.
+pub fn park_for_futex() {
+    let pid = crate::context::current_pid();
+    let rip = crate::usermode::pending_user_rip();
+    let rsp = crate::usermode::current_user_rsp();
+    crate::context::set_user_context(pid, rip, rsp, 0);
+    crate::scheduler::block_current();
+    serial_println!(
+        "[user_task] PID {} parked in futex at rip={:#x} rsp={:#x}",
+        pid,
+        rip,
+        rsp
+    );
+    resume_next_or_return();
+}
+
 /// Pick the next runnable task and enter it, or return if there is none.
 ///
 /// The desktop executor is the fallback: it always has a saved context once it
@@ -456,13 +473,13 @@ pub fn run_gate_demos() {
         return;
     }
     serial_println!(
-        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4: scheduled Ring 3 ──"
+        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4: scheduled Ring 3 ──"
     );
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
     serial_println!(
-        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4: done ──"
+        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4: done ──"
     );
 }
 
@@ -484,6 +501,9 @@ extern "C" fn gate_boot_body() {
     run_gate_k3();
     run_gate_l1();
     run_gate_l4();
+    run_gate_m2();
+    run_gate_m3();
+    run_gate_m4();
 }
 
 fn run_gate_b3() {
@@ -743,6 +763,49 @@ fn run_gate_l4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate L4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_M2_MARKER: &str = "GATE_M2 pipe";
+pub const GATE_M3_MARKER: &str = "GATE_M3 futex";
+pub const GATE_M4_MARKER: &str = "GATE_M4 enosys";
+
+fn run_gate_m2() {
+    serial_println!("[user_task] Gate M2: pipe() write/read round-trip");
+    let elf = crate::init::pipe_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "pipe-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate M2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_m3() {
+    serial_println!("[user_task] Gate M3: futex wait/wake");
+    let elf = crate::init::futex_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "futex-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate M3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_m4() {
+    serial_println!("[user_task] Gate M4: io_uring_setup returns ENOSYS");
+    let elf = crate::init::io_uring_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "io-uring-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate M4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

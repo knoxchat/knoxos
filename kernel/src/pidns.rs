@@ -117,6 +117,8 @@ pub struct PidNsState {
     pub namespaces: BTreeMap<u32, PidNamespace>,
     /// Process → namespace mapping
     pub process_ns: BTreeMap<u32, u32>, // global_pid → ns_id
+    /// `unshare(CLONE_NEWPID)` / `setns` target for future children
+    pub pid_ns_for_children: BTreeMap<u32, u32>,
     /// Next namespace ID
     next_ns_id: u32,
     /// Root namespace ID
@@ -147,6 +149,7 @@ impl PidNsState {
         Self {
             namespaces,
             process_ns: BTreeMap::new(),
+            pid_ns_for_children: BTreeMap::new(),
             next_ns_id: 2,
             root_ns: root_ns_id,
             stats: PidNsStats::default(),
@@ -180,23 +183,21 @@ impl PidNsState {
         Ok(ns_id)
     }
 
-    /// Add a process to a PID namespace
+    /// Add a process to a PID namespace.
+    ///
+    /// The root namespace uses the global PID as the ns PID (Linux init ns).
+    /// Child namespaces allocate from 1 so the first process is PID 1.
     pub fn add_process(&mut self, global_pid: u32, ns_id: u32) -> Result<u32, i32> {
-        let ns = self.namespaces.get_mut(&ns_id).ok_or(-22i32)?;
-        let ns_pid = ns.add_process(global_pid);
+        let ns_pid = if ns_id == self.root_ns {
+            let ns = self.namespaces.get_mut(&ns_id).ok_or(-22i32)?;
+            ns.global_to_ns.insert(global_pid, global_pid);
+            ns.ns_to_global.insert(global_pid, global_pid);
+            global_pid
+        } else {
+            let ns = self.namespaces.get_mut(&ns_id).ok_or(-22i32)?;
+            ns.add_process(global_pid)
+        };
         self.process_ns.insert(global_pid, ns_id);
-
-        // Also add to all ancestor namespaces
-        let mut current = ns.parent;
-        while let Some(parent_id) = current {
-            if let Some(parent_ns) = self.namespaces.get_mut(&parent_id) {
-                parent_ns.add_process(global_pid);
-                current = parent_ns.parent;
-            } else {
-                break;
-            }
-        }
-
         Ok(ns_pid)
     }
 
@@ -248,9 +249,58 @@ impl PidNsState {
             return Err(-22);
         }
         self.stats.setns_calls += 1;
-        // Mark that future children of this process will be in target_ns
-        // The process itself stays in its original namespace
+        self.pid_ns_for_children.insert(global_pid, target_ns);
         Ok(())
+    }
+
+    /// `unshare(CLONE_NEWPID)`: the caller stays in its ns; future children enter `new_ns`.
+    pub fn unshare_newpid(&mut self, global_pid: u32) -> Result<u32, i32> {
+        let parent_ns = self
+            .process_ns
+            .get(&global_pid)
+            .copied()
+            .unwrap_or(self.root_ns);
+        let new_ns = self.create_namespace(parent_ns, global_pid)?;
+        self.pid_ns_for_children.insert(global_pid, new_ns);
+        Ok(new_ns)
+    }
+
+    /// Place `child` in the namespace selected by the parent's `pid_ns_for_children`.
+    pub fn on_fork(&mut self, parent: u32, child: u32) -> Result<u32, i32> {
+        let ns_id = self
+            .pid_ns_for_children
+            .get(&parent)
+            .copied()
+            .or_else(|| self.process_ns.get(&parent).copied())
+            .unwrap_or(self.root_ns);
+        let ns_pid = self.add_process(child, ns_id)?;
+        self.pid_ns_for_children.insert(child, ns_id);
+        Ok(ns_pid)
+    }
+
+    /// `clone(CLONE_NEWPID)`: only this child becomes PID 1 in a fresh ns.
+    pub fn fork_into_new_pid_ns(&mut self, parent: u32, child: u32) -> Result<u32, i32> {
+        let parent_ns = self
+            .process_ns
+            .get(&parent)
+            .copied()
+            .unwrap_or(self.root_ns);
+        let new_ns = self.create_namespace(parent_ns, parent)?;
+        let ns_pid = self.add_process(child, new_ns)?;
+        self.pid_ns_for_children.insert(child, new_ns);
+        Ok(ns_pid)
+    }
+
+    /// Namespace-local PID as `getpid` should report it.
+    pub fn ns_pid(&self, global_pid: u32) -> u32 {
+        match self.process_ns.get(&global_pid) {
+            Some(&ns_id) => self
+                .namespaces
+                .get(&ns_id)
+                .and_then(|ns| ns.translate_to_ns(global_pid))
+                .unwrap_or(global_pid),
+            None => global_pid,
+        }
     }
 
     /// Get namespace info for a process
@@ -302,13 +352,71 @@ pub fn translate_pid(pid: u32, from_ns: u32, to_ns: u32) -> Option<u32> {
     PIDNS.lock().translate_pid(pid, from_ns, to_ns)
 }
 
+pub fn unshare_newpid(global_pid: u32) -> Result<u32, i32> {
+    PIDNS.lock().unshare_newpid(global_pid)
+}
+
+pub fn on_fork(parent: u32, child: u32) -> Result<u32, i32> {
+    PIDNS.lock().on_fork(parent, child)
+}
+
+pub fn fork_into_new_pid_ns(parent: u32, child: u32) -> Result<u32, i32> {
+    PIDNS.lock().fork_into_new_pid_ns(parent, child)
+}
+
+pub fn ns_pid(global_pid: u32) -> u32 {
+    PIDNS.lock().ns_pid(global_pid)
+}
+
 pub fn init() {
     // Add PID 1 (init) to root namespace
-    let mut state = PIDNS.lock();
-    let root_id = state.root_ns;
-    let _ = state.add_process(1, root_id);
+    {
+        let mut state = PIDNS.lock();
+        let root_id = state.root_ns;
+        let _ = state.add_process(1, root_id);
+    }
     serial_println!(
         "[PIDNS] PID namespace extensions initialized (hierarchical, max depth={}, translation, setns)",
         MAX_PID_NS_DEPTH
     );
+    let _ = pid_isolation_self_test();
+}
+
+pub const GATE_M1_MARKER: &str = "GATE_M1 pid ns";
+const GATE_M1_PARENT: u32 = 0x0000_4D01;
+const GATE_M1_CHILD: u32 = 0x0000_4D02;
+
+/// `unshare(CLONE_NEWPID)` then fork: child `getpid` is 1; parent is unchanged.
+pub fn pid_isolation_self_test() -> bool {
+    let mut state = PIDNS.lock();
+    let root = state.root_ns;
+    if state.add_process(GATE_M1_PARENT, root).is_err() {
+        serial_println!("[pidns] Gate M1 FAILED: add parent");
+        return false;
+    }
+    if state.unshare_newpid(GATE_M1_PARENT).is_err() {
+        serial_println!("[pidns] Gate M1 FAILED: unshare");
+        return false;
+    }
+    let ns_pid = match state.on_fork(GATE_M1_PARENT, GATE_M1_CHILD) {
+        Ok(p) => p,
+        Err(_) => {
+            serial_println!("[pidns] Gate M1 FAILED: fork");
+            return false;
+        }
+    };
+    let parent_view = state.ns_pid(GATE_M1_PARENT);
+    let child_view = state.ns_pid(GATE_M1_CHILD);
+    drop(state);
+    if ns_pid != 1 || child_view != 1 || parent_view != GATE_M1_PARENT {
+        serial_println!(
+            "[pidns] Gate M1 FAILED: ns_pid={} child={} parent={}",
+            ns_pid,
+            child_view,
+            parent_view
+        );
+        return false;
+    }
+    serial_println!("[pidns] {}", GATE_M1_MARKER);
+    true
 }

@@ -235,6 +235,18 @@ lazy_static::lazy_static! {
         Mutex::new(BTreeMap::new());
 }
 
+/// Futex wait - register the current task; the caller parks or blocks.
+pub fn futex_register_waiter(addr: u64) {
+    let pid = crate::scheduler::current_pid().unwrap_or(0);
+    let mut waiters = FUTEX_WAITERS.lock();
+    let queue = waiters.entry(addr).or_default();
+    queue.push(FutexWaiter {
+        pid,
+        tid: pid,
+        addr,
+    });
+}
+
 /// Futex wait - block if *addr == expected_val
 pub fn futex_wait(addr: u64, expected_val: u32) -> Result<(), i32> {
     let pid = crate::scheduler::current_pid().unwrap_or(0);
@@ -245,40 +257,34 @@ pub fn futex_wait(addr: u64, expected_val: u32) -> Result<(), i32> {
         return Err(-11); // EAGAIN - value changed
     }
 
-    // Add to wait queue
-    let mut waiters = FUTEX_WAITERS.lock();
-    let queue = waiters.entry(addr).or_default();
-    queue.push(FutexWaiter {
-        pid,
-        tid: pid,
-        addr,
-    });
-
-    // Block the process
-    drop(waiters);
+    futex_register_waiter(addr);
     crate::scheduler::SCHEDULER.lock().block_process(pid);
-
     Ok(())
 }
 
 /// Futex wake - wake up to `count` waiters on addr
 pub fn futex_wake(addr: u64, count: u32) -> Result<u32, i32> {
-    let mut waiters = FUTEX_WAITERS.lock();
-    let mut woken = 0u32;
-
-    if let Some(queue) = waiters.get_mut(&addr) {
-        let to_wake = (count as usize).min(queue.len());
-        for _ in 0..to_wake {
-            if let Some(waiter) = queue.pop() {
-                crate::scheduler::SCHEDULER.lock().wake_process(waiter.pid);
-                woken += 1;
+    let mut to_wake = Vec::new();
+    {
+        let mut waiters = FUTEX_WAITERS.lock();
+        if let Some(queue) = waiters.get_mut(&addr) {
+            let n = (count as usize).min(queue.len());
+            for _ in 0..n {
+                if let Some(waiter) = queue.pop() {
+                    to_wake.push(waiter.pid);
+                }
             }
-        }
-        if queue.is_empty() {
-            waiters.remove(&addr);
+            if queue.is_empty() {
+                waiters.remove(&addr);
+            }
         }
     }
 
+    let woken = to_wake.len() as u32;
+    for pid in to_wake {
+        crate::scheduler::wake_process(pid);
+        crate::context::set_user_retval(pid, 0);
+    }
     Ok(woken)
 }
 

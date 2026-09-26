@@ -1571,6 +1571,22 @@ mod security_tests {
     }
 
     #[test_case]
+    fn test_pid_namespace_isolation() {
+        assert!(
+            crate::pidns::pid_isolation_self_test(),
+            "unshare(CLONE_NEWPID) child must be PID 1; parent unchanged"
+        );
+    }
+
+    #[test_case]
+    fn test_pipe_ipc_roundtrip() {
+        assert!(
+            crate::ipc::pipe_roundtrip_self_test(),
+            "pipe write then read must return the same bytes"
+        );
+    }
+
+    #[test_case]
     fn test_dbus_unix_socket_roundtrip() {
         assert!(
             crate::dbus::unix_bus_self_test(),

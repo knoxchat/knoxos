@@ -1923,12 +1923,11 @@ pub fn handle_syscall(
         SyscallNumber::PidfdSendSignal => {
             advanced::sys_pidfd_send_signal(arg1, arg2 as i32, arg3, arg4 as u32)
         }
-        SyscallNumber::IoUringSetup => advanced::sys_io_uring_setup(arg1 as u32, arg2),
-        SyscallNumber::IoUringEnter => {
-            advanced::sys_io_uring_enter(arg1, arg2 as u32, arg3 as u32, arg4 as u32)
-        }
-        SyscallNumber::IoUringRegister => {
-            advanced::sys_io_uring_register(arg1, arg2 as u32, arg3, arg4 as u32)
+        SyscallNumber::IoUringSetup
+        | SyscallNumber::IoUringEnter
+        | SyscallNumber::IoUringRegister => {
+            serial_println!("[KnoxOS] io_uring denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
         }
         SyscallNumber::OpenTree => advanced::sys_open_tree(arg1 as i32, arg2, arg3 as u32),
         SyscallNumber::MoveMount => {

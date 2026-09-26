@@ -278,6 +278,19 @@ pub fn mq_receive(queue_id: u32) -> Result<IpcMessage, i32> {
     queue.receive().ok_or(-11) // EAGAIN
 }
 
+/// Write then read through the shared pipe table used by `sys_pipe`.
+pub fn pipe_roundtrip_self_test() -> bool {
+    let Ok(id) = create_pipe() else {
+        return false;
+    };
+    let payload = b"ping\n";
+    if pipe_write(id, payload) != Ok(payload.len()) {
+        return false;
+    }
+    let mut buf = [0u8; 8];
+    matches!(pipe_read(id, &mut buf), Ok(n) if n == payload.len() && &buf[..n] == payload)
+}
+
 /// Initialize IPC subsystem
 pub fn init() {
     serial_println!("[KnoxOS] IPC initialized (pipes + message queues)");

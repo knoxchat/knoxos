@@ -32,6 +32,7 @@ pub fn sys_fork() -> SyscallResult {
         }
 
         crate::namespaces::inherit_namespaces(child_pid, ppid);
+        let _ = crate::pidns::on_fork(ppid, child_pid);
         crate::scheduler::add_process(child_pid, 0);
         serial_println!("[KnoxOS] fork() -> PID {}", child_pid);
         Ok(child_pid as u64)
@@ -47,6 +48,7 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> Sysc
     const CLONE_THREAD: u64 = 0x00010000;
     const CLONE_SETTLS: u64 = 0x00080000;
     const CLONE_NEWUTS: u64 = 0x04000000;
+    const CLONE_NEWPID: u64 = 0x20000000;
     if flags & CLONE_THREAD != 0 && flags & CLONE_VM == 0 {
         return Err(SyscallError::InvalidArgument);
     }
@@ -83,6 +85,11 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> Sysc
     crate::namespaces::inherit_namespaces(child_pid, ppid);
     if flags & CLONE_NEWUTS != 0 {
         let _ = crate::namespaces::unshare(child_pid, CLONE_NEWUTS as u32);
+    }
+    if flags & CLONE_NEWPID != 0 {
+        let _ = crate::pidns::fork_into_new_pid_ns(ppid, child_pid);
+    } else {
+        let _ = crate::pidns::on_fork(ppid, child_pid);
     }
     if flags & CLONE_SETTLS != 0 {
         crate::context::set_user_fs_base(child_pid, tls);
@@ -300,7 +307,8 @@ pub fn sys_kill(pid: u32, sig: u32) -> SyscallResult {
 }
 
 pub fn sys_getpid() -> SyscallResult {
-    Ok(crate::scheduler::current_pid().unwrap_or(1) as u64)
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    Ok(crate::pidns::ns_pid(pid) as u64)
 }
 
 pub fn sys_getppid() -> SyscallResult {

@@ -68,6 +68,11 @@ pub enum SeekFrom {
     End = 2,     // SEEK_END
 }
 
+/// Parse `pipe:{id}` written by `sys_pipe`.
+fn pipe_id_from_path(path: &str) -> Option<u32> {
+    path.strip_prefix("pipe:")?.parse().ok()
+}
+
 /// Type of file backing a file descriptor
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
@@ -213,11 +218,13 @@ impl FdTable {
 
     /// Close a file descriptor
     pub fn close(&mut self, fd: Fd) -> Result<(), i32> {
-        if self.files.remove(&fd).is_some() {
-            Ok(())
-        } else {
-            Err(-9) // EBADF
+        let file = self.files.remove(&fd).ok_or(-9i32)?;
+        if file.file_type == FileType::Pipe {
+            if let Some(id) = pipe_id_from_path(&file.path) {
+                crate::ipc::pipe_close(id, !file.flags.is_writable());
+            }
         }
+        Ok(())
     }
 
     /// Get a reference to an open file
@@ -325,14 +332,13 @@ impl FdTable {
                 }
             }
             FileType::Pipe => {
-                if let Some(ref mut buffer) = file.buffer {
-                    let to_read = buf.len().min(buffer.len());
-                    buf[..to_read].copy_from_slice(&buffer[..to_read]);
-                    buffer.drain(..to_read);
-                    Ok(to_read)
-                } else {
-                    Ok(0)
+                let Some(id) = pipe_id_from_path(&file.path) else {
+                    return Ok(0);
+                };
+                if !file.flags.is_readable() {
+                    return Err(-9);
                 }
+                crate::ipc::pipe_read(id, buf)
             }
             FileType::Regular | FileType::ProcFile => {
                 if file.file_type == FileType::Regular {
@@ -410,15 +416,13 @@ impl FdTable {
                 }
             }
             FileType::Pipe => {
-                if file.buffer.is_none() {
-                    file.buffer = Some(Vec::new());
+                let Some(id) = pipe_id_from_path(&file.path) else {
+                    return Err(-5);
+                };
+                if !file.flags.is_writable() {
+                    return Err(-9);
                 }
-                if let Some(ref mut buffer) = file.buffer {
-                    buffer.extend_from_slice(buf);
-                    Ok(buf.len())
-                } else {
-                    Err(-5) // EIO
-                }
+                crate::ipc::pipe_write(id, buf)
             }
             FileType::Regular => {
                 let mut ino = file.inode;

@@ -26,12 +26,17 @@ pub fn sys_futex(uaddr: u64, op: i32, val: u32) -> SyscallResult {
     match cmd {
         FUTEX_WAIT | FUTEX_WAIT_BITSET => {
             // FUTEX_WAIT: if *uaddr == val, sleep until woken
-            // Check value atomically
             let current = unsafe { *(uaddr as *const u32) };
             if current != val {
                 return Err(SyscallError::WouldBlock);
             }
-            crate::threads::futex_wait(uaddr, val).map_err(|_| SyscallError::WouldBlock)?;
+            crate::threads::futex_register_waiter(uaddr);
+            let pid = crate::scheduler::current_pid().unwrap_or(1);
+            if pid > crate::context::DESKTOP_PID {
+                crate::user_task::park_for_futex();
+                return Ok(0);
+            }
+            crate::scheduler::SCHEDULER.lock().block_process(pid);
             Ok(0)
         }
         FUTEX_WAKE | FUTEX_WAKE_BITSET => {
