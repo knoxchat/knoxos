@@ -2,6 +2,7 @@
 /// Compatible with Linux epoll(7) interface
 /// Provides scalable I/O multiplexing for file descriptors
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::vec::Vec;
 use spin::Mutex;
 
@@ -31,6 +32,7 @@ pub struct EpollEvent {
 #[derive(Debug, Clone)]
 struct EpollEntry {
     fd: i32,
+    path: String,
     events: u32,
     data: u64,
     edge_triggered: bool,
@@ -50,7 +52,7 @@ impl EpollInstance {
         }
     }
 
-    fn add(&mut self, fd: i32, event: &EpollEvent) -> Result<(), i32> {
+    fn add(&mut self, fd: i32, event: &EpollEvent, path: &str) -> Result<(), i32> {
         if self.entries.contains_key(&fd) {
             return Err(-17); // EEXIST
         }
@@ -58,6 +60,7 @@ impl EpollInstance {
             fd,
             EpollEntry {
                 fd,
+                path: String::from(path),
                 events: event.events & !(EPOLLET | EPOLLONESHOT),
                 data: event.data,
                 edge_triggered: event.events & EPOLLET != 0,
@@ -91,8 +94,7 @@ impl EpollInstance {
                 break;
             }
 
-            // Check if fd is ready (simplified: check fd validity and readiness)
-            let ready = check_fd_readiness(entry.fd, entry.events);
+            let ready = check_path_readiness(&entry.path, entry.fd, entry.events);
 
             if ready != 0 {
                 // For edge-triggered: only report if state changed
@@ -126,6 +128,49 @@ impl EpollInstance {
     }
 }
 
+/// Readiness from a captured fd path (pipe:/eventfd:/memfd:).
+fn default_file_readiness(interest: u32) -> u32 {
+    let mut ready = 0u32;
+    if interest & EPOLLIN != 0 {
+        ready |= EPOLLIN;
+    }
+    if interest & EPOLLOUT != 0 {
+        ready |= EPOLLOUT;
+    }
+    ready
+}
+
+fn check_path_readiness(path: &str, _fd: i32, interest: u32) -> u32 {
+    if let Some(id) = path.strip_prefix("pipe:") {
+        if let Ok(id) = id.parse::<u32>() {
+            let mut ready = 0u32;
+            if interest & EPOLLIN != 0 && crate::ipc::pipe_available(id) > 0 {
+                ready |= EPOLLIN;
+            }
+            if interest & EPOLLOUT != 0 && crate::ipc::pipe_space(id) > 0 {
+                ready |= EPOLLOUT;
+            }
+            return ready;
+        }
+    }
+    if let Some(id) = path.strip_prefix("eventfd:") {
+        if let Ok(id) = id.parse::<i32>() {
+            let mut ready = 0u32;
+            if interest & EPOLLIN != 0 && crate::eventfd::eventfd_would_read(id) {
+                ready |= EPOLLIN;
+            }
+            if interest & EPOLLOUT != 0 {
+                ready |= EPOLLOUT;
+            }
+            return ready;
+        }
+    }
+    if path.starts_with("memfd:") {
+        return default_file_readiness(interest);
+    }
+    default_file_readiness(interest)
+}
+
 /// Check readiness of a file descriptor
 fn check_fd_readiness(fd: i32, interest: u32) -> u32 {
     let mut ready = 0u32;
@@ -140,47 +185,12 @@ fn check_fd_readiness(fd: i32, interest: u32) -> u32 {
         ready |= EPOLLOUT;
     }
 
-    // Regular files are always readable and writable
     if fd >= 3 {
         let pid = crate::scheduler::current_pid().unwrap_or(1);
         let tables = crate::fd::PROCESS_FD_TABLES.lock();
         if let Some(fd_table) = tables.get(&pid) {
             if let Some(file) = fd_table.get(fd) {
-                match file.file_type {
-                    crate::fd::FileType::Regular | crate::fd::FileType::ProcFile => {
-                        if interest & EPOLLIN != 0 {
-                            ready |= EPOLLIN;
-                        }
-                        if interest & EPOLLOUT != 0 {
-                            ready |= EPOLLOUT;
-                        }
-                    }
-                    crate::fd::FileType::Pipe => {
-                        // Pipe: readable if data available, writable if space available
-                        if interest & EPOLLIN != 0 {
-                            ready |= EPOLLIN;
-                        }
-                        if interest & EPOLLOUT != 0 {
-                            ready |= EPOLLOUT;
-                        }
-                    }
-                    crate::fd::FileType::Socket => {
-                        if interest & EPOLLIN != 0 {
-                            ready |= EPOLLIN;
-                        }
-                        if interest & EPOLLOUT != 0 {
-                            ready |= EPOLLOUT;
-                        }
-                    }
-                    _ => {
-                        if interest & EPOLLIN != 0 {
-                            ready |= EPOLLIN;
-                        }
-                        if interest & EPOLLOUT != 0 {
-                            ready |= EPOLLOUT;
-                        }
-                    }
-                }
+                return check_path_readiness(&file.path, fd, interest);
             } else {
                 ready |= EPOLLERR; // Bad fd
             }
@@ -207,11 +217,22 @@ pub fn epoll_create() -> Result<i32, i32> {
 
 /// Control an epoll instance (add/mod/del)
 pub fn epoll_ctl(epfd: i32, op: i32, fd: i32, event: &EpollEvent) -> Result<(), i32> {
+    epoll_ctl_with_path(epfd, op, fd, event, "")
+}
+
+/// `epoll_ctl` that records the watched fd's backing path for readiness.
+pub fn epoll_ctl_with_path(
+    epfd: i32,
+    op: i32,
+    fd: i32,
+    event: &EpollEvent,
+    path: &str,
+) -> Result<(), i32> {
     let mut instances = EPOLL_INSTANCES.lock();
     let instance = instances.get_mut(&epfd).ok_or(-9i32)?; // EBADF
 
     match op {
-        EPOLL_CTL_ADD => instance.add(fd, event),
+        EPOLL_CTL_ADD => instance.add(fd, event, path),
         EPOLL_CTL_MOD => instance.modify(fd, event),
         EPOLL_CTL_DEL => instance.delete(fd),
         _ => Err(-22), // EINVAL
@@ -228,6 +249,38 @@ pub fn epoll_wait(epfd: i32, events: &mut [EpollEvent], timeout_ms: i32) -> Resu
 /// Close an epoll instance
 pub fn epoll_close(epfd: i32) {
     EPOLL_INSTANCES.lock().remove(&epfd);
+}
+
+/// Empty pipe is not readable; a write makes `epoll_wait` report `EPOLLIN`.
+pub fn epoll_pipe_self_test() -> bool {
+    let Ok(pipe_id) = crate::ipc::create_pipe() else {
+        return false;
+    };
+    let Ok(epfd) = epoll_create() else {
+        return false;
+    };
+    let event = EpollEvent {
+        events: EPOLLIN,
+        data: 0x4242,
+    };
+    let path = alloc::format!("pipe:{}", pipe_id);
+    if epoll_ctl_with_path(epfd, EPOLL_CTL_ADD, 3, &event, &path).is_err() {
+        epoll_close(epfd);
+        return false;
+    }
+    let mut events = [EpollEvent { events: 0, data: 0 }; 1];
+    let idle = epoll_wait(epfd, &mut events, 0).unwrap_or(0);
+    if idle != 0 {
+        epoll_close(epfd);
+        return false;
+    }
+    if crate::ipc::pipe_write(pipe_id, b"x").is_err() {
+        epoll_close(epfd);
+        return false;
+    }
+    let ready = epoll_wait(epfd, &mut events, 0).unwrap_or(0);
+    epoll_close(epfd);
+    ready == 1 && events[0].events & EPOLLIN != 0 && events[0].data == 0x4242
 }
 
 // ═══════════════════════════════════════════════════════════════════════

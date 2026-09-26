@@ -69,18 +69,37 @@ pub enum SeekFrom {
 }
 
 /// Parse `pipe:{id}` written by `sys_pipe`.
-fn pipe_id_from_path(path: &str) -> Option<u32> {
+pub(crate) fn pipe_id_from_path(path: &str) -> Option<u32> {
     path.strip_prefix("pipe:")?.parse().ok()
 }
 
 /// Parse `unix:{id}` written by `sys_socketpair`.
-fn unix_id_from_path(path: &str) -> Option<u32> {
+pub(crate) fn unix_id_from_path(path: &str) -> Option<u32> {
     path.strip_prefix("unix:")?.parse().ok()
 }
 
 /// Parse `eventfd:{id}` written by `sys_eventfd`.
-fn eventfd_id_from_path(path: &str) -> Option<i32> {
+pub(crate) fn eventfd_id_from_path(path: &str) -> Option<i32> {
     path.strip_prefix("eventfd:")?.parse().ok()
+}
+
+/// Parse `epoll:{id}` written by `sys_epoll_create`.
+pub(crate) fn epoll_id_from_path(path: &str) -> Option<i32> {
+    path.strip_prefix("epoll:")?.parse().ok()
+}
+
+/// Parse `memfd:{id}` written by `sys_memfd_create`.
+pub(crate) fn memfd_id_from_path(path: &str) -> Option<u64> {
+    path.strip_prefix("memfd:")?.parse().ok()
+}
+
+/// Path recorded for a process fd, if the fd is open.
+pub fn path_for_fd(pid: u32, fd: Fd) -> Option<String> {
+    PROCESS_FD_TABLES
+        .lock()
+        .get(&pid)
+        .and_then(|t| t.get(fd))
+        .map(|f| f.path.clone())
 }
 
 /// Type of file backing a file descriptor
@@ -242,6 +261,12 @@ impl FdTable {
         if let Some(id) = eventfd_id_from_path(&file.path) {
             crate::eventfd::eventfd_close(id);
         }
+        if let Some(id) = epoll_id_from_path(&file.path) {
+            crate::epoll::epoll_close(id);
+        }
+        if let Some(id) = memfd_id_from_path(&file.path) {
+            crate::memfd::memfd_close(id);
+        }
         Ok(())
     }
 
@@ -323,6 +348,12 @@ impl FdTable {
                 Ok(0)
             }
             FileType::CharDevice => {
+                if let Some(id) = memfd_id_from_path(&file.path) {
+                    let offset = file.offset;
+                    let n = crate::memfd::memfd_read(id, offset, buf).map_err(|_| -9i32)?;
+                    file.offset += n;
+                    return Ok(n);
+                }
                 if let Some(id) = eventfd_id_from_path(&file.path) {
                     return crate::eventfd::eventfd_read_bytes(id, buf);
                 }
@@ -425,6 +456,15 @@ impl FdTable {
                 }
             }
             FileType::CharDevice => {
+                if let Some(id) = memfd_id_from_path(&file.path) {
+                    let offset = file.offset;
+                    let n = crate::memfd::memfd_write(id, offset, buf).map_err(|_| -9i32)?;
+                    file.offset = offset + n;
+                    if file.offset > file.size {
+                        file.size = file.offset;
+                    }
+                    return Ok(n);
+                }
                 if let Some(id) = eventfd_id_from_path(&file.path) {
                     return crate::eventfd::eventfd_write_bytes(id, buf);
                 }

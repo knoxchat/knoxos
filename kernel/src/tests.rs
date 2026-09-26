@@ -1587,6 +1587,30 @@ mod security_tests {
     }
 
     #[test_case]
+    fn test_net_namespace_isolation() {
+        assert!(
+            crate::namespaces::net_isolation_self_test(),
+            "unshare(CLONE_NEWNET) interfaces must not leak to the parent"
+        );
+    }
+
+    #[test_case]
+    fn test_epoll_pipe_readiness() {
+        assert!(
+            crate::epoll::epoll_pipe_self_test(),
+            "epoll_wait must stay idle on an empty pipe and fire EPOLLIN after write"
+        );
+    }
+
+    #[test_case]
+    fn test_memfd_roundtrip() {
+        assert!(
+            crate::memfd::memfd_roundtrip_self_test(),
+            "memfd write then read must return the same bytes"
+        );
+    }
+
+    #[test_case]
     fn test_socketpair_roundtrip() {
         assert!(
             crate::uds::socketpair_roundtrip_self_test(),

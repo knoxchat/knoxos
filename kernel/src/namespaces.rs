@@ -301,6 +301,35 @@ pub fn has_mount(pid: u32, target: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Add a virtual interface name to `pid`'s network namespace.
+pub fn add_net_interface(pid: u32, name: &str) -> Result<(), i32> {
+    let ns_id = PROCESS_NS.lock().get(&pid).map(|n| n.net_ns).unwrap_or(1);
+    let mut nets = NET_NAMESPACES.lock();
+    let ns = nets.entry(ns_id).or_insert_with(|| NetNamespace {
+        id: ns_id,
+        interfaces: Vec::new(),
+        has_loopback: false,
+    });
+    if ns.interfaces.iter().any(|i| i == name) {
+        return Err(-17); // EEXIST
+    }
+    ns.interfaces.push(String::from(name));
+    if name == "lo" {
+        ns.has_loopback = true;
+    }
+    Ok(())
+}
+
+/// Whether `pid`'s network namespace lists `name`.
+pub fn has_net_interface(pid: u32, name: &str) -> bool {
+    let ns_id = PROCESS_NS.lock().get(&pid).map(|n| n.net_ns).unwrap_or(1);
+    NET_NAMESPACES
+        .lock()
+        .get(&ns_id)
+        .map(|ns| ns.interfaces.iter().any(|i| i == name))
+        .unwrap_or(false)
+}
+
 /// Initialize namespace subsystem
 pub fn init() {
     // Create the initial (default) namespaces
@@ -402,6 +431,7 @@ pub fn init() {
     );
     let _ = uts_isolation_self_test();
     let _ = mount_isolation_self_test();
+    let _ = net_isolation_self_test();
 }
 
 pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";
@@ -456,5 +486,38 @@ pub fn mount_isolation_self_test() -> bool {
         return false;
     }
     crate::serial_println!("[ns] {}", GATE_N1_MARKER);
+    true
+}
+
+pub const GATE_O1_MARKER: &str = "GATE_O1 net ns";
+const GATE_O1_PID: u32 = 0x0000_4F01;
+
+/// Child `unshare(CLONE_NEWNET)` must not see the parent's `eth0`, and a
+/// child-only interface must not appear in the parent.
+pub fn net_isolation_self_test() -> bool {
+    inherit_namespaces(GATE_O1_PID, 1);
+    if !has_net_interface(1, "eth0") {
+        crate::serial_println!("[ns] Gate O1 FAILED: parent missing eth0");
+        return false;
+    }
+    if unshare(GATE_O1_PID, NamespaceType::Net as u32).is_err() {
+        crate::serial_println!("[ns] Gate O1 FAILED: unshare");
+        return false;
+    }
+    if has_net_interface(GATE_O1_PID, "eth0") {
+        crate::serial_println!("[ns] Gate O1 FAILED: child still has eth0");
+        return false;
+    }
+    if add_net_interface(GATE_O1_PID, "veth0").is_err() {
+        crate::serial_println!("[ns] Gate O1 FAILED: add veth0");
+        return false;
+    }
+    let child = has_net_interface(GATE_O1_PID, "veth0");
+    let parent = has_net_interface(1, "veth0");
+    if !child || parent {
+        crate::serial_println!("[ns] Gate O1 FAILED: child={} parent={}", child, parent);
+        return false;
+    }
+    crate::serial_println!("[ns] {}", GATE_O1_MARKER);
     true
 }

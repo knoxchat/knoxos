@@ -124,6 +124,15 @@ pub fn eventfd_roundtrip_self_test() -> bool {
     matches!(got, Ok(1))
 }
 
+/// Check if a counter read would succeed without blocking.
+pub fn eventfd_would_read(fd: i32) -> bool {
+    EVENTFDS
+        .lock()
+        .get(&fd)
+        .map(|e| e.counter > 0)
+        .unwrap_or(false)
+}
+
 /// Close an eventfd
 pub fn eventfd_close(fd: i32) {
     EVENTFDS.lock().remove(&fd);

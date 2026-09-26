@@ -1790,7 +1790,8 @@ pub fn handle_syscall(
         // ── Recent syscalls (298–334) ──────────────────────────────
         // ════════════════════════════════════════════════════════════
         SyscallNumber::PerfEventOpen => {
-            advanced::sys_perf_event_open(arg1, arg2 as i64, arg3 as i32, arg4 as i64, arg5)
+            serial_println!("[KnoxOS] perf_event_open denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
         }
         SyscallNumber::FanotifyInit => advanced::sys_fanotify_init(arg1 as u32, arg2 as u32),
         SyscallNumber::FanotifyMark => {

@@ -9,39 +9,61 @@ use crate::serial_println;
 
 pub fn sys_epoll_create(flags: i32) -> SyscallResult {
     let _ = flags;
-    crate::epoll::epoll_create()
-        .map(|fd| fd as u64)
-        .map_err(|_| SyscallError::TooManyFiles)
+    let id = crate::epoll::epoll_create().map_err(|_| SyscallError::TooManyFiles)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables.get_mut(&pid).ok_or(SyscallError::TooManyFiles)?;
+    let fd = fd_table
+        .open(
+            &alloc::format!("epoll:{}", id),
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::CharDevice,
+        )
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    Ok(fd as u64)
+}
+
+fn epoll_id_from_epfd(epfd: i32) -> Result<i32, SyscallError> {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::fd::path_for_fd(pid, epfd).ok_or(SyscallError::BadFileDescriptor)?;
+    crate::fd::epoll_id_from_path(&path).ok_or(SyscallError::BadFileDescriptor)
 }
 
 pub fn sys_epoll_ctl(epfd: i32, op: i32, fd: i32, event_ptr: u64) -> SyscallResult {
+    let id = epoll_id_from_epfd(epfd)?;
     let events = if event_ptr != 0 {
         unsafe { *(event_ptr as *const u32) }
     } else {
         0
     };
     let data = if event_ptr != 0 {
-        unsafe { *((event_ptr as *const u8).add(4) as *const u64) }
+        unsafe { core::ptr::read_unaligned((event_ptr as *const u8).add(4) as *const u64) }
     } else {
         0
     };
     let event = crate::epoll::EpollEvent { events, data };
-    crate::epoll::epoll_ctl(epfd, op, fd, &event)
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::fd::path_for_fd(pid, fd).unwrap_or_default();
+    crate::epoll::epoll_ctl_with_path(id, op, fd, &event, &path)
         .map(|_| 0u64)
         .map_err(|_| SyscallError::InvalidArgument)
 }
 
 pub fn sys_epoll_wait(epfd: i32, events_ptr: u64, max_events: i32, timeout: i32) -> SyscallResult {
+    let id = epoll_id_from_epfd(epfd)?;
     let mut events_buf = [crate::epoll::EpollEvent { events: 0, data: 0 }; 64];
     let count = core::cmp::min(max_events as usize, 64);
     let buf = &mut events_buf[..count];
-    let ready = crate::epoll::epoll_wait(epfd, buf, timeout)
-        .map_err(|_| SyscallError::BadFileDescriptor)?;
+    let ready =
+        crate::epoll::epoll_wait(id, buf, timeout).map_err(|_| SyscallError::BadFileDescriptor)?;
     if events_ptr != 0 && ready > 0 {
-        let out = unsafe {
-            core::slice::from_raw_parts_mut(events_ptr as *mut crate::epoll::EpollEvent, ready)
-        };
-        out[..ready].copy_from_slice(&buf[..ready]);
+        for i in 0..ready {
+            let p = events_ptr + (i * 12) as u64;
+            unsafe {
+                *(p as *mut u32) = buf[i].events;
+                core::ptr::write_unaligned((p as *mut u8).add(4) as *mut u64, buf[i].data);
+            }
+        }
     }
     Ok(ready as u64)
 }

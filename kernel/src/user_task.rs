@@ -473,13 +473,13 @@ pub fn run_gate_demos() {
         return;
     }
     serial_println!(
-        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4: scheduled Ring 3 ──"
+        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4 + O2–O4: scheduled Ring 3 ──"
     );
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
     serial_println!(
-        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4: done ──"
+        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4 + O2–O4: done ──"
     );
 }
 
@@ -507,6 +507,9 @@ extern "C" fn gate_boot_body() {
     run_gate_n2();
     run_gate_n3();
     run_gate_n4();
+    run_gate_o2();
+    run_gate_o3();
+    run_gate_o4();
 }
 
 fn run_gate_b3() {
@@ -852,6 +855,49 @@ fn run_gate_n4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate N4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_O2_MARKER: &str = "GATE_O2 epoll";
+pub const GATE_O3_MARKER: &str = "GATE_O3 memfd";
+pub const GATE_O4_MARKER: &str = "GATE_O4 enosys";
+
+fn run_gate_o2() {
+    serial_println!("[user_task] Gate O2: epoll wait on a pipe");
+    let elf = crate::init::epoll_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "epoll-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate O2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_o3() {
+    serial_println!("[user_task] Gate O3: memfd write/read");
+    let elf = crate::init::memfd_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "memfd-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate O3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_o4() {
+    serial_println!("[user_task] Gate O4: perf_event_open returns ENOSYS");
+    let elf = crate::init::perf_event_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "perf-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate O4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

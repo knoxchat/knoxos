@@ -63,7 +63,22 @@ pub fn sys_pidfd_getfd(pidfd: u64, target_fd: i32, flags: u32) -> SyscallResult 
 
 pub fn sys_memfd_create(name_ptr: u64, flags: u32) -> SyscallResult {
     let name = unsafe { read_user_string(name_ptr) }.unwrap_or_default();
-    crate::memfd::sys_memfd_create(&name, flags).map_err(|_| SyscallError::TooManyFiles)
+    let id =
+        crate::memfd::sys_memfd_create(&name, flags).map_err(|_| SyscallError::TooManyFiles)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables.get_mut(&pid).ok_or(SyscallError::TooManyFiles)?;
+    let fd = fd_table
+        .open(
+            &alloc::format!("memfd:{}", id),
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::CharDevice,
+        )
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    if flags & crate::memfd::MFD_CLOEXEC != 0 {
+        fd_table.set_cloexec(fd, true);
+    }
+    Ok(fd as u64)
 }
 
 // ── userfaultfd ─────────────────────────────────────────────────────

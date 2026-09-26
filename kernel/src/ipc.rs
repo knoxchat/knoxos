@@ -150,6 +150,26 @@ pub fn pipe_read(id: u32, buf: &mut [u8]) -> Result<usize, i32> {
     pipe.read(buf)
 }
 
+/// Bytes waiting to be read.
+pub fn pipe_available(id: u32) -> usize {
+    PIPES
+        .lock()
+        .iter()
+        .find(|p| p.id == id)
+        .map(|p| p.available())
+        .unwrap_or(0)
+}
+
+/// Free space for a write.
+pub fn pipe_space(id: u32) -> usize {
+    PIPES
+        .lock()
+        .iter()
+        .find(|p| p.id == id)
+        .map(|p| p.space())
+        .unwrap_or(0)
+}
+
 /// Close a pipe end
 pub fn pipe_close(id: u32, is_read_end: bool) {
     let mut pipes = PIPES.lock();

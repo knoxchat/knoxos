@@ -242,6 +242,22 @@ pub struct MemFdInfo {
     pub ref_count: u32,
 }
 
+/// Write then read through the memfd table used by `sys_memfd_create`.
+pub fn memfd_roundtrip_self_test() -> bool {
+    let Ok(id) = sys_memfd_create("gate-o3", 0) else {
+        return false;
+    };
+    let payload = b"ping\n";
+    if memfd_write(id, 0, payload) != Ok(payload.len()) {
+        memfd_close(id);
+        return false;
+    }
+    let mut buf = [0u8; 8];
+    let got = memfd_read(id, 0, &mut buf);
+    memfd_close(id);
+    matches!(got, Ok(n) if n == payload.len() && &buf[..n] == payload)
+}
+
 /// Initialize memfd subsystem
 pub fn init() {
     crate::serial_println!(
