@@ -1288,11 +1288,10 @@ pub extern "C" fn ap_idle_loop() -> ! {
         set_ap_idle_flag(cpu, true);
         maybe_start_ap_timer(cpu);
         try_enter_ap_task(cpu);
-        if crate::apic_timer::is_initialized() {
-            crate::arch_compat::instructions::interrupts::hlt();
-        } else {
-            core::hint::spin_loop();
-        }
+        // Do not HLT: `enqueue_on_cpu` from the BSP races with a
+        // check-then-HLT idle (Gate I3). Spin with IF=1 so the APIC timer
+        // still fires; QEMU APs are not power-managed.
+        core::hint::spin_loop();
     }
 }
 
@@ -1318,7 +1317,9 @@ fn try_enter_ap_task(cpu: u32) {
             continue;
         }
         if !crate::context::has_runnable_context(pid) {
-            continue;
+            // Not ready yet — put it back so a later idle pass can take it.
+            enqueue_on_cpu(cpu as usize, pid);
+            break;
         }
         {
             let mut cpus = CPU_DATA.lock();
@@ -1410,7 +1411,6 @@ pub fn dequeue_from_cpu(cpu: usize) -> Option<u32> {
     None
 }
 
-/// Drop `pid` from every per-CPU shadow queue.
 pub fn remove_from_runqueues(pid: u32) {
     let mut queues = PER_CPU_RUNQUEUES.lock();
     for q in queues.iter_mut() {

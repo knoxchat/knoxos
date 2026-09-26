@@ -723,9 +723,10 @@ pub fn sys_arch_prctl(code: i32, addr: u64) -> SyscallResult {
         }
         0x1002 => {
             // ARCH_SET_FS
-            crate::arch_compat::registers::model_specific::FsBase::write(
-                crate::arch_compat::structures::paging::VirtAddr::new(addr),
-            );
+            crate::usermode::program_fs_base(addr);
+            if let Some(pid) = crate::scheduler::current_pid() {
+                crate::context::set_user_fs_base(pid, addr);
+            }
             Ok(0)
         }
         0x1003 => {

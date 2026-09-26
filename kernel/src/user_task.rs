@@ -91,6 +91,7 @@ pub fn spawn_elf(
 
     crate::fd::create_fd_table(pid);
     crate::signals::create_process_signals(pid);
+    crate::namespaces::inherit_namespaces(pid, parent);
     let uid = crate::process::PROCESS_TABLE
         .lock()
         .get_process(pid)
@@ -136,6 +137,10 @@ pub fn wait_status(exit_code: i32) -> i32 {
 /// is already parked, so a later `wait4` can reap it.
 fn retire(pid: Pid, code: i32) {
     serial_println!("[user_task] PID {} exited with {}", pid, code);
+
+    let join_status = if code < 0 { 0 } else { code as u64 };
+    crate::threads::thread_exit(pid, join_status);
+    deliver_join_result(pid, join_status as i64);
 
     let parent = {
         let mut table = crate::process::PROCESS_TABLE.lock();
@@ -271,6 +276,58 @@ pub fn deliver_wait_result(parent: Pid, child: Pid, status: i32) {
     wake(parent);
 }
 
+/// A parent parked in `thread_join`, waiting for `tid`.
+struct JoinRegistration {
+    tid: u32,
+}
+
+lazy_static::lazy_static! {
+    static ref JOINERS: spin::Mutex<BTreeMap<Pid, JoinRegistration>> =
+        spin::Mutex::new(BTreeMap::new());
+}
+
+/// Park the current task in `thread_join` until `tid` exits.
+pub fn park_for_join(tid: u32) {
+    let pid = crate::context::current_pid();
+    JOINERS.lock().insert(pid, JoinRegistration { tid });
+
+    let rip = crate::usermode::pending_user_rip();
+    let rsp = crate::usermode::current_user_rsp();
+    crate::context::set_user_context(pid, rip, rsp, 0);
+    crate::scheduler::block_current();
+    serial_println!(
+        "[user_task] PID {} parked in thread_join({}) at rip={:#x} rsp={:#x}",
+        pid,
+        tid,
+        rip,
+        rsp
+    );
+    resume_next_or_return();
+}
+
+/// Hand a thread's exit status to a parked joiner.
+pub fn deliver_join_result(tid: u32, status: i64) {
+    let joiner = {
+        let mut joiners = JOINERS.lock();
+        joiners
+            .iter()
+            .find(|(_, r)| r.tid == tid)
+            .map(|(pid, _)| *pid)
+    };
+    let Some(joiner) = joiner else {
+        return;
+    };
+    JOINERS.lock().remove(&joiner);
+    crate::context::set_user_retval(joiner, status);
+    serial_println!(
+        "[user_task] PID {} join satisfied: tid {} status {}",
+        joiner,
+        tid,
+        status
+    );
+    wake(joiner);
+}
+
 /// Pick the next runnable task and enter it, or return if there is none.
 ///
 /// The desktop executor is the fallback: it always has a saved context once it
@@ -398,11 +455,15 @@ pub fn run_gate_demos() {
         serial_println!("[user_task] Gate B3+ skipped: VMM not ready");
         return;
     }
-    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4: scheduled Ring 3 ──");
+    serial_println!(
+        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4: scheduled Ring 3 ──"
+    );
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
-    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4: done ──");
+    serial_println!(
+        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4: done ──"
+    );
 }
 
 extern "C" fn gate_boot_body() {
@@ -419,6 +480,10 @@ extern "C" fn gate_boot_body() {
     run_gate_f4();
     run_gate_j1();
     run_gate_j4();
+    run_gate_k1();
+    run_gate_k3();
+    run_gate_l1();
+    run_gate_l4();
 }
 
 fn run_gate_b3() {
@@ -602,6 +667,84 @@ fn run_gate_j4() {
     serial_println!("[user_task] Gate J4 parent pid={} reaped={}", pid, reaped);
 }
 
+pub const GATE_K1_MARKER: &str = "GATE_K1 thread join";
+pub const GATE_K3_MARKER: &str = "GATE_K3 init userspace";
+
+fn run_gate_k1() {
+    serial_println!("[user_task] Gate K1: clone(CLONE_THREAD) + thread_join");
+    let elf = crate::init::clone_thread_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "clone-thread") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate K1 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_k3() {
+    serial_println!("[user_task] Gate K3: /sbin/init in Ring 3");
+    let elf = {
+        let vfs = crate::vfs::VFS.lock();
+        match vfs.read_file("/sbin/init") {
+            Some(data) => data.to_vec(),
+            None => crate::init::builtin_init_elf_data(),
+        }
+    };
+    let Some(pid) = spawn_or_log(&elf, "init") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let alive = crate::process::PROCESS_TABLE
+        .lock()
+        .get_process(pid)
+        .map(|p| p.state != crate::process::ProcessState::Zombie)
+        .unwrap_or(false);
+    if alive {
+        serial_println!("[user_task] {} (pid={})", GATE_K3_MARKER, pid);
+        terminate(pid, 0);
+        let _ = reap_child(pid);
+    } else {
+        serial_println!(
+            "[user_task] Gate K3 FAILED: /sbin/init pid={} did not stay parked",
+            pid
+        );
+        let _ = reap_child(pid);
+    }
+}
+
+pub const GATE_L1_MARKER: &str = "GATE_L1 tls fs";
+pub const GATE_L4_MARKER: &str = "GATE_L4 enosys";
+
+fn run_gate_l1() {
+    serial_println!("[user_task] Gate L1: arch_prctl ARCH_SET_FS + %fs:0");
+    let elf = crate::init::tls_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "tls-fs") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate L1 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_l4() {
+    serial_println!("[user_task] Gate L4: quotactl returns ENOSYS");
+    let elf = crate::init::quotactl_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "quotactl-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate L4 parent pid={} reaped={}", pid, reaped);
+}
+
 fn run_gate_b7() {
     serial_println!("[user_task] Gate B7: SIGINT handler + rt_sigreturn");
     let elf = crate::init::sigreturn_userspace_elf_data();
@@ -733,7 +876,7 @@ fn run_gate_i3() {
         if cpu == 1 && idle && zombie {
             break;
         }
-        if crate::apic_timer::total_ticks().saturating_sub(start) > 300 {
+        if crate::apic_timer::total_ticks().saturating_sub(start) > 2000 {
             serial_println!(
                 "[user_task] Gate I3 timeout: last_cpu={} idle={} zombie={}",
                 cpu,

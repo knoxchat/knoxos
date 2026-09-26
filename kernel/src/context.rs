@@ -61,6 +61,8 @@ pub struct CpuContext {
     _fxsave_pad: u64,
     pub fxsave_area: [u8; 512],
     pub fpu_initialized: bool,
+    /// Ring 3 `%fs` base (`arch_prctl(ARCH_SET_FS)` / `CLONE_SETTLS`).
+    pub user_fs_base: u64,
 }
 
 const _: () = {
@@ -114,6 +116,7 @@ impl CpuContext {
             _fxsave_pad: 0,
             fxsave_area: [0; 512],
             fpu_initialized: false,
+            user_fs_base: 0,
         }
     }
 
@@ -611,7 +614,19 @@ pub unsafe fn enter_task_local(next_pid: Pid) {
 }
 
 unsafe fn enter_task(next_pid: Pid, claim_global: bool) {
-    let Some(new_ptr) = runnable_context_ptr(next_pid) else {
+    let Some((new_ptr, fs_base)) = ({
+        let contexts = PROCESS_CONTEXTS.lock();
+        contexts
+            .iter()
+            .find(|pc| pc.pid == next_pid)
+            .and_then(|pc| {
+                if pc.context.is_runnable() {
+                    Some((&pc.context as *const CpuContext, pc.context.user_fs_base))
+                } else {
+                    None
+                }
+            })
+    }) else {
         return;
     };
     if claim_global {
@@ -619,7 +634,15 @@ unsafe fn enter_task(next_pid: Pid, claim_global: bool) {
     }
     set_current_pid(next_pid);
     program_kernel_stack(next_pid);
+    crate::usermode::program_fs_base(fs_base);
     enter_context(new_ptr);
+}
+
+/// Store the Ring 3 `%fs` base for `pid` (applied on the next `enter_task`).
+pub fn set_user_fs_base(pid: Pid, base: u64) {
+    if let Some(pc) = PROCESS_CONTEXTS.lock().iter_mut().find(|pc| pc.pid == pid) {
+        pc.context.user_fs_base = base;
+    }
 }
 
 /// Create a context for a new process

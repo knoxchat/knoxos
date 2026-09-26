@@ -318,6 +318,7 @@ impl ProcessTable {
         crate::fd::fork_fd_table(parent_pid, child_pid);
         // Clone signal dispositions from parent
         crate::signals::fork_process_signals(parent_pid, child_pid);
+        crate::namespaces::inherit_namespaces(child_pid, parent_pid);
         // Inherit process group from parent
         if let Ok(parent_pgid) = crate::pgrp::getpgid(parent_pid) {
             let _ = crate::pgrp::setpgid(child_pid, parent_pgid);

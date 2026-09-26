@@ -52,6 +52,16 @@ pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     serial_println!("[KnoxOS] open({}, {:#x})", path, flags);
 
+    let access = if flags & 0x3 != 0 || flags & 0x40 != 0 {
+        crate::landlock::LANDLOCK_ACCESS_FS_WRITE_FILE
+            | crate::landlock::LANDLOCK_ACCESS_FS_MAKE_REG
+    } else {
+        crate::landlock::LANDLOCK_ACCESS_FS_READ_FILE
+    };
+    if !crate::landlock::check_process_fs_access(pid as u64, &path, access) {
+        return Err(SyscallError::PermissionDenied);
+    }
+
     // Determine file type
     let file_type = {
         let vfs = crate::vfs::VFS.lock();

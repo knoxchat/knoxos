@@ -125,6 +125,21 @@ pub fn thread_create(pid: Pid, entry_point: u64, arg: u64, stack_size: usize) ->
     Ok(tid)
 }
 
+/// Create a thread metadata record for `clone(CLONE_THREAD)`.
+pub fn register_clone_thread(parent_pid: Pid, child_tid: Tid) {
+    let thread = Thread::new(child_tid, parent_pid, 0, 0, 0);
+    let mut groups = THREAD_GROUPS.lock();
+    let group = groups
+        .entry(parent_pid)
+        .or_insert_with(|| ThreadGroup::new(parent_pid, parent_pid));
+    group.threads.push(thread);
+    serial_println!(
+        "[KnoxOS] clone(CLONE_THREAD): PID {} -> TID {}",
+        parent_pid,
+        child_tid
+    );
+}
+
 /// Wait for a thread to finish (pthread_join equivalent)
 pub fn thread_join(tid: Tid) -> Result<u64, i32> {
     let groups = THREAD_GROUPS.lock();
@@ -136,7 +151,7 @@ pub fn thread_join(tid: Tid) -> Result<u64, i32> {
             if let Some(status) = thread.exit_status {
                 return Ok(status);
             }
-            // Would block here in real implementation
+            // Still running — caller should park.
             return Err(-11); // EAGAIN
         }
     }
@@ -160,9 +175,6 @@ pub fn thread_exit(tid: Tid, status: u64) {
             break;
         }
     }
-
-    // Remove from scheduler
-    crate::scheduler::SCHEDULER.lock().remove_process(tid);
 }
 
 /// Detach a thread (pthread_detach equivalent)

@@ -1539,7 +1539,10 @@ pub fn handle_syscall(
             system::sys_init_module(arg1, arg2)
         }
         SyscallNumber::DeleteModule => system::sys_delete_module(arg1),
-        SyscallNumber::Quotactl | SyscallNumber::QuotactlFd => Ok(0),
+        SyscallNumber::Quotactl | SyscallNumber::QuotactlFd => {
+            serial_println!("[KnoxOS] quotactl denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
+        }
         SyscallNumber::Nfsservctl
         | SyscallNumber::Getpmsg
         | SyscallNumber::Putpmsg
@@ -1590,7 +1593,9 @@ pub fn handle_syscall(
         | SyscallNumber::SchedGetaffinity
         | SyscallNumber::SchedSetattr
         | SyscallNumber::SchedGetattr => Ok(0),
-        SyscallNumber::SetThreadArea | SyscallNumber::GetThreadArea => Ok(0),
+        SyscallNumber::SetThreadArea | SyscallNumber::GetThreadArea => {
+            Err(SyscallError::NotImplemented)
+        }
         SyscallNumber::IoSetup => advanced::sys_io_setup(arg1 as u32, arg2),
         SyscallNumber::IoDestroy => advanced::sys_io_destroy(arg1),
         SyscallNumber::IoGetevents | SyscallNumber::IoPgetevents => {
@@ -1615,7 +1620,7 @@ pub fn handle_syscall(
         | SyscallNumber::EpollPwait2 => {
             io::sys_epoll_wait(arg1 as i32, arg2, arg3 as i32, arg4 as i32)
         }
-        SyscallNumber::RemapFilePages => Ok(0),
+        SyscallNumber::RemapFilePages => Err(SyscallError::NotImplemented),
         SyscallNumber::Getdents64 => fs::sys_getdents64(arg1 as i32, arg2, arg3 as u32),
         SyscallNumber::SetTidAddress => thread::sys_set_tid_address(arg1),
         SyscallNumber::RestartSyscall => Ok(0),
@@ -2047,7 +2052,9 @@ pub fn handle_syscall(
             let _ = crate::onnx::unload_model(arg1 as u32);
             Ok(0)
         }
-        SyscallNumber::OnnxInfer | SyscallNumber::OnnxListModels => Ok(0),
+        SyscallNumber::OnnxInfer | SyscallNumber::OnnxListModels => {
+            Err(SyscallError::NotImplemented)
+        }
 
         // ════════════════════════════════════════════════════════════
         // ── KnoxOS Shared Library Loader ───────────────────────────

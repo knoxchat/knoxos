@@ -31,6 +31,7 @@ pub fn sys_fork() -> SyscallResult {
             crate::context::create_process_context(child_pid);
         }
 
+        crate::namespaces::inherit_namespaces(child_pid, ppid);
         crate::scheduler::add_process(child_pid, 0);
         serial_println!("[KnoxOS] fork() -> PID {}", child_pid);
         Ok(child_pid as u64)
@@ -39,9 +40,16 @@ pub fn sys_fork() -> SyscallResult {
     }
 }
 
-/// clone(flags, stack, ptid, ctid, tls) — CLONE_VM shares page tables.
-pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, _tls: u64) -> SyscallResult {
+/// clone(flags, stack, ptid, ctid, tls) — CLONE_VM shares page tables;
+/// CLONE_THREAD also registers joinable thread metadata.
+pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> SyscallResult {
     const CLONE_VM: u64 = 0x00000100;
+    const CLONE_THREAD: u64 = 0x00010000;
+    const CLONE_SETTLS: u64 = 0x00080000;
+    const CLONE_NEWUTS: u64 = 0x04000000;
+    if flags & CLONE_THREAD != 0 && flags & CLONE_VM == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
     if flags & CLONE_VM == 0 {
         return sys_fork();
     }
@@ -72,7 +80,18 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, _tls: u64) -> Sys
         crate::context::create_process_context(child_pid);
     }
 
+    crate::namespaces::inherit_namespaces(child_pid, ppid);
+    if flags & CLONE_NEWUTS != 0 {
+        let _ = crate::namespaces::unshare(child_pid, CLONE_NEWUTS as u32);
+    }
+    if flags & CLONE_SETTLS != 0 {
+        crate::context::set_user_fs_base(child_pid, tls);
+    }
+
     crate::scheduler::add_process(child_pid, 0);
+    if flags & CLONE_THREAD != 0 {
+        crate::threads::register_clone_thread(ppid, child_pid);
+    }
     if ptid != 0 {
         crate::vmm::write_user_memory(ppid, ptid, &child_pid.to_ne_bytes());
     }
@@ -80,7 +99,8 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, _tls: u64) -> Sys
         crate::vmm::write_user_memory(child_pid, ctid, &child_pid.to_ne_bytes());
     }
     serial_println!(
-        "[KnoxOS] clone(CLONE_VM) -> PID {} stack={:#x}",
+        "[KnoxOS] clone({:#x}) -> PID {} stack={:#x}",
+        flags,
         child_pid,
         stack
     );
@@ -199,11 +219,16 @@ pub fn sys_wait4(pid: i32, wstatus_ptr: u64, options: i32) -> SyscallResult {
     const WNOHANG: i32 = 1;
     let self_pid = crate::scheduler::current_pid().unwrap_or(1);
 
-    // Reap a specific child, or any child when pid <= 0.
-    let target = if pid > 0 { pid as u32 } else { 0 };
     let reaped = {
         let mut table = crate::process::PROCESS_TABLE.lock();
-        table.waitpid(target)
+        if pid > 0 {
+            table.waitpid(pid as u32)
+        } else {
+            table
+                .waitpid_options(-1, self_pid, options & WNOHANG != 0)
+                .ok()
+                .flatten()
+        }
     };
 
     match reaped {
@@ -219,9 +244,8 @@ pub fn sys_wait4(pid: i32, wstatus_ptr: u64, options: i32) -> SyscallResult {
             if options & WNOHANG != 0 {
                 return Ok(0);
             }
-            // No child ready. A Ring 3 task parks here and is woken by the
-            // child's exit; the kernel can only spin (there is no other frame
-            // to resume).
+            // No child ready (or ECHILD). A Ring 3 task parks here and is
+            // woken by a child's exit.
             if self_pid > crate::context::DESKTOP_PID {
                 crate::user_task::park_for_wait(wstatus_ptr);
                 return Ok(0);

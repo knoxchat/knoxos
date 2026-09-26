@@ -118,6 +118,11 @@ pub fn socket_bind(id: u32, path: &str) -> Result<(), i32> {
     Ok(())
 }
 
+/// Socket id currently bound to `path`, if any.
+pub fn socket_id_for_path(path: &str) -> Option<u32> {
+    BOUND_PATHS.lock().get(path).copied()
+}
+
 /// Listen on a unix socket
 pub fn socket_listen(id: u32, backlog: i32) -> Result<(), i32> {
     let mut sockets = UNIX_SOCKETS.lock();

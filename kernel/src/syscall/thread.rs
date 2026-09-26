@@ -113,13 +113,24 @@ pub fn sys_thread_create(entry: u64, stack: u64) -> SyscallResult {
 }
 
 pub fn sys_thread_exit(status: i32) -> SyscallResult {
-    crate::threads::thread_exit(0, status as u64);
+    let tid = crate::scheduler::current_pid().unwrap_or(0);
+    crate::threads::thread_exit(tid, status as u64);
     Ok(0)
 }
 
 pub fn sys_thread_join(tid: u32) -> SyscallResult {
-    let status = crate::threads::thread_join(tid).map_err(|_| SyscallError::InvalidArgument)?;
-    Ok(status)
+    match crate::threads::thread_join(tid) {
+        Ok(status) => Ok(status),
+        Err(-11) => {
+            let self_pid = crate::scheduler::current_pid().unwrap_or(1);
+            if self_pid > crate::context::DESKTOP_PID {
+                crate::user_task::park_for_join(tid);
+                return Ok(0);
+            }
+            Err(SyscallError::WouldBlock)
+        }
+        Err(_) => Err(SyscallError::InvalidArgument),
+    }
 }
 
 pub fn sys_thread_detach(tid: u32) -> SyscallResult {

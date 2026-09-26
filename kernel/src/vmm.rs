@@ -402,6 +402,7 @@ impl AddressSpace {
                         // Zero the page
                         zero_physical_frame(frame_phys);
                     }
+                    crate::swap::track_anon_page(self.pid, page_addr, frame_phys);
                 } else {
                     serial_println!("[VMM] OOM: failed to allocate frame for mmap");
                     return None;
@@ -754,6 +755,33 @@ impl AddressSpace {
         false
     }
 
+    /// Restore a swapped-out page on #PF. Returns true if the fault was handled.
+    pub fn handle_swap_in(&mut self, fault_addr: u64) -> bool {
+        let page_addr = page_align_down(fault_addr);
+        if !crate::swap::is_swapped(self.pid, page_addr) {
+            return false;
+        }
+        let Some(frame) = allocate_physical_frame_raw() else {
+            return false;
+        };
+        let Some(data) = crate::swap::page_in(self.pid, page_addr) else {
+            FRAME_POOL.lock().free(frame);
+            return false;
+        };
+        let flags = if let Some(vma) = self.find_vma(page_addr) {
+            vma.prot.to_page_flags()
+        } else {
+            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE
+        };
+        self.owned_frames.push(frame);
+        unsafe {
+            copy_to_physical_frame(frame, &data);
+            map_page_in_table(self.cr3, page_addr, frame, flags);
+        }
+        crate::swap::track_anon_page(self.pid, page_addr, frame);
+        true
+    }
+
     /// Handle a demand-paging fault: the page belongs to a valid VMA but has
     /// no physical backing yet (lazy allocation from mmap without MAP_POPULATE).
     /// File-backed VMAs fill one page from the page cache / VFS, not the whole file.
@@ -808,6 +836,8 @@ impl AddressSpace {
                     let off = file_offset + (page_addr - vma_start);
                     fill_file_backed_page(path, off, frame);
                 }
+            } else {
+                crate::swap::track_anon_page(self.pid, page_addr, frame);
             }
             serial_println!(
                 "[VMM] Demand-paged {:#x} (type={:?})",
@@ -1132,7 +1162,7 @@ lazy_static::lazy_static! {
 }
 
 /// Allocate a physical frame from the global pool.
-/// On failure, shrink the page cache then run the OOM killer and retry once.
+/// On failure, shrink the page cache, then swap out anonymous pages, then OOM.
 pub fn allocate_physical_frame() -> Option<u64> {
     if let Some(addr) = FRAME_POOL.lock().allocate() {
         return Some(addr);
@@ -1141,7 +1171,16 @@ pub fn allocate_physical_frame() -> Option<u64> {
     if let Some(addr) = FRAME_POOL.lock().allocate() {
         return Some(addr);
     }
+    let _ = crate::swap::reclaim_anonymous(16);
+    if let Some(addr) = FRAME_POOL.lock().allocate() {
+        return Some(addr);
+    }
     crate::oom::trigger_oom();
+    FRAME_POOL.lock().allocate()
+}
+
+/// Allocate without reclaim. Used by swap-in so a #PF cannot recurse into reclaim.
+pub fn allocate_physical_frame_raw() -> Option<u64> {
     FRAME_POOL.lock().allocate()
 }
 
@@ -1654,7 +1693,12 @@ pub fn handle_page_fault(pid: Pid, fault_addr: u64, is_write: bool) -> bool {
             return true;
         }
 
-        // 2. Check demand paging — page in a valid VMA but not yet backed
+        // 2. Swap-in: a previously paged-out anonymous page.
+        if addr_space.handle_swap_in(fault_addr) {
+            return true;
+        }
+
+        // 3. Check demand paging — page in a valid VMA but not yet backed
         if addr_space.handle_demand_fault(fault_addr) {
             return true;
         }
@@ -2114,6 +2158,111 @@ pub fn ingest_remaining_ram(frame_allocator: &mut crate::memory::BootInfoFrameAl
         );
     }
     let _ = buddy_ram_self_test();
+}
+
+/// Copy a mapped anonymous page into swap, unmap it, and free the frame.
+///
+/// Uses `try_lock` so reclaim can run from `allocate_physical_frame` without
+/// deadlocking when the caller already holds `ADDRESS_SPACES`.
+pub fn swap_out_page(pid: Pid, vaddr: u64) -> bool {
+    let page = page_align_down(vaddr);
+    let phys = {
+        let Some(spaces) = ADDRESS_SPACES.try_lock() else {
+            return false;
+        };
+        let Some(addr_space) = spaces.get(&pid) else {
+            return false;
+        };
+        unsafe { get_mapped_frame(addr_space.cr3, page) }
+    };
+    let Some(phys) = phys else {
+        return false;
+    };
+    let mut buf = [0u8; PAGE_SIZE as usize];
+    read_user_memory(pid, page, &mut buf);
+    if crate::swap::page_out(pid, page, &buf).is_none() {
+        return false;
+    }
+    {
+        let Some(mut spaces) = ADDRESS_SPACES.try_lock() else {
+            return false;
+        };
+        if let Some(addr_space) = spaces.get_mut(&pid) {
+            unsafe {
+                unmap_page_in_table(addr_space.cr3, page);
+            }
+            addr_space.owned_frames.retain(|&f| f != phys);
+        }
+    }
+    free_physical_frame(phys);
+    true
+}
+
+const GATE_K2_PID: Pid = 0x0000_4B02;
+const GATE_K2_MAGIC: [u8; 8] = *b"K2SWAPOK";
+
+/// Populate one anonymous page, swap it out, fault it back, and check the bytes.
+pub fn swap_fault_self_test() -> bool {
+    if !create_address_space(GATE_K2_PID) {
+        serial_println!("[VMM] Gate K2 FAILED: address space");
+        return false;
+    }
+    let flags = crate::mmap::MAP_PRIVATE | crate::mmap::MAP_ANONYMOUS | crate::mmap::MAP_POPULATE;
+    let mapped = mmap(
+        GATE_K2_PID,
+        0,
+        PAGE_SIZE,
+        crate::mmap::PROT_READ | crate::mmap::PROT_WRITE,
+        flags,
+    );
+    if mapped < 0 {
+        serial_println!("[VMM] Gate K2 FAILED: mmap {}", mapped);
+        destroy_address_space(GATE_K2_PID);
+        return false;
+    }
+    let vaddr = mapped as u64;
+    write_user_memory(GATE_K2_PID, vaddr, &GATE_K2_MAGIC);
+
+    if !swap_out_page(GATE_K2_PID, vaddr) {
+        serial_println!("[VMM] Gate K2 FAILED: swap_out");
+        destroy_address_space(GATE_K2_PID);
+        return false;
+    }
+    if !crate::swap::is_swapped(GATE_K2_PID, vaddr) {
+        serial_println!("[VMM] Gate K2 FAILED: not marked swapped");
+        destroy_address_space(GATE_K2_PID);
+        return false;
+    }
+    {
+        let spaces = ADDRESS_SPACES.lock();
+        if let Some(addr_space) = spaces.get(&GATE_K2_PID) {
+            if unsafe { get_mapped_frame(addr_space.cr3, vaddr) }.is_some() {
+                serial_println!("[VMM] Gate K2 FAILED: page still mapped");
+                drop(spaces);
+                destroy_address_space(GATE_K2_PID);
+                return false;
+            }
+        }
+    }
+
+    if !handle_page_fault(GATE_K2_PID, vaddr, false) {
+        serial_println!("[VMM] Gate K2 FAILED: swap-in fault");
+        destroy_address_space(GATE_K2_PID);
+        return false;
+    }
+    let mut got = [0u8; 8];
+    read_user_memory(GATE_K2_PID, vaddr, &mut got);
+    destroy_address_space(GATE_K2_PID);
+    if got != GATE_K2_MAGIC {
+        serial_println!(
+            "[VMM] Gate K2 FAILED: restored {:x?} want {:x?}",
+            got,
+            GATE_K2_MAGIC
+        );
+        return false;
+    }
+    serial_println!("[VMM] {}", crate::swap::GATE_K2_MARKER);
+    true
 }
 
 /// Alloc/free a frame from the expanded pool and prove free restores it.

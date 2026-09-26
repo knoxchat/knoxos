@@ -812,6 +812,15 @@ pub fn stat_dispatch(path: &str) -> Result<VfsStat, i32> {
 
 /// Write a file, dispatching to ext4 if under ext4 mount
 pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
+    let pid = crate::landlock::current_check_pid();
+    if !crate::landlock::check_process_fs_access(
+        pid,
+        path,
+        crate::landlock::LANDLOCK_ACCESS_FS_WRITE_FILE
+            | crate::landlock::LANDLOCK_ACCESS_FS_MAKE_REG,
+    ) {
+        return false;
+    }
     if let Some((fs_idx, rel_path)) = crate::mount::find_ext4_fs_for_path(path) {
         match crate::ext4::write_file(fs_idx, &rel_path, data) {
             Ok(()) => return true,

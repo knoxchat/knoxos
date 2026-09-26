@@ -205,8 +205,7 @@ pub fn unshare(pid: u32, flags: u32) -> Result<(), i32> {
 /// Set hostname in the UTS namespace of a process
 pub fn sethostname(pid: u32, hostname: &str) -> Result<(), i32> {
     let proc_ns = PROCESS_NS.lock();
-    let ns = proc_ns.get(&pid).ok_or(-3i32)?;
-    let uts_id = ns.uts_ns;
+    let uts_id = proc_ns.get(&pid).map(|n| n.uts_ns).unwrap_or(1);
     drop(proc_ns);
 
     let mut uts_ns = UTS_NAMESPACES.lock();
@@ -345,4 +344,35 @@ pub fn init() {
     crate::serial_println!(
         "[KnoxOS] Namespaces initialized (mount, uts, ipc, pid, net, user, cgroup)"
     );
+    let _ = uts_isolation_self_test();
+}
+
+pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";
+const GATE_L2_PID: u32 = 0x0000_4C02;
+
+/// Child `unshare(CLONE_NEWUTS)` + `sethostname` must not change the parent's hostname.
+pub fn uts_isolation_self_test() -> bool {
+    inherit_namespaces(GATE_L2_PID, 1);
+    let parent_before = gethostname(1);
+    if unshare(GATE_L2_PID, NamespaceType::Uts as u32).is_err() {
+        crate::serial_println!("[ns] Gate L2 FAILED: unshare");
+        return false;
+    }
+    if sethostname(GATE_L2_PID, "gate-l2").is_err() {
+        crate::serial_println!("[ns] Gate L2 FAILED: sethostname");
+        return false;
+    }
+    let child = gethostname(GATE_L2_PID);
+    let parent_after = gethostname(1);
+    if child != "gate-l2" || parent_after != parent_before {
+        crate::serial_println!(
+            "[ns] Gate L2 FAILED: child={} parent={} was={}",
+            child,
+            parent_after,
+            parent_before
+        );
+        return false;
+    }
+    crate::serial_println!("[ns] {}", GATE_L2_MARKER);
+    true
 }

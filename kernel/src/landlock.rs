@@ -4,6 +4,7 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU64, Ordering};
 use lazy_static::lazy_static;
 use spin::Mutex;
 
@@ -160,6 +161,27 @@ lazy_static! {
     static ref PROCESS_RULESETS: Mutex<BTreeMap<u64, Vec<u64>>> = Mutex::new(BTreeMap::new());
 }
 
+/// When non-zero, VFS access checks use this PID instead of the scheduler's.
+static CHECK_PID_OVERRIDE: AtomicU64 = AtomicU64::new(0);
+
+/// PID whose Landlock rulesets apply to the current VFS mutate.
+pub fn current_check_pid() -> u64 {
+    let over = CHECK_PID_OVERRIDE.load(Ordering::Relaxed);
+    if over != 0 {
+        over
+    } else {
+        crate::scheduler::current_pid().unwrap_or(1) as u64
+    }
+}
+
+/// Run `f` with VFS access checks attributed to `pid`.
+pub fn with_check_pid<R>(pid: u64, f: impl FnOnce() -> R) -> R {
+    CHECK_PID_OVERRIDE.store(pid, Ordering::Relaxed);
+    let result = f();
+    CHECK_PID_OVERRIDE.store(0, Ordering::Relaxed);
+    result
+}
+
 /// landlock_create_ruleset — create a new ruleset
 pub fn sys_landlock_create_ruleset(
     attr: &LandlockRulesetAttr,
@@ -301,4 +323,70 @@ pub fn init() {
         "  Landlock LSM initialized (ABI v{}, fs+net access control)",
         LANDLOCK_ABI_VERSION
     );
+    let _ = mac_self_test();
+}
+
+pub const GATE_K4_MARKER: &str = "GATE_K4 landlock vfs";
+
+const GATE_K4_PID: u64 = 0x0000_4B04;
+const GATE_K4_ALLOW: &str = "/tmp/gate_k4_ok";
+const GATE_K4_DENY: &str = "/etc/knoxos/gate_k4_denied";
+
+/// Restrict a dummy PID to `/tmp` writes and prove VFS denies `/etc`.
+pub fn mac_self_test() -> bool {
+    let attr = LandlockRulesetAttr {
+        handled_access_fs: LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_MAKE_REG,
+        handled_access_net: 0,
+    };
+    let Ok(id) = sys_landlock_create_ruleset(&attr, 16, 0) else {
+        crate::serial_println!("[landlock] Gate K4 FAILED: create_ruleset");
+        return false;
+    };
+    let rule = LandlockRule::PathBeneath(PathBeneathRule {
+        allowed_access: LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_MAKE_REG,
+        parent_path: String::from("/tmp"),
+    });
+    if sys_landlock_add_rule(id, LandlockRuleType::PathBeneath, rule, 0).is_err() {
+        crate::serial_println!("[landlock] Gate K4 FAILED: add_rule");
+        return false;
+    }
+    if sys_landlock_restrict_self(id, 0, GATE_K4_PID).is_err() {
+        crate::serial_println!("[landlock] Gate K4 FAILED: restrict_self");
+        return false;
+    }
+    if !check_process_fs_access(GATE_K4_PID, "/tmp/ok", LANDLOCK_ACCESS_FS_WRITE_FILE) {
+        crate::serial_println!("[landlock] Gate K4 FAILED: /tmp should be allowed");
+        return false;
+    }
+    if check_process_fs_access(
+        GATE_K4_PID,
+        "/etc/knoxos/secret",
+        LANDLOCK_ACCESS_FS_WRITE_FILE,
+    ) {
+        crate::serial_println!("[landlock] Gate K4 FAILED: /etc should be denied");
+        return false;
+    }
+
+    let allowed = with_check_pid(GATE_K4_PID, || {
+        crate::vfs::write_file_dispatch(GATE_K4_ALLOW, b"yes")
+    });
+    let denied = with_check_pid(GATE_K4_PID, || {
+        crate::vfs::write_file_dispatch(GATE_K4_DENY, b"no")
+    });
+    let _ = crate::vfs::remove_dispatch(GATE_K4_ALLOW);
+    if crate::vfs::read_file_dispatch(GATE_K4_DENY).is_some() {
+        let _ = crate::vfs::remove_dispatch(GATE_K4_DENY);
+        crate::serial_println!("[landlock] Gate K4 FAILED: denied write still landed");
+        return false;
+    }
+    if !allowed || denied {
+        crate::serial_println!(
+            "[landlock] Gate K4 FAILED: vfs allow={} deny_wrote={}",
+            allowed,
+            denied
+        );
+        return false;
+    }
+    crate::serial_println!("[landlock] {}", GATE_K4_MARKER);
+    true
 }

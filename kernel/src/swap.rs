@@ -189,6 +189,8 @@ pub struct SwapManager {
     pub used_swap_pages: usize,
     /// Map: (pid, vaddr) -> SwapEntry for swapped-out pages
     pub swapped_pages: BTreeMap<(u32, u64), SwapEntry>,
+    /// Page contents keyed by (area_id, slot). Ram-backed until a disk area exists.
+    slot_data: BTreeMap<(usize, usize), Vec<u8>>,
     /// LRU list of candidate pages
     pub lru_pages: Vec<PageInfo>,
     /// Swappiness (0-100, like Linux vm.swappiness)
@@ -211,6 +213,7 @@ impl SwapManager {
             total_swap_pages: 0,
             used_swap_pages: 0,
             swapped_pages: BTreeMap::new(),
+            slot_data: BTreeMap::new(),
             lru_pages: Vec::new(),
             swappiness: 60,
             pages_swapped_in: 0,
@@ -297,9 +300,13 @@ impl SwapManager {
         }
     }
 
-    /// Record that a page was swapped out
-    pub fn page_out(&mut self, pid: u32, vaddr: u64, _phys_addr: u64) -> Option<SwapEntry> {
+    /// Store a page's bytes in a swap slot and remember the mapping.
+    pub fn page_out(&mut self, pid: u32, vaddr: u64, data: &[u8]) -> Option<SwapEntry> {
         let entry = self.alloc_swap_slot()?;
+        let mut page = alloc::vec![0u8; PAGE_SIZE];
+        let n = data.len().min(PAGE_SIZE);
+        page[..n].copy_from_slice(&data[..n]);
+        self.slot_data.insert((entry.area_id(), entry.slot()), page);
         self.swapped_pages.insert((pid, vaddr), entry);
         self.pages_swapped_out += 1;
         serial_println!(
@@ -312,13 +319,17 @@ impl SwapManager {
         Some(entry)
     }
 
-    /// Record that a page was swapped in
-    pub fn page_in(&mut self, pid: u32, vaddr: u64) -> Option<SwapEntry> {
+    /// Restore a page's bytes and free the swap slot.
+    pub fn page_in(&mut self, pid: u32, vaddr: u64) -> Option<Vec<u8>> {
         if let Some(entry) = self.swapped_pages.remove(&(pid, vaddr)) {
+            let data = self
+                .slot_data
+                .remove(&(entry.area_id(), entry.slot()))
+                .unwrap_or_else(|| alloc::vec![0u8; PAGE_SIZE]);
             self.free_swap_slot(entry);
             self.pages_swapped_in += 1;
             serial_println!("[SWAP] Page in: pid={} vaddr={:#x}", pid, vaddr);
-            Some(entry)
+            Some(data)
         } else {
             None
         }
@@ -414,12 +425,43 @@ pub fn swapoff(path: &str) -> Result<(), &'static str> {
     SWAP_MANAGER.lock().swapoff(path)
 }
 
-pub fn page_out(pid: u32, vaddr: u64, phys_addr: u64) -> Option<SwapEntry> {
-    SWAP_MANAGER.lock().page_out(pid, vaddr, phys_addr)
+pub fn page_out(pid: u32, vaddr: u64, data: &[u8]) -> Option<SwapEntry> {
+    SWAP_MANAGER.lock().page_out(pid, vaddr, data)
 }
 
-pub fn page_in(pid: u32, vaddr: u64) -> Option<SwapEntry> {
+pub fn page_in(pid: u32, vaddr: u64) -> Option<Vec<u8>> {
     SWAP_MANAGER.lock().page_in(pid, vaddr)
+}
+
+/// Track an anonymous page so reclaim can pick it as a victim.
+pub fn track_anon_page(pid: u32, vaddr: u64, phys_addr: u64) {
+    SWAP_MANAGER.lock().track_page(PageInfo {
+        phys_addr,
+        virt_addr: vaddr,
+        pid,
+        access_count: 0,
+        last_access_tick: 0,
+        dirty: true,
+        pinned: false,
+    });
+}
+
+/// Page out up to `max` tracked anonymous pages. Returns how many succeeded.
+pub fn reclaim_anonymous(max: usize) -> usize {
+    let mut freed = 0;
+    for _ in 0..max {
+        let victim = SWAP_MANAGER.lock().select_victim();
+        let Some(page) = victim else {
+            break;
+        };
+        if crate::vmm::swap_out_page(page.pid, page.virt_addr) {
+            freed += 1;
+        }
+    }
+    if freed > 0 {
+        serial_println!("[SWAP] Reclaimed {} anonymous pages", freed);
+    }
+    freed
 }
 
 pub fn is_swapped(pid: u32, vaddr: u64) -> bool {
@@ -440,8 +482,26 @@ pub fn init() {
     serial_println!("[SWAP] Swappiness={}", SWAP_MANAGER.lock().swappiness);
     SWAP_ENABLED.store(true, Ordering::Relaxed);
 
+    // Ram-backed area so page-out has somewhere to store bytes without a
+    // swap partition. Disk probe can add a real area later.
+    let _ = swapon("/dev/ram-swap", SwapType::File, 64 * PAGE_SIZE, 0);
+
     // Probe for swap partitions on disk
     probe_swap_partitions();
+
+    let _ = swap_io_self_test();
+}
+
+/// Serial marker once a page's bytes survive page-out and a #PF brings them back.
+pub const GATE_K2_MARKER: &str = "GATE_K2 swap io";
+
+/// Page out a populated anonymous page, then fault it back in with the same bytes.
+pub fn swap_io_self_test() -> bool {
+    if !crate::vmm::ready() {
+        serial_println!("[SWAP] Gate K2 skipped: VMM not ready");
+        return false;
+    }
+    crate::vmm::swap_fault_self_test()
 }
 
 // ─── Real disk I/O integration ─────────────────────────────────────────

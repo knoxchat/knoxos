@@ -30,6 +30,7 @@ const MSR_LSTAR: u32 = 0xC000_0082;
 const MSR_CSTAR: u32 = 0xC000_0083; // Not used in 64-bit mode
 const MSR_SFMASK: u32 = 0xC000_0084;
 const MSR_EFER: u32 = 0xC000_0080;
+const MSR_FS_BASE: u32 = 0xC000_0100;
 const MSR_GS_BASE: u32 = 0xC000_0101;
 const MSR_KERNEL_GS_BASE: u32 = 0xC000_0102;
 
@@ -107,6 +108,16 @@ pub fn current_cpu_index() -> u32 {
     {
         0
     }
+}
+
+/// Program this CPU's `FS_BASE` (Ring 3 TLS). Safe to call with `base = 0`.
+pub fn program_fs_base(base: u64) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        wrmsr(MSR_FS_BASE, base);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = base;
 }
 
 /// Kernel GS_BASE currently loaded on this CPU.

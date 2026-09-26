@@ -1547,6 +1547,38 @@ mod security_tests {
     }
 
     #[test_case]
+    fn test_swap_page_roundtrip() {
+        assert!(
+            crate::swap::swap_io_self_test(),
+            "swapped-out page must restore its bytes on #PF"
+        );
+    }
+
+    #[test_case]
+    fn test_landlock_denies_vfs_write() {
+        assert!(
+            crate::landlock::mac_self_test(),
+            "landlock must deny writes outside the allowed path"
+        );
+    }
+
+    #[test_case]
+    fn test_uts_namespace_isolation() {
+        assert!(
+            crate::namespaces::uts_isolation_self_test(),
+            "unshare(CLONE_NEWUTS) hostname must not leak to the parent"
+        );
+    }
+
+    #[test_case]
+    fn test_dbus_unix_socket_roundtrip() {
+        assert!(
+            crate::dbus::unix_bus_self_test(),
+            "AF_UNIX connect to /run/dbus/system_bus_socket must round-trip"
+        );
+    }
+
+    #[test_case]
     fn test_percpu_gs_layout() {
         assert_eq!(
             core::mem::offset_of!(crate::usermode::CpuLocal, user_rsp),
