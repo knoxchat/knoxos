@@ -152,6 +152,37 @@ pub fn inotify_read(fd: i32) -> Result<Vec<InotifyEvent>, i32> {
     Ok(instance.read_events())
 }
 
+/// Serialize queued events into the Linux `inotify_event` layout.
+pub fn inotify_read_bytes(id: i32, buf: &mut [u8]) -> Result<usize, i32> {
+    let events = inotify_read(id)?;
+    if events.is_empty() {
+        return Ok(0);
+    }
+    let mut written = 0usize;
+    for ev in events {
+        let name = ev.name.as_bytes();
+        let padded = if name.is_empty() { 0 } else { name.len() + 1 };
+        let rec = 16 + padded;
+        if written + rec > buf.len() {
+            if written == 0 {
+                return Err(-22); // EINVAL: buffer smaller than first event
+            }
+            break;
+        }
+        buf[written..written + 4].copy_from_slice(&ev.wd.to_le_bytes());
+        buf[written + 4..written + 8].copy_from_slice(&ev.mask.to_le_bytes());
+        buf[written + 8..written + 12].copy_from_slice(&ev.cookie.to_le_bytes());
+        buf[written + 12..written + 16].copy_from_slice(&(padded as u32).to_le_bytes());
+        if padded > 0 {
+            let start = written + 16;
+            buf[start..start + name.len()].copy_from_slice(name);
+            buf[start + name.len()] = 0;
+        }
+        written += rec;
+    }
+    Ok(written)
+}
+
 /// Close an inotify instance
 pub fn inotify_close(fd: i32) {
     INOTIFY_INSTANCES.lock().remove(&fd);
@@ -261,4 +292,24 @@ pub fn vfs_watch_self_test() -> bool {
 
     crate::serial_println!("[inotify] {}", GATE_H3_MARKER);
     true
+}
+
+/// Watch `/tmp`, emit a create, and prove `inotify_read_bytes` returns a header.
+pub fn inotify_bytes_self_test() -> bool {
+    let Ok(fd) = inotify_init() else {
+        return false;
+    };
+    if inotify_add_watch(fd, "/tmp", IN_CREATE).is_err() {
+        inotify_close(fd);
+        return false;
+    }
+    emit_event("/tmp/gate_q3", IN_CREATE, Some("gate_q3"));
+    let mut buf = [0u8; 64];
+    let n = inotify_read_bytes(fd, &mut buf).unwrap_or(0);
+    inotify_close(fd);
+    if n < 16 {
+        return false;
+    }
+    let mask = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
+    mask & IN_CREATE != 0
 }

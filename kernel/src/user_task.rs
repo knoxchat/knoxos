@@ -479,7 +479,7 @@ pub fn run_gate_demos() {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
     serial_println!(
-        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4 + O2–O4 + P2–P4: done ──"
+        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4 + O2–O4 + P2–P4 + Q2–Q4: done ──"
     );
 }
 
@@ -513,6 +513,9 @@ extern "C" fn gate_boot_body() {
     run_gate_p2();
     run_gate_p3();
     run_gate_p4();
+    run_gate_q2();
+    run_gate_q3();
+    run_gate_q4();
 }
 
 fn run_gate_b3() {
@@ -944,6 +947,49 @@ fn run_gate_p4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate P4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_Q2_MARKER: &str = "GATE_Q2 poll";
+pub const GATE_Q3_MARKER: &str = "GATE_Q3 inotify";
+pub const GATE_Q4_MARKER: &str = "GATE_Q4 enosys";
+
+fn run_gate_q2() {
+    serial_println!("[user_task] Gate Q2: poll on a pipe");
+    let elf = crate::init::poll_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "poll-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate Q2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_q3() {
+    serial_println!("[user_task] Gate Q3: inotify_init1 + add_watch + read");
+    let elf = crate::init::inotify_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "inotify-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate Q3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_q4() {
+    serial_println!("[user_task] Gate Q4: io_setup returns ENOSYS");
+    let elf = crate::init::io_setup_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "aio-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate Q4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

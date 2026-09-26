@@ -63,6 +63,7 @@ pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
     }
 
     // Determine file type
+    let mut created = false;
     let file_type = {
         let vfs = crate::vfs::VFS.lock();
         if path.starts_with("/proc") {
@@ -80,11 +81,16 @@ pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
             // O_CREAT
             drop(vfs);
             crate::vfs::VFS.lock().write_file(&path, &[]);
+            created = true;
             crate::fd::FileType::Regular
         } else {
             return Err(SyscallError::FileNotFound);
         }
     };
+    if created {
+        let name = path.rsplit('/').next().filter(|s| !s.is_empty());
+        crate::inotify::emit_event(&path, crate::inotify::IN_CREATE, name);
+    }
 
     let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
     let fd_table = tables

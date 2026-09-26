@@ -71,6 +71,9 @@ pub fn sys_epoll_wait(epfd: i32, events_ptr: u64, max_events: i32, timeout: i32)
 // ── Poll / Select ───────────────────────────────────────────────────
 
 pub fn sys_poll(fds_ptr: u64, nfds: u32, timeout: i32) -> SyscallResult {
+    if nfds == 0 {
+        return Ok(0);
+    }
     if fds_ptr == 0 {
         return Err(SyscallError::InvalidArgument);
     }
@@ -130,21 +133,46 @@ pub fn sys_eventfd(initval: u32, flags: i32) -> SyscallResult {
 // ── Inotify ─────────────────────────────────────────────────────────
 
 pub fn sys_inotify_init(flags: i32) -> SyscallResult {
-    let _ = flags;
-    crate::inotify::inotify_init()
-        .map(|fd| fd as u64)
-        .map_err(|_| SyscallError::TooManyFiles)
+    let id = crate::inotify::inotify_init().map_err(|_| SyscallError::TooManyFiles)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables.get_mut(&pid).ok_or(SyscallError::TooManyFiles)?;
+    let mut o_flags = crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY);
+    const IN_NONBLOCK: i32 = 0x800;
+    const IN_CLOEXEC: i32 = 0x80000;
+    if flags & IN_NONBLOCK != 0 {
+        o_flags.0 |= crate::fd::OpenFlags::O_NONBLOCK;
+    }
+    let fd = fd_table
+        .open(
+            &alloc::format!("inotify:{}", id),
+            o_flags,
+            crate::fd::FileType::CharDevice,
+        )
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    if flags & IN_CLOEXEC != 0 {
+        fd_table.set_cloexec(fd, true);
+    }
+    Ok(fd as u64)
+}
+
+fn inotify_id_from_fd(fd: i32) -> Result<i32, SyscallError> {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::fd::path_for_fd(pid, fd).ok_or(SyscallError::BadFileDescriptor)?;
+    crate::fd::inotify_id_from_path(&path).ok_or(SyscallError::BadFileDescriptor)
 }
 
 pub fn sys_inotify_add_watch(fd: i32, path_ptr: u64, mask: u32) -> SyscallResult {
+    let id = inotify_id_from_fd(fd)?;
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-    crate::inotify::inotify_add_watch(fd, &path, mask)
+    crate::inotify::inotify_add_watch(id, &path, mask)
         .map(|wd| wd as u64)
         .map_err(|_| SyscallError::InvalidArgument)
 }
 
 pub fn sys_inotify_rm_watch(fd: i32, wd: i32) -> SyscallResult {
-    crate::inotify::inotify_rm_watch(fd, wd)
+    let id = inotify_id_from_fd(fd)?;
+    crate::inotify::inotify_rm_watch(id, wd)
         .map(|_| 0u64)
         .map_err(|_| SyscallError::InvalidArgument)
 }

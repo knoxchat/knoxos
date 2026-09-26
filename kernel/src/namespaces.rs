@@ -519,6 +519,7 @@ pub fn init() {
     let _ = mount_isolation_self_test();
     let _ = net_isolation_self_test();
     let _ = user_isolation_self_test();
+    let _ = ipc_isolation_self_test();
 }
 
 pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";
@@ -641,5 +642,72 @@ pub fn user_isolation_self_test() -> bool {
         return false;
     }
     crate::serial_println!("[ns] {}", GATE_P1_MARKER);
+    true
+}
+
+pub const GATE_Q1_MARKER: &str = "GATE_Q1 ipc ns";
+const GATE_Q1_PID: u32 = 0x0000_5101;
+const GATE_Q1_KEY: u32 = 0x0000_51C1;
+const GATE_Q1_PRIV: u32 = 0x0000_51C2;
+
+/// Child `unshare(CLONE_NEWIPC)` must not see the parent's SysV shm key,
+/// and a child-only key must not appear in the parent.
+pub fn ipc_isolation_self_test() -> bool {
+    inherit_namespaces(GATE_Q1_PID, 1);
+    let parent_ns = get_process_namespaces(1).ipc_ns;
+    let Ok(parent_id) =
+        crate::shm::shmget_in_ns(parent_ns, 1, GATE_Q1_KEY, 4096, crate::shm::IPC_CREAT)
+    else {
+        crate::serial_println!("[ns] Gate Q1 FAILED: parent shmget");
+        return false;
+    };
+    if unshare(GATE_Q1_PID, NamespaceType::Ipc as u32).is_err() {
+        crate::serial_println!("[ns] Gate Q1 FAILED: unshare");
+        return false;
+    }
+    let child_ns = get_process_namespaces(GATE_Q1_PID).ipc_ns;
+    if child_ns == parent_ns {
+        crate::serial_println!("[ns] Gate Q1 FAILED: child still in parent ipc ns");
+        return false;
+    }
+    if crate::shm::has_shm_key(child_ns, GATE_Q1_KEY) {
+        crate::serial_println!("[ns] Gate Q1 FAILED: child still sees parent key");
+        return false;
+    }
+    let Ok(child_id) = crate::shm::shmget_in_ns(
+        child_ns,
+        GATE_Q1_PID,
+        GATE_Q1_KEY,
+        4096,
+        crate::shm::IPC_CREAT,
+    ) else {
+        crate::serial_println!("[ns] Gate Q1 FAILED: child shmget");
+        return false;
+    };
+    if child_id == parent_id {
+        crate::serial_println!("[ns] Gate Q1 FAILED: child reused parent shmid");
+        return false;
+    }
+    if crate::shm::shmget_in_ns(
+        child_ns,
+        GATE_Q1_PID,
+        GATE_Q1_PRIV,
+        4096,
+        crate::shm::IPC_CREAT,
+    )
+    .is_err()
+    {
+        crate::serial_println!("[ns] Gate Q1 FAILED: child private shmget");
+        return false;
+    }
+    if crate::shm::has_shm_key(parent_ns, GATE_Q1_PRIV) {
+        crate::serial_println!("[ns] Gate Q1 FAILED: parent sees child key");
+        return false;
+    }
+    if !crate::shm::has_shm_key(parent_ns, GATE_Q1_KEY) {
+        crate::serial_println!("[ns] Gate Q1 FAILED: parent lost its key");
+        return false;
+    }
+    crate::serial_println!("[ns] {}", GATE_Q1_MARKER);
     true
 }

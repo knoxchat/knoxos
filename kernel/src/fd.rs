@@ -103,6 +103,11 @@ pub(crate) fn signalfd_id_from_path(path: &str) -> Option<i32> {
     path.strip_prefix("signalfd:")?.parse().ok()
 }
 
+/// Parse `inotify:{id}` written by `sys_inotify_init`.
+pub(crate) fn inotify_id_from_path(path: &str) -> Option<i32> {
+    path.strip_prefix("inotify:")?.parse().ok()
+}
+
 /// Path recorded for a process fd, if the fd is open.
 pub fn path_for_fd(pid: u32, fd: Fd) -> Option<String> {
     PROCESS_FD_TABLES
@@ -283,6 +288,9 @@ impl FdTable {
         if let Some(id) = signalfd_id_from_path(&file.path) {
             crate::signalfd::signalfd_close(id);
         }
+        if let Some(id) = inotify_id_from_path(&file.path) {
+            crate::inotify::inotify_close(id);
+        }
         Ok(())
     }
 
@@ -378,6 +386,9 @@ impl FdTable {
                 }
                 if let Some(id) = signalfd_id_from_path(&file.path) {
                     return crate::signalfd::signalfd_read_bytes(id, buf);
+                }
+                if let Some(id) = inotify_id_from_path(&file.path) {
+                    return crate::inotify::inotify_read_bytes(id, buf);
                 }
                 if let Some(idx) = pts_index(&file.path) {
                     return crate::pty::read_slave(idx, buf);

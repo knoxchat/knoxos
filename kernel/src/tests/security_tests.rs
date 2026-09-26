@@ -60,6 +60,14 @@ fn test_inotify_sees_vfs_mutate() {
 }
 
 #[test_case]
+fn test_inotify_read_bytes() {
+    assert!(
+        crate::inotify::inotify_bytes_self_test(),
+        "inotify_read_bytes must serialize a create event header"
+    );
+}
+
+#[test_case]
 fn test_guard_stack_and_oom_from_alloc() {
     assert!(crate::stack_guard::guard_oom_self_test());
 }
@@ -126,6 +134,14 @@ fn test_user_namespace_isolation() {
 }
 
 #[test_case]
+fn test_ipc_namespace_isolation() {
+    assert!(
+        crate::namespaces::ipc_isolation_self_test(),
+        "unshare(CLONE_NEWIPC) SysV shm keys must not leak to the parent"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),
@@ -146,6 +162,14 @@ fn test_epoll_pipe_readiness() {
     assert!(
         crate::epoll::epoll_pipe_self_test(),
         "epoll_wait must stay idle on an empty pipe and fire EPOLLIN after write"
+    );
+}
+
+#[test_case]
+fn test_poll_pipe_readiness() {
+    assert!(
+        crate::epoll::poll_pipe_self_test(),
+        "poll must stay idle on an empty pipe and fire POLLIN after write"
     );
 }
 

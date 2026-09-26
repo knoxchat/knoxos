@@ -572,40 +572,30 @@ pub fn sys_fspick(dfd: i32, path_ptr: u64, flags: u32) -> SyscallResult {
 
 // ── AIO ─────────────────────────────────────────────────────────────
 
-pub fn sys_io_setup(max_events: u32, ctx_ptr: u64) -> SyscallResult {
-    let ctx = crate::aio::io_setup(max_events).map_err(|_| SyscallError::OutOfMemory)?;
-    if ctx_ptr != 0 {
-        unsafe {
-            *(ctx_ptr as *mut u64) = ctx;
-        }
-    }
-    Ok(0)
+pub fn sys_io_setup(_max_events: u32, _ctx_ptr: u64) -> SyscallResult {
+    serial_println!("[KnoxOS] io_setup denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
-pub fn sys_io_destroy(ctx: u64) -> SyscallResult {
-    crate::aio::io_destroy(ctx)
-        .map(|_| 0u64)
-        .map_err(|_| SyscallError::InvalidArgument)
+pub fn sys_io_destroy(_ctx: u64) -> SyscallResult {
+    serial_println!("[KnoxOS] io_destroy denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_io_getevents(
-    ctx: u64,
-    min_nr: i64,
-    max_nr: i64,
+    _ctx: u64,
+    _min_nr: i64,
+    _max_nr: i64,
     _events_ptr: u64,
     _timeout_ptr: u64,
 ) -> SyscallResult {
-    let events = crate::aio::io_getevents(ctx, min_nr as i32, max_nr as i32)
-        .map_err(|_| SyscallError::InvalidArgument)?;
-    Ok(events.len() as u64)
+    serial_println!("[KnoxOS] io_getevents denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
-pub fn sys_io_submit(ctx: u64, nr: i64, _iocbpp: u64) -> SyscallResult {
-    // Submit empty batch (simplified)
-    let iocbs = alloc::vec::Vec::new();
-    crate::aio::io_submit(ctx, iocbs)
-        .map(|n| n as u64)
-        .map_err(|_| SyscallError::InvalidArgument)
+pub fn sys_io_submit(_ctx: u64, _nr: i64, _iocbpp: u64) -> SyscallResult {
+    serial_println!("[KnoxOS] io_submit denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_io_cancel(_ctx: u64, _iocb: u64, _result: u64) -> SyscallResult {

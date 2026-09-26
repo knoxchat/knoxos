@@ -365,6 +365,23 @@ pub fn poll(fds: &mut [PollFd], _timeout_ms: i32) -> usize {
     ready_count
 }
 
+/// Empty pipe is not readable; a write makes `poll` report `POLLIN`.
+pub fn poll_pipe_self_test() -> bool {
+    let Ok(pipe_id) = crate::ipc::create_pipe() else {
+        return false;
+    };
+    let path = alloc::format!("pipe:{}", pipe_id);
+    let idle = check_path_readiness(&path, 3, EPOLLIN);
+    if idle != 0 {
+        return false;
+    }
+    if crate::ipc::pipe_write(pipe_id, b"x").is_err() {
+        return false;
+    }
+    let ready = check_path_readiness(&path, 3, EPOLLIN);
+    ready & EPOLLIN != 0
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // select() - POSIX select() implementation
 // ═══════════════════════════════════════════════════════════════════════

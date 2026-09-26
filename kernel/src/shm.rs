@@ -35,10 +35,12 @@ pub struct SharedMemory {
     pub cpid: Pid,
     /// Last operation PID
     pub lpid: Pid,
+    /// IPC namespace id that owns this key
+    pub ipc_ns: u64,
 }
 
 impl SharedMemory {
-    pub fn new(id: u32, key: u32, size: usize, owner: Pid, mode: u32) -> Self {
+    pub fn new(id: u32, key: u32, size: usize, owner: Pid, mode: u32, ipc_ns: u64) -> Self {
         let data = alloc::vec![0; size];
         Self {
             id,
@@ -53,6 +55,7 @@ impl SharedMemory {
             dtime: 0,
             cpid: owner,
             lpid: owner,
+            ipc_ns,
         }
     }
 }
@@ -86,15 +89,29 @@ lazy_static::lazy_static! {
     pub static ref SHM_ATTACHMENTS: Mutex<Vec<ShmAttachment>> = Mutex::new(Vec::new());
 }
 
-/// Get or create a shared memory segment (shmget)
+fn ipc_ns_of(pid: Pid) -> u64 {
+    crate::namespaces::get_process_namespaces(pid).ipc_ns
+}
+
+/// Get or create a shared memory segment (shmget) in the caller's IPC ns.
 pub fn shmget(key: u32, size: usize, flags: u32) -> Result<u32, i32> {
     let pid = crate::scheduler::current_pid().unwrap_or(0);
+    shmget_in_ns(ipc_ns_of(pid), pid, key, size, flags)
+}
+
+/// `shmget` against a specific IPC namespace (used by Gate Q1).
+pub fn shmget_in_ns(
+    ipc_ns: u64,
+    owner: Pid,
+    key: u32,
+    size: usize,
+    flags: u32,
+) -> Result<u32, i32> {
     let mut segments = SHM_SEGMENTS.lock();
 
-    // Check if segment with this key exists
     if key != IPC_PRIVATE {
         for (id, seg) in segments.iter() {
-            if seg.key == key {
+            if seg.key == key && seg.ipc_ns == ipc_ns {
                 if flags & IPC_CREAT != 0 && flags & IPC_EXCL != 0 {
                     return Err(-17); // EEXIST
                 }
@@ -103,22 +120,30 @@ pub fn shmget(key: u32, size: usize, flags: u32) -> Result<u32, i32> {
         }
     }
 
-    // Create new segment
     if flags & IPC_CREAT != 0 || key == IPC_PRIVATE {
         let id = NEXT_SHM_ID.fetch_add(1, Ordering::Relaxed);
         let mode = flags & 0o777;
-        let segment = SharedMemory::new(id, key, size, pid, mode);
+        let segment = SharedMemory::new(id, key, size, owner, mode, ipc_ns);
         serial_println!(
-            "[KnoxOS] shmget: created segment {} (key={}, size={})",
+            "[KnoxOS] shmget: created segment {} (key={}, size={}, ns={})",
             id,
             key,
-            size
+            size,
+            ipc_ns
         );
         segments.insert(id, segment);
         Ok(id)
     } else {
         Err(-2) // ENOENT
     }
+}
+
+/// Whether `ipc_ns` already has a SysV shm segment for `key`.
+pub fn has_shm_key(ipc_ns: u64, key: u32) -> bool {
+    SHM_SEGMENTS
+        .lock()
+        .values()
+        .any(|seg| seg.key == key && seg.ipc_ns == ipc_ns)
 }
 
 /// Attach a shared memory segment to the process address space (shmat)
