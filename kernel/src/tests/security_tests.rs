@@ -142,6 +142,14 @@ fn test_ipc_namespace_isolation() {
 }
 
 #[test_case]
+fn test_cgroup_namespace_isolation() {
+    assert!(
+        crate::namespaces::cgroup_isolation_self_test(),
+        "unshare(CLONE_NEWCGROUP) cgroup paths must not leak to the parent"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

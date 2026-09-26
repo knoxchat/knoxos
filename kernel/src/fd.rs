@@ -117,6 +117,25 @@ pub fn path_for_fd(pid: u32, fd: Fd) -> Option<String> {
         .map(|f| f.path.clone())
 }
 
+/// Stable flock key for `fd`: VFS inode when present, otherwise a path hash.
+pub fn lock_key_for_fd(pid: u32, fd: Fd) -> Option<u64> {
+    let tables = PROCESS_FD_TABLES.lock();
+    let file = tables.get(&pid)?.get(fd)?;
+    if file.inode != 0 {
+        return Some(file.inode);
+    }
+    Some(path_lock_key(&file.path))
+}
+
+fn path_lock_key(path: &str) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for b in path.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    h
+}
+
 /// Type of file backing a file descriptor
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {

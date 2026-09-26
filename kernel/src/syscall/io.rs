@@ -269,7 +269,9 @@ pub fn sys_openpty(master_fd_ptr: u64, slave_name_ptr: u64) -> SyscallResult {
 // ── File locking ────────────────────────────────────────────────────
 
 pub fn sys_flock(fd: i32, operation: i32) -> SyscallResult {
-    crate::flock::flock(fd as u64, operation)
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let key = crate::fd::lock_key_for_fd(pid, fd).ok_or(SyscallError::BadFileDescriptor)?;
+    crate::flock::flock(key, operation)
         .map(|_| 0u64)
         .map_err(|e| match e {
             -11 => SyscallError::WouldBlock,

@@ -1678,6 +1678,7 @@ pub fn handle_syscall(
         SyscallNumber::MqNotify => advanced::sys_mq_notify(arg1 as i32, arg2),
         SyscallNumber::MqGetsetattr => advanced::sys_mq_getsetattr(arg1 as i32, arg2, arg3),
         SyscallNumber::KexecLoad | SyscallNumber::KexecFileLoad => {
+            serial_println!("[KnoxOS] kexec denied (ENOSYS)");
             Err(SyscallError::NotImplemented)
         }
 

@@ -121,6 +121,13 @@ pub struct UserNamespace {
     pub uid_map: Vec<UidMap>,
 }
 
+/// Cgroup namespace data — virtualizes the cgroup path view.
+#[derive(Debug, Clone)]
+pub struct CgroupNamespace {
+    pub id: u64,
+    pub cgroups: Vec<String>,
+}
+
 /// Global namespace registry
 lazy_static::lazy_static! {
     static ref NAMESPACES: Mutex<BTreeMap<u64, Namespace>> = Mutex::new(BTreeMap::new());
@@ -129,6 +136,7 @@ lazy_static::lazy_static! {
     static ref MOUNT_NAMESPACES: Mutex<BTreeMap<u64, MountNamespace>> = Mutex::new(BTreeMap::new());
     static ref NET_NAMESPACES: Mutex<BTreeMap<u64, NetNamespace>> = Mutex::new(BTreeMap::new());
     static ref USER_NAMESPACES: Mutex<BTreeMap<u64, UserNamespace>> = Mutex::new(BTreeMap::new());
+    static ref CGROUP_NAMESPACES: Mutex<BTreeMap<u64, CgroupNamespace>> = Mutex::new(BTreeMap::new());
     static ref PROCESS_NS: Mutex<BTreeMap<u32, ProcessNamespaces>> = Mutex::new(BTreeMap::new());
 }
 
@@ -195,6 +203,15 @@ pub fn create_namespace(ns_type: NamespaceType, owner_pid: u32) -> Result<u64, i
                 },
             );
         }
+        NamespaceType::Cgroup => {
+            CGROUP_NAMESPACES.lock().insert(
+                id,
+                CgroupNamespace {
+                    id,
+                    cgroups: vec![String::from("/")],
+                },
+            );
+        }
         _ => {}
     }
 
@@ -244,6 +261,9 @@ pub fn unshare(pid: u32, flags: u32) -> Result<(), i32> {
             });
         }
         ns.user_ns = new_id;
+    }
+    if flags & NamespaceType::Cgroup as u32 != 0 {
+        ns.cgroup_ns = create_namespace(NamespaceType::Cgroup, pid)?;
     }
     drop(proc_ns);
 
@@ -355,6 +375,39 @@ pub fn add_net_interface(pid: u32, name: &str) -> Result<(), i32> {
         ns.has_loopback = true;
     }
     Ok(())
+}
+
+/// Add a cgroup path to `pid`'s cgroup namespace.
+pub fn add_cgroup(pid: u32, path: &str) -> Result<(), i32> {
+    let ns_id = PROCESS_NS
+        .lock()
+        .get(&pid)
+        .map(|n| n.cgroup_ns)
+        .unwrap_or(1);
+    let mut cgroups = CGROUP_NAMESPACES.lock();
+    let ns = cgroups.entry(ns_id).or_insert_with(|| CgroupNamespace {
+        id: ns_id,
+        cgroups: Vec::new(),
+    });
+    if ns.cgroups.iter().any(|c| c == path) {
+        return Err(-17); // EEXIST
+    }
+    ns.cgroups.push(String::from(path));
+    Ok(())
+}
+
+/// Whether `pid`'s cgroup namespace lists `path`.
+pub fn has_cgroup(pid: u32, path: &str) -> bool {
+    let ns_id = PROCESS_NS
+        .lock()
+        .get(&pid)
+        .map(|n| n.cgroup_ns)
+        .unwrap_or(1);
+    CGROUP_NAMESPACES
+        .lock()
+        .get(&ns_id)
+        .map(|ns| ns.cgroups.iter().any(|c| c == path))
+        .unwrap_or(false)
 }
 
 /// Whether `pid`'s network namespace lists `name`.
@@ -506,6 +559,18 @@ pub fn init() {
         },
     );
 
+    CGROUP_NAMESPACES.lock().insert(
+        1,
+        CgroupNamespace {
+            id: 1,
+            cgroups: vec![
+                String::from("/"),
+                String::from("/system.slice"),
+                String::from("/user.slice"),
+            ],
+        },
+    );
+
     // Set initial process namespaces
     let default_ns = ProcessNamespaces::default();
     PROCESS_NS.lock().insert(0, default_ns.clone());
@@ -520,6 +585,7 @@ pub fn init() {
     let _ = net_isolation_self_test();
     let _ = user_isolation_self_test();
     let _ = ipc_isolation_self_test();
+    let _ = cgroup_isolation_self_test();
 }
 
 pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";
@@ -709,5 +775,43 @@ pub fn ipc_isolation_self_test() -> bool {
         return false;
     }
     crate::serial_println!("[ns] {}", GATE_Q1_MARKER);
+    true
+}
+
+pub const GATE_R1_MARKER: &str = "GATE_R1 cgroup ns";
+const GATE_R1_PID: u32 = 0x0000_5201;
+const GATE_R1_PATH: &str = "/gate_r1";
+
+/// Child `unshare(CLONE_NEWCGROUP)` must not see the parent's extra cgroups,
+/// and a child-only cgroup must not appear in the parent.
+pub fn cgroup_isolation_self_test() -> bool {
+    inherit_namespaces(GATE_R1_PID, 1);
+    if !has_cgroup(1, "/system.slice") {
+        crate::serial_println!("[ns] Gate R1 FAILED: parent missing /system.slice");
+        return false;
+    }
+    if unshare(GATE_R1_PID, NamespaceType::Cgroup as u32).is_err() {
+        crate::serial_println!("[ns] Gate R1 FAILED: unshare");
+        return false;
+    }
+    if has_cgroup(GATE_R1_PID, "/system.slice") {
+        crate::serial_println!("[ns] Gate R1 FAILED: child still has /system.slice");
+        return false;
+    }
+    if add_cgroup(GATE_R1_PID, GATE_R1_PATH).is_err() {
+        crate::serial_println!("[ns] Gate R1 FAILED: add child cgroup");
+        return false;
+    }
+    let child = has_cgroup(GATE_R1_PID, GATE_R1_PATH);
+    let parent = has_cgroup(1, GATE_R1_PATH);
+    if !child || parent {
+        crate::serial_println!("[ns] Gate R1 FAILED: child={} parent={}", child, parent);
+        return false;
+    }
+    if !has_cgroup(1, "/system.slice") {
+        crate::serial_println!("[ns] Gate R1 FAILED: parent lost /system.slice");
+        return false;
+    }
+    crate::serial_println!("[ns] {}", GATE_R1_MARKER);
     true
 }
