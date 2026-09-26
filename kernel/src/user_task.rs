@@ -519,6 +519,9 @@ extern "C" fn gate_boot_body() {
     run_gate_r2();
     run_gate_r3();
     run_gate_r4();
+    run_gate_s2();
+    run_gate_s3();
+    run_gate_s4();
 }
 
 fn run_gate_b3() {
@@ -1036,6 +1039,49 @@ fn run_gate_r4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate R4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_S2_MARKER: &str = "GATE_S2 sendfile";
+pub const GATE_S3_MARKER: &str = "GATE_S3 tee";
+pub const GATE_S4_MARKER: &str = "GATE_S4 enosys";
+
+fn run_gate_s2() {
+    serial_println!("[user_task] Gate S2: sendfile file to pipe");
+    let elf = crate::init::sendfile_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sendfile-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate S2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_s3() {
+    serial_println!("[user_task] Gate S3: tee without consuming the source");
+    let elf = crate::init::tee_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "tee-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate S3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_s4() {
+    serial_println!("[user_task] Gate S4: init_module returns ENOSYS");
+    let elf = crate::init::init_module_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "initmod-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate S4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

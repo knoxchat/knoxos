@@ -15,7 +15,8 @@ pub fn sys_gettimeofday(tv_ptr: u64) -> SyscallResult {
 }
 
 pub fn sys_clock_gettime(clock_id: u32, tp_ptr: u64) -> SyscallResult {
-    let ts = crate::rtc::clock_gettime(clock_id);
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let ts = crate::namespaces::namespaced_clock_gettime(pid, clock_id);
     if tp_ptr != 0 {
         unsafe {
             let p = tp_ptr as *mut [i64; 2];

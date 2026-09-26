@@ -1,6 +1,6 @@
 /// Namespaces - Linux namespace isolation for containers
 /// Compatible with Linux namespace types (clone flags)
-/// Provides resource isolation: PID, mount, network, user, UTS, IPC
+/// Provides resource isolation: PID, mount, network, user, UTS, IPC, cgroup, time
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
@@ -25,6 +25,8 @@ pub enum NamespaceType {
     User = 0x10000000,
     /// Cgroup namespace (CLONE_NEWCGROUP)
     Cgroup = 0x02000000,
+    /// Time namespace (CLONE_NEWTIME) — CLOCK_MONOTONIC / CLOCK_BOOTTIME offsets
+    Time = 0x00000080,
 }
 
 /// A namespace instance
@@ -86,6 +88,7 @@ pub struct ProcessNamespaces {
     pub net_ns: u64,
     pub user_ns: u64,
     pub cgroup_ns: u64,
+    pub time_ns: u64,
     /// Host (kuid) user id; `getuid` maps this through `user_ns`.
     pub host_uid: u32,
 }
@@ -101,6 +104,7 @@ impl Default for ProcessNamespaces {
             net_ns: 1,
             user_ns: 1,
             cgroup_ns: 1,
+            time_ns: 1,
             host_uid: 0,
         }
     }
@@ -128,6 +132,14 @@ pub struct CgroupNamespace {
     pub cgroups: Vec<String>,
 }
 
+/// Time namespace data — offsets applied to monotonic / boottime clocks.
+#[derive(Debug, Clone)]
+pub struct TimeNamespace {
+    pub id: u64,
+    pub monotonic_offset_ns: i64,
+    pub boottime_offset_ns: i64,
+}
+
 /// Global namespace registry
 lazy_static::lazy_static! {
     static ref NAMESPACES: Mutex<BTreeMap<u64, Namespace>> = Mutex::new(BTreeMap::new());
@@ -137,6 +149,7 @@ lazy_static::lazy_static! {
     static ref NET_NAMESPACES: Mutex<BTreeMap<u64, NetNamespace>> = Mutex::new(BTreeMap::new());
     static ref USER_NAMESPACES: Mutex<BTreeMap<u64, UserNamespace>> = Mutex::new(BTreeMap::new());
     static ref CGROUP_NAMESPACES: Mutex<BTreeMap<u64, CgroupNamespace>> = Mutex::new(BTreeMap::new());
+    static ref TIME_NAMESPACES: Mutex<BTreeMap<u64, TimeNamespace>> = Mutex::new(BTreeMap::new());
     static ref PROCESS_NS: Mutex<BTreeMap<u32, ProcessNamespaces>> = Mutex::new(BTreeMap::new());
 }
 
@@ -212,6 +225,16 @@ pub fn create_namespace(ns_type: NamespaceType, owner_pid: u32) -> Result<u64, i
                 },
             );
         }
+        NamespaceType::Time => {
+            TIME_NAMESPACES.lock().insert(
+                id,
+                TimeNamespace {
+                    id,
+                    monotonic_offset_ns: 0,
+                    boottime_offset_ns: 0,
+                },
+            );
+        }
         _ => {}
     }
 
@@ -264,6 +287,18 @@ pub fn unshare(pid: u32, flags: u32) -> Result<(), i32> {
     }
     if flags & NamespaceType::Cgroup as u32 != 0 {
         ns.cgroup_ns = create_namespace(NamespaceType::Cgroup, pid)?;
+    }
+    if flags & NamespaceType::Time as u32 != 0 {
+        let parent_id = ns.time_ns;
+        let copied = TIME_NAMESPACES.lock().get(&parent_id).cloned();
+        let new_id = create_namespace(NamespaceType::Time, pid)?;
+        if let Some(src) = copied {
+            if let Some(dst) = TIME_NAMESPACES.lock().get_mut(&new_id) {
+                dst.monotonic_offset_ns = src.monotonic_offset_ns;
+                dst.boottime_offset_ns = src.boottime_offset_ns;
+            }
+        }
+        ns.time_ns = new_id;
     }
     drop(proc_ns);
 
@@ -461,6 +496,61 @@ pub fn set_host_uid(pid: u32, uid: u32) {
     PROCESS_NS.lock().entry(pid).or_default().host_uid = uid;
 }
 
+fn time_ns_id(pid: u32) -> u64 {
+    PROCESS_NS.lock().get(&pid).map(|n| n.time_ns).unwrap_or(1)
+}
+
+/// Offset applied to `clock_id` in `pid`'s time namespace (0 if not namespaced).
+pub fn time_offset_ns(pid: u32, clock_id: u32) -> i64 {
+    let ns_id = time_ns_id(pid);
+    let nss = TIME_NAMESPACES.lock();
+    let Some(ns) = nss.get(&ns_id) else {
+        return 0;
+    };
+    match clock_id {
+        crate::rtc::CLOCK_MONOTONIC | crate::rtc::CLOCK_MONOTONIC_COARSE => ns.monotonic_offset_ns,
+        crate::rtc::CLOCK_BOOTTIME => ns.boottime_offset_ns,
+        _ => 0,
+    }
+}
+
+/// Replace the monotonic / boottime offsets in `pid`'s time namespace.
+pub fn set_time_offsets(pid: u32, monotonic_ns: i64, boottime_ns: i64) -> Result<(), i32> {
+    let ns_id = time_ns_id(pid);
+    let mut nss = TIME_NAMESPACES.lock();
+    let ns = nss.get_mut(&ns_id).ok_or(-22i32)?;
+    ns.monotonic_offset_ns = monotonic_ns;
+    ns.boottime_offset_ns = boottime_ns;
+    Ok(())
+}
+
+fn add_ns_offset(ts: crate::rtc::Timespec, offset_ns: i64) -> crate::rtc::Timespec {
+    let total = ts
+        .tv_sec
+        .saturating_mul(1_000_000_000)
+        .saturating_add(ts.tv_nsec)
+        .saturating_add(offset_ns);
+    if total < 0 {
+        crate::rtc::Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        }
+    } else {
+        crate::rtc::Timespec {
+            tv_sec: total / 1_000_000_000,
+            tv_nsec: total % 1_000_000_000,
+        }
+    }
+}
+
+/// `clock_gettime` as seen from `pid`'s time namespace.
+pub fn namespaced_clock_gettime(pid: u32, clock_id: u32) -> crate::rtc::Timespec {
+    add_ns_offset(
+        crate::rtc::clock_gettime(clock_id),
+        time_offset_ns(pid, clock_id),
+    )
+}
+
 /// Initialize namespace subsystem
 pub fn init() {
     // Create the initial (default) namespaces
@@ -571,6 +661,15 @@ pub fn init() {
         },
     );
 
+    TIME_NAMESPACES.lock().insert(
+        1,
+        TimeNamespace {
+            id: 1,
+            monotonic_offset_ns: 0,
+            boottime_offset_ns: 0,
+        },
+    );
+
     // Set initial process namespaces
     let default_ns = ProcessNamespaces::default();
     PROCESS_NS.lock().insert(0, default_ns.clone());
@@ -586,6 +685,7 @@ pub fn init() {
     let _ = user_isolation_self_test();
     let _ = ipc_isolation_self_test();
     let _ = cgroup_isolation_self_test();
+    let _ = time_isolation_self_test();
 }
 
 pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";
@@ -813,5 +913,55 @@ pub fn cgroup_isolation_self_test() -> bool {
         return false;
     }
     crate::serial_println!("[ns] {}", GATE_R1_MARKER);
+    true
+}
+
+pub const GATE_S1_MARKER: &str = "GATE_S1 time ns";
+const GATE_S1_PID: u32 = 0x0000_5301;
+const GATE_S1_OFFSET_NS: i64 = 3_600_000_000_000; // +1 hour
+
+/// Child `unshare(CLONE_NEWTIME)` + monotonic offset must not change the
+/// parent's CLOCK_MONOTONIC, and CLOCK_MONOTONIC_RAW stays unoffset.
+pub fn time_isolation_self_test() -> bool {
+    inherit_namespaces(GATE_S1_PID, 1);
+    let parent_before = namespaced_clock_gettime(1, crate::rtc::CLOCK_MONOTONIC);
+    if unshare(GATE_S1_PID, NamespaceType::Time as u32).is_err() {
+        crate::serial_println!("[ns] Gate S1 FAILED: unshare");
+        return false;
+    }
+    if time_ns_id(GATE_S1_PID) == time_ns_id(1) {
+        crate::serial_println!("[ns] Gate S1 FAILED: child still in parent time ns");
+        return false;
+    }
+    if set_time_offsets(GATE_S1_PID, GATE_S1_OFFSET_NS, GATE_S1_OFFSET_NS).is_err() {
+        crate::serial_println!("[ns] Gate S1 FAILED: set offsets");
+        return false;
+    }
+    let child = namespaced_clock_gettime(GATE_S1_PID, crate::rtc::CLOCK_MONOTONIC);
+    let parent_after = namespaced_clock_gettime(1, crate::rtc::CLOCK_MONOTONIC);
+    let child_raw = namespaced_clock_gettime(GATE_S1_PID, crate::rtc::CLOCK_MONOTONIC_RAW);
+    if child.tv_sec < parent_before.tv_sec + 3600 {
+        crate::serial_println!(
+            "[ns] Gate S1 FAILED: child monotonic {} (want >= {})",
+            child.tv_sec,
+            parent_before.tv_sec + 3600
+        );
+        return false;
+    }
+    if parent_after.tv_sec >= parent_before.tv_sec + 3600 {
+        crate::serial_println!(
+            "[ns] Gate S1 FAILED: parent monotonic leaked offset {}",
+            parent_after.tv_sec
+        );
+        return false;
+    }
+    if child_raw.tv_sec >= parent_before.tv_sec + 3600 {
+        crate::serial_println!(
+            "[ns] Gate S1 FAILED: CLOCK_MONOTONIC_RAW was namespaced {}",
+            child_raw.tv_sec
+        );
+        return false;
+    }
+    crate::serial_println!("[ns] {}", GATE_S1_MARKER);
     true
 }

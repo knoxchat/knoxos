@@ -54,10 +54,13 @@ pub fn splice(
 }
 
 /// tee() — duplicate pipe data without consuming it
-pub fn tee(fd_in: i32, fd_out: i32, len: usize, flags: u32) -> Result<usize, i32> {
-    // For now, tee is implemented similarly to splice
-    // A proper implementation would peek at the pipe buffer
-    splice(fd_in, None, fd_out, None, len, flags)
+pub fn tee(fd_in: i32, fd_out: i32, len: usize, _flags: u32) -> Result<usize, i32> {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let src_path = crate::fd::path_for_fd(pid, fd_in).ok_or(-9i32)?;
+    let dst_path = crate::fd::path_for_fd(pid, fd_out).ok_or(-9i32)?;
+    let src_id = crate::fd::pipe_id_from_path(&src_path).ok_or(-22i32)?;
+    let dst_id = crate::fd::pipe_id_from_path(&dst_path).ok_or(-22i32)?;
+    crate::ipc::pipe_tee(src_id, dst_id, len)
 }
 
 /// sendfile() — transfer data between file descriptors (optimized for regular files → sockets)

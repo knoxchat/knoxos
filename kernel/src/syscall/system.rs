@@ -130,6 +130,7 @@ pub fn sys_syslog(log_type: i32, buf_ptr: u64, len: usize) -> SyscallResult {
     }
 }
 
+#[allow(dead_code)]
 pub fn sys_init_module(name_ptr: u64, _param_ptr: u64) -> SyscallResult {
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let module = crate::modules::KernelModule {
@@ -148,6 +149,7 @@ pub fn sys_init_module(name_ptr: u64, _param_ptr: u64) -> SyscallResult {
     Ok(0)
 }
 
+#[allow(dead_code)]
 pub fn sys_delete_module(name_ptr: u64) -> SyscallResult {
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     crate::modules::remove_module(&name).map_err(|_| SyscallError::FileNotFound)?;

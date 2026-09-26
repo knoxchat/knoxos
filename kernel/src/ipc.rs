@@ -81,6 +81,17 @@ impl Pipe {
         Ok(to_read)
     }
 
+    /// Peek at data without consuming it.
+    pub fn peek(&self, buf: &mut [u8]) -> usize {
+        let to_peek = buf.len().min(self.buffer.len());
+        for (i, item) in buf.iter_mut().take(to_peek).enumerate() {
+            if let Some(&b) = self.buffer.get(i) {
+                *item = b;
+            }
+        }
+        to_peek
+    }
+
     /// Close the read end
     pub fn close_read(&mut self) {
         self.readers = self.readers.saturating_sub(1);
@@ -148,6 +159,20 @@ pub fn pipe_read(id: u32, buf: &mut [u8]) -> Result<usize, i32> {
     let mut pipes = PIPES.lock();
     let pipe = pipes.iter_mut().find(|p| p.id == id).ok_or(-9i32)?; // EBADF
     pipe.read(buf)
+}
+
+/// Duplicate `len` bytes from `src_id` into `dst_id` without consuming the source.
+pub fn pipe_tee(src_id: u32, dst_id: u32, len: usize) -> Result<usize, i32> {
+    if src_id == dst_id {
+        return Err(-22); // EINVAL
+    }
+    let mut pipes = PIPES.lock();
+    let src_idx = pipes.iter().position(|p| p.id == src_id).ok_or(-9i32)?;
+    let dst_idx = pipes.iter().position(|p| p.id == dst_id).ok_or(-9i32)?;
+    let n = pipes[src_idx].available().min(len);
+    let mut tmp = alloc::vec![0u8; n];
+    let peeked = pipes[src_idx].peek(&mut tmp);
+    pipes[dst_idx].write(&tmp[..peeked])
 }
 
 /// Bytes waiting to be read.
@@ -309,6 +334,26 @@ pub fn pipe_roundtrip_self_test() -> bool {
     }
     let mut buf = [0u8; 8];
     matches!(pipe_read(id, &mut buf), Ok(n) if n == payload.len() && &buf[..n] == payload)
+}
+
+/// tee must copy pipe bytes without consuming the source.
+pub fn pipe_tee_self_test() -> bool {
+    let Ok(src) = create_pipe() else {
+        return false;
+    };
+    let Ok(dst) = create_pipe() else {
+        return false;
+    };
+    if pipe_write(src, b"x") != Ok(1) {
+        return false;
+    }
+    if pipe_tee(src, dst, 1) != Ok(1) {
+        return false;
+    }
+    let mut copied = [0u8; 1];
+    let mut original = [0u8; 1];
+    matches!(pipe_read(dst, &mut copied), Ok(1) if copied[0] == b'x')
+        && matches!(pipe_read(src, &mut original), Ok(1) if original[0] == b'x')
 }
 
 /// Initialize IPC subsystem

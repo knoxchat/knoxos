@@ -150,6 +150,14 @@ fn test_cgroup_namespace_isolation() {
 }
 
 #[test_case]
+fn test_time_namespace_isolation() {
+    assert!(
+        crate::namespaces::time_isolation_self_test(),
+        "unshare(CLONE_NEWTIME) monotonic offset must not leak to the parent"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),
@@ -210,6 +218,14 @@ fn test_pipe_ipc_roundtrip() {
     assert!(
         crate::ipc::pipe_roundtrip_self_test(),
         "pipe write then read must return the same bytes"
+    );
+}
+
+#[test_case]
+fn test_pipe_tee_does_not_consume() {
+    assert!(
+        crate::ipc::pipe_tee_self_test(),
+        "tee must copy pipe bytes without consuming the source"
     );
 }
 
