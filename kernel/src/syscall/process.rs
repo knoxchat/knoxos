@@ -47,6 +47,7 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> Sysc
     const CLONE_VM: u64 = 0x00000100;
     const CLONE_THREAD: u64 = 0x00010000;
     const CLONE_SETTLS: u64 = 0x00080000;
+    const CLONE_NEWNS: u64 = 0x00020000;
     const CLONE_NEWUTS: u64 = 0x04000000;
     const CLONE_NEWPID: u64 = 0x20000000;
     if flags & CLONE_THREAD != 0 && flags & CLONE_VM == 0 {
@@ -83,6 +84,9 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> Sysc
     }
 
     crate::namespaces::inherit_namespaces(child_pid, ppid);
+    if flags & CLONE_NEWNS != 0 {
+        let _ = crate::namespaces::unshare(child_pid, CLONE_NEWNS as u32);
+    }
     if flags & CLONE_NEWUTS != 0 {
         let _ = crate::namespaces::unshare(child_pid, CLONE_NEWUTS as u32);
     }

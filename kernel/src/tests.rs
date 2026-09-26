@@ -1579,6 +1579,30 @@ mod security_tests {
     }
 
     #[test_case]
+    fn test_mount_namespace_isolation() {
+        assert!(
+            crate::namespaces::mount_isolation_self_test(),
+            "unshare(CLONE_NEWNS) bind mount must not leak to the parent"
+        );
+    }
+
+    #[test_case]
+    fn test_socketpair_roundtrip() {
+        assert!(
+            crate::uds::socketpair_roundtrip_self_test(),
+            "socketpair send then recv must return the same bytes"
+        );
+    }
+
+    #[test_case]
+    fn test_eventfd_counter_roundtrip() {
+        assert!(
+            crate::eventfd::eventfd_roundtrip_self_test(),
+            "eventfd write then read must return the same counter"
+        );
+    }
+
+    #[test_case]
     fn test_pipe_ipc_roundtrip() {
         assert!(
             crate::ipc::pipe_roundtrip_self_test(),

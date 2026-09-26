@@ -89,6 +89,41 @@ pub fn eventfd_write(fd: i32, val: u64) -> Result<(), i32> {
     efd.write(val)
 }
 
+/// Read the counter into an 8-byte little-endian buffer (Linux eventfd ABI).
+pub fn eventfd_read_bytes(id: i32, buf: &mut [u8]) -> Result<usize, i32> {
+    if buf.len() < 8 {
+        return Err(-22); // EINVAL
+    }
+    let val = eventfd_read(id)?;
+    buf[..8].copy_from_slice(&val.to_le_bytes());
+    Ok(8)
+}
+
+/// Add an 8-byte little-endian counter write (Linux eventfd ABI).
+pub fn eventfd_write_bytes(id: i32, buf: &[u8]) -> Result<usize, i32> {
+    if buf.len() < 8 {
+        return Err(-22); // EINVAL
+    }
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&buf[..8]);
+    eventfd_write(id, u64::from_le_bytes(bytes))?;
+    Ok(8)
+}
+
+/// Write then read a counter through the eventfd table used by `sys_eventfd`.
+pub fn eventfd_roundtrip_self_test() -> bool {
+    let Ok(id) = eventfd_create(0, EFD_NONBLOCK) else {
+        return false;
+    };
+    if eventfd_write(id, 1).is_err() {
+        eventfd_close(id);
+        return false;
+    }
+    let got = eventfd_read(id);
+    eventfd_close(id);
+    matches!(got, Ok(1))
+}
+
 /// Close an eventfd
 pub fn eventfd_close(fd: i32) {
     EVENTFDS.lock().remove(&fd);

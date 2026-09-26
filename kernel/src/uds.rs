@@ -331,6 +331,24 @@ pub fn socketpair(sock_type: UnixSocketType) -> Result<(u32, u32), i32> {
     Ok((id1, id2))
 }
 
+/// Send on one end of a pair and receive on the other.
+pub fn socketpair_roundtrip_self_test() -> bool {
+    let Ok((a, b)) = socketpair(UnixSocketType::Stream) else {
+        return false;
+    };
+    let payload = b"ping\n";
+    if socket_send(a, payload) != Ok(payload.len()) {
+        let _ = socket_close(a);
+        let _ = socket_close(b);
+        return false;
+    }
+    let mut buf = [0u8; 8];
+    let n = socket_recv(b, &mut buf).unwrap_or(0);
+    let _ = socket_close(a);
+    let _ = socket_close(b);
+    n == payload.len() && &buf[..n] == payload
+}
+
 /// Initialize unix socket subsystem
 pub fn init() {
     crate::serial_println!("[KnoxOS] Unix domain sockets initialized");

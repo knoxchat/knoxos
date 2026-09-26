@@ -83,9 +83,26 @@ pub fn sys_select(
 // ── Eventfd ─────────────────────────────────────────────────────────
 
 pub fn sys_eventfd(initval: u32, flags: i32) -> SyscallResult {
-    crate::eventfd::eventfd_create(initval as u64, flags)
-        .map(|fd| fd as u64)
-        .map_err(|_| SyscallError::TooManyFiles)
+    let id = crate::eventfd::eventfd_create(initval as u64, flags)
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables.get_mut(&pid).ok_or(SyscallError::TooManyFiles)?;
+    let mut o_flags = crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR);
+    if flags & crate::eventfd::EFD_NONBLOCK != 0 {
+        o_flags.0 |= crate::fd::OpenFlags::O_NONBLOCK;
+    }
+    let fd = fd_table
+        .open(
+            &alloc::format!("eventfd:{}", id),
+            o_flags,
+            crate::fd::FileType::CharDevice,
+        )
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    if flags & crate::eventfd::EFD_CLOEXEC != 0 {
+        fd_table.set_cloexec(fd, true);
+    }
+    Ok(fd as u64)
 }
 
 // ── Inotify ─────────────────────────────────────────────────────────

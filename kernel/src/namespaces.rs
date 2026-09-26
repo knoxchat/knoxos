@@ -181,7 +181,17 @@ pub fn unshare(pid: u32, flags: u32) -> Result<(), i32> {
 
     // Create new namespaces for each flag
     if flags & NamespaceType::Mount as u32 != 0 {
-        ns.mount_ns = create_namespace(NamespaceType::Mount, pid)?;
+        let parent_id = ns.mount_ns;
+        let copied = MOUNT_NAMESPACES
+            .lock()
+            .get(&parent_id)
+            .map(|m| m.mounts.clone())
+            .unwrap_or_default();
+        let new_id = create_namespace(NamespaceType::Mount, pid)?;
+        if let Some(m) = MOUNT_NAMESPACES.lock().get_mut(&new_id) {
+            m.mounts = copied;
+        }
+        ns.mount_ns = new_id;
     }
     if flags & NamespaceType::Uts as u32 != 0 {
         ns.uts_ns = create_namespace(NamespaceType::Uts, pid)?;
@@ -248,6 +258,47 @@ pub fn inherit_namespaces(child_pid: u32, parent_pid: u32) {
         .cloned()
         .unwrap_or_else(ProcessNamespaces::default);
     PROCESS_NS.lock().insert(child_pid, parent_ns);
+}
+
+/// Record a mount in `pid`'s mount namespace (bind or otherwise).
+pub fn add_mount(
+    pid: u32,
+    source: &str,
+    target: &str,
+    fstype: &str,
+    flags: u32,
+) -> Result<(), i32> {
+    let ns_id = PROCESS_NS.lock().get(&pid).map(|n| n.mount_ns).unwrap_or(1);
+    let mut mounts = MOUNT_NAMESPACES.lock();
+    let ns = mounts.entry(ns_id).or_insert_with(|| MountNamespace {
+        id: ns_id,
+        mounts: Vec::new(),
+    });
+    if ns.mounts.iter().any(|m| m.target == target) {
+        return Err(-16); // EBUSY
+    }
+    ns.mounts.push(MountEntry {
+        source: String::from(source),
+        target: String::from(target),
+        fstype: String::from(fstype),
+        flags,
+    });
+    Ok(())
+}
+
+/// Bind-mount `source` at `target` in `pid`'s mount namespace.
+pub fn bind_mount(pid: u32, source: &str, target: &str) -> Result<(), i32> {
+    add_mount(pid, source, target, "bind", 0x1000)
+}
+
+/// Whether `pid`'s mount namespace lists `target`.
+pub fn has_mount(pid: u32, target: &str) -> bool {
+    let ns_id = PROCESS_NS.lock().get(&pid).map(|n| n.mount_ns).unwrap_or(1);
+    MOUNT_NAMESPACES
+        .lock()
+        .get(&ns_id)
+        .map(|ns| ns.mounts.iter().any(|m| m.target == target))
+        .unwrap_or(false)
 }
 
 /// Initialize namespace subsystem
@@ -350,6 +401,7 @@ pub fn init() {
         "[KnoxOS] Namespaces initialized (mount, uts, ipc, pid, net, user, cgroup)"
     );
     let _ = uts_isolation_self_test();
+    let _ = mount_isolation_self_test();
 }
 
 pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";
@@ -379,5 +431,30 @@ pub fn uts_isolation_self_test() -> bool {
         return false;
     }
     crate::serial_println!("[ns] {}", GATE_L2_MARKER);
+    true
+}
+
+pub const GATE_N1_MARKER: &str = "GATE_N1 mount ns";
+const GATE_N1_PID: u32 = 0x0000_4E01;
+const GATE_N1_TARGET: &str = "/tmp/gate_n1";
+
+/// Child `unshare(CLONE_NEWNS)` + bind mount must not appear in the parent.
+pub fn mount_isolation_self_test() -> bool {
+    inherit_namespaces(GATE_N1_PID, 1);
+    if unshare(GATE_N1_PID, NamespaceType::Mount as u32).is_err() {
+        crate::serial_println!("[ns] Gate N1 FAILED: unshare");
+        return false;
+    }
+    if bind_mount(GATE_N1_PID, "/tmp", GATE_N1_TARGET).is_err() {
+        crate::serial_println!("[ns] Gate N1 FAILED: bind_mount");
+        return false;
+    }
+    let child = has_mount(GATE_N1_PID, GATE_N1_TARGET);
+    let parent = has_mount(1, GATE_N1_TARGET);
+    if !child || parent {
+        crate::serial_println!("[ns] Gate N1 FAILED: child={} parent={}", child, parent);
+        return false;
+    }
+    crate::serial_println!("[ns] {}", GATE_N1_MARKER);
     true
 }

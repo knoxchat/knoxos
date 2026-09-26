@@ -145,10 +145,34 @@ pub fn sys_socketpair(domain: i32, sock_type: i32, _protocol: i32, sv: u64) -> S
         5 => crate::uds::UnixSocketType::SeqPacket,
         _ => return Err(SyscallError::InvalidArgument),
     };
-    let (fd1, fd2) = crate::uds::socketpair(uds_type).map_err(|_| SyscallError::TooManyFiles)?;
-    let fds = unsafe { &mut *(sv as *mut [u32; 2]) };
-    fds[0] = fd1;
-    fds[1] = fd2;
+    let (id1, id2) = crate::uds::socketpair(uds_type).map_err(|_| SyscallError::TooManyFiles)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables
+        .get_mut(&pid)
+        .ok_or(SyscallError::BadFileDescriptor)?;
+    let fd1 = fd_table
+        .open(
+            &alloc::format!("unix:{}", id1),
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::Socket,
+        )
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    let fd2 = fd_table
+        .open(
+            &alloc::format!("unix:{}", id2),
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::Socket,
+        )
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    drop(tables);
+    unsafe {
+        core::ptr::copy_nonoverlapping([fd1, fd2].as_ptr(), sv as *mut i32, 2);
+    }
+    let mut bytes = [0u8; 8];
+    bytes[..4].copy_from_slice(&fd1.to_ne_bytes());
+    bytes[4..].copy_from_slice(&fd2.to_ne_bytes());
+    crate::vmm::write_user_memory(pid, sv, &bytes);
     Ok(0)
 }
 

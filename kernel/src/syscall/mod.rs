@@ -1899,7 +1899,10 @@ pub fn handle_syscall(
             serial_println!("[KnoxOS] bpf(cmd={}) denied (ENOSYS)", arg1);
             Err(SyscallError::NotImplemented)
         }
-        SyscallNumber::Userfaultfd => advanced::sys_userfaultfd(arg1 as u32),
+        SyscallNumber::Userfaultfd => {
+            serial_println!("[KnoxOS] userfaultfd denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
+        }
         SyscallNumber::Membarrier => advanced::sys_membarrier(arg1 as u32, arg2 as u32),
         SyscallNumber::Mlock2 => advanced::sys_mlock2(arg1, arg2, arg3 as i32),
         SyscallNumber::CopyFileRange => {

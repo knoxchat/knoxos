@@ -73,6 +73,16 @@ fn pipe_id_from_path(path: &str) -> Option<u32> {
     path.strip_prefix("pipe:")?.parse().ok()
 }
 
+/// Parse `unix:{id}` written by `sys_socketpair`.
+fn unix_id_from_path(path: &str) -> Option<u32> {
+    path.strip_prefix("unix:")?.parse().ok()
+}
+
+/// Parse `eventfd:{id}` written by `sys_eventfd`.
+fn eventfd_id_from_path(path: &str) -> Option<i32> {
+    path.strip_prefix("eventfd:")?.parse().ok()
+}
+
 /// Type of file backing a file descriptor
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
@@ -224,6 +234,14 @@ impl FdTable {
                 crate::ipc::pipe_close(id, !file.flags.is_writable());
             }
         }
+        if file.file_type == FileType::Socket {
+            if let Some(id) = unix_id_from_path(&file.path) {
+                let _ = crate::uds::socket_close(id);
+            }
+        }
+        if let Some(id) = eventfd_id_from_path(&file.path) {
+            crate::eventfd::eventfd_close(id);
+        }
         Ok(())
     }
 
@@ -305,6 +323,9 @@ impl FdTable {
                 Ok(0)
             }
             FileType::CharDevice => {
+                if let Some(id) = eventfd_id_from_path(&file.path) {
+                    return crate::eventfd::eventfd_read_bytes(id, buf);
+                }
                 if let Some(idx) = pts_index(&file.path) {
                     return crate::pty::read_slave(idx, buf);
                 }
@@ -339,6 +360,12 @@ impl FdTable {
                     return Err(-9);
                 }
                 crate::ipc::pipe_read(id, buf)
+            }
+            FileType::Socket => {
+                let Some(id) = unix_id_from_path(&file.path) else {
+                    return Err(-9);
+                };
+                crate::uds::socket_recv(id, buf)
             }
             FileType::Regular | FileType::ProcFile => {
                 if file.file_type == FileType::Regular {
@@ -398,6 +425,9 @@ impl FdTable {
                 }
             }
             FileType::CharDevice => {
+                if let Some(id) = eventfd_id_from_path(&file.path) {
+                    return crate::eventfd::eventfd_write_bytes(id, buf);
+                }
                 if let Some(idx) = pts_index(&file.path) {
                     for &byte in buf {
                         crate::serial_print!("{}", byte as char);
@@ -423,6 +453,12 @@ impl FdTable {
                     return Err(-9);
                 }
                 crate::ipc::pipe_write(id, buf)
+            }
+            FileType::Socket => {
+                let Some(id) = unix_id_from_path(&file.path) else {
+                    return Err(-9);
+                };
+                crate::uds::socket_send(id, buf)
             }
             FileType::Regular => {
                 let mut ino = file.inode;

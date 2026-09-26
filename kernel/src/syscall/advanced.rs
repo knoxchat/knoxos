@@ -1436,12 +1436,17 @@ pub fn sys_mount_linux(
     let source = unsafe { read_user_string(source_ptr) }.unwrap_or_default();
     let target = unsafe { read_user_string(target_ptr) }.unwrap_or_default();
     let fstype = unsafe { read_user_string(fstype_ptr) }.unwrap_or_default();
-    let _ = (data_ptr, flags);
     serial_println!("[KnoxOS] mount({}, {}, {})", source, target, fstype);
     // Create mount point in VFS
-    let mut vfs = crate::vfs::VFS.lock();
-    vfs.mkdir(&target, 0o755).ok();
-    Ok(0)
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        vfs.mkdir(&target, 0o755).ok();
+    }
+    let _ = data_ptr;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    crate::namespaces::add_mount(pid, &source, &target, &fstype, flags as u32)
+        .map(|_| 0u64)
+        .map_err(|_| SyscallError::IoError)
 }
 
 pub fn sys_umount2(target_ptr: u64, flags: i32) -> SyscallResult {
