@@ -1,6 +1,6 @@
 # KnoxOS Production Readiness Status
 
-> **Last Updated**: 2026-09-25
+> **Last Updated**: 2026-09-27
 > **Version**: 0.2.2 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.2)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
 > **Codebase**: 609 Rust files in `kernel/src` · ~347,000 lines · 407 `pub mod` entries
@@ -68,19 +68,23 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 21. **Gate I1 SMP online** — per-CPU TSS + GS-relative `CpuLocal`; AP INIT/SIPI reaches 64-bit and loads its own TSS (`GATE_I1 smp online`).
 22. **Gate I2 IRQ GPRs** — naked APIC-timer stub saves all GPRs + FXSAVE; spinner `rbx` magic survives preemption (`GATE_I2 irq gprs`).
 23. **Gate I3 AP Ring 3** — a `getcpu` ELF affinity-pinned to CPU 1 `iretq`s on the AP, syscalls, and exits (`GATE_I3 ap ring3`).
+24. **Gate J1 clone threads** — Ring 3 `clone(CLONE_VM)` shares CR3; child writes `thread child ran`; parent `wait4`s (`GATE_J1 thread clone`).
+25. **Gate J2 buddy RAM** — leftover usable bootloader frames enter the buddy pool; alloc/free restores availability (`GATE_J2 buddy ram`).
+26. **Gate J3 LRU reclaim** — page-cache shrink evicts the oldest clean pages and keeps dirty (`GATE_J3 lru reclaim`).
+27. **Gate J4 ENOSYS** — unimplemented `bpf` returns `-ENOSYS` instead of a fake fd (`GATE_J4 enosys`).
 
 ### Architectural blockers (must fix first)
 
 | Blocker | Evidence | Why it blocks a perfect OS |
 |---------|----------|----------------------------|
-| **Scheduled Ring 3** | Hello is a CFS task with its own CR3; `execve`/`waitpid`/`fork`/`/bin/sh` run on the boot path. | Desktop apps other than the Gate F demo are still in-kernel. |
+| **Scheduled Ring 3** | Hello is a CFS task with its own CR3; `execve`/`waitpid`/`fork`/`clone(CLONE_VM)`/`/bin/sh` run on the boot path. | Desktop apps other than the Gate F demo are still in-kernel. |
 | **Ring 3 timer preemption** | Naked APIC-timer stub saves GPRs + FXSAVE then `enter_context`s (`GATE_B8` + `GATE_I2 irq gprs`). | Done for the spinning-user case. |
 | **SMP** | INIT/SIPI trampoline; AP loads per-CPU TSS + GS, starts its LAPIC timer, and runs a pinned Ring 3 task (`GATE_I1 smp online`, `GATE_I3 ap ring3`). | Further APs still share one CFS `current` for the BSP desktop. |
 | **Signal frames for handlers** | Default terminate plus a live SIGINT handler + `rt_sigreturn` (B7). | Catching SIGINT in a user handler is done. |
 | **Sockets do not transmit off-box** | Loopback `send` delivers to a peer `recv_buf`. VirtIO-net TX/RX rings are live (D2). DHCP writes `eth0`. DNS + TCP SYN/retransmit/HTTP are live (D4). CUBIC cwnd limits send (D5). | Off-box TCP is live; CUBIC is wired. |
 | **AHCI and NVMe DMA are live** | AHCI command-list + PRDT round-trips a sector (C4). NVMe admin/I/O queues + PRP bounce round-trip a sector (C5). | Bare-metal beyond QEMU still unproven. |
 | **Default VFS is RAM with persist snapshot** | Inodes are `Vec<u8>`. Persist blob store round-trips through VirtIO-blk (C1) with a WAL that replays after crash (C2). Root snapshot includes `/etc` (C6). inotify is live on mutate (H3). | Reboot still loses virtual FS (`/dev` `/proc` `/sys`) and boot-generated `/bin`. |
-| **Security not on the deny path** | SELinux unused by VFS. Many syscalls `Ok(0)`. | W^X, ChaCha20 `getrandom`, seccomp EPERM, and CapNetBindService are live (E1–E4). |
+| **Security not on the deny path** | SELinux unused by VFS. | W^X, ChaCha20 `getrandom`, seccomp EPERM, CapNetBindService (E1–E4). `bpf`/`pkey`/`process_mrelease` return ENOSYS (J4). |
 | **Breadth without wiring** | 407 modules. GPU compositor, Wayland, KVM `vmlaunch`, overlayfs never on the live path. | Compile time and maintenance grow; capability does not. |
 
 ---
@@ -108,26 +112,26 @@ Percentages are **production usefulness**, not lines of code.
 | # | Subsystem | Grade | Live % | Priority | One-line truth |
 |---|-----------|-------|--------|----------|----------------|
 | 1 | Kernel Core | Wired | 82% | High | Interrupts and timers work; GS-relative CpuLocal; per-CPU TSS; MADT IOAPIC + ISO; AP online then Ring 3 (I3). |
-| 2 | Memory Management | Wired | 58% | **Critical** | Demand paging + CoW #PF (H1) + file-backed fault-in (H2); OOM on frame alloc; guarded kernel stacks (H4). |
-| 3 | Process & Scheduling | Wired | 78% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B8** scheduled Ring 3; IRQ GPR+FPU save (I2); AP Ring 3 (I3). |
+| 2 | Memory Management | Wired | 68% | **Critical** | Demand paging + CoW #PF (H1) + file-backed fault-in (H2); leftover RAM in buddy (J2); LRU shrink (J3); OOM on frame alloc; guarded kernel stacks (H4). |
+| 3 | Process & Scheduling | Wired | 82% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B8** scheduled Ring 3; IRQ GPR+FPU save (I2); AP Ring 3 (I3); `clone(CLONE_VM)` shares CR3 (J1). |
 | 4 | Filesystem & Storage | Wired | 72% | **Critical** | VirtIO-blk + persist C1–C6 + AHCI/NVMe DMA; inotify on VFS mutate (H3). |
 | 5 | Networking | Wired | 64% | **Critical** | Loopback live; VirtIO-net D2; DHCP applies eth0 (D3); DNS + TCP SYN/RTO/HTTP (D4); CUBIC cwnd (D5). |
 | 6 | Device Drivers | Wired | 40% | **Critical** | PCI, PS/2, UART, VirtIO-blk, AHCI DMA, NVMe DMA live; USB/GPU mostly stub. |
 | 7 | GUI & Desktop | Live | 82% | Medium | In-kernel demo plus Ring 3 SHM clients (F1–F4); interactive desktop terminal still in-kernel for PTY I/O. |
 | 8 | Shell & Terminal | Live | 82% | Medium | Real parser/PTY/glob; Ring 3 `/bin/sh` on a PTY; live `sigreturn`; desktop terminal still in-kernel. |
-| 9 | Security & Cryptography | Wired | 42% | **Critical** | AES/SHA software; W^X + ChaCha20 CSPRNG + seccomp deny + CapNetBindService live (E1–E4). |
+| 9 | Security & Cryptography | Wired | 48% | **Critical** | AES/SHA software; W^X + ChaCha20 CSPRNG + seccomp deny + CapNetBindService live (E1–E4); bpf/pkey ENOSYS (J4). |
 | 10 | System Services | Wired | 28% | High | In-kernel units and in-memory D-Bus; no real supervision. |
 | 11 | Virtualization & Containers | Stub | 12% | Low | VMX `asm` unused; containers are comments. |
 | 12 | AI/ML | Wired | 22% | Low | GGUF parse + naive CPU; GPU matmul unused. |
-| 13 | Binary Compatibility | Wired | 45% | **Critical** | Static hello `iretq`s; `execve`/`fork`/`/bin/sh`; live `rt_sigaction` + `rt_sigreturn`. |
+| 13 | Binary Compatibility | Wired | 50% | **Critical** | Static hello `iretq`s; `execve`/`fork`/`clone(CLONE_VM)`/`/bin/sh`; live `rt_sigaction` + `rt_sigreturn`. |
 | 14 | Internationalization & Fonts | Live | 68% | Low | TTF, CJK, RTL on the compositor; locale loading partial. |
 | 15 | Build System & Tooling | Live | 75% | Medium | Make/QEMU work; `flake.nix` missing. |
-| 16 | Testing & Quality | Wired | 48% | **Critical** | Real VFS/widget/DNS/buddy tests; C4–C6/D3–D5/E1–E4/F2–F4/H1–H4/I1–I3 self-tests; `assert!(true)` tests removed. |
+| 16 | Testing & Quality | Wired | 52% | **Critical** | Real VFS/widget/DNS/buddy tests; C4–C6/D3–D5/E1–E4/F2–F4/H1–H4/I1–I3/J1–J4 self-tests; `assert!(true)` tests removed. |
 | 17 | Documentation | Wired | 42% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + this file. Architecture guides still missing. |
 | 18 | CI/CD & Release | Wired | 30% | High | `.github/workflows/ci.yml` (fmt, clippy, size, QEMU boot); no signed releases. |
 
-**QEMU desktop demo readiness: ~88%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B8 scheduled userspace; Gate D1–D5 packets; Gate C1–C6 storage; Gate E1–E4 enforcement; Gate F1–F4 isolated clients; Gate H1–H4 memory/VFS; Gate I1–I3 SMP + IRQ GPRs + AP Ring 3).
-**Production OS readiness: ~72%** (Gate B2–B8, C1–C6, D1–D5, E1–E4, F1–F4, H1–H4, I1–I3). `./tests/run_integration.sh` **46/46** on QEMU (2026-09-25).
+**QEMU desktop demo readiness: ~90%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B8 scheduled userspace; Gate D1–D5 packets; Gate C1–C6 storage; Gate E1–E4 enforcement; Gate F1–F4 isolated clients; Gate H1–H4 memory/VFS; Gate I1–I3 SMP + IRQ GPRs + AP Ring 3; Gate J1–J4 clone/buddy/LRU/ENOSYS).
+**Production OS readiness: ~74%** (Gate B2–B8, C1–C6, D1–D5, E1–E4, F1–F4, H1–H4, I1–I3, J1–J4). `./tests/run_integration.sh` **50/50** on QEMU (2026-09-27).
 
 ---
 
@@ -176,7 +180,7 @@ Percentages are **production usefulness**, not lines of code.
 
 ## 2. Memory Management
 
-**Grade: Wired (58%)** · `memory.rs`, `allocator.rs`, `vmm.rs`, `mmap.rs`, `slab.rs`, `page_cache.rs`
+**Grade: Wired (68%)** · `memory.rs`, `allocator.rs`, `vmm.rs`, `mmap.rs`, `slab.rs`, `page_cache.rs`
 
 The real MMU work is in **`vmm.rs`**, not a buddy allocator.
 
@@ -190,14 +194,14 @@ The real MMU work is in **`vmm.rs`**, not a buddy allocator.
 - [x] Anonymous `mmap` (lazy unless `MAP_POPULATE`)
 - [x] File-backed `mmap`: one-page fault-in from page cache / VFS; siblings stay unmapped (**Gate H2**)
 - [x] User ASLR offsets (xorshift; kernel image not randomized)
-- [x] **Buddy allocator** on the VMM frame pool (orders 0–10, split/merge; 32 MiB prefill)
+- [x] **Buddy allocator** on the VMM frame pool (orders 0–10, split/merge; 32 MiB prefill plus leftover usable RAM)
 - [x] **OOM on alloc** — empty buddy pool shrinks the page cache then `trigger_oom` (**Gate H4**)
 - [x] **Kernel stack guards** — `alloc_guarded_stack` used after VMM is ready; guard page is unmapped (**Gate H4**)
 
 ### Unused / stub
-- [ ] **Buddy over all RAM** — bootloader bump-pointer still has no free; only the VMM pool is buddy-backed
+- [x] **Buddy over leftover RAM** — remaining usable bootloader frames are ingested into the buddy (`GATE_J2 buddy ram`)
 - [x] **File-backed mmap** — lazy VMA; `#PF` fills one 4 KiB page from the page cache / VFS (H2)
-- [ ] **Page reclamation / LRU eviction** — `page_cache::shrink` is called before OOM; no anonymous LRU
+- [x] **Page reclamation / LRU eviction** — `page_cache::shrink` drops oldest clean pages and keeps dirty (`GATE_J3 lru reclaim`); no anonymous LRU
 - [ ] **Swap** — `page_out` ignores phys addr; never called from reclaim
 - [x] **OOM killer** — scoring + `trigger_oom` from failed `allocate_physical_frame` (H4)
 - [ ] **NUMA** — SRAT parse; `allocate_node` returns an id, not memory
@@ -208,16 +212,16 @@ The real MMU work is in **`vmm.rs`**, not a buddy allocator.
 - [ ] **Memory cgroups** enforcement
 
 ### Perfect-OS next steps
-1. Physical buddy (or equivalent) with free, orders, and a real page inventory.
+1. ~~Physical buddy (or equivalent) with free, orders, and a real page inventory.~~ **Done** (J2) for leftover usable RAM after the heap; reserved/firmware holes stay out of the pool.
 2. ~~Call OOM from failed alloc; reclaim before OOM.~~ **Done** (H4) — shrink then `trigger_oom`.
 3. ~~File-backed VMAs that fault from the block layer through the page cache.~~ **Done** (H2).
-4. ~~Guard pages on every kernel stack; W^X on all user maps.~~ Guarded stacks after VMM init (H4); W^X was E1.
+4. ~~Guard pages on every kernel stack; W^X on all user maps.~~ Guarded stacks after VMM init (H4); W^X was E1. LRU reclaim of clean file pages (J3).
 
 ---
 
 ## 3. Process & Scheduling
 
-**Grade: Wired (78%)** · `scheduler.rs`, `process.rs`, `context.rs`, `usermode.rs`, `signals.rs`, `user_task.rs`
+**Grade: Wired (82%)** · `scheduler.rs`, `process.rs`, `context.rs`, `usermode.rs`, `signals.rs`, `user_task.rs`
 
 Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate B3–B6 then run **scheduled** Ring 3 tasks with their own CR3: `execve`+`waitpid`, `fork`+child, SIGKILL/SIGSEGV/PTY SIGINT, and `/bin/sh` on a PTY.
 
@@ -242,8 +246,8 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] **Preemption of userspace** — naked APIC-timer stub saves GPRs + FXSAVE; spinner `rbx` magic survives (`GATE_I2 irq gprs`)
 - [x] **`wait4` blocking** — parks a Ring 3 parent until the child exits
 - [x] **SMP load balance / affinity** — `set_cpu_affinity` is honoured by CFS; APs run tasks pinned with `enqueue_on_cpu` (`GATE_I3 ap ring3`). Global CFS `current` remains BSP-shaped for the desktop.
+- [x] **Threads / `clone(CLONE_VM)`** — child shares the parent's CR3 and runs; parent `wait4`s (`GATE_J1 thread clone`). `CLONE_THREAD` metadata `thread_join` still EAGAIN.
 - [ ] **sched_ext / eBPF** — not eBPF
-- [ ] **Threads** — metadata only; `thread_join` → EAGAIN
 
 ### Perfect-OS next steps (this is the critical path)
 1. ~~Save/restore full `iretq` frame + `fxsave`/`fxrstor` in `context.rs`.~~ (kernel threads done)
@@ -426,7 +430,7 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 
 ## 9. Security & Cryptography
 
-**Grade: Wired (42%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
+**Grade: Wired (48%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
 
 ### Wired
 - [x] AES-128/256 block + CBC (software)
@@ -439,6 +443,7 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 - [x] Unix permission bits on VFS inodes
 - [x] W^X + NX on user maps; `mprotect` RWX fails; ASLR randomizes (E1)
 - [x] CapNetBindService on `bind`; unprivileged `:80` fails; dropped on exec (E4)
+- [x] Unimplemented security-sensitive syscalls (`bpf`, `pkey_alloc`/`pkey_free`, `process_mrelease`, KVM vCPU regs) return ENOSYS (J4)
 
 ### Stub / unused
 - [ ] AES-GCM, Poly1305, TLS 1.3 key schedule, X.509 chain verify
@@ -513,7 +518,7 @@ Nice-to-have. Not on the path to a perfect OS.
 
 ## 13. Binary Compatibility & Runtime
 
-**Grade: Wired (45%)** · `elf.rs`, `dynlink.rs`, `syscall/mod.rs`, `vdso.rs`
+**Grade: Wired (50%)** · `elf.rs`, `dynlink.rs`, `syscall/mod.rs`, `vdso.rs`
 
 Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not** 95.8% compatibility. Many arms return `Ok(0)` or ignore flags (`mprotect` “not enforced on our flat memory model”).
 
@@ -533,9 +538,10 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 - [ ] glibc/musl ABI for Ring 3
 - [x] Signal trampoline + `rt_sigreturn` (custom SIGINT handler returns to `pause`)
 - [x] Working `fork` child that runs
+- [x] Working `clone(CLONE_VM)` child that shares CR3 (J1)
 
 ### Perfect-OS next steps
-~~Ship **static musl hello** first.~~ Gate B2 hello is an in-kernel generated static ELF. ~~B6 PTY + `/bin/sh`.~~ ~~Live `sigreturn`.~~ Isolated GUI clients F1–F4 live. Next: dynamic linking.
+~~Ship **static musl hello** first.~~ Gate B2 hello is an in-kernel generated static ELF. ~~B6 PTY + `/bin/sh`.~~ ~~Live `sigreturn`.~~ Isolated GUI clients F1–F4 live. ~~`clone(CLONE_VM)` (J1).~~ Next: dynamic linking.
 
 ---
 
@@ -578,12 +584,12 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 
 ## 16. Testing & Quality
 
-**Grade: Wired (46%)**
+**Grade: Wired (52%)**
 
 ### Exists
 - [x] `#[test_case]` framework + QEMU exit ports
 - [x] Real tests: VFS read/write, allocator Box/Vec, some path tests (~subset of 103 `#[test_case]`)
-- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C6 / D1–D5 / E1–E4 / F1–F4 / H1–H4 / I1–I3 markers
+- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C6 / D1–D5 / E1–E4 / F1–F4 / H1–H4 / I1–I3 / J1–J4 markers
 
 ### Harmful
 - [x] **`assert!(true)` tests removed** — widgets, VFS stress, DNS, TCP flags, creds, buddy, path normalize are real assertions
@@ -605,7 +611,7 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 
 | Artifact | Status |
 |----------|--------|
-| `status.md` | This file (updated 2026-09-25) |
+| `status.md` | This file (updated 2026-09-27) |
 | `README.md` | Present — honesty paragraph, `./run.sh`, architecture sketch |
 | `LICENSE` | MIT |
 | `BUILDING.md` / `CONTRIBUTING.md` | Present |
@@ -649,7 +655,7 @@ Make the scheduler and memory manager true.
 |----|------|-----------|
 | A1 | Full context switch (GPRs, RIP, CS/SS, RFLAGS, FXSAVE) | **Done** — boot self-test switches two kernel threads with different RIP |
 | A2 | Idle thread `HLT` on BSP | **Done** — PID 0 `STI; HLT`; executor yields when idle |
-| A3 | Physical page free + buddy (or equivalent) | **Done** for the 32 MiB VMM pool (buddy orders 0–10); bootloader bump-pointer still has no free |
+| A3 | Physical page free + buddy (or equivalent) | **Done** for leftover usable RAM after the heap (J2); bootloader reserved regions stay out of the pool |
 | A4 | `#PF` + CoW tested | **Done** — forked address space write-fault copies; parent bytes unchanged (`GATE_H1 cow fault`) |
 | A5 | Kill `assert!(true)` tests | **Done** — those tests are rewritten or deleted |
 
@@ -724,6 +730,15 @@ This **is** becoming an OS.
 | I2 | IRQ saves GPRs + FXSAVE | **Done** — spinner `mov rbx, magic; jmp $`; after timer preempt, saved `rbx` and FXSAVE area are live (`GATE_I2 irq gprs`) |
 | I3 | AP runs Ring 3 | **Done** — `getcpu` ELF affinity-pinned to CPU 1 syscalls on the AP (`GATE_I3 ap ring3`) |
 
+### Gate J — Threads, buddy RAM, reclaim, honest syscalls (after I)
+
+| ID | Task | Done when |
+|----|------|-----------|
+| J1 | `clone(CLONE_VM)` child runs on shared CR3 | **Done** — child writes `thread child ran`; parent `wait4`s (`GATE_J1 thread clone`) |
+| J2 | Buddy over leftover RAM | **Done** — remaining usable frames enter the buddy; alloc/free restores (`GATE_J2 buddy ram`) |
+| J3 | Page-cache LRU reclaim | **Done** — shrink drops oldest clean pages; dirty survives (`GATE_J3 lru reclaim`) |
+| J4 | No silent `Ok(0)` for unimplemented security syscalls | **Done** — Ring 3 `bpf` returns `-ENOSYS` (`GATE_J4 enosys`) |
+
 ### Gate G — Quality bar (parallel from day one)
 
 | ID | Task | Done when |
@@ -731,7 +746,7 @@ This **is** becoming an OS.
 | G1 | `README.md` + `LICENSE` | **Done** |
 | G2 | GitHub Actions: fmt, clippy, size, QEMU boot | **Workflow present** (`.github/workflows/ci.yml`) |
 | G3 | Feature flags: `gui`, `net`, `fs-ext4`, `stub-drivers` | Default kernel compiles **Live** code only |
-| G4 | Syscall audit spreadsheet: implemented / no-op / ENOSYS | No silent `Ok(0)` for security-sensitive calls |
+| G4 | Syscall audit spreadsheet: implemented / no-op / ENOSYS | **Partial** — `bpf`/`pkey`/`process_mrelease`/KVM vCPU regs return ENOSYS (J4); remaining silent `Ok(0)` still exist |
 | G5 | `unsafe` SAFETY comments + size budget | Clippy gate |
 
 ### Explicitly later (after Gates A–E)
@@ -757,25 +772,25 @@ Do not:
 
 ## Progress tracker
 
-**Production OS: ~72%** · **QEMU desktop demo: ~88%**
+**Production OS: ~74%** · **QEMU desktop demo: ~90%**
 
 ```
 Kernel Core:        ████████████████████░░░░░  82%  Wired         ← I1–I3 per-CPU TSS + GS + AP Ring 3
-Memory Mgmt:        ██████████████░░░░░░░░░░░  58%  Wired         ← H1–H4 CoW/mmap/OOM/guards
-Process/Sched:      ███████████████████░░░░░░  78%  Wired         ← B3–B8 + I2 IRQ GPRs + I3 AP Ring 3
+Memory Mgmt:        █████████████████░░░░░░░░  68%  Wired         ← H1–H4 + J2 buddy RAM + J3 LRU
+Process/Sched:      ████████████████████░░░░░  82%  Wired         ← B3–B8 + I2/I3 + J1 clone(CLONE_VM)
 Filesystem:         ██████████████████░░░░░░░  72%  Wired         ← C1–C6 + inotify H3
 Networking:         ████████████████░░░░░░░░░  64%  Wired         ← D1–D5
 Device Drivers:     ██████████░░░░░░░░░░░░░░░  40%  Wired         ← AHCI + NVMe DMA
 GUI & Desktop:      ████████████████████░░░░░  82%  Live          ← F1–F4 SHM clients
 Shell & Terminal:   ████████████████████░░░░░  82%  Live          ← sigreturn
-Security:           ██████████░░░░░░░░░░░░░░░  42%  Wired         ← E1–E4
+Security:           ████████████░░░░░░░░░░░░░  48%  Wired         ← E1–E4 + J4 ENOSYS
 System Services:    ███████░░░░░░░░░░░░░░░░░░  28%  Wired
 Virtualization:     ███░░░░░░░░░░░░░░░░░░░░░░  12%  Stub
 AI/ML:              █████░░░░░░░░░░░░░░░░░░░░  22%  Wired
-Binary Compat:      ███████████░░░░░░░░░░░░░░  45%  Wired        ← execve + fork + sigreturn
+Binary Compat:      ████████████░░░░░░░░░░░░░  50%  Wired         ← execve + fork + clone + sigreturn
 i18n & Fonts:       █████████████████░░░░░░░░  68%  Live
 Build System:       ███████████████████░░░░░░  75%  Live
-Testing:            ████████████░░░░░░░░░░░░░  48%  Wired         ← 46/46 integration
+Testing:            █████████████░░░░░░░░░░░░  52%  Wired         ← 50/50 integration
 Documentation:      ██████████░░░░░░░░░░░░░░░  42%  Wired         ← BUILDING + CONTRIBUTING
 CI/CD:              ███████░░░░░░░░░░░░░░░░░░  30%  Wired
 ```
@@ -787,16 +802,16 @@ CI/CD:              ███████░░░░░░░░░░░░░
 | Subsystem | Old | Now | Why |
 |-----------|-----|-----|-----|
 | Kernel Core | 95% | 82% | Per-CPU TSS + GS CpuLocal; AP INIT/SIPI online (I1); AP Ring 3 (I3); NMI/MCE; MADT IOAPIC |
-| Process | 90% | 78% | Gate B3–B8 scheduled Ring 3; IRQ GPR+FPU save (I2); AP Ring 3 (I3) |
-| Binary compat | 40% | 45% | Static hello + scheduled `execve`/`fork` + `/bin/sh` + `rt_sigreturn`; 452 numbers still ≠ 452 behaviors |
-| Memory | — | 58% | H1 CoW #PF; H2 file-backed fault-in; H4 OOM-on-alloc + guarded stacks |
+| Process | 90% | 82% | Gate B3–B8 scheduled Ring 3; IRQ GPR+FPU save (I2); AP Ring 3 (I3); clone(CLONE_VM) (J1) |
+| Binary compat | 40% | 50% | Static hello + scheduled `execve`/`fork`/`clone` + `/bin/sh` + `rt_sigreturn`; 452 numbers still ≠ 452 behaviors |
+| Memory | — | 68% | H1 CoW #PF; H2 file-backed fault-in; H4 OOM-on-alloc + guarded stacks; J2 leftover buddy RAM; J3 LRU |
 | Filesystem | 35% | 72% | VirtIO-blk + C1–C6 + inotify on VFS mutate (H3) |
 | GUI | 85% | 82% | Ring 3 SHM clients (F1–F4); remaining apps still in-process |
 | Shell | 90% | 82% | PTY/glob/env real; Ring 3 `/bin/sh`; live `sigreturn`; desktop terminal still in-kernel for PTY I/O |
 | Docs / CI | 10% / 25% | 42% / 30% | README, LICENSE, BUILDING, CONTRIBUTING, GitHub Actions; flake still missing |
 | Networking | 22% | 64% | D1 loopback; D2 VirtIO-net; D3 DHCP apply; D4 DNS+TCP; D5 CUBIC |
-| Security | 15% | 42% | E1 W^X/ASLR; E2 ChaCha20; E3 seccomp EPERM; E4 CapNetBindService |
-| **Overall production** | **~40%** | **~72%** | Gates B3–B8 + C1–C6 + D1–D5 + E1–E4 + F1–F4 + H1–H4 + I1–I3 on the live boot path |
+| Security | 15% | 48% | E1 W^X/ASLR; E2 ChaCha20; E3 seccomp EPERM; E4 CapNetBindService; J4 bpf ENOSYS |
+| **Overall production** | **~40%** | **~74%** | Gates B3–B8 + C1–C6 + D1–D5 + E1–E4 + F1–F4 + H1–H4 + I1–I3 + J1–J4 on the live boot path |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates to this file should tick **Gate** IDs, not module counts.
 

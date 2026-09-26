@@ -398,11 +398,11 @@ pub fn run_gate_demos() {
         serial_println!("[user_task] Gate B3+ skipped: VMM not ready");
         return;
     }
-    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1–F4: scheduled Ring 3 ──");
+    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4: scheduled Ring 3 ──");
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
-    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1–F4: done ──");
+    serial_println!("[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4: done ──");
 }
 
 extern "C" fn gate_boot_body() {
@@ -417,6 +417,8 @@ extern "C" fn gate_boot_body() {
     run_gate_f1();
     run_gate_f3();
     run_gate_f4();
+    run_gate_j1();
+    run_gate_j4();
 }
 
 fn run_gate_b3() {
@@ -572,6 +574,32 @@ fn run_gate_d1() {
             pid
         );
     }
+}
+
+fn run_gate_j1() {
+    serial_println!("[user_task] Gate J1: clone(CLONE_VM) child shares CR3");
+    let elf = crate::init::clone_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "clone-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate J1 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_j4() {
+    serial_println!("[user_task] Gate J4: bpf returns ENOSYS");
+    let elf = crate::init::enosys_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "enosys-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate J4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

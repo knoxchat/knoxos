@@ -1236,17 +1236,7 @@ pub fn handle_syscall(
         // ════════════════════════════════════════════════════════════
         SyscallNumber::Clone => {
             // clone(flags, stack, ptid, ctid, tls)
-            let flags = arg1;
-            const CLONE_VM: u64 = 0x00000100;
-            const CLONE_THREAD: u64 = 0x00010000;
-            if flags & CLONE_THREAD != 0 && flags & CLONE_VM != 0 {
-                // Thread creation: use the provided stack
-                let stack = arg2;
-                thread::sys_thread_create(0, stack)
-            } else {
-                // Process creation: fork
-                process::sys_fork()
-            }
+            process::sys_clone(arg1, arg2, arg3, arg4, arg5)
         }
         SyscallNumber::Fork | SyscallNumber::Vfork => process::sys_fork(),
         SyscallNumber::Execve | SyscallNumber::Execveat => process::sys_execve(arg1, arg2, arg3),
@@ -1901,14 +1891,8 @@ pub fn handle_syscall(
         SyscallNumber::Getrandom => system::sys_getrandom(arg1, arg2 as usize, arg3 as u32),
         SyscallNumber::MemfdCreate => advanced::sys_memfd_create(arg1, arg2 as u32),
         SyscallNumber::Bpf => {
-            let cmd = arg1 as u32;
-            serial_println!("[KnoxOS] bpf(cmd={})", cmd);
-            // BPF programs: return a pseudo-fd for basic compatibility
-            match cmd {
-                5 => Ok(3), // BPF_PROG_LOAD: return pseudo-fd
-                0 => Ok(3), // BPF_MAP_CREATE: return pseudo-fd
-                _ => Err(SyscallError::InvalidArgument),
-            }
+            serial_println!("[KnoxOS] bpf(cmd={}) denied (ENOSYS)", arg1);
+            Err(SyscallError::NotImplemented)
         }
         SyscallNumber::Userfaultfd => advanced::sys_userfaultfd(arg1 as u32),
         SyscallNumber::Membarrier => advanced::sys_membarrier(arg1 as u32, arg2 as u32),
@@ -1922,7 +1906,7 @@ pub fn handle_syscall(
         SyscallNumber::Pwritev2 => {
             advanced::sys_pwritev2(arg1 as i32, arg2, arg3 as i32, arg4 as i64, arg5 as i32)
         }
-        SyscallNumber::PkeyAlloc | SyscallNumber::PkeyFree => Ok(0),
+        SyscallNumber::PkeyAlloc | SyscallNumber::PkeyFree => Err(SyscallError::NotImplemented),
         SyscallNumber::Statx => {
             advanced::sys_statx(arg1 as i32, arg2, arg3 as i32, arg4 as u32, arg5)
         }
@@ -1972,7 +1956,7 @@ pub fn handle_syscall(
             advanced::sys_landlock_restrict_self(arg1 as i32, arg2 as u32)
         }
         SyscallNumber::MemfdSecret => Err(SyscallError::NotImplemented),
-        SyscallNumber::ProcessMrelease => Ok(0),
+        SyscallNumber::ProcessMrelease => Err(SyscallError::NotImplemented),
         SyscallNumber::FutexWaitv => {
             advanced::sys_futex_waitv(arg1, arg2 as u32, arg3 as u32, arg4, arg5 as u32)
         }
@@ -2045,7 +2029,9 @@ pub fn handle_syscall(
             let _ = crate::kvm::destroy_vm(arg1 as u32);
             Ok(0)
         }
-        SyscallNumber::KvmSetVcpuRegs | SyscallNumber::KvmGetVcpuRegs => Ok(0),
+        SyscallNumber::KvmSetVcpuRegs | SyscallNumber::KvmGetVcpuRegs => {
+            Err(SyscallError::NotImplemented)
+        }
 
         // ════════════════════════════════════════════════════════════
         // ── KnoxOS ONNX ML Runtime ─────────────────────────────────

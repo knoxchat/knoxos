@@ -74,6 +74,40 @@ impl BootInfoFrameAllocator {
             frame_offset,
         }
     }
+
+    /// Remaining usable frames as (phys_start, nframes) from the bump cursor.
+    /// Marks the bump allocator exhausted; those frames belong to the buddy.
+    pub fn take_remaining_usable(&mut self) -> alloc::vec::Vec<(u64, u64)> {
+        let mut out = alloc::vec::Vec::new();
+        loop {
+            let mut region = None;
+            for (i, r) in self.memory_regions.iter().enumerate() {
+                if i == self.region_idx {
+                    region = Some(r);
+                    break;
+                }
+            }
+            let Some(region) = region else {
+                break;
+            };
+            if region.kind == MemoryRegionKind::Usable && self.frame_offset < region.end {
+                let start = (self.frame_offset + 0xFFF) & !0xFFF;
+                if start < region.end {
+                    let nframes = (region.end - start) / 4096;
+                    if nframes > 0 {
+                        out.push((start, nframes));
+                    }
+                }
+            }
+            self.region_idx += 1;
+            if let Some(r) = self.memory_regions.get(self.region_idx) {
+                self.frame_offset = r.start;
+            } else {
+                self.frame_offset = 0;
+            }
+        }
+        out
+    }
 }
 
 unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {

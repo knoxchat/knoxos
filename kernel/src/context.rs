@@ -704,6 +704,12 @@ pub fn reset_user_process_context(pid: Pid, entry_point: u64, user_stack: u64, c
 /// Fork a Ring 3 context: new kernel stack, child's CR3, `rax = 0`, resume at
 /// the instruction after the parent's `syscall`.
 pub fn clone_user_context(parent: Pid, child: Pid, child_cr3: u64) {
+    clone_user_context_at(parent, child, child_cr3, 0);
+}
+
+/// Like [`clone_user_context`], but `user_stack != 0` becomes the child's RSP
+/// (Linux `clone` with a new stack).
+pub fn clone_user_context_at(parent: Pid, child: Pid, child_cr3: u64, user_stack: u64) {
     let mut ctx = snapshot(parent).unwrap_or_default();
     let resume_rip = crate::usermode::pending_user_rip();
     let resume_rsp = crate::usermode::current_user_rsp();
@@ -712,6 +718,9 @@ pub fn clone_user_context(parent: Pid, child: Pid, child_cr3: u64) {
     }
     if resume_rsp != 0 {
         ctx.rsp = resume_rsp;
+    }
+    if user_stack != 0 {
+        ctx.rsp = user_stack;
     }
     ctx.cr3 = child_cr3;
     ctx.rax = 0;

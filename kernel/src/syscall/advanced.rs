@@ -1283,48 +1283,35 @@ pub fn sys_clone3(cl_args_ptr: u64, size: u64) -> SyscallResult {
         0
     };
 
-    const CLONE_VM: u64 = 0x00000100;
-    const CLONE_FS: u64 = 0x00000200;
-    const CLONE_FILES: u64 = 0x00000400;
-    const CLONE_SIGHAND: u64 = 0x00000800;
-    const CLONE_THREAD: u64 = 0x00010000;
     const CLONE_NEWNS: u64 = 0x00020000;
     const CLONE_NEWPID: u64 = 0x20000000;
 
-    // If CLONE_THREAD + CLONE_VM — this is a thread creation
-    if flags & CLONE_THREAD != 0 && flags & CLONE_VM != 0 {
-        // Extract stack pointer from clone_args (offset 0x28 = 40)
-        let stack = if cl_args_ptr != 0 && size >= 48 {
-            unsafe { *((cl_args_ptr + 40) as *const u64) }
-        } else {
-            0
-        };
-        // Extract entry point (child_tid or tls can indicate where to start)
-        let tls = if cl_args_ptr != 0 && size >= 88 {
-            unsafe { *((cl_args_ptr + 80) as *const u64) }
-        } else {
-            0
-        };
-        let entry = if tls != 0 { tls } else { 0 };
-        return super::thread::sys_thread_create(entry, stack);
-    }
+    let stack = if cl_args_ptr != 0 && size >= 48 {
+        unsafe { *((cl_args_ptr + 40) as *const u64) }
+    } else {
+        0
+    };
+    let parent_tid = if cl_args_ptr != 0 && size >= 32 {
+        unsafe { *((cl_args_ptr + 16) as *const u64) }
+    } else {
+        0
+    };
+    let child_tid = if cl_args_ptr != 0 && size >= 72 {
+        unsafe { *((cl_args_ptr + 64) as *const u64) }
+    } else {
+        0
+    };
+    let tls = if cl_args_ptr != 0 && size >= 88 {
+        unsafe { *((cl_args_ptr + 80) as *const u64) }
+    } else {
+        0
+    };
 
-    // For namespace flags, log them but still do fork
     if flags & CLONE_NEWNS != 0 || flags & CLONE_NEWPID != 0 {
         serial_println!("[KnoxOS] clone3 with namespace flags {:#x}", flags);
     }
 
-    // Default: fall back to fork (creates a full child process)
-    let child_pid = super::process::sys_fork()?;
-
-    // If CLONE_FILES, share the fd table rather than copying
-    if flags & CLONE_FILES != 0 {
-        serial_println!("[KnoxOS] clone3: CLONE_FILES for PID {}", child_pid);
-        // FD table is already copied by fork; CLONE_FILES means sharing
-        // which we approximate by keeping the copy
-    }
-
-    Ok(child_pid)
+    super::process::sys_clone(flags, stack, parent_tid, child_tid, tls)
 }
 
 // ── setresuid / getresuid / setresgid / getresgid ───────────────────

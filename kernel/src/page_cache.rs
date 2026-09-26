@@ -657,6 +657,7 @@ pub fn init() {
         DEFAULT_MAX_PAGES * PAGE_SIZE / (1024 * 1024)
     );
     let _ = writeback_self_test();
+    let _ = lru_reclaim_self_test();
 }
 
 /// Serial marker once a dirty middle page flushes without replacing the
@@ -773,5 +774,57 @@ pub fn writeback_self_test() -> bool {
     }
 
     serial_println!("[page_cache] {}", GATE_C3_MARKER);
+    true
+}
+
+/// Serial marker once LRU shrink drops the oldest clean pages and keeps dirty.
+pub const GATE_J3_MARKER: &str = "GATE_J3 lru reclaim";
+
+const GATE_J3_INODE: u64 = 0x0000_4A03;
+
+/// Gate J3: shrink evicts the least-recently-used clean pages; a dirty page
+/// and a recently touched clean page survive.
+pub fn lru_reclaim_self_test() -> bool {
+    let _ = shrink(usize::MAX);
+
+    let clean = alloc::vec![b'C'; PAGE_SIZE];
+    for i in 0..6u64 {
+        insert_page(GATE_J3_INODE, i, &clean, false);
+    }
+    if find_page(GATE_J3_INODE, 5).is_none() {
+        serial_println!("[page_cache] Gate J3 FAILED: touch newest");
+        return false;
+    }
+    let dirty = alloc::vec![b'D'; PAGE_SIZE];
+    insert_page(GATE_J3_INODE, 3, &dirty, true);
+
+    let evicted = shrink(3);
+    if evicted < 3 {
+        serial_println!(
+            "[page_cache] Gate J3 FAILED: shrink evicted {} want >= 3",
+            evicted
+        );
+        invalidate_inode(GATE_J3_INODE);
+        return false;
+    }
+
+    if find_page(GATE_J3_INODE, 3).is_none() {
+        serial_println!("[page_cache] Gate J3 FAILED: dirty page was reclaimed");
+        invalidate_inode(GATE_J3_INODE);
+        return false;
+    }
+    if find_page(GATE_J3_INODE, 0).is_some() {
+        serial_println!("[page_cache] Gate J3 FAILED: oldest clean page survived");
+        invalidate_inode(GATE_J3_INODE);
+        return false;
+    }
+    if find_page(GATE_J3_INODE, 5).is_none() {
+        serial_println!("[page_cache] Gate J3 FAILED: newest clean page was reclaimed");
+        invalidate_inode(GATE_J3_INODE);
+        return false;
+    }
+
+    invalidate_inode(GATE_J3_INODE);
+    serial_println!("[page_cache] {}", GATE_J3_MARKER);
     true
 }

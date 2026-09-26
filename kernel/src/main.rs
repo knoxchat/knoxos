@@ -592,6 +592,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize Virtual Memory Manager (per-process page tables)
     vmm::init(phys_mem_offset.as_u64());
     vmm::populate_frame_pool(&mut frame_allocator, 8192); // Pre-allocate 32 MiB of frames
+    vmm::ingest_remaining_ram(&mut frame_allocator);
 
     // Initialize APIC & SMP (multi-core support)
     // Respect cmdline: nosmp disables SMP, noapic disables APIC

@@ -39,6 +39,54 @@ pub fn sys_fork() -> SyscallResult {
     }
 }
 
+/// clone(flags, stack, ptid, ctid, tls) — CLONE_VM shares page tables.
+pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, _tls: u64) -> SyscallResult {
+    const CLONE_VM: u64 = 0x00000100;
+    if flags & CLONE_VM == 0 {
+        return sys_fork();
+    }
+
+    let ppid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut table = crate::process::PROCESS_TABLE.lock();
+    let Some(child_pid) = table.fork(ppid) else {
+        return Err(SyscallError::OutOfMemory);
+    };
+    let parent_has_as = table
+        .get_process(ppid)
+        .map(|p| p.has_address_space)
+        .unwrap_or(false);
+    drop(table);
+
+    if parent_has_as {
+        if !crate::vmm::share_address_space(ppid, child_pid) {
+            serial_println!(
+                "[clone] Failed to share address space {} -> {}",
+                ppid,
+                child_pid
+            );
+            return Err(SyscallError::OutOfMemory);
+        }
+        let child_cr3 = crate::vmm::get_cr3(child_pid).unwrap_or(0);
+        crate::context::clone_user_context_at(ppid, child_pid, child_cr3, stack);
+    } else {
+        crate::context::create_process_context(child_pid);
+    }
+
+    crate::scheduler::add_process(child_pid, 0);
+    if ptid != 0 {
+        crate::vmm::write_user_memory(ppid, ptid, &child_pid.to_ne_bytes());
+    }
+    if ctid != 0 {
+        crate::vmm::write_user_memory(child_pid, ctid, &child_pid.to_ne_bytes());
+    }
+    serial_println!(
+        "[KnoxOS] clone(CLONE_VM) -> PID {} stack={:#x}",
+        child_pid,
+        stack
+    );
+    Ok(child_pid as u64)
+}
+
 pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
     let filename =
         unsafe { read_user_string(filename_ptr) }.ok_or(SyscallError::InvalidArgument)?;

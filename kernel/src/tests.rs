@@ -89,6 +89,14 @@ mod vfs_tests {
             "dirty middle page must flush without replacing sibling pages"
         );
     }
+
+    #[test_case]
+    fn test_page_cache_lru_reclaim() {
+        assert!(
+            crate::page_cache::lru_reclaim_self_test(),
+            "shrink must drop oldest clean pages and keep dirty"
+        );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1534,6 +1542,11 @@ mod security_tests {
     }
 
     #[test_case]
+    fn test_buddy_leftover_ram() {
+        assert!(crate::vmm::buddy_ram_self_test());
+    }
+
+    #[test_case]
     fn test_percpu_gs_layout() {
         assert_eq!(
             core::mem::offset_of!(crate::usermode::CpuLocal, user_rsp),
@@ -1699,6 +1712,23 @@ mod property_tests {
         let a = pool.allocate().unwrap();
         pool.free(a);
         assert_eq!(pool.available(), 32);
+    }
+
+    #[test_case]
+    fn test_buddy_add_range_roundtrip() {
+        let mut pool = PhysicalFramePool::new();
+        pool.add_range(0x0100_0000, 1024);
+        assert_eq!(pool.available(), 1024);
+        assert_eq!(pool.total(), 1024);
+        let mut held = Vec::new();
+        for _ in 0..16 {
+            held.push(pool.allocate().expect("frame"));
+        }
+        assert_eq!(pool.available(), 1024 - 16);
+        for f in held {
+            pool.free(f);
+        }
+        assert_eq!(pool.available(), 1024);
     }
 }
 

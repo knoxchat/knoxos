@@ -901,6 +901,21 @@ impl AddressSpace {
     pub fn total_rss(&self) -> u64 {
         self.owned_frames.len() as u64 * PAGE_SIZE
     }
+
+    /// Share this mm with another PID (clone(CLONE_VM)): same CR3, copied VMAs.
+    /// The child does not own frames; [`destroy_address_space`] transfers them
+    /// to a sibling so the last task to exit frees the tables.
+    pub fn share(&self, child_pid: Pid) -> AddressSpace {
+        AddressSpace {
+            pid: child_pid,
+            cr3: self.cr3,
+            vmas: self.vmas.clone(),
+            brk: self.brk,
+            mmap_next: self.mmap_next,
+            owned_frames: Vec::new(),
+            cow_pages: self.cow_pages.clone(),
+        }
+    }
 }
 
 impl Drop for AddressSpace {
@@ -921,6 +936,30 @@ impl Drop for AddressSpace {
 lazy_static::lazy_static! {
     /// Global table of per-process address spaces
     pub static ref ADDRESS_SPACES: Mutex<BTreeMap<Pid, AddressSpace>> = Mutex::new(BTreeMap::new());
+    /// Extra holders of a shared CR3 (clone(CLONE_VM)). 0 means unshared.
+    static ref CR3_EXTRA_REFS: Mutex<BTreeMap<u64, u32>> = Mutex::new(BTreeMap::new());
+}
+
+fn cr3_share(cr3: u64) {
+    if cr3 == 0 {
+        return;
+    }
+    *CR3_EXTRA_REFS.lock().entry(cr3).or_insert(0) += 1;
+}
+
+fn cr3_is_shared(cr3: u64) -> bool {
+    CR3_EXTRA_REFS.lock().get(&cr3).copied().unwrap_or(0) > 0
+}
+
+fn cr3_unshare(cr3: u64) {
+    let mut refs = CR3_EXTRA_REFS.lock();
+    match refs.get_mut(&cr3) {
+        Some(n) if *n > 1 => *n -= 1,
+        Some(_) => {
+            refs.remove(&cr3);
+        }
+        None => {}
+    }
 }
 
 /// Physical memory offset (set during init)
@@ -1003,6 +1042,29 @@ impl PhysicalFramePool {
         self.total_frames += 1;
     }
 
+    /// Add `nframes` consecutive 4 KiB pages as the largest aligned buddy blocks.
+    pub fn add_range(&mut self, mut addr: u64, mut nframes: u64) {
+        addr &= !0xFFF;
+        while nframes > 0 {
+            let mut order = 0;
+            while order < BUDDY_MAX_ORDER {
+                let next = order + 1;
+                if nframes < (1u64 << next) {
+                    break;
+                }
+                if addr & (Self::block_size(next) - 1) != 0 {
+                    break;
+                }
+                order = next;
+            }
+            let n = 1u64 << order;
+            self.free_block(addr, order);
+            self.total_frames += n;
+            addr += n * PAGE_SIZE;
+            nframes -= n;
+        }
+    }
+
     /// Allocate a 4 KiB physical frame
     pub fn allocate(&mut self) -> Option<u64> {
         let addr = self.take_block(0)?;
@@ -1045,25 +1107,22 @@ impl PhysicalFramePool {
         self.allocated_frames
     }
 
-    /// Remove every free buddy block as 4 KiB frames (for the OOM self-test).
-    /// Does not change `total_frames`.
-    pub fn steal_free_frames(&mut self) -> Vec<u64> {
+    /// Remove every free buddy block (for the OOM self-test). Does not change
+    /// `total_frames`. Returns `(addr, order)` so restore is not O(n) 4 KiB merges.
+    pub fn steal_free_frames(&mut self) -> Vec<(u64, usize)> {
         let mut out = Vec::new();
-        for order in (0..=BUDDY_MAX_ORDER).rev() {
+        for order in 0..=BUDDY_MAX_ORDER {
             while let Some(addr) = self.free[order].pop() {
-                let n = 1u64 << order;
-                for i in 0..n {
-                    out.push(addr + i * PAGE_SIZE);
-                }
+                out.push((addr, order));
             }
         }
         out
     }
 
-    /// Return frames taken by [`steal_free_frames`] without bumping `total_frames`.
-    pub fn restore_free_frames(&mut self, frames: Vec<u64>) {
-        for phys in frames {
-            self.free_block(phys & !0xFFF, 0);
+    /// Return blocks taken by [`steal_free_frames`] without bumping `total_frames`.
+    pub fn restore_free_frames(&mut self, blocks: Vec<(u64, usize)>) {
+        for (addr, order) in blocks {
+            self.free_block(addr & !0xFFF, order.min(BUDDY_MAX_ORDER));
         }
     }
 }
@@ -1500,8 +1559,45 @@ pub fn create_address_space(pid: Pid) -> bool {
 
 /// Destroy a process's address space
 pub fn destroy_address_space(pid: Pid) {
-    ADDRESS_SPACES.lock().remove(&pid);
+    let mut spaces = ADDRESS_SPACES.lock();
+    let Some(mut dying) = spaces.remove(&pid) else {
+        serial_println!("[VMM] Destroyed address space for PID {}", pid);
+        return;
+    };
+    let cr3 = dying.cr3;
+    if cr3 != 0 && cr3_is_shared(cr3) {
+        cr3_unshare(cr3);
+        if let Some(sib) = spaces.values_mut().find(|s| s.cr3 == cr3) {
+            sib.owned_frames.append(&mut dying.owned_frames);
+        }
+        dying.cr3 = 0;
+        dying.owned_frames.clear();
+    }
+    drop(spaces);
     serial_println!("[VMM] Destroyed address space for PID {}", pid);
+}
+
+/// Share the parent's page tables with a child (clone(CLONE_VM)).
+pub fn share_address_space(parent_pid: Pid, child_pid: Pid) -> bool {
+    let spaces = ADDRESS_SPACES.lock();
+    let Some(parent) = spaces.get(&parent_pid) else {
+        return false;
+    };
+    let child = parent.share(child_pid);
+    let cr3 = child.cr3;
+    drop(spaces);
+    if cr3 == 0 {
+        return false;
+    }
+    cr3_share(cr3);
+    ADDRESS_SPACES.lock().insert(child_pid, child);
+    serial_println!(
+        "[VMM] Shared address space: PID {} -> PID {} cr3={:#x}",
+        parent_pid,
+        child_pid,
+        cr3
+    );
+    true
 }
 
 /// Replace a live process's address space without leaving CR3 on freed tables.
@@ -1674,13 +1770,13 @@ pub fn get_kernel_cr3() -> u64 {
 }
 
 /// Drain the buddy free lists (Gate H4 OOM self-test). Caller must restore.
-pub fn steal_frame_pool() -> Vec<u64> {
+pub fn steal_frame_pool() -> Vec<(u64, usize)> {
     FRAME_POOL.lock().steal_free_frames()
 }
 
-/// Put frames from [`steal_frame_pool`] back on the free lists.
-pub fn restore_frame_pool(frames: Vec<u64>) {
-    FRAME_POOL.lock().restore_free_frames(frames);
+/// Put blocks from [`steal_frame_pool`] back on the free lists.
+pub fn restore_frame_pool(blocks: Vec<(u64, usize)>) {
+    FRAME_POOL.lock().restore_free_frames(blocks);
 }
 
 /// Public wrapper to map a page in a process's page table.
@@ -1992,6 +2088,66 @@ pub fn populate_frame_pool(
     drop(pool);
     snapshot_kernel_l4();
     let _ = cow_fault_self_test();
+}
+
+/// Serial marker once leftover bootloader RAM is in the buddy pool.
+pub const GATE_J2_MARKER: &str = "GATE_J2 buddy ram";
+
+/// Pull every remaining usable bootloader frame into the buddy allocator.
+///
+/// Gate J2: physical free is not limited to the 32 MiB VMM prefill.
+pub fn ingest_remaining_ram(frame_allocator: &mut crate::memory::BootInfoFrameAllocator) {
+    let ranges = frame_allocator.take_remaining_usable();
+    let mut extra = 0u64;
+    {
+        let mut pool = FRAME_POOL.lock();
+        for (start, nframes) in ranges {
+            pool.add_range(start, nframes);
+            extra += nframes;
+        }
+        serial_println!(
+            "[VMM] Buddy ingested leftover RAM: +{} frames ({} MiB), pool total={} available={}",
+            extra,
+            extra * 4 / 1024,
+            pool.total(),
+            pool.available()
+        );
+    }
+    let _ = buddy_ram_self_test();
+}
+
+/// Alloc/free a frame from the expanded pool and prove free restores it.
+pub fn buddy_ram_self_test() -> bool {
+    let (total, _allocated, available) = get_stats();
+    if total < 8192 + 1024 {
+        serial_println!(
+            "[VMM] Gate J2 FAILED: pool total {} frames (want leftover RAM beyond 32 MiB)",
+            total
+        );
+        return false;
+    }
+    if available == 0 {
+        serial_println!("[VMM] Gate J2 FAILED: no free frames after ingest");
+        return false;
+    }
+    let Some(frame) = allocate_physical_frame() else {
+        serial_println!("[VMM] Gate J2 FAILED: allocate");
+        return false;
+    };
+    let after_alloc = FRAME_POOL.lock().available();
+    free_physical_frame(frame);
+    let after_free = FRAME_POOL.lock().available();
+    if after_free != after_alloc + 1 {
+        serial_println!(
+            "[VMM] Gate J2 FAILED: free did not restore (available {} -> {} -> {})",
+            available,
+            after_alloc,
+            after_free
+        );
+        return false;
+    }
+    serial_println!("[VMM] {}", GATE_J2_MARKER);
+    true
 }
 
 /// Copy the boot L4 into a private template used by [`clone_kernel_mappings`].
