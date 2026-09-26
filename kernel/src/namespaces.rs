@@ -86,6 +86,8 @@ pub struct ProcessNamespaces {
     pub net_ns: u64,
     pub user_ns: u64,
     pub cgroup_ns: u64,
+    /// Host (kuid) user id; `getuid` maps this through `user_ns`.
+    pub host_uid: u32,
 }
 
 impl Default for ProcessNamespaces {
@@ -99,8 +101,24 @@ impl Default for ProcessNamespaces {
             net_ns: 1,
             user_ns: 1,
             cgroup_ns: 1,
+            host_uid: 0,
         }
     }
+}
+
+/// A single uid_map row: `inside`..`inside+count` ↔ `outside`..`outside+count`.
+#[derive(Debug, Clone, Copy)]
+pub struct UidMap {
+    pub inside: u32,
+    pub outside: u32,
+    pub count: u32,
+}
+
+/// User namespace data (uid/gid mappings)
+#[derive(Debug, Clone)]
+pub struct UserNamespace {
+    pub id: u64,
+    pub uid_map: Vec<UidMap>,
 }
 
 /// Global namespace registry
@@ -110,6 +128,7 @@ lazy_static::lazy_static! {
     static ref PID_NAMESPACES: Mutex<BTreeMap<u64, PidNamespace>> = Mutex::new(BTreeMap::new());
     static ref MOUNT_NAMESPACES: Mutex<BTreeMap<u64, MountNamespace>> = Mutex::new(BTreeMap::new());
     static ref NET_NAMESPACES: Mutex<BTreeMap<u64, NetNamespace>> = Mutex::new(BTreeMap::new());
+    static ref USER_NAMESPACES: Mutex<BTreeMap<u64, UserNamespace>> = Mutex::new(BTreeMap::new());
     static ref PROCESS_NS: Mutex<BTreeMap<u32, ProcessNamespaces>> = Mutex::new(BTreeMap::new());
 }
 
@@ -167,6 +186,15 @@ pub fn create_namespace(ns_type: NamespaceType, owner_pid: u32) -> Result<u64, i
             net_ns.interfaces.push(String::from("lo"));
             NET_NAMESPACES.lock().insert(id, net_ns);
         }
+        NamespaceType::User => {
+            USER_NAMESPACES.lock().insert(
+                id,
+                UserNamespace {
+                    id,
+                    uid_map: Vec::new(),
+                },
+            );
+        }
         _ => {}
     }
 
@@ -206,7 +234,16 @@ pub fn unshare(pid: u32, flags: u32) -> Result<(), i32> {
         ns.net_ns = create_namespace(NamespaceType::Net, pid)?;
     }
     if flags & NamespaceType::User as u32 != 0 {
-        ns.user_ns = create_namespace(NamespaceType::User, pid)?;
+        let kuid = ns.host_uid;
+        let new_id = create_namespace(NamespaceType::User, pid)?;
+        if let Some(u) = USER_NAMESPACES.lock().get_mut(&new_id) {
+            u.uid_map.push(UidMap {
+                inside: 0,
+                outside: kuid,
+                count: 1,
+            });
+        }
+        ns.user_ns = new_id;
     }
     drop(proc_ns);
 
@@ -330,6 +367,47 @@ pub fn has_net_interface(pid: u32, name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn map_kuid(ns_id: u64, kuid: u32) -> u32 {
+    if ns_id == 1 {
+        return kuid;
+    }
+    let nss = USER_NAMESPACES.lock();
+    let Some(ns) = nss.get(&ns_id) else {
+        return kuid;
+    };
+    for m in &ns.uid_map {
+        if kuid >= m.outside && kuid < m.outside.saturating_add(m.count) {
+            return m.inside + (kuid - m.outside);
+        }
+    }
+    65534 // overflowuid
+}
+
+/// Host (kuid) for `pid`, then mapped through its user namespace.
+pub fn ns_uid(pid: u32) -> u32 {
+    let (user_ns, host_uid) = {
+        let proc_ns = PROCESS_NS.lock();
+        match proc_ns.get(&pid) {
+            Some(ns) => (ns.user_ns, ns.host_uid),
+            None => {
+                drop(proc_ns);
+                let kuid = crate::process::PROCESS_TABLE
+                    .lock()
+                    .get_process(pid)
+                    .map(|p| p.uid)
+                    .unwrap_or(0);
+                return kuid;
+            }
+        }
+    };
+    map_kuid(user_ns, host_uid)
+}
+
+/// Set the host uid recorded for `pid` (used by tests and `setuid`).
+pub fn set_host_uid(pid: u32, uid: u32) {
+    PROCESS_NS.lock().entry(pid).or_default().host_uid = uid;
+}
+
 /// Initialize namespace subsystem
 pub fn init() {
     // Create the initial (default) namespaces
@@ -420,6 +498,14 @@ pub fn init() {
         },
     );
 
+    USER_NAMESPACES.lock().insert(
+        1,
+        UserNamespace {
+            id: 1,
+            uid_map: Vec::new(),
+        },
+    );
+
     // Set initial process namespaces
     let default_ns = ProcessNamespaces::default();
     PROCESS_NS.lock().insert(0, default_ns.clone());
@@ -432,6 +518,7 @@ pub fn init() {
     let _ = uts_isolation_self_test();
     let _ = mount_isolation_self_test();
     let _ = net_isolation_self_test();
+    let _ = user_isolation_self_test();
 }
 
 pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";
@@ -519,5 +606,40 @@ pub fn net_isolation_self_test() -> bool {
         return false;
     }
     crate::serial_println!("[ns] {}", GATE_O1_MARKER);
+    true
+}
+
+pub const GATE_P1_MARKER: &str = "GATE_P1 user ns";
+const GATE_P1_PARENT: u32 = 0x0000_5001;
+const GATE_P1_CHILD: u32 = 0x0000_5002;
+
+/// Child `unshare(CLONE_NEWUSER)` sees uid 0; the parent uid is unchanged.
+pub fn user_isolation_self_test() -> bool {
+    inherit_namespaces(GATE_P1_PARENT, 1);
+    set_host_uid(GATE_P1_PARENT, 1000);
+    inherit_namespaces(GATE_P1_CHILD, GATE_P1_PARENT);
+    if ns_uid(GATE_P1_PARENT) != 1000 || ns_uid(GATE_P1_CHILD) != 1000 {
+        crate::serial_println!(
+            "[ns] Gate P1 FAILED: before unshare parent={} child={}",
+            ns_uid(GATE_P1_PARENT),
+            ns_uid(GATE_P1_CHILD)
+        );
+        return false;
+    }
+    if unshare(GATE_P1_CHILD, NamespaceType::User as u32).is_err() {
+        crate::serial_println!("[ns] Gate P1 FAILED: unshare");
+        return false;
+    }
+    let child = ns_uid(GATE_P1_CHILD);
+    let parent = ns_uid(GATE_P1_PARENT);
+    if child != 0 || parent != 1000 {
+        crate::serial_println!(
+            "[ns] Gate P1 FAILED: child={} parent={} (want 0 / 1000)",
+            child,
+            parent
+        );
+        return false;
+    }
+    crate::serial_println!("[ns] {}", GATE_P1_MARKER);
     true
 }

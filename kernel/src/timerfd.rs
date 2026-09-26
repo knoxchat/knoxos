@@ -73,6 +73,15 @@ impl TimerFd {
         self.spec
     }
 
+    fn is_expired(&self) -> bool {
+        if !self.armed {
+            return false;
+        }
+        let elapsed_ticks = crate::interrupts::get_ticks() - self.start_ticks;
+        let timer_ticks = (self.spec.it_value.tv_sec as u64) * 18; // ~18.2Hz PIT
+        elapsed_ticks >= timer_ticks
+    }
+
     fn read(&mut self) -> Result<u64, i32> {
         if !self.armed {
             if self.flags & TFD_NONBLOCK != 0 {
@@ -146,6 +155,49 @@ pub fn timerfd_read(fd: i32) -> Result<u64, i32> {
     let mut fds = TIMER_FDS.lock();
     let tfd = fds.get_mut(&fd).ok_or(-9i32)?;
     tfd.read()
+}
+
+/// Read expirations into an 8-byte little-endian buffer (Linux timerfd ABI).
+pub fn timerfd_read_bytes(id: i32, buf: &mut [u8]) -> Result<usize, i32> {
+    if buf.len() < 8 {
+        return Err(-22); // EINVAL
+    }
+    let val = timerfd_read(id)?;
+    buf[..8].copy_from_slice(&val.to_le_bytes());
+    Ok(8)
+}
+
+/// Whether a timerfd read would return an expiration count.
+pub fn timerfd_would_read(fd: i32) -> bool {
+    TIMER_FDS
+        .lock()
+        .get(&fd)
+        .map(|tfd| tfd.is_expired())
+        .unwrap_or(false)
+}
+
+/// Create, arm a 1ns one-shot, and read at least one expiration.
+pub fn timerfd_expire_self_test() -> bool {
+    let Ok(id) = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK) else {
+        return false;
+    };
+    let spec = ITimerSpec {
+        it_interval: crate::rtc::Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        },
+        it_value: crate::rtc::Timespec {
+            tv_sec: 0,
+            tv_nsec: 1,
+        },
+    };
+    if timerfd_settime(id, 0, &spec).is_err() {
+        timerfd_close(id);
+        return false;
+    }
+    let got = timerfd_read(id);
+    timerfd_close(id);
+    matches!(got, Ok(n) if n >= 1)
 }
 
 /// Close a timerfd

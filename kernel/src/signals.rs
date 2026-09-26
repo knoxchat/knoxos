@@ -278,6 +278,11 @@ pub fn kill(target_pid: Pid, sig: Signal, sender_pid: Pid) -> Result<(), i32> {
     let mut signals = PROCESS_SIGNALS.lock();
     let proc_signals = signals.get_mut(&target_pid).ok_or(-3i32)?; // ESRCH
 
+    if sig != Signal::SIGKILL && crate::signalfd::deliver_to_pid(target_pid, sig as u32, sender_pid)
+    {
+        return Ok(());
+    }
+
     // Queue the signal
     proc_signals.send_signal(sig, sender_pid);
 

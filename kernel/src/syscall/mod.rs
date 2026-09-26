@@ -1793,9 +1793,9 @@ pub fn handle_syscall(
             serial_println!("[KnoxOS] perf_event_open denied (ENOSYS)");
             Err(SyscallError::NotImplemented)
         }
-        SyscallNumber::FanotifyInit => advanced::sys_fanotify_init(arg1 as u32, arg2 as u32),
-        SyscallNumber::FanotifyMark => {
-            advanced::sys_fanotify_mark(arg1 as i32, arg2 as u32, arg3, arg4 as i32, arg5)
+        SyscallNumber::FanotifyInit | SyscallNumber::FanotifyMark => {
+            serial_println!("[KnoxOS] fanotify denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
         }
         SyscallNumber::Prlimit64 => system::sys_prlimit64(arg1 as u32, arg2 as i32, arg3, arg4),
         SyscallNumber::NameToHandleAt => {

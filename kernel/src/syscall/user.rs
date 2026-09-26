@@ -11,11 +11,7 @@ static PROCESS_GROUPS: Mutex<BTreeMap<u32, Vec<u32>>> = Mutex::new(BTreeMap::new
 
 pub fn sys_getuid() -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(0);
-    Ok(crate::process::PROCESS_TABLE
-        .lock()
-        .get_process(pid)
-        .map(|p| p.uid)
-        .unwrap_or(0) as u64)
+    Ok(crate::namespaces::ns_uid(pid) as u64)
 }
 
 pub fn sys_getgid() -> SyscallResult {

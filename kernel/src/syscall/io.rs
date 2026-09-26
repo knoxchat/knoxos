@@ -152,17 +152,46 @@ pub fn sys_inotify_rm_watch(fd: i32, wd: i32) -> SyscallResult {
 // ── Timerfd ─────────────────────────────────────────────────────────
 
 pub fn sys_timerfd_create(clockid: i32, flags: i32) -> SyscallResult {
-    crate::timerfd::timerfd_create(clockid, flags)
-        .map(|fd| fd as u64)
-        .map_err(|_| SyscallError::TooManyFiles)
+    let id = crate::timerfd::timerfd_create(clockid, flags).map_err(|e| {
+        if e == -22 {
+            SyscallError::InvalidArgument
+        } else {
+            SyscallError::TooManyFiles
+        }
+    })?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables.get_mut(&pid).ok_or(SyscallError::TooManyFiles)?;
+    let mut o_flags = crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR);
+    if flags & crate::timerfd::TFD_NONBLOCK != 0 {
+        o_flags.0 |= crate::fd::OpenFlags::O_NONBLOCK;
+    }
+    let fd = fd_table
+        .open(
+            &alloc::format!("timerfd:{}", id),
+            o_flags,
+            crate::fd::FileType::CharDevice,
+        )
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    if flags & crate::timerfd::TFD_CLOEXEC != 0 {
+        fd_table.set_cloexec(fd, true);
+    }
+    Ok(fd as u64)
+}
+
+fn timerfd_id_from_fd(fd: i32) -> Result<i32, SyscallError> {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::fd::path_for_fd(pid, fd).ok_or(SyscallError::BadFileDescriptor)?;
+    crate::fd::timerfd_id_from_path(&path).ok_or(SyscallError::BadFileDescriptor)
 }
 
 pub fn sys_timerfd_settime(fd: i32, flags: i32, new_value: u64, old_value: u64) -> SyscallResult {
     if new_value == 0 {
         return Err(SyscallError::InvalidArgument);
     }
+    let id = timerfd_id_from_fd(fd)?;
     let spec = unsafe { &*(new_value as *const crate::timerfd::ITimerSpec) };
-    let result = crate::timerfd::timerfd_settime(fd, flags, spec)
+    let result = crate::timerfd::timerfd_settime(id, flags, spec)
         .map_err(|_| SyscallError::InvalidArgument)?;
     if old_value != 0 {
         let out = unsafe { &mut *(old_value as *mut crate::timerfd::ITimerSpec) };
@@ -172,7 +201,8 @@ pub fn sys_timerfd_settime(fd: i32, flags: i32, new_value: u64, old_value: u64) 
 }
 
 pub fn sys_timerfd_gettime(fd: i32, curr_value: u64) -> SyscallResult {
-    let spec = crate::timerfd::timerfd_gettime(fd).map_err(|_| SyscallError::BadFileDescriptor)?;
+    let id = timerfd_id_from_fd(fd)?;
+    let spec = crate::timerfd::timerfd_gettime(id).map_err(|_| SyscallError::BadFileDescriptor)?;
     if curr_value != 0 {
         let out = unsafe { &mut *(curr_value as *mut crate::timerfd::ITimerSpec) };
         *out = spec;

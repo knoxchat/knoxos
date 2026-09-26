@@ -13,7 +13,7 @@ use crate::arch_compat::instructions::port::Port;
 ///   - HCI events via USB Interrupt IN endpoint (EP1 IN)
 ///   - ACL data via USB Bulk IN/OUT endpoints (EP2 IN/OUT)
 ///   - SCO audio via USB Isochronous IN/OUT endpoints (EP3 IN/OUT)
-///   - Integrates with bluetooth.rs for upper HCI/L2CAP protocol
+///   - Integrates with crate::bluetooth for upper HCI/L2CAP protocol
 ///   - Firmware loading for Intel/Broadcom adapters
 ///
 /// Supported controllers:

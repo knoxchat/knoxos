@@ -60,14 +60,16 @@ impl SignalFdSiginfo {
 struct SignalFdInstance {
     mask: u64,
     flags: i32,
+    owner_pid: u32,
     pending: Vec<SignalFdSiginfo>,
 }
 
 impl SignalFdInstance {
-    fn new(mask: u64, flags: i32) -> Self {
+    fn new(mask: u64, flags: i32, owner_pid: u32) -> Self {
         Self {
             mask,
             flags,
+            owner_pid,
             pending: Vec::new(),
         }
     }
@@ -91,9 +93,10 @@ static NEXT_SIGNAL_FD: core::sync::atomic::AtomicI32 = core::sync::atomic::Atomi
 /// Create a new signalfd
 pub fn signalfd_create(mask: u64, flags: i32) -> Result<i32, i32> {
     let fd = NEXT_SIGNAL_FD.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    let owner_pid = crate::scheduler::current_pid().unwrap_or(0);
     SIGNAL_FDS
         .lock()
-        .insert(fd, SignalFdInstance::new(mask, flags));
+        .insert(fd, SignalFdInstance::new(mask, flags, owner_pid));
     crate::serial_println!("[KnoxOS] signalfd(mask={:#x}) = {}", mask, fd);
     Ok(fd)
 }
@@ -113,6 +116,37 @@ pub fn signalfd_read(fd: i32) -> Result<SignalFdSiginfo, i32> {
     sfd.read()
 }
 
+/// Copy a pending `signalfd_siginfo` into `buf`.
+pub fn signalfd_read_bytes(id: i32, buf: &mut [u8]) -> Result<usize, i32> {
+    let info = signalfd_read(id)?;
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            (&info as *const SignalFdSiginfo).cast::<u8>(),
+            core::mem::size_of::<SignalFdSiginfo>(),
+        )
+    };
+    let n = buf.len().min(bytes.len());
+    buf[..n].copy_from_slice(&bytes[..n]);
+    Ok(n)
+}
+
+/// Queue `signo` on signalfds owned by `target_pid`. Returns true if any matched.
+pub fn deliver_to_pid(target_pid: u32, signo: u32, sender_pid: u32) -> bool {
+    let mut fds = SIGNAL_FDS.lock();
+    let sig_bit = 1u64 << signo;
+    let mut delivered = false;
+    for sfd in fds.values_mut() {
+        if sfd.owner_pid == target_pid && sfd.mask & sig_bit != 0 {
+            let mut info = SignalFdSiginfo::zero();
+            info.ssi_signo = signo;
+            info.ssi_pid = sender_pid;
+            sfd.pending.push(info);
+            delivered = true;
+        }
+    }
+    delivered
+}
+
 /// Deliver a signal to matching signalfds
 pub fn deliver_to_signalfds(signo: u32, sender_pid: u32) {
     let mut fds = SIGNAL_FDS.lock();
@@ -125,6 +159,31 @@ pub fn deliver_to_signalfds(signo: u32, sender_pid: u32) {
             sfd.pending.push(info);
         }
     }
+}
+
+/// Whether a signalfd has a queued signal.
+pub fn signalfd_would_read(fd: i32) -> bool {
+    SIGNAL_FDS
+        .lock()
+        .get(&fd)
+        .map(|s| !s.pending.is_empty())
+        .unwrap_or(false)
+}
+
+/// Create, inject SIGUSR1, and read the signo back.
+pub fn signalfd_roundtrip_self_test() -> bool {
+    const SIGUSR1: u32 = 10;
+    let owner = crate::scheduler::current_pid().unwrap_or(0);
+    let Ok(id) = signalfd_create(1u64 << SIGUSR1, 0) else {
+        return false;
+    };
+    if !deliver_to_pid(owner, SIGUSR1, 1) {
+        signalfd_close(id);
+        return false;
+    }
+    let got = signalfd_read(id);
+    signalfd_close(id);
+    matches!(got, Ok(info) if info.ssi_signo == SIGUSR1)
 }
 
 /// Close a signalfd

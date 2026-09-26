@@ -93,6 +93,16 @@ pub(crate) fn memfd_id_from_path(path: &str) -> Option<u64> {
     path.strip_prefix("memfd:")?.parse().ok()
 }
 
+/// Parse `timerfd:{id}` written by `sys_timerfd_create`.
+pub(crate) fn timerfd_id_from_path(path: &str) -> Option<i32> {
+    path.strip_prefix("timerfd:")?.parse().ok()
+}
+
+/// Parse `signalfd:{id}` written by `sys_signalfd`.
+pub(crate) fn signalfd_id_from_path(path: &str) -> Option<i32> {
+    path.strip_prefix("signalfd:")?.parse().ok()
+}
+
 /// Path recorded for a process fd, if the fd is open.
 pub fn path_for_fd(pid: u32, fd: Fd) -> Option<String> {
     PROCESS_FD_TABLES
@@ -267,6 +277,12 @@ impl FdTable {
         if let Some(id) = memfd_id_from_path(&file.path) {
             crate::memfd::memfd_close(id);
         }
+        if let Some(id) = timerfd_id_from_path(&file.path) {
+            crate::timerfd::timerfd_close(id);
+        }
+        if let Some(id) = signalfd_id_from_path(&file.path) {
+            crate::signalfd::signalfd_close(id);
+        }
         Ok(())
     }
 
@@ -356,6 +372,12 @@ impl FdTable {
                 }
                 if let Some(id) = eventfd_id_from_path(&file.path) {
                     return crate::eventfd::eventfd_read_bytes(id, buf);
+                }
+                if let Some(id) = timerfd_id_from_path(&file.path) {
+                    return crate::timerfd::timerfd_read_bytes(id, buf);
+                }
+                if let Some(id) = signalfd_id_from_path(&file.path) {
+                    return crate::signalfd::signalfd_read_bytes(id, buf);
                 }
                 if let Some(idx) = pts_index(&file.path) {
                     return crate::pty::read_slave(idx, buf);

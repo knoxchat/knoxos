@@ -165,6 +165,24 @@ fn check_path_readiness(path: &str, _fd: i32, interest: u32) -> u32 {
             return ready;
         }
     }
+    if let Some(id) = path.strip_prefix("timerfd:") {
+        if let Ok(id) = id.parse::<i32>() {
+            let mut ready = 0u32;
+            if interest & EPOLLIN != 0 && crate::timerfd::timerfd_would_read(id) {
+                ready |= EPOLLIN;
+            }
+            return ready;
+        }
+    }
+    if let Some(id) = path.strip_prefix("signalfd:") {
+        if let Ok(id) = id.parse::<i32>() {
+            let mut ready = 0u32;
+            if interest & EPOLLIN != 0 && crate::signalfd::signalfd_would_read(id) {
+                ready |= EPOLLIN;
+            }
+            return ready;
+        }
+    }
     if path.starts_with("memfd:") {
         return default_file_readiness(interest);
     }
