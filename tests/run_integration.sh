@@ -40,6 +40,10 @@ if [ ! -f "$BIOS_IMG" ]; then
     echo "ERROR: BIOS image not found at $BIOS_IMG"
     exit 1
 fi
+# Copy so a desktop `./run.sh` QEMU can keep the original image locked.
+ITEST_BIOS="$PROJECT_ROOT/tests/knoxos-bios-itest.img"
+cp "$BIOS_IMG" "$ITEST_BIOS"
+BIOS_IMG="$ITEST_BIOS"
 
 PERSIST_DISK="$PROJECT_ROOT/tests/c1-persist.img"
 AHCI_DISK="$PROJECT_ROOT/tests/c4-ahci.img"
@@ -286,6 +290,10 @@ check_marker "GATE_AG1 fsync"
 check_marker "GATE_AG2 fdatasync"
 check_marker "GATE_AG3 getppid"
 check_marker "GATE_AG4 enosys"
+check_marker "GATE_AH1 syncfs"
+check_marker "GATE_AH2 sync"
+check_marker "GATE_AH3 getpgid"
+check_marker "GATE_AH4 enosys"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

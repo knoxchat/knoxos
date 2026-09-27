@@ -49,7 +49,10 @@ pub fn handle_syscall(
         SyscallNumber::Mmap => {
             memory::sys_mmap(arg1, arg2, arg3 as u32, arg4 as u32, arg5 as i32, arg6)
         }
-        SyscallNumber::Mprotect | SyscallNumber::PkeyMprotect => {
+        SyscallNumber::PkeyMprotect => {
+            advanced::sys_pkey_mprotect(arg1, arg2, arg3 as i32, arg4 as i32)
+        }
+        SyscallNumber::Mprotect => {
             let pid = crate::scheduler::current_pid().unwrap_or(1);
             let r = crate::mmap::sys_mprotect(pid, arg1, arg2, arg3);
             if r == 0 {

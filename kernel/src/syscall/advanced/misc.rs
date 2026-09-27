@@ -63,3 +63,9 @@ pub fn sys_pkey_free(pkey: i32) -> SyscallResult {
     crate::serial_println!("[KnoxOS] pkey_free denied (ENOSYS)");
     Err(SyscallError::NotImplemented)
 }
+
+pub fn sys_pkey_mprotect(addr: u64, len: u64, prot: i32, pkey: i32) -> SyscallResult {
+    let _ = (addr, len, prot, pkey);
+    crate::serial_println!("[KnoxOS] pkey_mprotect denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
+}

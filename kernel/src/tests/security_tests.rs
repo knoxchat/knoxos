@@ -270,6 +270,14 @@ fn test_fsync_fd() {
 }
 
 #[test_case]
+fn test_syncfs_fd() {
+    assert!(
+        crate::syscall::syncfs_self_test(),
+        "syncfs must succeed on a VFS fd and return EBADF for a bad fd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

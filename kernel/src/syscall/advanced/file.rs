@@ -135,8 +135,13 @@ fn fsync_fd(fd: i32) -> SyscallResult {
 }
 
 pub fn sys_syncfs(fd: i32) -> SyscallResult {
-    let _ = fd;
-    Ok(0)
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    {
+        let tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+        let _ = table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
+    }
+    sys_sync()
 }
 
 pub fn sys_sync_file_range(fd: i32, offset: i64, nbytes: i64, flags: u32) -> SyscallResult {
@@ -201,6 +206,66 @@ pub fn fsync_self_test() -> bool {
         }
     }
     crate::serial_println!("[file] {}", GATE_AG1_MARKER);
+    true
+}
+
+pub const GATE_AH1_MARKER: &str = "GATE_AH1 syncfs";
+const GATE_AH1_PATH: &str = "/tmp/gate_ah1";
+
+/// `syncfs` on a written VFS fd succeeds; a bad fd returns EBADF.
+pub fn syncfs_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AH1_PATH);
+        if !vfs.write_file(GATE_AH1_PATH, b"x") {
+            crate::serial_println!("[file] Gate AH1 FAILED: write {}", GATE_AH1_PATH);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let fd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[file] Gate AH1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AH1_PATH,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::Regular,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[file] Gate AH1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    match sys_syncfs(fd) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[file] Gate AH1 FAILED: syncfs {:?}", other);
+            return false;
+        }
+    }
+    match sys_syncfs(-1) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[file] Gate AH1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(fd);
+        }
+    }
+    crate::serial_println!("[file] {}", GATE_AH1_MARKER);
     true
 }
 

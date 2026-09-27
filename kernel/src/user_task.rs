@@ -564,6 +564,9 @@ extern "C" fn gate_boot_body() {
     run_gate_ag2();
     run_gate_ag3();
     run_gate_ag4();
+    run_gate_ah2();
+    run_gate_ah3();
+    run_gate_ah4();
 }
 
 fn run_gate_b3() {
@@ -1726,6 +1729,49 @@ fn run_gate_ag4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AG4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_AH2_MARKER: &str = "GATE_AH2 sync";
+pub const GATE_AH3_MARKER: &str = "GATE_AH3 getpgid";
+pub const GATE_AH4_MARKER: &str = "GATE_AH4 enosys";
+
+fn run_gate_ah2() {
+    serial_println!("[user_task] Gate AH2: sync after write");
+    let elf = crate::init::sync_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sync-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AH2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ah3() {
+    serial_println!("[user_task] Gate AH3: getpgid is non-zero");
+    let elf = crate::init::getpgid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getpgid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AH3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ah4() {
+    serial_println!("[user_task] Gate AH4: pkey_mprotect returns ENOSYS");
+    let elf = crate::init::pkey_mprotect_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "pkey-mprotect-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AH4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {
