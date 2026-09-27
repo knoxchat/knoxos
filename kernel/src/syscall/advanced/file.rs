@@ -180,17 +180,7 @@ pub fn sys_linkat(
     flags: i32,
 ) -> SyscallResult {
     let _ = (olddirfd, newdirfd, flags);
-    let oldpath = unsafe { read_user_string(oldpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-    let newpath = unsafe { read_user_string(newpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-    // Create a hard link (simplified: copy data)
-    let data = {
-        let vfs = crate::vfs::VFS.lock();
-        vfs.read_file(&oldpath)
-            .map(|d| d.to_vec())
-            .ok_or(SyscallError::FileNotFound)?
-    };
-    crate::vfs::VFS.lock().write_file(&newpath, &data);
-    Ok(0)
+    crate::syscall::fs::sys_link(oldpath_ptr, newpath_ptr)
 }
 
 pub fn sys_fchmodat(dirfd: i32, path_ptr: u64, mode: u32, flags: i32) -> SyscallResult {

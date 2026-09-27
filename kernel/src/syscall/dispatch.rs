@@ -246,7 +246,7 @@ pub fn handle_syscall(
         SyscallNumber::Rename => fs::sys_rename(arg1, arg2),
         SyscallNumber::Mkdir => fs::sys_mkdir(arg1, arg2 as u16),
         SyscallNumber::Rmdir => fs::sys_rmdir(arg1),
-        SyscallNumber::Link => advanced::sys_linkat(-100, arg1, -100, arg2, 0),
+        SyscallNumber::Link => fs::sys_link(arg1, arg2),
         SyscallNumber::Unlink => fs::sys_unlink(arg1),
         SyscallNumber::Symlink => fs::sys_symlink(arg1, arg2),
         SyscallNumber::Readlink => fs::sys_readlink(arg1, arg2, arg3),

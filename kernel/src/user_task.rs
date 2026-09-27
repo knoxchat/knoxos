@@ -479,7 +479,7 @@ pub fn run_gate_demos() {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
     serial_println!(
-        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4 + O2–O4 + P2–P4 + Q2–Q4 + R2–R4 + S2–S4 + T2–T4: done ──"
+        "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4 + O2–O4 + P2–P4 + Q2–Q4 + R2–R4 + S2–S4 + T2–T4 + U2–U4 + V2–V4 + W2–W4 + X2–X4 + Y2–Y4: done ──"
     );
 }
 
@@ -534,6 +534,12 @@ extern "C" fn gate_boot_body() {
     run_gate_w2();
     run_gate_w3();
     run_gate_w4();
+    run_gate_x2();
+    run_gate_x3();
+    run_gate_x4();
+    run_gate_y2();
+    run_gate_y3();
+    run_gate_y4();
 }
 
 fn run_gate_b3() {
@@ -1266,6 +1272,92 @@ fn run_gate_w4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate W4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_X2_MARKER: &str = "GATE_X2 rename";
+pub const GATE_X3_MARKER: &str = "GATE_X3 truncate";
+pub const GATE_X4_MARKER: &str = "GATE_X4 enosys";
+
+fn run_gate_x2() {
+    serial_println!("[user_task] Gate X2: rename then read new path");
+    let elf = crate::init::rename_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "rename-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate X2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_x3() {
+    serial_println!("[user_task] Gate X3: truncate then statx size");
+    let elf = crate::init::truncate_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "truncate-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate X3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_x4() {
+    serial_println!("[user_task] Gate X4: iopl returns ENOSYS");
+    let elf = crate::init::iopl_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "iopl-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate X4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_Y2_MARKER: &str = "GATE_Y2 chown";
+pub const GATE_Y3_MARKER: &str = "GATE_Y3 mkdir";
+pub const GATE_Y4_MARKER: &str = "GATE_Y4 enosys";
+
+fn run_gate_y2() {
+    serial_println!("[user_task] Gate Y2: chown then statx uid");
+    let elf = crate::init::chown_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chown-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate Y2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_y3() {
+    serial_println!("[user_task] Gate Y3: mkdir then statx S_IFDIR");
+    let elf = crate::init::mkdir_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "mkdir-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate Y3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_y4() {
+    serial_println!("[user_task] Gate Y4: acct returns ENOSYS");
+    let elf = crate::init::acct_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "acct-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate Y4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

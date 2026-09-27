@@ -1,5 +1,6 @@
 /// Virtual Filesystem - Linux-compatible VFS layer
 /// Provides a basic in-memory filesystem with Linux-style paths
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use spin::Mutex;
@@ -45,6 +46,9 @@ pub fn now_timestamp() -> i64 {
 pub struct VirtualFS {
     pub inodes: Vec<Inode>,
     next_ino: u64,
+    /// Extra directory names that share an existing inode (hard links).
+    /// Key is `(parent_ino, child_name)`.
+    aliases: BTreeMap<(u64, String), u64>,
 }
 
 lazy_static::lazy_static! {
@@ -62,6 +66,7 @@ impl VirtualFS {
         let mut vfs = Self {
             inodes: Vec::new(),
             next_ino: 1,
+            aliases: BTreeMap::new(),
         };
 
         // Create root directory tree matching Linux FHS
@@ -185,6 +190,28 @@ impl VirtualFS {
         ino
     }
 
+    fn lookup_child(&self, parent_ino: u64, name: &str) -> Option<u64> {
+        let parent = self.inodes.iter().find(|i| i.ino == parent_ino)?;
+        for &child_ino in &parent.children {
+            if let Some(child) = self.inodes.iter().find(|i| i.ino == child_ino) {
+                if child.name == name {
+                    return Some(child_ino);
+                }
+            }
+        }
+        self.aliases.get(&(parent_ino, String::from(name))).copied()
+    }
+
+    fn name_count(&self, ino: u64) -> u64 {
+        let primary = self
+            .inodes
+            .iter()
+            .filter(|p| p.children.contains(&ino))
+            .count() as u64;
+        let aliases = self.aliases.values().filter(|&&t| t == ino).count() as u64;
+        primary + aliases
+    }
+
     /// Resolve a path to an inode number
     pub fn resolve_path(&self, path: &str) -> Option<u64> {
         if path == "/" {
@@ -198,20 +225,7 @@ impl VirtualFS {
             if part.is_empty() {
                 continue;
             }
-            let current = self.inodes.iter().find(|i| i.ino == current_ino)?;
-            let mut found = false;
-            for &child_ino in &current.children {
-                if let Some(child) = self.inodes.iter().find(|i| i.ino == child_ino) {
-                    if child.name == part {
-                        current_ino = child_ino;
-                        found = true;
-                        break;
-                    }
-                }
-            }
-            if !found {
-                return None;
-            }
+            current_ino = self.lookup_child(current_ino, part)?;
         }
 
         Some(current_ino)
@@ -239,6 +253,11 @@ impl VirtualFS {
         for &child_ino in &inode.children {
             if let Some(child) = self.get_inode(child_ino) {
                 names.push(child.name.clone());
+            }
+        }
+        for ((parent, name), _) in &self.aliases {
+            if *parent == ino && !names.iter().any(|n| n == name) {
+                names.push(name.clone());
             }
         }
         Some(names)
@@ -444,24 +463,43 @@ impl VirtualFS {
             }
         }
 
-        // Remove from parent's children
-        let path_trimmed = path.trim_start_matches('/');
-        let parts: Vec<&str> = path_trimmed.split('/').collect();
-        let parent_path = if parts.len() > 1 {
-            let parent_parts = &parts[..parts.len() - 1];
-            alloc::format!("/{}", parent_parts.join("/"))
-        } else {
-            String::from("/")
-        };
-
-        if let Some(parent_ino) = self.resolve_path(&parent_path) {
+        let (parent_path, name) = split_parent_name(path)?;
+        let parent_ino = self.resolve_path(&parent_path).ok_or(-2i32)?;
+        let was_alias = self.aliases.remove(&(parent_ino, name)).is_some();
+        if !was_alias {
             if let Some(parent) = self.inodes.iter_mut().find(|i| i.ino == parent_ino) {
                 parent.children.retain(|&c| c != ino);
             }
         }
 
-        // Remove the inode
-        self.inodes.retain(|i| i.ino != ino);
+        if self.name_count(ino) == 0 {
+            self.inodes.retain(|i| i.ino != ino);
+        }
+        Ok(())
+    }
+
+    /// Create a hard link: `new_path` becomes another name for `old_path`'s inode.
+    pub fn link(&mut self, old_path: &str, new_path: &str) -> Result<(), i32> {
+        let ino = self.resolve_path(old_path).ok_or(-2i32)?;
+        if let Some(inode) = self.get_inode(ino) {
+            if inode.file_type == FileType::Directory {
+                return Err(-1); // EPERM
+            }
+        }
+        if self.resolve_path(new_path).is_some() {
+            return Err(-17); // EEXIST
+        }
+        let (parent_path, name) = split_parent_name(new_path)?;
+        let parent_ino = self.resolve_path(&parent_path).ok_or(-2i32)?;
+        if let Some(parent) = self.get_inode(parent_ino) {
+            if parent.file_type != FileType::Directory {
+                return Err(-20); // ENOTDIR
+            }
+        }
+        self.aliases.insert((parent_ino, name), ino);
+        if let Some(inode) = self.get_inode_mut(ino) {
+            inode.ctime = now_timestamp();
+        }
         Ok(())
     }
 
@@ -502,20 +540,25 @@ impl VirtualFS {
     /// Rename/move a file or directory
     pub fn rename(&mut self, old_path: &str, new_path: &str) -> Result<(), i32> {
         let ino = self.resolve_path(old_path).ok_or(-2i32)?; // ENOENT
+        let (old_parent_path, old_name) = split_parent_name(old_path)?;
+        let old_parent_ino = self.resolve_path(&old_parent_path).ok_or(-2i32)?;
 
-        // Remove from old parent
-        let old_trimmed = old_path.trim_start_matches('/');
-        let old_parts: Vec<&str> = old_trimmed.split('/').collect();
-        let old_parent_path = if old_parts.len() > 1 {
-            alloc::format!("/{}", old_parts[..old_parts.len() - 1].join("/"))
-        } else {
-            String::from("/")
-        };
-
-        if let Some(parent_ino) = self.resolve_path(&old_parent_path) {
-            if let Some(parent) = self.inodes.iter_mut().find(|i| i.ino == parent_ino) {
-                parent.children.retain(|&c| c != ino);
+        if self
+            .aliases
+            .contains_key(&(old_parent_ino, old_name.clone()))
+        {
+            if self.resolve_path(new_path).is_some() {
+                return Err(-17); // EEXIST
             }
+            let (new_parent_path, new_name) = split_parent_name(new_path)?;
+            let new_parent_ino = self.resolve_path(&new_parent_path).ok_or(-2i32)?;
+            self.aliases.remove(&(old_parent_ino, old_name));
+            self.aliases.insert((new_parent_ino, new_name), ino);
+            return Ok(());
+        }
+
+        if let Some(parent) = self.inodes.iter_mut().find(|i| i.ino == old_parent_ino) {
+            parent.children.retain(|&c| c != ino);
         }
 
         // Update name
@@ -716,7 +759,7 @@ impl VirtualFS {
             nlink: if inode.file_type == FileType::Directory {
                 2 + inode.children.len() as u64
             } else {
-                1
+                self.name_count(ino)
             },
             atime: inode.atime,
             mtime: inode.mtime,
@@ -749,6 +792,24 @@ impl VirtualFS {
     }
 }
 
+fn split_parent_name(path: &str) -> Result<(String, String), i32> {
+    let parts: Vec<&str> = path
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return Err(-22);
+    }
+    let name = String::from(*parts.last().unwrap());
+    let parent = if parts.len() > 1 {
+        alloc::format!("/{}", parts[..parts.len() - 1].join("/"))
+    } else {
+        String::from("/")
+    };
+    Ok((parent, name))
+}
+
 /// File stat result
 #[derive(Debug, Clone)]
 pub struct VfsStat {
@@ -776,6 +837,119 @@ pub fn init() {
 
     // Install built-in binaries (/bin/sh, /bin/busybox)
     install_builtin_binaries();
+    let _ = hardlink_self_test();
+    let _ = chmod_self_test();
+}
+
+pub const GATE_X1_MARKER: &str = "GATE_X1 hardlink";
+const GATE_X1_A: &str = "/tmp/gate_x1/a";
+const GATE_X1_B: &str = "/tmp/gate_x1/b";
+
+/// Two names must share one inode; a write via the link is visible on the
+/// original; unlink of the original leaves the link and drops nlink to 1.
+pub fn hardlink_self_test() -> bool {
+    {
+        let mut vfs = VFS.lock();
+        let _ = vfs.unlink(GATE_X1_A);
+        let _ = vfs.unlink(GATE_X1_B);
+        if !vfs.write_file(GATE_X1_A, b"shared") {
+            crate::serial_println!("[vfs] Gate X1 FAILED: write {}", GATE_X1_A);
+            return false;
+        }
+        if vfs.link(GATE_X1_A, GATE_X1_B).is_err() {
+            crate::serial_println!("[vfs] Gate X1 FAILED: link");
+            return false;
+        }
+        let a = vfs.resolve_path(GATE_X1_A);
+        let b = vfs.resolve_path(GATE_X1_B);
+        if a.is_none() || a != b {
+            crate::serial_println!("[vfs] Gate X1 FAILED: inodes a={:?} b={:?}", a, b);
+            return false;
+        }
+        let nlink = vfs.stat(GATE_X1_A).map(|s| s.nlink).unwrap_or(0);
+        if nlink != 2 {
+            crate::serial_println!("[vfs] Gate X1 FAILED: nlink {} want 2", nlink);
+            return false;
+        }
+        if !vfs.write_file(GATE_X1_B, b"linked") {
+            crate::serial_println!("[vfs] Gate X1 FAILED: write via link");
+            return false;
+        }
+        let data = vfs.read_file(GATE_X1_A).map(|d| d.to_vec());
+        if data.as_deref() != Some(&b"linked"[..]) {
+            crate::serial_println!("[vfs] Gate X1 FAILED: original did not see link write");
+            return false;
+        }
+        if vfs.unlink(GATE_X1_A).is_err() {
+            crate::serial_println!("[vfs] Gate X1 FAILED: unlink original");
+            return false;
+        }
+        if vfs.resolve_path(GATE_X1_A).is_some() {
+            crate::serial_println!("[vfs] Gate X1 FAILED: original name still present");
+            return false;
+        }
+        let still = vfs.read_file(GATE_X1_B).map(|d| d.to_vec());
+        if still.as_deref() != Some(&b"linked"[..]) {
+            crate::serial_println!("[vfs] Gate X1 FAILED: link contents lost after unlink");
+            return false;
+        }
+        let nlink_after = vfs.stat(GATE_X1_B).map(|s| s.nlink).unwrap_or(0);
+        if nlink_after != 1 {
+            crate::serial_println!("[vfs] Gate X1 FAILED: nlink after unlink {}", nlink_after);
+            return false;
+        }
+    }
+    crate::serial_println!("[vfs] {}", GATE_X1_MARKER);
+    true
+}
+
+pub const GATE_Y1_MARKER: &str = "GATE_Y1 chmod";
+const GATE_Y1_PATH: &str = "/tmp/gate_y1";
+
+/// chmod 0400 on a uid-1000 file: owner can read but not write; other cannot read.
+pub fn chmod_self_test() -> bool {
+    {
+        let mut vfs = VFS.lock();
+        let _ = vfs.unlink(GATE_Y1_PATH);
+        if !vfs.write_file(GATE_Y1_PATH, b"mode") {
+            crate::serial_println!("[vfs] Gate Y1 FAILED: write {}", GATE_Y1_PATH);
+            return false;
+        }
+        let ino = match vfs.resolve_path(GATE_Y1_PATH) {
+            Some(ino) => ino,
+            None => {
+                crate::serial_println!("[vfs] Gate Y1 FAILED: resolve {}", GATE_Y1_PATH);
+                return false;
+            }
+        };
+        if let Some(inode) = vfs.get_inode_mut(ino) {
+            inode.uid = 1000;
+            inode.gid = 1000;
+        }
+        if vfs.chmod(GATE_Y1_PATH, 0o400, 0).is_err() {
+            crate::serial_println!("[vfs] Gate Y1 FAILED: chmod");
+            return false;
+        }
+        let mode = vfs.stat(GATE_Y1_PATH).map(|s| s.permissions).unwrap_or(0);
+        if mode != 0o400 {
+            crate::serial_println!("[vfs] Gate Y1 FAILED: mode {:#o} want 0400", mode);
+            return false;
+        }
+        if !vfs.check_permission(ino, 1000, 1000, 4) {
+            crate::serial_println!("[vfs] Gate Y1 FAILED: owner read denied");
+            return false;
+        }
+        if vfs.check_permission(ino, 1000, 1000, 2) {
+            crate::serial_println!("[vfs] Gate Y1 FAILED: owner write allowed");
+            return false;
+        }
+        if vfs.check_permission(ino, 2000, 2000, 4) {
+            crate::serial_println!("[vfs] Gate Y1 FAILED: other read allowed");
+            return false;
+        }
+    }
+    crate::serial_println!("[vfs] {}", GATE_Y1_MARKER);
+    true
 }
 
 // ─── Ext4 Dispatch Layer ────────────────────────────────────────────────

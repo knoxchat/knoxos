@@ -24,7 +24,8 @@ pub fn sys_ioperm(from: u64, num: u64, turn_on: i32) -> SyscallResult {
 
 pub fn sys_iopl(level: i32) -> SyscallResult {
     let _ = level;
-    Ok(0) // Accept IOPL changes
+    crate::serial_println!("[KnoxOS] iopl denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_vhangup() -> SyscallResult {
@@ -38,7 +39,8 @@ pub fn sys_modify_ldt(func: i32, ptr: u64, bytecount: u64) -> SyscallResult {
 
 pub fn sys_acct(filename_ptr: u64) -> SyscallResult {
     let _ = filename_ptr;
-    Ok(0) // Process accounting enable/disable
+    crate::serial_println!("[KnoxOS] acct denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_sysfs(option: i32, arg1: u64, arg2: u64) -> SyscallResult {

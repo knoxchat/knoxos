@@ -190,6 +190,22 @@ fn test_overlayfs_isolation() {
 }
 
 #[test_case]
+fn test_hardlink_shares_inode() {
+    assert!(
+        crate::vfs::hardlink_self_test(),
+        "hard link must share an inode; write via one name is visible via the other"
+    );
+}
+
+#[test_case]
+fn test_chmod_enforced() {
+    assert!(
+        crate::vfs::chmod_self_test(),
+        "chmod 0400 must deny owner write and other read"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

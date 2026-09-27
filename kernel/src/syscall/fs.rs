@@ -234,11 +234,29 @@ pub fn sys_rename(old_ptr: u64, new_ptr: u64) -> SyscallResult {
     let old = unsafe { read_user_string(old_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let new = unsafe { read_user_string(new_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let old = vfs_path(&old);
-    let new = vfs_path(&new);
+    let new = vfs_path_write(&new);
     crate::vfs::VFS
         .lock()
         .rename(&old, &new)
         .map_err(|_| SyscallError::FileNotFound)?;
+    Ok(0)
+}
+
+pub fn sys_link(old_ptr: u64, new_ptr: u64) -> SyscallResult {
+    let old = unsafe { read_user_string(old_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let new = unsafe { read_user_string(new_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let old = vfs_path(&old);
+    let new = vfs_path_write(&new);
+    crate::vfs::VFS
+        .lock()
+        .link(&old, &new)
+        .map_err(|e| match e {
+            -2 => SyscallError::FileNotFound,
+            -17 => SyscallError::FileExists,
+            -1 => SyscallError::PermissionDenied,
+            -20 => SyscallError::NotDirectory,
+            _ => SyscallError::IoError,
+        })?;
     Ok(0)
 }
 
@@ -435,6 +453,7 @@ pub fn sys_symlink(target_ptr: u64, linkpath_ptr: u64) -> SyscallResult {
 pub fn sys_chmod(path_or_fd: u64, mode: u16) -> SyscallResult {
     // Try to interpret as path first
     if let Some(path) = unsafe { read_user_string(path_or_fd) } {
+        let path = vfs_path_write(&path);
         let mut vfs = crate::vfs::VFS.lock();
         if let Some(ino) = vfs.resolve_path(&path) {
             if let Some(inode) = vfs.get_inode_mut(ino) {
@@ -466,6 +485,7 @@ pub fn sys_chmod(path_or_fd: u64, mode: u16) -> SyscallResult {
 pub fn sys_chown(path_or_fd: u64, uid: u32, gid: u32) -> SyscallResult {
     // Try to interpret as path first
     if let Some(path) = unsafe { read_user_string(path_or_fd) } {
+        let path = vfs_path_write(&path);
         let mut vfs = crate::vfs::VFS.lock();
         if let Some(ino) = vfs.resolve_path(&path) {
             if let Some(inode) = vfs.get_inode_mut(ino) {
@@ -526,27 +546,32 @@ pub fn sys_statfs(path_or_fd: u64, buf: u64) -> SyscallResult {
     Ok(0)
 }
 
-pub fn sys_truncate(path_or_fd: u64, length: usize) -> SyscallResult {
-    // Try as path (truncate) first
-    if let Some(path) = unsafe { read_user_string(path_or_fd) } {
-        let mut vfs = crate::vfs::VFS.lock();
-        if let Some(ino) = vfs.resolve_path(&path) {
-            if let Some(data) = vfs.read_file(&path).map(|d| d.to_vec()) {
-                if length == 0 {
-                    vfs.write_file(&path, &[]);
-                } else if length < data.len() {
-                    vfs.write_file(&path, &data[..length]);
-                } else if length > data.len() {
-                    let mut extended = data;
-                    extended.resize(length, 0);
-                    vfs.write_file(&path, &extended);
-                }
-                return Ok(0);
-            }
-        }
-        return Err(SyscallError::FileNotFound);
+fn truncate_path(path: &str, length: usize) -> SyscallResult {
+    let mut vfs = crate::vfs::VFS.lock();
+    let ino = vfs.resolve_path(path).ok_or(SyscallError::FileNotFound)?;
+    let data = vfs
+        .read_file(path)
+        .map(|d| d.to_vec())
+        .ok_or(SyscallError::FileNotFound)?;
+    if length == 0 {
+        vfs.write_file(path, &[]);
+    } else if length < data.len() {
+        vfs.write_file(path, &data[..length]);
+    } else if length > data.len() {
+        let mut extended = data;
+        extended.resize(length, 0);
+        vfs.write_file(path, &extended);
     }
-    // Treat as fd (ftruncate)
+    drop(vfs);
+    crate::page_cache::set_file_size(ino, length as u64);
+    Ok(0)
+}
+
+pub fn sys_truncate(path_or_fd: u64, length: usize) -> SyscallResult {
+    if let Some(path) = unsafe { read_user_string(path_or_fd) } {
+        let path = vfs_path_write(&path);
+        return truncate_path(&path, length);
+    }
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let tables = crate::fd::PROCESS_FD_TABLES.lock();
     let fd_table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
@@ -555,21 +580,7 @@ pub fn sys_truncate(path_or_fd: u64, length: usize) -> SyscallResult {
         .ok_or(SyscallError::BadFileDescriptor)?;
     let file_path = file.path.clone();
     drop(tables);
-    let mut vfs = crate::vfs::VFS.lock();
-    if let Some(data) = vfs.read_file(&file_path).map(|d| d.to_vec()) {
-        if length == 0 {
-            vfs.write_file(&file_path, &[]);
-        } else if length < data.len() {
-            vfs.write_file(&file_path, &data[..length]);
-        } else if length > data.len() {
-            let mut extended = data;
-            extended.resize(length, 0);
-            vfs.write_file(&file_path, &extended);
-        }
-        Ok(0)
-    } else {
-        Err(SyscallError::BadFileDescriptor)
-    }
+    truncate_path(&file_path, length)
 }
 
 pub fn sys_getrusage(who: i32, usage_ptr: u64) -> SyscallResult {
