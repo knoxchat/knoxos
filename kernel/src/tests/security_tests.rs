@@ -166,6 +166,14 @@ fn test_setns_joins_uts_namespace() {
 }
 
 #[test_case]
+fn test_chroot_isolation() {
+    assert!(
+        crate::process::chroot_isolation_self_test(),
+        "chroot must jail path lookup; parent root unchanged"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

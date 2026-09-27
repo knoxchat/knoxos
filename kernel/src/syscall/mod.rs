@@ -19,8 +19,8 @@
 ///   system   — System info, control, namespaces, security
 ///   io       — I/O multiplexing, advanced I/O, IPC
 ///   ai       — KnoxOS AI system calls
-///   advanced — All remaining Linux syscalls (pidfd, memfd, io_uring,
-///              xattr, ptrace, perf, landlock, prctl, etc.)
+///   advanced — Remaining Linux syscalls, split by subsystem
+///              (pidfd, memfd, io_uring, xattr, ptrace, prctl, etc.)
 mod advanced;
 mod ai;
 mod dispatch;

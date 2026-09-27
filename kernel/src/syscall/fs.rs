@@ -13,6 +13,11 @@ lazy_static::lazy_static! {
     static ref PROCESS_UMASKS: Mutex<BTreeMap<u32, u16>> = Mutex::new(BTreeMap::new());
 }
 
+fn vfs_path(path: &str) -> String {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    crate::process::translate_path(pid, path)
+}
+
 pub fn sys_read(fd: u64, buf_ptr: u64, count: u64) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
@@ -50,6 +55,7 @@ pub fn sys_write(fd: u64, buf_ptr: u64, count: u64) -> SyscallResult {
 pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = vfs_path(&path);
     serial_println!("[KnoxOS] open({}, {:#x})", path, flags);
 
     let access = if flags & 0x3 != 0 || flags & 0x40 != 0 {
@@ -134,6 +140,7 @@ pub fn sys_lseek(fd: i32, offset: i64, whence: u32) -> SyscallResult {
 
 pub fn sys_stat(path_ptr: u64, stat_buf: u64) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = vfs_path(&path);
     let vfs = crate::vfs::VFS.lock();
     let s = vfs.stat(&path).map_err(|_| SyscallError::FileNotFound)?;
     let mode = match s.file_type {
@@ -181,6 +188,7 @@ pub fn sys_fstat(fd: i32, stat_buf: u64) -> SyscallResult {
 
 pub fn sys_access(path_ptr: u64, _mode: u32) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = vfs_path(&path);
     crate::vfs::VFS
         .lock()
         .access(&path, _mode)
@@ -190,6 +198,7 @@ pub fn sys_access(path_ptr: u64, _mode: u32) -> SyscallResult {
 
 pub fn sys_unlink(path_ptr: u64) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = vfs_path(&path);
     crate::vfs::VFS.lock().unlink(&path).map_err(|e| match e {
         -2 => SyscallError::FileNotFound,
         -21 => SyscallError::IsDirectory,
@@ -201,6 +210,8 @@ pub fn sys_unlink(path_ptr: u64) -> SyscallResult {
 pub fn sys_rename(old_ptr: u64, new_ptr: u64) -> SyscallResult {
     let old = unsafe { read_user_string(old_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let new = unsafe { read_user_string(new_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let old = vfs_path(&old);
+    let new = vfs_path(&new);
     crate::vfs::VFS
         .lock()
         .rename(&old, &new)
@@ -318,11 +329,7 @@ pub fn sys_getdents64(fd: i32, dirp: u64, count: u32) -> SyscallResult {
 
 pub fn sys_getcwd(buf_ptr: u64, size: usize) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
-    let table = crate::process::PROCESS_TABLE.lock();
-    let cwd = table
-        .get_process(pid)
-        .map(|p| p.cwd.clone())
-        .unwrap_or_else(|| String::from("/"));
+    let cwd = crate::process::getcwd_visible(pid);
     if size < cwd.len() + 1 {
         return Err(SyscallError::InvalidArgument);
     }
@@ -336,6 +343,7 @@ pub fn sys_getcwd(buf_ptr: u64, size: usize) -> SyscallResult {
 pub fn sys_chdir(path_ptr: u64) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
     let vfs = crate::vfs::VFS.lock();
     if let Some(ino) = vfs.resolve_path(&path) {
         if let Some(inode) = vfs.get_inode(ino) {
@@ -353,6 +361,7 @@ pub fn sys_chdir(path_ptr: u64) -> SyscallResult {
 
 pub fn sys_mkdir(path_ptr: u64, mode: u16) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = vfs_path(&path);
     crate::vfs::VFS
         .lock()
         .mkdir(&path, mode)
@@ -366,6 +375,7 @@ pub fn sys_mkdir(path_ptr: u64, mode: u16) -> SyscallResult {
 
 pub fn sys_rmdir(path_ptr: u64) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = vfs_path(&path);
     crate::vfs::VFS.lock().rmdir(&path).map_err(|e| match e {
         -2 => SyscallError::FileNotFound,
         -39 => SyscallError::NotEmpty,

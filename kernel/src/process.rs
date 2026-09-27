@@ -26,7 +26,9 @@ pub struct Process {
     pub state: ProcessState,
     pub uid: u32,
     pub gid: u32,
-    pub cwd: String,  // Current working directory
+    pub cwd: String, // Current working directory (host VFS path)
+    /// `chroot(2)` jail. Path lookups are clamped under this directory.
+    pub root: String,
     pub priority: i8, // Nice value (-20 to 19)
     /// Whether this process has a per-process address space (VMM)
     pub has_address_space: bool,
@@ -70,6 +72,7 @@ impl ProcessTable {
             uid: 0,
             gid: 0,
             cwd: String::from("/"),
+            root: String::from("/"),
             priority: 0,
             has_address_space: false,
             entry_point: 0,
@@ -85,6 +88,7 @@ impl ProcessTable {
             uid: 0,
             gid: 0,
             cwd: String::from("/"),
+            root: String::from("/"),
             priority: 0,
             has_address_space: false,
             entry_point: 0,
@@ -101,6 +105,7 @@ impl ProcessTable {
             uid: 1000,
             gid: 1000,
             cwd: String::from("/home/user"),
+            root: String::from("/"),
             priority: 0,
             has_address_space: false,
             entry_point: 0,
@@ -125,6 +130,7 @@ impl ProcessTable {
             uid: 1000,
             gid: 1000,
             cwd: String::from("/home/user"),
+            root: String::from("/"),
             priority: 0,
             has_address_space: false,
             entry_point: 0,
@@ -307,6 +313,7 @@ impl ProcessTable {
             uid: parent.uid,
             gid: parent.gid,
             cwd: parent.cwd.clone(),
+            root: parent.root.clone(),
             priority: parent.priority,
             has_address_space: parent.has_address_space,
             entry_point: parent.entry_point,
@@ -351,7 +358,7 @@ impl ProcessTable {
         }
     }
 
-    /// Change process working directory
+    /// Change process working directory (host VFS path)
     pub fn chdir(&mut self, pid: Pid, path: &str) -> bool {
         if let Some(proc) = self.get_process_mut(pid) {
             proc.cwd = String::from(path);
@@ -409,6 +416,7 @@ pub fn exec_elf(elf_data: &[u8], name: &str, argv: &[&str], envp: &[&str]) -> Op
             uid: 1000,
             gid: 1000,
             cwd: String::from("/"),
+            root: String::from("/"),
             priority: 0,
             has_address_space: true,
             entry_point: 0,
@@ -541,6 +549,163 @@ pub fn reap_init_zombies() {
     if !reaped.is_empty() {
         crate::serial_println!("[KnoxOS] Reaped {} orphan zombies", reaped.len());
     }
+}
+
+/// Split a VFS path into non-empty components (`/` → empty).
+fn path_components(path: &str) -> impl Iterator<Item = &str> {
+    path.split('/').filter(|s| !s.is_empty())
+}
+
+/// Translate a process-visible path into a host VFS path, clamped under `chroot`.
+pub fn translate_path(pid: Pid, user_path: &str) -> String {
+    let (root, cwd) = {
+        let table = PROCESS_TABLE.lock();
+        match table.get_process(pid) {
+            Some(p) => (p.root.clone(), p.cwd.clone()),
+            None => (String::from("/"), String::from("/")),
+        }
+    };
+    let mut stack: Vec<&str> = if user_path.starts_with('/') {
+        path_components(&root).collect()
+    } else {
+        path_components(&cwd).collect()
+    };
+    let root_depth = path_components(&root).count();
+    for part in user_path.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            if stack.len() > root_depth {
+                stack.pop();
+            }
+        } else {
+            stack.push(part);
+        }
+    }
+    if stack.is_empty() {
+        String::from("/")
+    } else {
+        let mut out = String::from("/");
+        out.push_str(&stack.join("/"));
+        out
+    }
+}
+
+/// `getcwd(2)` view: the host cwd stripped of the chroot prefix.
+pub fn getcwd_visible(pid: Pid) -> String {
+    let (root, cwd) = {
+        let table = PROCESS_TABLE.lock();
+        match table.get_process(pid) {
+            Some(p) => (p.root.clone(), p.cwd.clone()),
+            None => return String::from("/"),
+        }
+    };
+    if root == "/" {
+        return cwd;
+    }
+    if cwd == root {
+        return String::from("/");
+    }
+    if let Some(rest) = cwd.strip_prefix(&root) {
+        if rest.is_empty() {
+            String::from("/")
+        } else if rest.starts_with('/') {
+            String::from(rest)
+        } else {
+            alloc::format!("/{}", rest)
+        }
+    } else {
+        String::from("/")
+    }
+}
+
+/// `chroot(2)`: jail `pid` under `user_path` (resolved against the current root).
+pub fn chroot(pid: Pid, user_path: &str) -> Result<(), i32> {
+    let host = translate_path(pid, user_path);
+    {
+        let vfs = crate::vfs::VFS.lock();
+        let ino = vfs.resolve_path(&host).ok_or(-2i32)?;
+        let inode = vfs.get_inode(ino).ok_or(-2i32)?;
+        if inode.file_type != crate::vfs::FileType::Directory {
+            return Err(-20);
+        }
+    }
+    let mut table = PROCESS_TABLE.lock();
+    let proc = table.get_process_mut(pid).ok_or(-3i32)?;
+    let under =
+        proc.cwd == host || proc.cwd.starts_with(&alloc::format!("{}/", host)) || host == "/";
+    if !under {
+        proc.cwd = host.clone();
+    }
+    proc.root = host;
+    Ok(())
+}
+
+pub const GATE_U1_MARKER: &str = "GATE_U1 chroot";
+const GATE_U1_PID: Pid = 0x0000_5501;
+const GATE_U1_JAIL: &str = "/tmp/gate_u1";
+const GATE_U1_INSIDE: &str = "/tmp/gate_u1/ok";
+
+/// Child `chroot` must not see files outside the jail; the parent root is unchanged.
+pub fn chroot_isolation_self_test() -> bool {
+    {
+        let mut table = PROCESS_TABLE.lock();
+        if table.get_process(GATE_U1_PID).is_none() {
+            table.processes.push(Process {
+                pid: GATE_U1_PID,
+                ppid: 1,
+                name: String::from("gate-u1"),
+                state: ProcessState::Ready,
+                uid: 0,
+                gid: 0,
+                cwd: String::from("/"),
+                root: String::from("/"),
+                priority: 0,
+                has_address_space: false,
+                entry_point: 0,
+                user_stack_top: 0,
+                exit_code: 0,
+            });
+        } else if let Some(proc) = table.get_process_mut(GATE_U1_PID) {
+            proc.root = String::from("/");
+            proc.cwd = String::from("/");
+        }
+    }
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.mkdir(GATE_U1_JAIL, 0o755);
+        if !vfs.write_file(GATE_U1_INSIDE, b"jailed") {
+            crate::serial_println!("[proc] Gate U1 FAILED: write jail file");
+            return false;
+        }
+    }
+    if chroot(GATE_U1_PID, GATE_U1_JAIL).is_err() {
+        crate::serial_println!("[proc] Gate U1 FAILED: chroot");
+        return false;
+    }
+    let inside = translate_path(GATE_U1_PID, "/ok");
+    let escape = translate_path(GATE_U1_PID, "/etc");
+    let dotdot = translate_path(GATE_U1_PID, "/../etc");
+    let parent_etc = translate_path(1, "/etc");
+    let vfs = crate::vfs::VFS.lock();
+    let inside_ok = inside == GATE_U1_INSIDE && vfs.resolve_path(&inside).is_some();
+    let escape_blocked = escape == "/tmp/gate_u1/etc" && vfs.resolve_path(&escape).is_none();
+    let dotdot_blocked = dotdot == "/tmp/gate_u1/etc";
+    let parent_ok = parent_etc == "/etc" && vfs.resolve_path("/etc").is_some();
+    drop(vfs);
+    if !inside_ok || !escape_blocked || !dotdot_blocked || !parent_ok {
+        crate::serial_println!(
+            "[proc] Gate U1 FAILED: inside={} escape={} dotdot={} parent={}",
+            inside,
+            escape,
+            dotdot,
+            parent_etc
+        );
+        return false;
+    }
+    crate::serial_println!("[proc] {}", GATE_U1_MARKER);
+    true
 }
 
 /// Initialize process management

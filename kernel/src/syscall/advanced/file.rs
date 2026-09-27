@@ -1,0 +1,314 @@
+/// pread/pwrite, fallocate, sync*, *at path ops, statx, file handles
+use crate::syscall::{SyscallError, SyscallResult, read_user_string};
+
+// ── pread64 / pwrite64 ─────────────────────────────────────────────
+
+pub fn sys_pread64(fd: u64, buf_ptr: u64, count: u64, offset: i64) -> SyscallResult {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables
+        .get_mut(&pid)
+        .ok_or(SyscallError::BadFileDescriptor)?;
+
+    // Save current position, seek to offset, read, restore position
+    let saved = fd_table
+        .lseek(fd as i32, 0, crate::fd::SeekFrom::Current)
+        .unwrap_or(0);
+    let _ = fd_table.lseek(fd as i32, offset, crate::fd::SeekFrom::Start);
+    let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, count as usize) };
+    let result = fd_table
+        .read(fd as i32, buf)
+        .map(|n| n as u64)
+        .map_err(|_| SyscallError::IoError);
+    let _ = fd_table.lseek(fd as i32, saved as i64, crate::fd::SeekFrom::Start);
+    result
+}
+
+pub fn sys_pwrite64(fd: u64, buf_ptr: u64, count: u64, offset: i64) -> SyscallResult {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables
+        .get_mut(&pid)
+        .ok_or(SyscallError::BadFileDescriptor)?;
+
+    let saved = fd_table
+        .lseek(fd as i32, 0, crate::fd::SeekFrom::Current)
+        .unwrap_or(0);
+    let _ = fd_table.lseek(fd as i32, offset, crate::fd::SeekFrom::Start);
+    let buf = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, count as usize) };
+    let result = fd_table
+        .write(fd as i32, buf)
+        .map(|n| n as u64)
+        .map_err(|_| SyscallError::IoError);
+    let _ = fd_table.lseek(fd as i32, saved as i64, crate::fd::SeekFrom::Start);
+    result
+}
+
+// ── fallocate ───────────────────────────────────────────────────────
+
+pub fn sys_fallocate(fd: i32, mode: i32, offset: i64, len: i64) -> SyscallResult {
+    if len <= 0 || offset < 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+    let file = fd_table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
+    let path = file.path.clone();
+    drop(tables);
+
+    let target_size = (offset + len) as usize;
+    // FALLOC_FL_KEEP_SIZE (0x01) means don't change file size
+    if mode & 0x01 == 0 {
+        let mut vfs = crate::vfs::VFS.lock();
+        if let Some(ino) = vfs.resolve_path(&path) {
+            if let Some(inode) = vfs.get_inode_mut(ino) {
+                if inode.data.len() < target_size {
+                    inode.data.resize(target_size, 0);
+                    inode.size = target_size as u64;
+                }
+            }
+        }
+    }
+    Ok(0)
+}
+
+// ── sync / fdatasync / syncfs / sync_file_range ─────────────────────
+
+pub fn sys_sync() -> SyscallResult {
+    // Persist already writes on VFS mutate; flush dirty pages first so
+    // `sync(2)` is a real barrier when VirtIO-blk is present.
+    let _ = crate::page_cache::sync_all();
+    let _ = crate::virtio_blk::flush();
+    Ok(0)
+}
+
+pub fn sys_fsync(fd: i32) -> SyscallResult {
+    fsync_fd(fd)
+}
+
+pub fn sys_fdatasync(fd: i32) -> SyscallResult {
+    fsync_fd(fd)
+}
+
+fn fsync_fd(fd: i32) -> SyscallResult {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let (path, file_type) = {
+        let tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+        let file = table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
+        (file.path.clone(), file.file_type)
+    };
+    if file_type == crate::fd::FileType::Regular {
+        let _ = crate::page_cache::flush_path(&path);
+        if let Some(data) = crate::vfs::read_file_dispatch(&path) {
+            let perms = {
+                let vfs = crate::vfs::VFS.lock();
+                vfs.resolve_path(&path)
+                    .and_then(|ino| vfs.get_inode(ino))
+                    .map(|i| i.permissions)
+                    .unwrap_or(0o644)
+            };
+            crate::persist::persist_file(&path, &data, perms);
+        }
+    }
+    let _ = crate::virtio_blk::flush();
+    Ok(0)
+}
+
+pub fn sys_syncfs(fd: i32) -> SyscallResult {
+    let _ = fd;
+    Ok(0)
+}
+
+pub fn sys_sync_file_range(fd: i32, offset: i64, nbytes: i64, flags: u32) -> SyscallResult {
+    let _ = (fd, offset, nbytes, flags);
+    Ok(0)
+}
+
+// ── getdents (old, non-64 version) ──────────────────────────────────
+
+pub fn sys_getdents(fd: i32, dirp: u64, count: u32) -> SyscallResult {
+    // Redirect to getdents64 implementation
+    crate::syscall::fs::sys_getdents64(fd, dirp, count)
+}
+
+// ── newfstatat ──────────────────────────────────────────────────────
+
+pub fn sys_newfstatat(dirfd: i32, path_ptr: u64, stat_buf: u64, flags: i32) -> SyscallResult {
+    let _ = (dirfd, flags);
+    crate::syscall::fs::sys_stat(path_ptr, stat_buf)
+}
+
+// ── unlinkat / renameat / renameat2 / linkat / fchmodat / fchownat / futimesat / utimensat
+
+pub fn sys_unlinkat(dirfd: i32, path_ptr: u64, flags: i32) -> SyscallResult {
+    let _ = dirfd;
+    if flags & 0x200 != 0 {
+        // AT_REMOVEDIR
+        crate::syscall::fs::sys_rmdir(path_ptr)
+    } else {
+        crate::syscall::fs::sys_unlink(path_ptr)
+    }
+}
+
+pub fn sys_renameat(
+    olddirfd: i32,
+    oldpath_ptr: u64,
+    newdirfd: i32,
+    newpath_ptr: u64,
+) -> SyscallResult {
+    let _ = (olddirfd, newdirfd);
+    crate::syscall::fs::sys_rename(oldpath_ptr, newpath_ptr)
+}
+
+pub fn sys_renameat2(
+    olddirfd: i32,
+    oldpath_ptr: u64,
+    newdirfd: i32,
+    newpath_ptr: u64,
+    flags: u32,
+) -> SyscallResult {
+    let _ = (olddirfd, newdirfd, flags);
+    crate::syscall::fs::sys_rename(oldpath_ptr, newpath_ptr)
+}
+
+pub fn sys_linkat(
+    olddirfd: i32,
+    oldpath_ptr: u64,
+    newdirfd: i32,
+    newpath_ptr: u64,
+    flags: i32,
+) -> SyscallResult {
+    let _ = (olddirfd, newdirfd, flags);
+    let oldpath = unsafe { read_user_string(oldpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let newpath = unsafe { read_user_string(newpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    // Create a hard link (simplified: copy data)
+    let data = {
+        let vfs = crate::vfs::VFS.lock();
+        vfs.read_file(&oldpath)
+            .map(|d| d.to_vec())
+            .ok_or(SyscallError::FileNotFound)?
+    };
+    crate::vfs::VFS.lock().write_file(&newpath, &data);
+    Ok(0)
+}
+
+pub fn sys_fchmodat(dirfd: i32, path_ptr: u64, mode: u32, flags: i32) -> SyscallResult {
+    let _ = (dirfd, flags);
+    crate::syscall::fs::sys_chmod(path_ptr, mode as u16)
+}
+
+pub fn sys_fchownat(dirfd: i32, path_ptr: u64, uid: u32, gid: u32, flags: i32) -> SyscallResult {
+    let _ = (dirfd, flags);
+    crate::syscall::fs::sys_chown(path_ptr, uid, gid)
+}
+
+pub fn sys_utimensat(dirfd: i32, path_ptr: u64, times_ptr: u64, flags: i32) -> SyscallResult {
+    let _ = (dirfd, flags);
+    // Validate path exists if provided
+    if path_ptr != 0 {
+        let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+        let vfs = crate::vfs::VFS.lock();
+        vfs.resolve_path(&path).ok_or(SyscallError::FileNotFound)?;
+    }
+    // Accept timestamp changes (in-memory VFS doesn't track timestamps)
+    let _ = times_ptr;
+    Ok(0)
+}
+
+// ── faccessat / faccessat2 ──────────────────────────────────────────
+
+pub fn sys_faccessat(dirfd: i32, path_ptr: u64, mode: u32, flags: i32) -> SyscallResult {
+    let _ = (dirfd, flags);
+    crate::syscall::fs::sys_access(path_ptr, mode)
+}
+
+// ── copy_file_range already handled, but add preadv2/pwritev2 ──────
+
+pub fn sys_preadv2(fd: i32, iov: u64, iovcnt: i32, offset: i64, flags: i32) -> SyscallResult {
+    let _ = (offset, flags);
+    crate::syscall::io::sys_readv(fd, iov, iovcnt as usize)
+}
+
+pub fn sys_pwritev2(fd: i32, iov: u64, iovcnt: i32, offset: i64, flags: i32) -> SyscallResult {
+    let _ = (offset, flags);
+    crate::syscall::io::sys_writev(fd, iov, iovcnt as usize)
+}
+
+// ── statx ───────────────────────────────────────────────────────────
+
+pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: i32, mask: u32, statxbuf: u64) -> SyscallResult {
+    let _ = (dirfd, flags, mask);
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+    let vfs = crate::vfs::VFS.lock();
+    let s = vfs.stat(&path).map_err(|_| SyscallError::FileNotFound)?;
+    drop(vfs);
+    let size = crate::page_cache::register_path(&path)
+        .map(crate::page_cache::logical_size)
+        .unwrap_or(s.size)
+        .max(s.size);
+    if statxbuf != 0 {
+        let mut buf = [0u8; 256];
+        buf[0..4].copy_from_slice(&0x7FFu32.to_ne_bytes());
+        buf[4..8].copy_from_slice(&4096u32.to_ne_bytes());
+        buf[16..20].copy_from_slice(&(s.nlink as u32).to_ne_bytes());
+        buf[20..24].copy_from_slice(&s.uid.to_ne_bytes());
+        buf[24..28].copy_from_slice(&s.gid.to_ne_bytes());
+        let mode: u16 = match s.file_type {
+            crate::vfs::FileType::Regular => 0o100000,
+            crate::vfs::FileType::Directory => 0o040000,
+            crate::vfs::FileType::CharDevice => 0o020000,
+            crate::vfs::FileType::BlockDevice => 0o060000,
+            crate::vfs::FileType::Pipe => 0o010000,
+            crate::vfs::FileType::Socket => 0o140000,
+            crate::vfs::FileType::SymLink => 0o120000,
+        } as u16
+            | s.permissions;
+        buf[28..30].copy_from_slice(&mode.to_ne_bytes());
+        buf[32..40].copy_from_slice(&s.ino.to_ne_bytes());
+        buf[40..48].copy_from_slice(&size.to_ne_bytes());
+        buf[48..56].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
+        unsafe {
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), statxbuf as *mut u8, buf.len());
+        }
+        crate::vmm::write_user_memory(pid, statxbuf, &buf);
+    }
+    Ok(0)
+}
+
+// ── name_to_handle_at / open_by_handle_at ───────────────────────────
+
+pub fn sys_name_to_handle_at(
+    dirfd: i32,
+    path_ptr: u64,
+    handle: u64,
+    mount_id: u64,
+    flags: i32,
+) -> SyscallResult {
+    let _ = (dirfd, flags);
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let vfs = crate::vfs::VFS.lock();
+    let ino = vfs.resolve_path(&path).ok_or(SyscallError::FileNotFound)?;
+    if mount_id != 0 {
+        unsafe {
+            *(mount_id as *mut i32) = 0;
+        }
+    }
+    if handle != 0 {
+        // file_handle: u32 handle_bytes, i32 handle_type, then bytes
+        unsafe {
+            *(handle as *mut u32) = 8;
+            *((handle as usize + 4) as *mut i32) = 1;
+            *((handle as usize + 8) as *mut u64) = ino;
+        }
+    }
+    Ok(0)
+}
+
+pub fn sys_open_by_handle_at(mount_fd: i32, handle: u64, flags: i32) -> SyscallResult {
+    let _ = (mount_fd, handle, flags);
+    Err(SyscallError::NotImplemented)
+}

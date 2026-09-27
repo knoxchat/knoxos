@@ -460,15 +460,15 @@ pub fn handle_syscall(
         SyscallNumber::Adjtimex | SyscallNumber::ClockAdjtime => advanced::sys_adjtimex(arg1),
         SyscallNumber::Chroot => {
             if let Some(path) = unsafe { read_user_string(arg1) } {
-                let vfs = crate::vfs::VFS.lock();
-                if vfs.resolve_path(&path).is_none() {
-                    Err(SyscallError::FileNotFound)
-                } else {
-                    drop(vfs);
-                    let pid = crate::scheduler::current_pid().unwrap_or(1);
-                    crate::process::PROCESS_TABLE.lock().chdir(pid, &path);
-                    serial_println!("[KnoxOS] chroot({}) for PID {}", path, pid);
-                    Ok(0)
+                let pid = crate::scheduler::current_pid().unwrap_or(1);
+                match crate::process::chroot(pid, &path) {
+                    Ok(()) => {
+                        serial_println!("[KnoxOS] chroot({}) for PID {}", path, pid);
+                        Ok(0)
+                    }
+                    Err(-2) => Err(SyscallError::FileNotFound),
+                    Err(-20) => Err(SyscallError::NotDirectory),
+                    _ => Err(SyscallError::InvalidArgument),
                 }
             } else {
                 Err(SyscallError::InvalidArgument)
@@ -873,16 +873,15 @@ pub fn handle_syscall(
             serial_println!("[KnoxOS] io_uring denied (ENOSYS)");
             Err(SyscallError::NotImplemented)
         }
-        SyscallNumber::OpenTree => advanced::sys_open_tree(arg1 as i32, arg2, arg3 as u32),
-        SyscallNumber::MoveMount => {
-            advanced::sys_move_mount(arg1 as i32, arg2, arg3 as i32, arg4, arg5 as u32)
+        SyscallNumber::OpenTree
+        | SyscallNumber::MoveMount
+        | SyscallNumber::Fsopen
+        | SyscallNumber::Fsconfig
+        | SyscallNumber::Fsmount
+        | SyscallNumber::Fspick => {
+            serial_println!("[KnoxOS] fsopen/mount_api denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
         }
-        SyscallNumber::Fsopen => advanced::sys_fsopen(arg1, arg2 as u32),
-        SyscallNumber::Fsconfig => {
-            advanced::sys_fsconfig(arg1 as i32, arg2 as u32, arg3, arg4, arg5 as i32)
-        }
-        SyscallNumber::Fsmount => advanced::sys_fsmount(arg1 as i32, arg2 as u32, arg3),
-        SyscallNumber::Fspick => advanced::sys_fspick(arg1 as i32, arg2, arg3 as u32),
         SyscallNumber::PidfdOpen => advanced::sys_pidfd_open(arg1, arg2 as u32),
         SyscallNumber::Clone3 => advanced::sys_clone3(arg1, arg2),
         SyscallNumber::CloseRange => {

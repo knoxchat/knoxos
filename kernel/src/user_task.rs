@@ -525,6 +525,9 @@ extern "C" fn gate_boot_body() {
     run_gate_t2();
     run_gate_t3();
     run_gate_t4();
+    run_gate_u2();
+    run_gate_u3();
+    run_gate_u4();
 }
 
 fn run_gate_b3() {
@@ -1128,6 +1131,49 @@ fn run_gate_t4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate T4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_U2_MARKER: &str = "GATE_U2 xattr";
+pub const GATE_U3_MARKER: &str = "GATE_U3 statx";
+pub const GATE_U4_MARKER: &str = "GATE_U4 enosys";
+
+fn run_gate_u2() {
+    serial_println!("[user_task] Gate U2: setxattr/getxattr round-trip");
+    let elf = crate::init::xattr_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "xattr-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate U2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_u3() {
+    serial_println!("[user_task] Gate U3: statx file size");
+    let elf = crate::init::statx_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "statx-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate U3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_u4() {
+    serial_println!("[user_task] Gate U4: fsopen returns ENOSYS");
+    let elf = crate::init::fsopen_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "fsopen-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate U4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {
