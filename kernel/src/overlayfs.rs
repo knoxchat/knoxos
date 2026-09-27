@@ -724,3 +724,274 @@ pub enum LayerOrigin {
     Upper,
     Lower(usize),
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// VFS-BACKED OVERLAY (Gate W1)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// The in-memory Layer map above is unused by path lookup. A live overlay
+// is a (lower, upper, merge) triple of real VFS directories, scoped to a
+// mount namespace. Reads prefer upper, then lower; `.wh.<name>` in upper
+// hides a lower name; writes copy-up into upper.
+
+/// Result of mapping a host path through a VFS overlay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverlayResolve {
+    /// Path is not under any overlay for this mount ns.
+    None,
+    /// The merge directory itself (list must union layers).
+    MergeRoot,
+    /// Use this backing VFS path.
+    Backing(String),
+    /// Hidden by a whiteout.
+    Whiteout,
+}
+
+#[derive(Debug, Clone)]
+struct VfsOverlay {
+    ns_id: u64,
+    lower: String,
+    upper: String,
+    merge: String,
+}
+
+static VFS_OVERLAYS: Mutex<Vec<VfsOverlay>> = Mutex::new(Vec::new());
+
+fn join_overlay(dir: &str, rel: &str) -> String {
+    let rel = rel.trim_start_matches('/');
+    if rel.is_empty() {
+        return String::from(dir);
+    }
+    if dir == "/" {
+        alloc::format!("/{}", rel)
+    } else {
+        alloc::format!("{}/{}", dir, rel)
+    }
+}
+
+fn whiteout_path(upper: &str, rel: &str) -> String {
+    let rel = rel.trim_start_matches('/');
+    if let Some((parent, name)) = rel.rsplit_once('/') {
+        if parent.is_empty() {
+            alloc::format!("{}/{}{}", upper, WHITEOUT_PREFIX, name)
+        } else {
+            alloc::format!("{}/{}/{}{}", upper, parent, WHITEOUT_PREFIX, name)
+        }
+    } else {
+        alloc::format!("{}/{}{}", upper, WHITEOUT_PREFIX, rel)
+    }
+}
+
+/// Register a VFS overlay in `pid`'s mount namespace.
+pub fn register_vfs_overlay(pid: u32, lower: &str, upper: &str, merge: &str) -> Result<(), i32> {
+    {
+        let vfs = crate::vfs::VFS.lock();
+        for path in [lower, upper, merge] {
+            let ino = vfs.resolve_path(path).ok_or(-2i32)?;
+            let inode = vfs.get_inode(ino).ok_or(-2i32)?;
+            if inode.file_type != crate::vfs::FileType::Directory {
+                return Err(-20);
+            }
+        }
+    }
+    let ns_id = crate::namespaces::mount_ns_id(pid);
+    let mut overlays = VFS_OVERLAYS.lock();
+    overlays.retain(|o| !(o.ns_id == ns_id && o.merge == merge));
+    overlays.push(VfsOverlay {
+        ns_id,
+        lower: String::from(lower),
+        upper: String::from(upper),
+        merge: String::from(merge),
+    });
+    Ok(())
+}
+
+fn find_overlay(pid: u32, host: &str) -> Option<VfsOverlay> {
+    let ns_id = crate::namespaces::mount_ns_id(pid);
+    VFS_OVERLAYS
+        .lock()
+        .iter()
+        .find(|o| {
+            o.ns_id == ns_id
+                && (host == o.merge || host.starts_with(&alloc::format!("{}/", o.merge)))
+        })
+        .cloned()
+}
+
+/// Map a host path through the caller's overlay, if any.
+pub fn resolve(pid: u32, host: &str, for_write: bool) -> OverlayResolve {
+    let Some(ov) = find_overlay(pid, host) else {
+        return OverlayResolve::None;
+    };
+    if host == ov.merge {
+        return OverlayResolve::MergeRoot;
+    }
+    let rel = &host[ov.merge.len()..];
+    let upper_path = join_overlay(&ov.upper, rel);
+    let lower_path = join_overlay(&ov.lower, rel);
+    let wh = whiteout_path(&ov.upper, rel);
+    let (wh_exists, upper_exists, lower_exists) = {
+        let vfs = crate::vfs::VFS.lock();
+        (
+            vfs.resolve_path(&wh).is_some(),
+            vfs.resolve_path(&upper_path).is_some(),
+            vfs.resolve_path(&lower_path).is_some(),
+        )
+    };
+    if !for_write && wh_exists {
+        return OverlayResolve::Whiteout;
+    }
+    if for_write {
+        if lower_exists && !upper_exists && !wh_exists {
+            if let Some(data) = {
+                let vfs = crate::vfs::VFS.lock();
+                vfs.read_file(&lower_path).map(|d| d.to_vec())
+            } {
+                let mut vfs = crate::vfs::VFS.lock();
+                vfs.write_file(&upper_path, &data);
+            }
+        }
+        return OverlayResolve::Backing(upper_path);
+    }
+    if upper_exists {
+        OverlayResolve::Backing(upper_path)
+    } else if lower_exists {
+        OverlayResolve::Backing(lower_path)
+    } else {
+        OverlayResolve::Backing(upper_path)
+    }
+}
+
+/// Remap a path for VFS I/O. Whiteouts become a non-existent sentinel.
+pub fn apply_overlay(pid: u32, path: &str, for_write: bool) -> String {
+    match resolve(pid, path, for_write) {
+        OverlayResolve::None | OverlayResolve::MergeRoot => String::from(path),
+        OverlayResolve::Backing(p) => p,
+        OverlayResolve::Whiteout => alloc::format!("{}.knox-wh", path),
+    }
+}
+
+/// Union directory listing for a merge path.
+pub fn list_merged(pid: u32, host: &str) -> Option<Vec<String>> {
+    let ov = find_overlay(pid, host)?;
+    let rel = if host == ov.merge {
+        ""
+    } else if host.starts_with(&alloc::format!("{}/", ov.merge)) {
+        &host[ov.merge.len()..]
+    } else {
+        return None;
+    };
+    let lower_dir = join_overlay(&ov.lower, rel);
+    let upper_dir = join_overlay(&ov.upper, rel);
+    let vfs = crate::vfs::VFS.lock();
+    let mut names: Vec<String> = Vec::new();
+    let mut whiteouts: Vec<String> = Vec::new();
+    if let Some(entries) = vfs.list_dir(&upper_dir) {
+        for name in entries {
+            if let Some(hidden) = name.strip_prefix(WHITEOUT_PREFIX) {
+                whiteouts.push(String::from(hidden));
+            } else if !names.iter().any(|n| n == &name) {
+                names.push(name);
+            }
+        }
+    }
+    if let Some(entries) = vfs.list_dir(&lower_dir) {
+        for name in entries {
+            if name.starts_with(WHITEOUT_PREFIX) {
+                continue;
+            }
+            if whiteouts.iter().any(|w| w == &name) {
+                continue;
+            }
+            if !names.iter().any(|n| n == &name) {
+                names.push(name);
+            }
+        }
+    }
+    Some(names)
+}
+
+pub const GATE_W1_MARKER: &str = "GATE_W1 overlayfs";
+const GATE_W1_PID: u32 = 0x0000_5701;
+const GATE_W1_LOWER: &str = "/tmp/gate_w1/lower";
+const GATE_W1_UPPER: &str = "/tmp/gate_w1/upper";
+const GATE_W1_MERGE: &str = "/tmp/gate_w1/merged";
+const GATE_W1_BASE: &str = "/tmp/gate_w1/lower/base";
+const GATE_W1_GONE: &str = "/tmp/gate_w1/lower/gone";
+const GATE_W1_OVER: &str = "/tmp/gate_w1/upper/over";
+const GATE_W1_WH: &str = "/tmp/gate_w1/upper/.wh.gone";
+
+/// Child overlay mount must merge lower+upper, honour a whiteout, and stay
+/// invisible in the parent's mount namespace.
+pub fn overlay_isolation_self_test() -> bool {
+    crate::namespaces::inherit_namespaces(GATE_W1_PID, 1);
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        for dir in ["/tmp/gate_w1", GATE_W1_LOWER, GATE_W1_UPPER, GATE_W1_MERGE] {
+            let _ = vfs.mkdir(dir, 0o755);
+        }
+        if !vfs.write_file(GATE_W1_BASE, b"from-lower") {
+            serial_println!("[overlay] Gate W1 FAILED: write lower/base");
+            return false;
+        }
+        if !vfs.write_file(GATE_W1_GONE, b"hidden") {
+            serial_println!("[overlay] Gate W1 FAILED: write lower/gone");
+            return false;
+        }
+        if !vfs.write_file(GATE_W1_OVER, b"from-upper") {
+            serial_println!("[overlay] Gate W1 FAILED: write upper/over");
+            return false;
+        }
+        if !vfs.write_file(GATE_W1_WH, b"") {
+            serial_println!("[overlay] Gate W1 FAILED: write whiteout");
+            return false;
+        }
+    }
+    if crate::namespaces::unshare(GATE_W1_PID, crate::namespaces::NamespaceType::Mount as u32)
+        .is_err()
+    {
+        serial_println!("[overlay] Gate W1 FAILED: unshare");
+        return false;
+    }
+    if crate::namespaces::overlay_mount(GATE_W1_PID, GATE_W1_LOWER, GATE_W1_UPPER, GATE_W1_MERGE)
+        .is_err()
+    {
+        serial_println!("[overlay] Gate W1 FAILED: overlay_mount");
+        return false;
+    }
+    let base = resolve(GATE_W1_PID, "/tmp/gate_w1/merged/base", false);
+    let over = resolve(GATE_W1_PID, "/tmp/gate_w1/merged/over", false);
+    let gone = resolve(GATE_W1_PID, "/tmp/gate_w1/merged/gone", false);
+    let listed = list_merged(GATE_W1_PID, GATE_W1_MERGE).unwrap_or_default();
+    let child_mount = crate::namespaces::has_mount(GATE_W1_PID, GATE_W1_MERGE);
+    let parent_mount = crate::namespaces::has_mount(1, GATE_W1_MERGE);
+    let parent_base = resolve(1, "/tmp/gate_w1/merged/base", false);
+    let base_ok = base == OverlayResolve::Backing(String::from(GATE_W1_BASE));
+    let over_ok = over == OverlayResolve::Backing(String::from(GATE_W1_OVER));
+    let gone_ok = gone == OverlayResolve::Whiteout;
+    let list_ok = listed.iter().any(|n| n == "base")
+        && listed.iter().any(|n| n == "over")
+        && !listed.iter().any(|n| n == "gone")
+        && !listed.iter().any(|n| n.starts_with(WHITEOUT_PREFIX));
+    if !base_ok
+        || !over_ok
+        || !gone_ok
+        || !list_ok
+        || !child_mount
+        || parent_mount
+        || parent_base != OverlayResolve::None
+    {
+        serial_println!(
+            "[overlay] Gate W1 FAILED: base={:?} over={:?} gone={:?} list={:?} child={} parent={}",
+            base,
+            over,
+            gone,
+            listed,
+            child_mount,
+            parent_mount
+        );
+        return false;
+    }
+    serial_println!("[overlay] {}", GATE_W1_MARKER);
+    true
+}

@@ -14,8 +14,23 @@ lazy_static::lazy_static! {
 }
 
 fn vfs_path(path: &str) -> String {
+    vfs_path_rw(path, false)
+}
+
+fn vfs_path_write(path: &str) -> String {
+    vfs_path_rw(path, true)
+}
+
+fn vfs_path_rw(path: &str, for_write: bool) -> String {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
-    crate::process::translate_path(pid, path)
+    let host = crate::process::translate_path(pid, path);
+    crate::overlayfs::apply_overlay(pid, &host, for_write)
+}
+
+/// Current process file-creation umask (default 0022).
+pub fn current_umask() -> u16 {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    *PROCESS_UMASKS.lock().get(&pid).unwrap_or(&0o022)
 }
 
 pub fn sys_read(fd: u64, buf_ptr: u64, count: u64) -> SyscallResult {
@@ -55,7 +70,8 @@ pub fn sys_write(fd: u64, buf_ptr: u64, count: u64) -> SyscallResult {
 pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
-    let path = vfs_path(&path);
+    let write = flags & 0x3 != 0 || flags & 0x40 != 0;
+    let path = vfs_path_rw(&path, write);
     serial_println!("[KnoxOS] open({}, {:#x})", path, flags);
 
     let access = if flags & 0x3 != 0 || flags & 0x40 != 0 {
@@ -86,7 +102,14 @@ pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
         } else if flags & 0x40 != 0 {
             // O_CREAT
             drop(vfs);
-            crate::vfs::VFS.lock().write_file(&path, &[]);
+            let mut vfs = crate::vfs::VFS.lock();
+            vfs.write_file(&path, &[]);
+            let perms = mode & !current_umask() & 0o7777;
+            if let Some(ino) = vfs.resolve_path(&path) {
+                if let Some(inode) = vfs.get_inode_mut(ino) {
+                    inode.permissions = perms;
+                }
+            }
             created = true;
             crate::fd::FileType::Regular
         } else {
@@ -274,23 +297,26 @@ pub fn sys_readlink(path_ptr: u64, buf_ptr: u64, bufsiz: u64) -> SyscallResult {
     }
 
     // Regular symlink in VFS
-    let vfs = crate::vfs::VFS.lock();
-    if let Some(ino) = vfs.resolve_path(&path) {
-        if let Some(inode) = vfs.get_inode(ino) {
-            if inode.file_type == crate::vfs::FileType::SymLink {
-                if let Some(data) = vfs.read_file(&path) {
-                    let target = core::str::from_utf8(data).unwrap_or("");
-                    let len = target.len().min(bufsiz as usize);
-                    unsafe {
-                        core::ptr::copy_nonoverlapping(target.as_ptr(), buf_ptr as *mut u8, len);
-                    }
-                    return Ok(len as u64);
-                }
-            }
+    let path = vfs_path(&path);
+    let target = {
+        let vfs = crate::vfs::VFS.lock();
+        let ino = vfs
+            .resolve_path(&path)
+            .ok_or(SyscallError::InvalidArgument)?;
+        let inode = vfs.get_inode(ino).ok_or(SyscallError::InvalidArgument)?;
+        if inode.file_type != crate::vfs::FileType::SymLink {
+            return Err(SyscallError::InvalidArgument);
         }
+        inode.data.clone()
+    };
+    let len = target.len().min(bufsiz as usize);
+    if buf_ptr != 0 && len > 0 {
+        unsafe {
+            core::ptr::copy_nonoverlapping(target.as_ptr(), buf_ptr as *mut u8, len);
+        }
+        crate::vmm::write_user_memory(pid, buf_ptr, &target[..len]);
     }
-
-    Err(SyscallError::InvalidArgument)
+    return Ok(len as u64);
 }
 
 pub fn sys_getdents64(fd: i32, dirp: u64, count: u32) -> SyscallResult {
@@ -361,7 +387,8 @@ pub fn sys_chdir(path_ptr: u64) -> SyscallResult {
 
 pub fn sys_mkdir(path_ptr: u64, mode: u16) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-    let path = vfs_path(&path);
+    let path = vfs_path_write(&path);
+    let mode = mode & !current_umask();
     crate::vfs::VFS
         .lock()
         .mkdir(&path, mode)
@@ -388,6 +415,7 @@ pub fn sys_symlink(target_ptr: u64, linkpath_ptr: u64) -> SyscallResult {
     let target = unsafe { read_user_string(target_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let linkpath =
         unsafe { read_user_string(linkpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let linkpath = vfs_path_write(&linkpath);
     let mut vfs = crate::vfs::VFS.lock();
     // Check if the linkpath already exists
     if vfs.resolve_path(&linkpath).is_some() {

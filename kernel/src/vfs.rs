@@ -782,8 +782,15 @@ pub fn init() {
 // When a path falls under an ext4 mount point, we dispatch to the ext4
 // driver instead of the in-memory VFS.
 
+fn overlay_path(path: &str, for_write: bool) -> alloc::string::String {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    crate::overlayfs::apply_overlay(pid, path, for_write)
+}
+
 /// Read a file, dispatching to ext4 if the path is under an ext4 mount
 pub fn read_file_dispatch(path: &str) -> Option<Vec<u8>> {
+    let path = overlay_path(path, false);
+    let path = path.as_str();
     // Check if this path is under an ext4 mount point
     if let Some((fs_idx, rel_path)) = crate::mount::find_ext4_fs_for_path(path) {
         match crate::ext4::read_file(fs_idx, &rel_path) {
@@ -800,6 +807,10 @@ pub fn read_file_dispatch(path: &str) -> Option<Vec<u8>> {
 
 /// List directory contents, dispatching to ext4 if under ext4 mount
 pub fn list_dir_dispatch(path: &str) -> Option<Vec<String>> {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    if let Some(merged) = crate::overlayfs::list_merged(pid, path) {
+        return Some(merged);
+    }
     if let Some((fs_idx, rel_path)) = crate::mount::find_ext4_fs_for_path(path) {
         if let Ok(entries) = crate::ext4::list_dir(fs_idx, &rel_path) {
             return Some(entries.into_iter().map(|e| e.name).collect());
@@ -840,6 +851,8 @@ pub fn stat_dispatch(path: &str) -> Result<VfsStat, i32> {
 
 /// Write a file, dispatching to ext4 if under ext4 mount
 pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
+    let path = overlay_path(path, true);
+    let path = path.as_str();
     let pid = crate::landlock::current_check_pid();
     if !crate::landlock::check_process_fs_access(
         pid,

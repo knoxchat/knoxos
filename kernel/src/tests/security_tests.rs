@@ -182,6 +182,14 @@ fn test_pivot_root_isolation() {
 }
 
 #[test_case]
+fn test_overlayfs_isolation() {
+    assert!(
+        crate::overlayfs::overlay_isolation_self_test(),
+        "overlay mount must merge lower+upper, honour whiteout, stay out of parent ns"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

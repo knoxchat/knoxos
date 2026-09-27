@@ -393,6 +393,17 @@ pub fn has_mount(pid: u32, target: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Mount-namespace id for `pid` (init ns is 1).
+pub fn mount_ns_id(pid: u32) -> u64 {
+    PROCESS_NS.lock().get(&pid).map(|n| n.mount_ns).unwrap_or(1)
+}
+
+/// Mount a VFS-backed overlay and record it in `pid`'s mount namespace.
+pub fn overlay_mount(pid: u32, lower: &str, upper: &str, merge: &str) -> Result<(), i32> {
+    crate::overlayfs::register_vfs_overlay(pid, lower, upper, merge)?;
+    add_mount(pid, "overlay", merge, "overlay", 0)
+}
+
 /// Add a virtual interface name to `pid`'s network namespace.
 pub fn add_net_interface(pid: u32, name: &str) -> Result<(), i32> {
     let ns_id = PROCESS_NS.lock().get(&pid).map(|n| n.net_ns).unwrap_or(1);
@@ -689,6 +700,7 @@ pub fn init() {
     let _ = setns_join_self_test();
     let _ = crate::process::chroot_isolation_self_test();
     let _ = crate::process::pivot_root_self_test();
+    let _ = crate::overlayfs::overlay_isolation_self_test();
 }
 
 pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";

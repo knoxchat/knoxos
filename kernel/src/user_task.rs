@@ -531,6 +531,9 @@ extern "C" fn gate_boot_body() {
     run_gate_v2();
     run_gate_v3();
     run_gate_v4();
+    run_gate_w2();
+    run_gate_w3();
+    run_gate_w4();
 }
 
 fn run_gate_b3() {
@@ -1220,6 +1223,49 @@ fn run_gate_v4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate V4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_W2_MARKER: &str = "GATE_W2 umask";
+pub const GATE_W3_MARKER: &str = "GATE_W3 symlink";
+pub const GATE_W4_MARKER: &str = "GATE_W4 enosys";
+
+fn run_gate_w2() {
+    serial_println!("[user_task] Gate W2: umask applied on creat");
+    let elf = crate::init::umask_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "umask-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate W2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_w3() {
+    serial_println!("[user_task] Gate W3: symlink then readlink");
+    let elf = crate::init::symlink_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "symlink-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate W3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_w4() {
+    serial_println!("[user_task] Gate W4: ioperm returns ENOSYS");
+    let elf = crate::init::ioperm_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "ioperm-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate W4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

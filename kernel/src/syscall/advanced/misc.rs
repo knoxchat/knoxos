@@ -18,7 +18,8 @@ pub fn sys_lookup_dcookie(cookie: u64, buf: u64, len: usize) -> SyscallResult {
 
 pub fn sys_ioperm(from: u64, num: u64, turn_on: i32) -> SyscallResult {
     let _ = (from, num, turn_on);
-    Ok(0) // Kernel mode: always has I/O permissions
+    crate::serial_println!("[KnoxOS] ioperm denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_iopl(level: i32) -> SyscallResult {
