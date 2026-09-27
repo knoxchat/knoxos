@@ -287,6 +287,14 @@ impl FdTable {
                 crate::ipc::pipe_close(id, !file.flags.is_writable());
             }
         }
+        if file.file_type == FileType::Fifo {
+            if file.flags.is_readable() {
+                let _ = crate::fifo::close_fifo(&file.path, false);
+            }
+            if file.flags.is_writable() {
+                let _ = crate::fifo::close_fifo(&file.path, true);
+            }
+        }
         if file.file_type == FileType::Socket {
             if let Some(id) = unix_id_from_path(&file.path) {
                 let _ = crate::uds::socket_close(id);
@@ -444,6 +452,12 @@ impl FdTable {
                 }
                 crate::ipc::pipe_read(id, buf)
             }
+            FileType::Fifo => {
+                if !file.flags.is_readable() {
+                    return Err(-9);
+                }
+                crate::fifo::read_fifo(&file.path, buf)
+            }
             FileType::Socket => {
                 let Some(id) = unix_id_from_path(&file.path) else {
                     return Err(-9);
@@ -546,6 +560,12 @@ impl FdTable {
                 }
                 crate::ipc::pipe_write(id, buf)
             }
+            FileType::Fifo => {
+                if !file.flags.is_writable() {
+                    return Err(-9);
+                }
+                crate::fifo::write_fifo(&file.path, buf)
+            }
             FileType::Socket => {
                 let Some(id) = unix_id_from_path(&file.path) else {
                     return Err(-9);
@@ -614,7 +634,7 @@ impl FdTable {
         let file = self.files.get_mut(&fd).ok_or(-9i32)?; // EBADF
 
         match file.file_type {
-            FileType::Pipe | FileType::Socket => return Err(-29), // ESPIPE
+            FileType::Pipe | FileType::Fifo | FileType::Socket => return Err(-29), // ESPIPE
             _ => {}
         }
 

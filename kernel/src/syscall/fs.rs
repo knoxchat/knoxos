@@ -96,7 +96,13 @@ pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
                 crate::vfs::FileType::Directory => crate::fd::FileType::Directory,
                 crate::vfs::FileType::CharDevice => crate::fd::FileType::CharDevice,
                 crate::vfs::FileType::BlockDevice => crate::fd::FileType::BlockDevice,
-                crate::vfs::FileType::Pipe => crate::fd::FileType::Pipe,
+                crate::vfs::FileType::Pipe => {
+                    if crate::fifo::is_fifo(&path) {
+                        crate::fd::FileType::Fifo
+                    } else {
+                        crate::fd::FileType::Pipe
+                    }
+                }
                 _ => crate::fd::FileType::Regular,
             }
         } else if flags & 0x40 != 0 {
@@ -125,10 +131,20 @@ pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
     let fd_table = tables
         .get_mut(&pid)
         .ok_or(SyscallError::BadFileDescriptor)?;
-    fd_table
+    let fd = fd_table
         .open(&path, crate::fd::OpenFlags(flags), file_type)
-        .map(|fd| fd as u64)
-        .map_err(|_| SyscallError::TooManyFiles)
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    if file_type == crate::fd::FileType::Fifo {
+        let writing = flags & 0x3 != 0;
+        let reading = flags & 0x3 != 0x1;
+        if reading {
+            let _ = crate::fifo::open_fifo(&path, false);
+        }
+        if writing {
+            let _ = crate::fifo::open_fifo(&path, true);
+        }
+    }
+    Ok(fd as u64)
 }
 
 pub fn sys_close(fd: i32) -> SyscallResult {
@@ -221,7 +237,7 @@ pub fn sys_access(path_ptr: u64, _mode: u32) -> SyscallResult {
 
 pub fn sys_unlink(path_ptr: u64) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-    let path = vfs_path(&path);
+    let path = vfs_path_write(&path);
     crate::vfs::VFS.lock().unlink(&path).map_err(|e| match e {
         -2 => SyscallError::FileNotFound,
         -21 => SyscallError::IsDirectory,
@@ -377,10 +393,9 @@ pub fn sys_getcwd(buf_ptr: u64, size: usize) -> SyscallResult {
     if size < cwd.len() + 1 {
         return Err(SyscallError::InvalidArgument);
     }
-    unsafe {
-        core::ptr::copy_nonoverlapping(cwd.as_ptr(), buf_ptr as *mut u8, cwd.len());
-        *((buf_ptr + cwd.len() as u64) as *mut u8) = 0;
-    }
+    let mut tmp = cwd.into_bytes();
+    tmp.push(0);
+    crate::vmm::write_user_memory(pid, buf_ptr, &tmp);
     Ok(buf_ptr)
 }
 
@@ -420,7 +435,7 @@ pub fn sys_mkdir(path_ptr: u64, mode: u16) -> SyscallResult {
 
 pub fn sys_rmdir(path_ptr: u64) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-    let path = vfs_path(&path);
+    let path = vfs_path_write(&path);
     crate::vfs::VFS.lock().rmdir(&path).map_err(|e| match e {
         -2 => SyscallError::FileNotFound,
         -39 => SyscallError::NotEmpty,

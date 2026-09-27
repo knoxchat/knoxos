@@ -839,6 +839,7 @@ pub fn init() {
     install_builtin_binaries();
     let _ = hardlink_self_test();
     let _ = chmod_self_test();
+    let _ = rmdir_self_test();
 }
 
 pub const GATE_X1_MARKER: &str = "GATE_X1 hardlink";
@@ -949,6 +950,61 @@ pub fn chmod_self_test() -> bool {
         }
     }
     crate::serial_println!("[vfs] {}", GATE_Y1_MARKER);
+    true
+}
+
+pub const GATE_Z1_MARKER: &str = "GATE_Z1 rmdir";
+const GATE_Z1_DIR: &str = "/tmp/gate_z1";
+const GATE_Z1_CHILD: &str = "/tmp/gate_z1/child";
+
+/// mkdir then rmdir removes an empty directory; rmdir of a non-empty dir fails
+/// with ENOTEMPTY and leaves the directory in place.
+pub fn rmdir_self_test() -> bool {
+    {
+        let mut vfs = VFS.lock();
+        let _ = vfs.unlink(GATE_Z1_CHILD);
+        let _ = vfs.rmdir(GATE_Z1_DIR);
+        if vfs.mkdir(GATE_Z1_DIR, 0o755).is_err() {
+            crate::serial_println!("[vfs] Gate Z1 FAILED: mkdir {}", GATE_Z1_DIR);
+            return false;
+        }
+        if vfs.rmdir(GATE_Z1_DIR).is_err() {
+            crate::serial_println!("[vfs] Gate Z1 FAILED: rmdir empty {}", GATE_Z1_DIR);
+            return false;
+        }
+        if vfs.resolve_path(GATE_Z1_DIR).is_some() {
+            crate::serial_println!("[vfs] Gate Z1 FAILED: empty dir still present");
+            return false;
+        }
+        if vfs.mkdir(GATE_Z1_DIR, 0o755).is_err() {
+            crate::serial_println!("[vfs] Gate Z1 FAILED: remkdir {}", GATE_Z1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_Z1_CHILD, b"x") {
+            crate::serial_println!("[vfs] Gate Z1 FAILED: write {}", GATE_Z1_CHILD);
+            return false;
+        }
+        match vfs.rmdir(GATE_Z1_DIR) {
+            Err(-39) => {}
+            other => {
+                crate::serial_println!(
+                    "[vfs] Gate Z1 FAILED: rmdir non-empty {:?} want ENOTEMPTY",
+                    other
+                );
+                return false;
+            }
+        }
+        if vfs.resolve_path(GATE_Z1_DIR).is_none() {
+            crate::serial_println!("[vfs] Gate Z1 FAILED: non-empty dir vanished");
+            return false;
+        }
+        let _ = vfs.unlink(GATE_Z1_CHILD);
+        if vfs.rmdir(GATE_Z1_DIR).is_err() {
+            crate::serial_println!("[vfs] Gate Z1 FAILED: rmdir after unlink child");
+            return false;
+        }
+    }
+    crate::serial_println!("[vfs] {}", GATE_Z1_MARKER);
     true
 }
 

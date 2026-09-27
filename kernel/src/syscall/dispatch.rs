@@ -362,28 +362,31 @@ pub fn handle_syscall(
             // mknod(path, mode, dev) — create special file
             let path = unsafe { read_user_string(arg1) };
             if let Some(p) = path {
+                let pid = crate::scheduler::current_pid().unwrap_or(1);
+                let p = crate::process::translate_path(pid, &p);
                 let mode = arg2 as u32;
                 let file_type = mode & 0o170000;
-                let mut vfs = crate::vfs::VFS.lock();
                 match file_type {
                     0o010000 => {
-                        // S_IFIFO — create named pipe
-                        vfs.write_file(&p, &[]);
-                        if let Some(ino) = vfs.resolve_path(&p) {
-                            if let Some(inode) = vfs.get_inode_mut(ino) {
-                                inode.file_type = crate::vfs::FileType::Pipe;
-                                inode.permissions = (mode & 0o7777) as u16;
-                            }
-                        }
-                        Ok(0)
+                        // S_IFIFO — named pipe with a live FIFO buffer
+                        let perms = (mode as u16) & 0o7777 & !crate::syscall::fs::current_umask();
+                        crate::fifo::mkfifo(&p, perms)
+                            .map(|_| 0u64)
+                            .map_err(|e| match e {
+                                -17 => SyscallError::FileExists,
+                                -2 => SyscallError::FileNotFound,
+                                _ => SyscallError::IoError,
+                            })
                     }
                     0o100000 | 0 => {
                         // S_IFREG or default — create regular file
+                        let mut vfs = crate::vfs::VFS.lock();
                         vfs.write_file(&p, &[]);
                         Ok(0)
                     }
                     0o020000 | 0o060000 => {
                         // S_IFCHR / S_IFBLK — create device node
+                        let mut vfs = crate::vfs::VFS.lock();
                         vfs.write_file(&p, &[]);
                         if let Some(ino) = vfs.resolve_path(&p) {
                             if let Some(inode) = vfs.get_inode_mut(ino) {
@@ -399,6 +402,7 @@ pub fn handle_syscall(
                     }
                     0o140000 => {
                         // S_IFSOCK — create socket node
+                        let mut vfs = crate::vfs::VFS.lock();
                         vfs.write_file(&p, &[]);
                         if let Some(ino) = vfs.resolve_path(&p) {
                             if let Some(inode) = vfs.get_inode_mut(ino) {

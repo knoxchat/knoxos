@@ -206,6 +206,22 @@ fn test_chmod_enforced() {
 }
 
 #[test_case]
+fn test_rmdir_empty_and_notempty() {
+    assert!(
+        crate::vfs::rmdir_self_test(),
+        "rmdir must remove an empty directory and fail ENOTEMPTY on a non-empty one"
+    );
+}
+
+#[test_case]
+fn test_mkfifo_roundtrip() {
+    assert!(
+        crate::fifo::mkfifo_self_test(),
+        "mkfifo must write a byte that a reader can read back"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

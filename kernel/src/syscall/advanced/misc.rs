@@ -34,7 +34,8 @@ pub fn sys_vhangup() -> SyscallResult {
 
 pub fn sys_modify_ldt(func: i32, ptr: u64, bytecount: u64) -> SyscallResult {
     let _ = (func, ptr, bytecount);
-    Ok(0)
+    crate::serial_println!("[KnoxOS] modify_ldt denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_acct(filename_ptr: u64) -> SyscallResult {

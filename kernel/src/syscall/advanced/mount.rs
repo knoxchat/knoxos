@@ -137,10 +137,12 @@ pub fn sys_umount2(target_ptr: u64, flags: i32) -> SyscallResult {
 
 pub fn sys_swapon(path_ptr: u64, flags: i32) -> SyscallResult {
     let _ = (path_ptr, flags);
-    Ok(0)
+    crate::serial_println!("[KnoxOS] swapon denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_swapoff(path_ptr: u64) -> SyscallResult {
     let _ = path_ptr;
-    Ok(0)
+    crate::serial_println!("[KnoxOS] swapoff denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }

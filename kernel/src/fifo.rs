@@ -141,21 +141,25 @@ lazy_static::lazy_static! {
 }
 
 /// Create a named pipe (mkfifo)
-pub fn mkfifo(path: &str, _mode: u16) -> Result<(), i32> {
+pub fn mkfifo(path: &str, mode: u16) -> Result<(), i32> {
+    {
+        let vfs = crate::vfs::VFS.lock();
+        if vfs.resolve_path(path).is_some() {
+            return Err(-17); // EEXIST
+        }
+    }
     let mut fifos = FIFOS.lock();
     if fifos.contains_key(path) {
         return Err(-17); // EEXIST
     }
-
-    // Create the FIFO
     fifos.insert(String::from(path), Fifo::new(path));
 
-    // Also create in VFS as a Pipe type file
     let mut vfs = crate::vfs::VFS.lock();
     if vfs.resolve_path(path).is_some() {
-        return Err(-17); // EEXIST in VFS
+        fifos.remove(path);
+        return Err(-17);
     }
-    vfs.create_file_at_path(path, crate::vfs::FileType::Pipe, &[], _mode);
+    vfs.create_file_at_path(path, crate::vfs::FileType::Pipe, &[], mode);
 
     serial_println!("[fifo] mkfifo: {}", path);
     Ok(())
@@ -220,7 +224,49 @@ pub fn list_fifos() -> Vec<String> {
     FIFOS.lock().keys().cloned().collect()
 }
 
+pub const GATE_AA1_MARKER: &str = "GATE_AA1 mkfifo";
+const GATE_AA1_PATH: &str = "/tmp/gate_aa1";
+
+/// Named FIFO write/read round-trip through the FIFO buffer.
+pub fn mkfifo_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AA1_PATH);
+    }
+    let _ = unlink_fifo(GATE_AA1_PATH);
+    if mkfifo(GATE_AA1_PATH, 0o644).is_err() {
+        serial_println!("[fifo] Gate AA1 FAILED: mkfifo {}", GATE_AA1_PATH);
+        return false;
+    }
+    if !is_fifo(GATE_AA1_PATH) {
+        serial_println!("[fifo] Gate AA1 FAILED: not registered");
+        return false;
+    }
+    if open_fifo(GATE_AA1_PATH, false).is_err() {
+        serial_println!("[fifo] Gate AA1 FAILED: open reader");
+        return false;
+    }
+    if open_fifo(GATE_AA1_PATH, true).is_err() {
+        serial_println!("[fifo] Gate AA1 FAILED: open writer");
+        return false;
+    }
+    if write_fifo(GATE_AA1_PATH, b"x") != Ok(1) {
+        serial_println!("[fifo] Gate AA1 FAILED: write");
+        return false;
+    }
+    let mut buf = [0u8; 1];
+    if read_fifo(GATE_AA1_PATH, &mut buf) != Ok(1) || buf[0] != b'x' {
+        serial_println!("[fifo] Gate AA1 FAILED: read {:?}", buf);
+        return false;
+    }
+    let _ = close_fifo(GATE_AA1_PATH, true);
+    let _ = close_fifo(GATE_AA1_PATH, false);
+    serial_println!("[fifo] {}", GATE_AA1_MARKER);
+    true
+}
+
 /// Initialize FIFO subsystem
 pub fn init() {
     serial_println!("[KnoxOS] FIFO (named pipes) subsystem initialized");
+    let _ = mkfifo_self_test();
 }
