@@ -1410,21 +1410,16 @@ pub fn sys_getresgid(rgid_ptr: u64, egid_ptr: u64, sgid_ptr: u64) -> SyscallResu
 
 pub fn sys_setns(fd: i32, nstype: i32) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
-    serial_println!(
-        "[KnoxOS] setns: PID {} joining namespace fd={} type={:#x}",
-        pid,
-        fd,
-        nstype
-    );
-    // Validate fd exists
-    let tables = crate::fd::PROCESS_FD_TABLES.lock();
-    if let Some(fd_table) = tables.get(&pid) {
-        if fd_table.get(fd).is_none() {
-            return Err(SyscallError::BadFileDescriptor);
-        }
+    let path = crate::fd::path_for_fd(pid, fd).ok_or(SyscallError::BadFileDescriptor)?;
+    let (fd_flag, ns_id) =
+        crate::namespaces::parse_ns_fd_path(&path).ok_or(SyscallError::InvalidArgument)?;
+    let flag = if nstype != 0 { nstype as u32 } else { fd_flag };
+    if nstype != 0 && nstype as u32 != fd_flag {
+        return Err(SyscallError::InvalidArgument);
     }
-    // Accept namespace join (detailed namespace tracking in namespaces.rs)
-    Ok(0)
+    crate::namespaces::setns(pid, ns_id, flag)
+        .map(|_| 0u64)
+        .map_err(|_| SyscallError::InvalidArgument)
 }
 
 // ── pivot_root ──────────────────────────────────────────────────────

@@ -361,6 +361,28 @@ pub fn sys_copy_file_range(
         .map_err(|_| SyscallError::IoError)
 }
 
+pub fn sys_vmsplice(fd: i32, iov_ptr: u64, nr_segs: usize, flags: u32) -> SyscallResult {
+    if iov_ptr == 0 || nr_segs == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Iovec {
+        iov_base: u64,
+        iov_len: usize,
+    }
+
+    let n = core::cmp::min(nr_segs, 16);
+    let iovecs = unsafe { core::slice::from_raw_parts(iov_ptr as *const Iovec, n) };
+    let iovs: alloc::vec::Vec<(u64, usize)> =
+        iovecs.iter().map(|v| (v.iov_base, v.iov_len)).collect();
+
+    crate::splice::vmsplice(fd, &iovs, flags)
+        .map(|copied| copied as u64)
+        .map_err(|_| SyscallError::IoError)
+}
+
 // ── Scheduler ───────────────────────────────────────────────────────
 
 pub fn sys_sched_getscheduler(pid: u32) -> SyscallResult {

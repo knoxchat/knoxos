@@ -693,22 +693,7 @@ pub fn handle_syscall(
         SyscallNumber::SyncFileRange => {
             advanced::sys_sync_file_range(arg1 as i32, arg2 as i64, arg3 as i64, arg4 as u32)
         }
-        SyscallNumber::Vmsplice => {
-            // vmsplice(fd, iov, nr_segs, flags)
-            // Transfer data from user memory into a pipe
-            let _fd = arg1 as i32;
-            let iov = arg2;
-            let nr_segs = arg3 as usize;
-            let mut total = 0usize;
-            for i in 0..nr_segs {
-                let base = unsafe { *((iov + (i * 16) as u64) as *const u64) };
-                let len = unsafe { *((iov + (i * 16 + 8) as u64) as *const u64) } as usize;
-                if base != 0 {
-                    total += len;
-                }
-            }
-            Ok(total as u64)
-        }
+        SyscallNumber::Vmsplice => io::sys_vmsplice(arg1 as i32, arg2, arg3 as usize, arg4 as u32),
         SyscallNumber::MovePages => {
             advanced::sys_move_pages(arg1 as u32, arg2, arg3, arg4, arg5, arg6 as i32)
         }
@@ -905,9 +890,8 @@ pub fn handle_syscall(
         }
         SyscallNumber::PidfdGetfd => advanced::sys_pidfd_getfd(arg1, arg2 as i32, arg3 as u32),
         SyscallNumber::MountSetattr => {
-            // mount_setattr(dirfd, path, flags, uattr, usize)
-            serial_println!("[KnoxOS] mount_setattr(dirfd={}, flags={:#x})", arg1, arg3);
-            Ok(0)
+            serial_println!("[KnoxOS] mount_setattr denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
         }
         SyscallNumber::LandlockCreateRuleset => {
             advanced::sys_landlock_create_ruleset(arg1, arg2 as usize, arg3 as u32)

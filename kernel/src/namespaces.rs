@@ -686,6 +686,7 @@ pub fn init() {
     let _ = ipc_isolation_self_test();
     let _ = cgroup_isolation_self_test();
     let _ = time_isolation_self_test();
+    let _ = setns_join_self_test();
 }
 
 pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";
@@ -963,5 +964,174 @@ pub fn time_isolation_self_test() -> bool {
         return false;
     }
     crate::serial_println!("[ns] {}", GATE_S1_MARKER);
+    true
+}
+
+fn ns_type_from_flag(flag: u32) -> Option<NamespaceType> {
+    match flag {
+        x if x == NamespaceType::Mount as u32 => Some(NamespaceType::Mount),
+        x if x == NamespaceType::Uts as u32 => Some(NamespaceType::Uts),
+        x if x == NamespaceType::Ipc as u32 => Some(NamespaceType::Ipc),
+        x if x == NamespaceType::Pid as u32 => Some(NamespaceType::Pid),
+        x if x == NamespaceType::Net as u32 => Some(NamespaceType::Net),
+        x if x == NamespaceType::User as u32 => Some(NamespaceType::User),
+        x if x == NamespaceType::Cgroup as u32 => Some(NamespaceType::Cgroup),
+        x if x == NamespaceType::Time as u32 => Some(NamespaceType::Time),
+        _ => None,
+    }
+}
+
+/// Namespace id of `ns_type` currently attached to `pid`.
+pub fn ns_id_of(pid: u32, ns_type: NamespaceType) -> u64 {
+    let ns = get_process_namespaces(pid);
+    match ns_type {
+        NamespaceType::Mount => ns.mount_ns,
+        NamespaceType::Uts => ns.uts_ns,
+        NamespaceType::Ipc => ns.ipc_ns,
+        NamespaceType::Pid => ns.pid_ns,
+        NamespaceType::Net => ns.net_ns,
+        NamespaceType::User => ns.user_ns,
+        NamespaceType::Cgroup => ns.cgroup_ns,
+        NamespaceType::Time => ns.time_ns,
+    }
+}
+
+fn ns_exists(ns_type: NamespaceType, ns_id: u64) -> bool {
+    if ns_id == 1 {
+        return true;
+    }
+    match ns_type {
+        NamespaceType::Uts => UTS_NAMESPACES.lock().contains_key(&ns_id),
+        NamespaceType::Pid => PID_NAMESPACES.lock().contains_key(&ns_id),
+        NamespaceType::Mount => MOUNT_NAMESPACES.lock().contains_key(&ns_id),
+        NamespaceType::Net => NET_NAMESPACES.lock().contains_key(&ns_id),
+        NamespaceType::User => USER_NAMESPACES.lock().contains_key(&ns_id),
+        NamespaceType::Cgroup => CGROUP_NAMESPACES.lock().contains_key(&ns_id),
+        NamespaceType::Time => TIME_NAMESPACES.lock().contains_key(&ns_id),
+        NamespaceType::Ipc => NAMESPACES
+            .lock()
+            .get(&ns_id)
+            .map(|n| n.ns_type == NamespaceType::Ipc)
+            .unwrap_or(false),
+    }
+}
+
+/// Join `ns_id` of type `nstype` (a `CLONE_NEW*` flag, or 0 to infer).
+pub fn setns(pid: u32, ns_id: u64, nstype: u32) -> Result<(), i32> {
+    let ns_type = if nstype != 0 {
+        ns_type_from_flag(nstype).ok_or(-22i32)?
+    } else {
+        NAMESPACES
+            .lock()
+            .get(&ns_id)
+            .map(|n| n.ns_type)
+            .ok_or(-22i32)?
+    };
+    if nstype != 0 {
+        if let Some(ns) = NAMESPACES.lock().get(&ns_id) {
+            if ns_id != 1 && ns.ns_type != ns_type {
+                return Err(-22);
+            }
+        }
+    }
+    if !ns_exists(ns_type, ns_id) {
+        return Err(-22);
+    }
+    let mut proc_ns = PROCESS_NS.lock();
+    let slot = proc_ns.entry(pid).or_default();
+    match ns_type {
+        NamespaceType::Mount => slot.mount_ns = ns_id,
+        NamespaceType::Uts => slot.uts_ns = ns_id,
+        NamespaceType::Ipc => slot.ipc_ns = ns_id,
+        NamespaceType::Pid => slot.pid_ns = ns_id,
+        NamespaceType::Net => slot.net_ns = ns_id,
+        NamespaceType::User => slot.user_ns = ns_id,
+        NamespaceType::Cgroup => slot.cgroup_ns = ns_id,
+        NamespaceType::Time => slot.time_ns = ns_id,
+    }
+    Ok(())
+}
+
+/// Join the namespace of `nstype` currently attached to `target_pid`.
+pub fn setns_from_process(pid: u32, target_pid: u32, nstype: u32) -> Result<(), i32> {
+    let ns_type = ns_type_from_flag(nstype).ok_or(-22i32)?;
+    let ns_id = ns_id_of(target_pid, ns_type);
+    setns(pid, ns_id, nstype)
+}
+
+/// Synthetic fd path encoding a namespace (`ns:<CLONE_NEW* flag>:<id>`).
+pub fn ns_fd_path(ns_type: NamespaceType, ns_id: u64) -> String {
+    alloc::format!("ns:{}:{}", ns_type as u32, ns_id)
+}
+
+/// Parse [`ns_fd_path`] back into `(nstype flag, ns id)`.
+pub fn parse_ns_fd_path(path: &str) -> Option<(u32, u64)> {
+    let rest = path.strip_prefix("ns:")?;
+    let (flag_s, id_s) = rest.split_once(':')?;
+    let flag = flag_s.parse::<u32>().ok()?;
+    let id = id_s.parse::<u64>().ok()?;
+    Some((flag, id))
+}
+
+pub const GATE_T1_MARKER: &str = "GATE_T1 setns";
+const GATE_T1_OWNER: u32 = 0x0000_5401;
+const GATE_T1_JOINER: u32 = 0x0000_5402;
+
+/// Joiner `setns` into the owner's UTS ns must see the owner's hostname;
+/// the parent hostname stays unchanged.
+pub fn setns_join_self_test() -> bool {
+    inherit_namespaces(GATE_T1_OWNER, 1);
+    inherit_namespaces(GATE_T1_JOINER, 1);
+    let parent_before = gethostname(1);
+    if unshare(GATE_T1_OWNER, NamespaceType::Uts as u32).is_err() {
+        crate::serial_println!("[ns] Gate T1 FAILED: unshare");
+        return false;
+    }
+    if sethostname(GATE_T1_OWNER, "gate-t1").is_err() {
+        crate::serial_println!("[ns] Gate T1 FAILED: sethostname");
+        return false;
+    }
+    if ns_id_of(GATE_T1_JOINER, NamespaceType::Uts) != ns_id_of(1, NamespaceType::Uts) {
+        crate::serial_println!("[ns] Gate T1 FAILED: joiner not in parent uts ns");
+        return false;
+    }
+    if gethostname(GATE_T1_JOINER) == "gate-t1" {
+        crate::serial_println!("[ns] Gate T1 FAILED: joiner already sees owner hostname");
+        return false;
+    }
+    let owner_uts = ns_id_of(GATE_T1_OWNER, NamespaceType::Uts);
+    let path = ns_fd_path(NamespaceType::Uts, owner_uts);
+    let Some((flag, id)) = parse_ns_fd_path(&path) else {
+        crate::serial_println!("[ns] Gate T1 FAILED: parse ns fd path");
+        return false;
+    };
+    if flag != NamespaceType::Uts as u32 || id != owner_uts {
+        crate::serial_println!("[ns] Gate T1 FAILED: ns fd path round-trip");
+        return false;
+    }
+    if setns_from_process(GATE_T1_JOINER, GATE_T1_OWNER, NamespaceType::Uts as u32).is_err() {
+        crate::serial_println!("[ns] Gate T1 FAILED: setns");
+        return false;
+    }
+    let joiner = gethostname(GATE_T1_JOINER);
+    let owner = gethostname(GATE_T1_OWNER);
+    let parent_after = gethostname(1);
+    if joiner != "gate-t1"
+        || owner != "gate-t1"
+        || parent_after != parent_before
+        || ns_id_of(GATE_T1_JOINER, NamespaceType::Uts)
+            != ns_id_of(GATE_T1_OWNER, NamespaceType::Uts)
+        || ns_id_of(GATE_T1_JOINER, NamespaceType::Uts) == ns_id_of(1, NamespaceType::Uts)
+    {
+        crate::serial_println!(
+            "[ns] Gate T1 FAILED: joiner={} owner={} parent={} was={}",
+            joiner,
+            owner,
+            parent_after,
+            parent_before
+        );
+        return false;
+    }
+    crate::serial_println!("[ns] {}", GATE_T1_MARKER);
     true
 }

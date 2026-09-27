@@ -158,6 +158,14 @@ fn test_time_namespace_isolation() {
 }
 
 #[test_case]
+fn test_setns_joins_uts_namespace() {
+    assert!(
+        crate::namespaces::setns_join_self_test(),
+        "setns into a child's UTS ns must see the child's hostname; parent unchanged"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),
