@@ -33,8 +33,18 @@ pub fn sys_uname(buf_ptr: u64) -> SyscallResult {
     fill(&mut u.release, "0.1.0-knoxos");
     fill(&mut u.version, "#1 SMP PREEMPT_DYNAMIC");
     fill(&mut u.machine, "x86_64");
-    unsafe {
-        core::ptr::write(buf_ptr as *mut Utsname, u);
+    if buf_ptr != 0 {
+        let pid = crate::scheduler::current_pid().unwrap_or(1);
+        let bytes = unsafe {
+            core::slice::from_raw_parts(
+                (&u as *const Utsname).cast::<u8>(),
+                core::mem::size_of::<Utsname>(),
+            )
+        };
+        unsafe {
+            core::ptr::copy_nonoverlapping(bytes.as_ptr(), buf_ptr as *mut u8, bytes.len());
+        }
+        crate::vmm::write_user_memory(pid, buf_ptr, bytes);
     }
     Ok(0)
 }

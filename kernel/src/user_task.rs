@@ -546,6 +546,12 @@ extern "C" fn gate_boot_body() {
     run_gate_aa2();
     run_gate_aa3();
     run_gate_aa4();
+    run_gate_ab2();
+    run_gate_ab3();
+    run_gate_ab4();
+    run_gate_ac2();
+    run_gate_ac3();
+    run_gate_ac4();
 }
 
 fn run_gate_b3() {
@@ -1450,6 +1456,92 @@ fn run_gate_aa4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AA4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_AB2_MARKER: &str = "GATE_AB2 dup2";
+pub const GATE_AB3_MARKER: &str = "GATE_AB3 uname";
+pub const GATE_AB4_MARKER: &str = "GATE_AB4 enosys";
+
+fn run_gate_ab2() {
+    serial_println!("[user_task] Gate AB2: dup2 then read via new fd");
+    let elf = crate::init::dup2_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "dup2-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AB2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ab3() {
+    serial_println!("[user_task] Gate AB3: uname sysname KnoxOS");
+    let elf = crate::init::uname_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "uname-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AB3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ab4() {
+    serial_println!("[user_task] Gate AB4: sysfs returns ENOSYS");
+    let elf = crate::init::sysfs_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sysfs-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AB4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_AC2_MARKER: &str = "GATE_AC2 pread64";
+pub const GATE_AC3_MARKER: &str = "GATE_AC3 getuid";
+pub const GATE_AC4_MARKER: &str = "GATE_AC4 enosys";
+
+fn run_gate_ac2() {
+    serial_println!("[user_task] Gate AC2: pread64 at offset without moving pos");
+    let elf = crate::init::pread64_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "pread64-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AC2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ac3() {
+    serial_println!("[user_task] Gate AC3: getuid is 0");
+    let elf = crate::init::getuid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getuid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AC3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ac4() {
+    serial_println!("[user_task] Gate AC4: vhangup returns ENOSYS");
+    let elf = crate::init::vhangup_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "vhangup-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AC4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

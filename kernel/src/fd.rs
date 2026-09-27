@@ -959,3 +959,74 @@ pub fn close_cloexec_fds(pid: u32) {
         }
     }
 }
+
+pub const GATE_AC1_MARKER: &str = "GATE_AC1 fcntl";
+const GATE_AC1_PATH: &str = "/tmp/gate_ac1";
+
+/// `F_SETFD`/`F_GETFD` toggle `FD_CLOEXEC`; `F_DUPFD` (`dup`) returns a
+/// distinct fd and clears cloexec on the copy.
+pub fn fcntl_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AC1_PATH);
+        if !vfs.write_file(GATE_AC1_PATH, b"x") {
+            serial_println!("[fd] Gate AC1 FAILED: write {}", GATE_AC1_PATH);
+            return false;
+        }
+    }
+    let mut tables = PROCESS_FD_TABLES.lock();
+    let Some(table) = tables.get_mut(&0) else {
+        serial_println!("[fd] Gate AC1 FAILED: no pid 0 fd table");
+        return false;
+    };
+    let fd = match table.open(
+        GATE_AC1_PATH,
+        OpenFlags(OpenFlags::O_RDWR),
+        FileType::Regular,
+    ) {
+        Ok(fd) => fd,
+        Err(e) => {
+            serial_println!("[fd] Gate AC1 FAILED: open {}", e);
+            return false;
+        }
+    };
+    if table.get_cloexec(fd) {
+        serial_println!("[fd] Gate AC1 FAILED: cloexec already set");
+        return false;
+    }
+    table.set_cloexec(fd, true);
+    if !table.get_cloexec(fd) {
+        serial_println!("[fd] Gate AC1 FAILED: F_SETFD");
+        return false;
+    }
+    let new_fd = match table.dup(fd) {
+        Ok(n) => n,
+        Err(e) => {
+            serial_println!("[fd] Gate AC1 FAILED: F_DUPFD {}", e);
+            return false;
+        }
+    };
+    if new_fd == fd {
+        serial_println!("[fd] Gate AC1 FAILED: dup same fd");
+        return false;
+    }
+    if table.get(new_fd).is_none() {
+        serial_println!("[fd] Gate AC1 FAILED: dup missing");
+        return false;
+    }
+    if table.get_cloexec(new_fd) {
+        serial_println!("[fd] Gate AC1 FAILED: dup kept cloexec");
+        return false;
+    }
+    let _ = table.close(fd);
+    let _ = table.close(new_fd);
+    drop(tables);
+    serial_println!("[fd] {}", GATE_AC1_MARKER);
+    true
+}
+
+/// Initialize FD tables and run the live-path fcntl self-test.
+pub fn init() {
+    serial_println!("[KnoxOS] File descriptor tables initialized");
+    let _ = fcntl_self_test();
+}

@@ -674,6 +674,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize FIFO (named pipes)
     fifo::init();
 
+    // FD tables exist from first use; prove fcntl CLOEXEC / DUPFD here.
+    fd::init();
+
     // Initialize audit logging
     audit::init();
 

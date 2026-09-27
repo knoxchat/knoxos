@@ -222,6 +222,22 @@ fn test_mkfifo_roundtrip() {
 }
 
 #[test_case]
+fn test_getdents_lists_child() {
+    assert!(
+        crate::vfs::getdents_self_test(),
+        "list_dir must include a file created in the directory"
+    );
+}
+
+#[test_case]
+fn test_fcntl_cloexec_dup() {
+    assert!(
+        crate::fd::fcntl_self_test(),
+        "fcntl F_SETFD/F_GETFD must toggle cloexec; dup must clear it"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

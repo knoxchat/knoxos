@@ -29,7 +29,8 @@ pub fn sys_iopl(level: i32) -> SyscallResult {
 }
 
 pub fn sys_vhangup() -> SyscallResult {
-    Ok(0)
+    crate::serial_println!("[KnoxOS] vhangup denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_modify_ldt(func: i32, ptr: u64, bytecount: u64) -> SyscallResult {
@@ -46,5 +47,6 @@ pub fn sys_acct(filename_ptr: u64) -> SyscallResult {
 
 pub fn sys_sysfs(option: i32, arg1: u64, arg2: u64) -> SyscallResult {
     let _ = (option, arg1, arg2);
-    Ok(0)
+    crate::serial_println!("[KnoxOS] sysfs denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }

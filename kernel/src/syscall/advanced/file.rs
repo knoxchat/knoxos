@@ -15,13 +15,25 @@ pub fn sys_pread64(fd: u64, buf_ptr: u64, count: u64, offset: i64) -> SyscallRes
         .lseek(fd as i32, 0, crate::fd::SeekFrom::Current)
         .unwrap_or(0);
     let _ = fd_table.lseek(fd as i32, offset, crate::fd::SeekFrom::Start);
-    let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, count as usize) };
+    let ncap = count as usize;
+    let mut tmp = alloc::vec![0u8; ncap];
     let result = fd_table
-        .read(fd as i32, buf)
+        .read(fd as i32, &mut tmp)
         .map(|n| n as u64)
         .map_err(|_| SyscallError::IoError);
     let _ = fd_table.lseek(fd as i32, saved as i64, crate::fd::SeekFrom::Start);
-    result
+    if let Ok(n) = result {
+        let n = n as usize;
+        if buf_ptr != 0 && n > 0 {
+            unsafe {
+                core::ptr::copy_nonoverlapping(tmp.as_ptr(), buf_ptr as *mut u8, n);
+            }
+            crate::vmm::write_user_memory(pid, buf_ptr, &tmp[..n]);
+        }
+        Ok(n as u64)
+    } else {
+        result
+    }
 }
 
 pub fn sys_pwrite64(fd: u64, buf_ptr: u64, count: u64, offset: i64) -> SyscallResult {

@@ -840,6 +840,7 @@ pub fn init() {
     let _ = hardlink_self_test();
     let _ = chmod_self_test();
     let _ = rmdir_self_test();
+    let _ = getdents_self_test();
 }
 
 pub const GATE_X1_MARKER: &str = "GATE_X1 hardlink";
@@ -1005,6 +1006,35 @@ pub fn rmdir_self_test() -> bool {
         }
     }
     crate::serial_println!("[vfs] {}", GATE_Z1_MARKER);
+    true
+}
+
+pub const GATE_AB1_MARKER: &str = "GATE_AB1 getdents";
+const GATE_AB1_DIR: &str = "/tmp/gate_ab1";
+const GATE_AB1_CHILD: &str = "/tmp/gate_ab1/x";
+
+/// `list_dir` (the `getdents64` data plane) must show a file created in the
+/// directory.
+pub fn getdents_self_test() -> bool {
+    {
+        let mut vfs = VFS.lock();
+        let _ = vfs.unlink(GATE_AB1_CHILD);
+        let _ = vfs.rmdir(GATE_AB1_DIR);
+        if vfs.mkdir(GATE_AB1_DIR, 0o755).is_err() {
+            crate::serial_println!("[vfs] Gate AB1 FAILED: mkdir {}", GATE_AB1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_AB1_CHILD, b"x") {
+            crate::serial_println!("[vfs] Gate AB1 FAILED: write {}", GATE_AB1_CHILD);
+            return false;
+        }
+        let entries = vfs.list_dir(GATE_AB1_DIR).unwrap_or_default();
+        if !entries.iter().any(|n| n == "x") {
+            crate::serial_println!("[vfs] Gate AB1 FAILED: list_dir {:?}", entries);
+            return false;
+        }
+    }
+    crate::serial_println!("[vfs] {}", GATE_AB1_MARKER);
     true
 }
 
