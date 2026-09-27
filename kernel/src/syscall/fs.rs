@@ -219,8 +219,17 @@ pub fn sys_fstat(fd: i32, stat_buf: u64) -> SyscallResult {
     let stat = fd_table
         .fstat(fd)
         .map_err(|_| SyscallError::BadFileDescriptor)?;
-    unsafe {
-        core::ptr::write(stat_buf as *mut crate::fd::FileStat, stat);
+    if stat_buf != 0 {
+        let bytes = unsafe {
+            core::slice::from_raw_parts(
+                (&stat as *const crate::fd::FileStat).cast::<u8>(),
+                core::mem::size_of::<crate::fd::FileStat>(),
+            )
+        };
+        unsafe {
+            core::ptr::copy_nonoverlapping(bytes.as_ptr(), stat_buf as *mut u8, bytes.len());
+        }
+        crate::vmm::write_user_memory(pid, stat_buf, bytes);
     }
     Ok(0)
 }
@@ -582,17 +591,17 @@ fn truncate_path(path: &str, length: usize) -> SyscallResult {
     Ok(0)
 }
 
-pub fn sys_truncate(path_or_fd: u64, length: usize) -> SyscallResult {
-    if let Some(path) = unsafe { read_user_string(path_or_fd) } {
-        let path = vfs_path_write(&path);
-        return truncate_path(&path, length);
-    }
+pub fn sys_truncate(path_ptr: u64, length: usize) -> SyscallResult {
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = vfs_path_write(&path);
+    truncate_path(&path, length)
+}
+
+pub fn sys_ftruncate(fd: i32, length: usize) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let tables = crate::fd::PROCESS_FD_TABLES.lock();
     let fd_table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
-    let file = fd_table
-        .get(path_or_fd as i32)
-        .ok_or(SyscallError::BadFileDescriptor)?;
+    let file = fd_table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
     let file_path = file.path.clone();
     drop(tables);
     truncate_path(&file_path, length)

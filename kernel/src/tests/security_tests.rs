@@ -238,6 +238,38 @@ fn test_fcntl_cloexec_dup() {
 }
 
 #[test_case]
+fn test_fstat_size() {
+    assert!(
+        crate::fd::fstat_self_test(),
+        "fstat must report the written VFS file size"
+    );
+}
+
+#[test_case]
+fn test_writev_scatter() {
+    assert!(
+        crate::splice::writev_self_test(),
+        "writev must write two iovecs that read back as xy"
+    );
+}
+
+#[test_case]
+fn test_readv_gather() {
+    assert!(
+        crate::splice::readv_self_test(),
+        "readv must fill two iovecs from xy"
+    );
+}
+
+#[test_case]
+fn test_fsync_fd() {
+    assert!(
+        crate::syscall::fsync_self_test(),
+        "fsync must succeed on a VFS fd and return EBADF for a bad fd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

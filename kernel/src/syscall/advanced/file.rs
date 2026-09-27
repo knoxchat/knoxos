@@ -38,6 +38,14 @@ pub fn sys_pread64(fd: u64, buf_ptr: u64, count: u64, offset: i64) -> SyscallRes
 
 pub fn sys_pwrite64(fd: u64, buf_ptr: u64, count: u64, offset: i64) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let ncap = count as usize;
+    let mut tmp = alloc::vec![0u8; ncap];
+    if buf_ptr != 0 && ncap > 0 {
+        unsafe {
+            core::ptr::copy_nonoverlapping(buf_ptr as *const u8, tmp.as_mut_ptr(), ncap);
+        }
+        crate::vmm::read_user_memory(pid, buf_ptr, &mut tmp);
+    }
     let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
     let fd_table = tables
         .get_mut(&pid)
@@ -47,9 +55,8 @@ pub fn sys_pwrite64(fd: u64, buf_ptr: u64, count: u64, offset: i64) -> SyscallRe
         .lseek(fd as i32, 0, crate::fd::SeekFrom::Current)
         .unwrap_or(0);
     let _ = fd_table.lseek(fd as i32, offset, crate::fd::SeekFrom::Start);
-    let buf = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, count as usize) };
     let result = fd_table
-        .write(fd as i32, buf)
+        .write(fd as i32, &tmp)
         .map(|n| n as u64)
         .map_err(|_| SyscallError::IoError);
     let _ = fd_table.lseek(fd as i32, saved as i64, crate::fd::SeekFrom::Start);
@@ -135,6 +142,66 @@ pub fn sys_syncfs(fd: i32) -> SyscallResult {
 pub fn sys_sync_file_range(fd: i32, offset: i64, nbytes: i64, flags: u32) -> SyscallResult {
     let _ = (fd, offset, nbytes, flags);
     Ok(0)
+}
+
+pub const GATE_AG1_MARKER: &str = "GATE_AG1 fsync";
+const GATE_AG1_PATH: &str = "/tmp/gate_ag1";
+
+/// `fsync` on a written VFS fd succeeds; a bad fd returns EBADF.
+pub fn fsync_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AG1_PATH);
+        if !vfs.write_file(GATE_AG1_PATH, b"x") {
+            crate::serial_println!("[file] Gate AG1 FAILED: write {}", GATE_AG1_PATH);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let fd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[file] Gate AG1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AG1_PATH,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::Regular,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[file] Gate AG1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    match sys_fsync(fd) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[file] Gate AG1 FAILED: fsync {:?}", other);
+            return false;
+        }
+    }
+    match sys_fsync(-1) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[file] Gate AG1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(fd);
+        }
+    }
+    crate::serial_println!("[file] {}", GATE_AG1_MARKER);
+    true
 }
 
 // ── getdents (old, non-64 version) ──────────────────────────────────

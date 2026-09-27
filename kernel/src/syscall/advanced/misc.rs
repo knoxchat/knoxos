@@ -13,6 +13,7 @@ pub fn sys_sysctl_old(args_ptr: u64) -> SyscallResult {
 
 pub fn sys_lookup_dcookie(cookie: u64, buf: u64, len: usize) -> SyscallResult {
     let _ = (cookie, buf, len);
+    crate::serial_println!("[KnoxOS] lookup_dcookie denied (ENOSYS)");
     Err(SyscallError::NotImplemented)
 }
 
@@ -48,5 +49,17 @@ pub fn sys_acct(filename_ptr: u64) -> SyscallResult {
 pub fn sys_sysfs(option: i32, arg1: u64, arg2: u64) -> SyscallResult {
     let _ = (option, arg1, arg2);
     crate::serial_println!("[KnoxOS] sysfs denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
+}
+
+pub fn sys_pkey_alloc(flags: u32, access_rights: u32) -> SyscallResult {
+    let _ = (flags, access_rights);
+    crate::serial_println!("[KnoxOS] pkey_alloc denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
+}
+
+pub fn sys_pkey_free(pkey: i32) -> SyscallResult {
+    let _ = pkey;
+    crate::serial_println!("[KnoxOS] pkey_free denied (ENOSYS)");
     Err(SyscallError::NotImplemented)
 }

@@ -215,6 +215,159 @@ pub fn pwritev(fd: i32, iovs: &[(u64, usize)], _offset: i64) -> Result<usize, i3
     writev(fd, iovs)
 }
 
+pub const GATE_AE1_MARKER: &str = "GATE_AE1 writev";
+const GATE_AE1_PATH: &str = "/tmp/gate_ae1";
+
+/// Scatter-gather `writev` writes two iovecs into a VFS file.
+pub fn writev_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AE1_PATH);
+        if !vfs.write_file(GATE_AE1_PATH, &[]) {
+            serial_println!("[splice] Gate AE1 FAILED: write {}", GATE_AE1_PATH);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let fd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                serial_println!("[splice] Gate AE1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AE1_PATH,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::Regular,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                serial_println!("[splice] Gate AE1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let x = [b'x'];
+    let y = [b'y'];
+    let iovs = [(x.as_ptr() as u64, 1usize), (y.as_ptr() as u64, 1usize)];
+    match writev(fd, &iovs) {
+        Ok(2) => {}
+        other => {
+            serial_println!("[splice] Gate AE1 FAILED: writev {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let Some(table) = tables.get_mut(&pid) else {
+            serial_println!("[splice] Gate AE1 FAILED: fd table gone");
+            return false;
+        };
+        if table.lseek(fd, 0, crate::fd::SeekFrom::Start).is_err() {
+            serial_println!("[splice] Gate AE1 FAILED: lseek");
+            return false;
+        }
+        let mut buf = [0u8; 2];
+        match table.read(fd, &mut buf) {
+            Ok(2) if buf == *b"xy" => {}
+            other => {
+                serial_println!("[splice] Gate AE1 FAILED: read {:?}", other);
+                return false;
+            }
+        }
+        let _ = table.close(fd);
+    }
+    serial_println!("[splice] {}", GATE_AE1_MARKER);
+    true
+}
+
+pub const GATE_AF1_MARKER: &str = "GATE_AF1 readv";
+const GATE_AF1_PATH: &str = "/tmp/gate_af1";
+
+/// Scatter-gather `readv` fills two iovecs from a VFS file.
+pub fn readv_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AF1_PATH);
+        if !vfs.write_file(GATE_AF1_PATH, &[]) {
+            serial_println!("[splice] Gate AF1 FAILED: write {}", GATE_AF1_PATH);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let fd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                serial_println!("[splice] Gate AF1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AF1_PATH,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::Regular,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                serial_println!("[splice] Gate AF1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let Some(table) = tables.get_mut(&pid) else {
+            serial_println!("[splice] Gate AF1 FAILED: fd table gone");
+            return false;
+        };
+        match table.write(fd, b"xy") {
+            Ok(2) => {}
+            other => {
+                serial_println!("[splice] Gate AF1 FAILED: write {:?}", other);
+                return false;
+            }
+        }
+        if table.lseek(fd, 0, crate::fd::SeekFrom::Start).is_err() {
+            serial_println!("[splice] Gate AF1 FAILED: lseek");
+            return false;
+        }
+    }
+    let mut x = [0u8; 1];
+    let mut y = [0u8; 1];
+    let mut iovs = [
+        (x.as_mut_ptr() as u64, 1usize),
+        (y.as_mut_ptr() as u64, 1usize),
+    ];
+    match readv(fd, &mut iovs) {
+        Ok(2) => {}
+        other => {
+            serial_println!("[splice] Gate AF1 FAILED: readv {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(fd);
+        }
+    }
+    if x != [b'x'] || y != [b'y'] {
+        serial_println!("[splice] Gate AF1 FAILED: got {:?} {:?}", x, y);
+        return false;
+    }
+    serial_println!("[splice] {}", GATE_AF1_MARKER);
+    true
+}
+
 pub fn init() {
     serial_println!("[KnoxOS] Zero-copy I/O (splice/sendfile/readv/writev) initialized");
+    let _ = writev_self_test();
+    let _ = readv_self_test();
 }

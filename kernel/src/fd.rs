@@ -657,6 +657,7 @@ impl FdTable {
     /// Get file status
     pub fn fstat(&self, fd: Fd) -> Result<FileStat, i32> {
         let file = self.files.get(&fd).ok_or(-9i32)?; // EBADF
+        let size = fstat_logical_size(file);
         Ok(FileStat {
             st_dev: 0,
             st_ino: file.inode,
@@ -675,9 +676,9 @@ impl FdTable {
             st_uid: 0,
             st_gid: 0,
             st_rdev: 0,
-            st_size: file.size as u64,
+            st_size: size,
             st_blksize: 4096,
-            st_blocks: (file.size.div_ceil(512)) as u64,
+            st_blocks: size.div_ceil(512),
             st_atime: 0,
             st_mtime: 0,
             st_ctime: 0,
@@ -960,6 +961,21 @@ pub fn close_cloexec_fds(pid: u32) {
     }
 }
 
+fn fstat_logical_size(file: &OpenFile) -> u64 {
+    if file.inode != 0 {
+        return crate::page_cache::logical_size(file.inode).max(file.size as u64);
+    }
+    if file.file_type == FileType::Regular {
+        return crate::vfs::VFS
+            .lock()
+            .stat(&file.path)
+            .map(|s| s.size)
+            .unwrap_or(file.size as u64)
+            .max(file.size as u64);
+    }
+    file.size as u64
+}
+
 pub const GATE_AC1_MARKER: &str = "GATE_AC1 fcntl";
 const GATE_AC1_PATH: &str = "/tmp/gate_ac1";
 
@@ -1025,8 +1041,56 @@ pub fn fcntl_self_test() -> bool {
     true
 }
 
-/// Initialize FD tables and run the live-path fcntl self-test.
+pub const GATE_AD1_MARKER: &str = "GATE_AD1 fstat";
+const GATE_AD1_PATH: &str = "/tmp/gate_ad1";
+
+/// `fstat` on a VFS file reports the written size.
+pub fn fstat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AD1_PATH);
+        if !vfs.write_file(GATE_AD1_PATH, b"xxxxxxxx") {
+            serial_println!("[fd] Gate AD1 FAILED: write {}", GATE_AD1_PATH);
+            return false;
+        }
+    }
+    let mut tables = PROCESS_FD_TABLES.lock();
+    let Some(table) = tables.get_mut(&0) else {
+        serial_println!("[fd] Gate AD1 FAILED: no pid 0 fd table");
+        return false;
+    };
+    let fd = match table.open(
+        GATE_AD1_PATH,
+        OpenFlags(OpenFlags::O_RDONLY),
+        FileType::Regular,
+    ) {
+        Ok(fd) => fd,
+        Err(e) => {
+            serial_println!("[fd] Gate AD1 FAILED: open {}", e);
+            return false;
+        }
+    };
+    let stat = match table.fstat(fd) {
+        Ok(s) => s,
+        Err(e) => {
+            serial_println!("[fd] Gate AD1 FAILED: fstat {}", e);
+            return false;
+        }
+    };
+    let _ = table.close(fd);
+    drop(tables);
+    if stat.st_size != 8 {
+        serial_println!("[fd] Gate AD1 FAILED: st_size {}", stat.st_size);
+        return false;
+    }
+    serial_println!("[fd] {}", GATE_AD1_MARKER);
+    true
+}
+
+/// Initialize FD tables and run the live-path fcntl/fstat/fsync self-tests.
 pub fn init() {
     serial_println!("[KnoxOS] File descriptor tables initialized");
     let _ = fcntl_self_test();
+    let _ = fstat_self_test();
+    let _ = crate::syscall::fsync_self_test();
 }

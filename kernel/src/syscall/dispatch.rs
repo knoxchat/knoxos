@@ -218,7 +218,8 @@ pub fn handle_syscall(
         SyscallNumber::Flock => io::sys_flock(arg1 as i32, arg2 as i32),
         SyscallNumber::Fsync => advanced::sys_fsync(arg1 as i32),
         SyscallNumber::Fdatasync => advanced::sys_fdatasync(arg1 as i32),
-        SyscallNumber::Truncate | SyscallNumber::Ftruncate => fs::sys_truncate(arg1, arg2 as usize),
+        SyscallNumber::Truncate => fs::sys_truncate(arg1, arg2 as usize),
+        SyscallNumber::Ftruncate => fs::sys_ftruncate(arg1 as i32, arg2 as usize),
         SyscallNumber::Getdents => advanced::sys_getdents(arg1 as i32, arg2, arg3 as u32),
         SyscallNumber::Getcwd => fs::sys_getcwd(arg1, arg2 as usize),
         SyscallNumber::Chdir => fs::sys_chdir(arg1),
@@ -417,7 +418,10 @@ pub fn handle_syscall(
                 Err(SyscallError::InvalidArgument)
             }
         }
-        SyscallNumber::Uselib => Err(SyscallError::NotImplemented),
+        SyscallNumber::Uselib => {
+            serial_println!("[KnoxOS] uselib denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
+        }
         SyscallNumber::Personality => advanced::sys_personality(arg1),
         SyscallNumber::Ustat => Err(SyscallError::NotImplemented),
         SyscallNumber::Statfs | SyscallNumber::Fstatfs => fs::sys_statfs(arg1, arg2),
@@ -858,7 +862,8 @@ pub fn handle_syscall(
         SyscallNumber::Pwritev2 => {
             advanced::sys_pwritev2(arg1 as i32, arg2, arg3 as i32, arg4 as i64, arg5 as i32)
         }
-        SyscallNumber::PkeyAlloc | SyscallNumber::PkeyFree => Err(SyscallError::NotImplemented),
+        SyscallNumber::PkeyAlloc => advanced::sys_pkey_alloc(arg1 as u32, arg2 as u32),
+        SyscallNumber::PkeyFree => advanced::sys_pkey_free(arg1 as i32),
         SyscallNumber::Statx => {
             advanced::sys_statx(arg1 as i32, arg2, arg3 as i32, arg4 as u32, arg5)
         }
@@ -904,7 +909,10 @@ pub fn handle_syscall(
         SyscallNumber::LandlockRestrictSelf => {
             advanced::sys_landlock_restrict_self(arg1 as i32, arg2 as u32)
         }
-        SyscallNumber::MemfdSecret => Err(SyscallError::NotImplemented),
+        SyscallNumber::MemfdSecret => {
+            serial_println!("[KnoxOS] memfd_secret denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
+        }
         SyscallNumber::ProcessMrelease => Err(SyscallError::NotImplemented),
         SyscallNumber::FutexWaitv => {
             advanced::sys_futex_waitv(arg1, arg2 as u32, arg3 as u32, arg4, arg5 as u32)
