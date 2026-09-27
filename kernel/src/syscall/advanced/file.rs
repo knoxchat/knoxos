@@ -59,16 +59,15 @@ pub fn sys_fallocate(fd: i32, mode: i32, offset: i64, len: i64) -> SyscallResult
 
     let target_size = (offset + len) as usize;
     // FALLOC_FL_KEEP_SIZE (0x01) means don't change file size
-    if mode & 0x01 == 0 {
-        let mut vfs = crate::vfs::VFS.lock();
-        if let Some(ino) = vfs.resolve_path(&path) {
-            if let Some(inode) = vfs.get_inode_mut(ino) {
-                if inode.data.len() < target_size {
-                    inode.data.resize(target_size, 0);
-                    inode.size = target_size as u64;
-                }
-            }
-        }
+    let mut vfs = crate::vfs::VFS.lock();
+    let ino = vfs.resolve_path(&path).ok_or(SyscallError::FileNotFound)?;
+    let inode = vfs.get_inode_mut(ino).ok_or(SyscallError::FileNotFound)?;
+    if mode & 0x01 == 0 && inode.data.len() < target_size {
+        inode.data.resize(target_size, 0);
+        inode.size = target_size as u64;
+        let ts = crate::vfs::now_timestamp();
+        inode.mtime = ts;
+        inode.ctime = ts;
     }
     Ok(0)
 }
@@ -206,15 +205,58 @@ pub fn sys_fchownat(dirfd: i32, path_ptr: u64, uid: u32, gid: u32, flags: i32) -
 
 pub fn sys_utimensat(dirfd: i32, path_ptr: u64, times_ptr: u64, flags: i32) -> SyscallResult {
     let _ = (dirfd, flags);
-    // Validate path exists if provided
-    if path_ptr != 0 {
-        let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-        let vfs = crate::vfs::VFS.lock();
-        vfs.resolve_path(&path).ok_or(SyscallError::FileNotFound)?;
-    }
-    // Accept timestamp changes (in-memory VFS doesn't track timestamps)
-    let _ = times_ptr;
-    Ok(0)
+    let path = if path_ptr != 0 {
+        unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?
+    } else {
+        return Err(SyscallError::InvalidArgument);
+    };
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+
+    const UTIME_NOW: i64 = 0x3fff_ffff;
+    const UTIME_OMIT: i64 = 0x3fff_fffe;
+
+    let (atime, mtime) = if times_ptr == 0 {
+        let now = crate::vfs::now_timestamp();
+        (Some(now), Some(now))
+    } else {
+        let mut buf = [0u8; 32];
+        unsafe {
+            core::ptr::copy_nonoverlapping(times_ptr as *const u8, buf.as_mut_ptr(), 32);
+        }
+        crate::vmm::read_user_memory(pid, times_ptr, &mut buf);
+        let i64_at = |off: usize| {
+            let mut b = [0u8; 8];
+            b.copy_from_slice(&buf[off..off + 8]);
+            i64::from_ne_bytes(b)
+        };
+        let a_sec = i64_at(0);
+        let a_nsec = i64_at(8);
+        let m_sec = i64_at(16);
+        let m_nsec = i64_at(24);
+        let now = crate::vfs::now_timestamp();
+        let atime = if a_nsec == UTIME_OMIT {
+            None
+        } else if a_nsec == UTIME_NOW {
+            Some(now)
+        } else {
+            Some(a_sec)
+        };
+        let mtime = if m_nsec == UTIME_OMIT {
+            None
+        } else if m_nsec == UTIME_NOW {
+            Some(now)
+        } else {
+            Some(m_sec)
+        };
+        (atime, mtime)
+    };
+
+    crate::vfs::VFS
+        .lock()
+        .set_times(&path, atime, mtime)
+        .map(|_| 0u64)
+        .map_err(|_| SyscallError::FileNotFound)
 }
 
 // ── faccessat / faccessat2 ──────────────────────────────────────────
@@ -271,6 +313,9 @@ pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: i32, mask: u32, statxbuf: u64
         buf[32..40].copy_from_slice(&s.ino.to_ne_bytes());
         buf[40..48].copy_from_slice(&size.to_ne_bytes());
         buf[48..56].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
+        buf[64..72].copy_from_slice(&s.atime.to_ne_bytes());
+        buf[96..104].copy_from_slice(&s.ctime.to_ne_bytes());
+        buf[112..120].copy_from_slice(&s.mtime.to_ne_bytes());
         unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), statxbuf as *mut u8, buf.len());
         }

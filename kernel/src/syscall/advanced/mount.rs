@@ -84,20 +84,21 @@ pub fn sys_pivot_root(new_root_ptr: u64, put_old_ptr: u64) -> SyscallResult {
     let new_root =
         unsafe { read_user_string(new_root_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let put_old = unsafe { read_user_string(put_old_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-    serial_println!("[KnoxOS] pivot_root({}, {})", new_root, put_old);
-
-    // Verify both paths exist
-    let vfs = crate::vfs::VFS.lock();
-    vfs.resolve_path(&new_root)
-        .ok_or(SyscallError::FileNotFound)?;
-    vfs.resolve_path(&put_old)
-        .ok_or(SyscallError::FileNotFound)?;
-    drop(vfs);
-
-    // Update current process root to new_root
     let pid = crate::scheduler::current_pid().unwrap_or(1);
-    crate::process::PROCESS_TABLE.lock().chdir(pid, &new_root);
-    Ok(0)
+    match crate::process::pivot_root(pid, &new_root, &put_old) {
+        Ok(()) => {
+            serial_println!(
+                "[KnoxOS] pivot_root({}, {}) for PID {}",
+                new_root,
+                put_old,
+                pid
+            );
+            Ok(0)
+        }
+        Err(-2) => Err(SyscallError::FileNotFound),
+        Err(-20) => Err(SyscallError::NotDirectory),
+        _ => Err(SyscallError::InvalidArgument),
+    }
 }
 
 // ── mount / umount2 (Linux standard) ────────────────────────────────

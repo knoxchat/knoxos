@@ -528,6 +528,9 @@ extern "C" fn gate_boot_body() {
     run_gate_u2();
     run_gate_u3();
     run_gate_u4();
+    run_gate_v2();
+    run_gate_v3();
+    run_gate_v4();
 }
 
 fn run_gate_b3() {
@@ -1174,6 +1177,49 @@ fn run_gate_u4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate U4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_V2_MARKER: &str = "GATE_V2 fallocate";
+pub const GATE_V3_MARKER: &str = "GATE_V3 utimensat";
+pub const GATE_V4_MARKER: &str = "GATE_V4 enosys";
+
+fn run_gate_v2() {
+    serial_println!("[user_task] Gate V2: fallocate then statx size");
+    let elf = crate::init::fallocate_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "fallocate-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate V2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_v3() {
+    serial_println!("[user_task] Gate V3: utimensat then statx mtime");
+    let elf = crate::init::utimensat_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "utimensat-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate V3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_v4() {
+    serial_println!("[user_task] Gate V4: keyctl returns ENOSYS");
+    let elf = crate::init::keyctl_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "keyctl-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate V4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

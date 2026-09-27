@@ -640,11 +640,10 @@ pub fn handle_syscall(
         // ── Waitid, keys, ioprio (247–260) ─────────────────────────
         // ════════════════════════════════════════════════════════════
         SyscallNumber::Waitid => process::sys_waitid(arg1 as i32, arg2 as u32, arg3, arg4 as i32),
-        SyscallNumber::AddKey => {
-            advanced::sys_add_key(arg1, arg2, arg3, arg4 as usize, arg5 as i32)
+        SyscallNumber::AddKey | SyscallNumber::RequestKey | SyscallNumber::Keyctl => {
+            serial_println!("[KnoxOS] keyctl denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
         }
-        SyscallNumber::RequestKey => advanced::sys_request_key(arg1, arg2, arg3, arg4 as i32),
-        SyscallNumber::Keyctl => advanced::sys_keyctl(arg1 as i32, arg2, arg3, arg4, arg5),
         SyscallNumber::IoprioSet => advanced::sys_ioprio_set(arg1 as u32, arg2 as u32, arg3 as u32),
         SyscallNumber::IoprioGet => advanced::sys_ioprio_get(arg1 as u32, arg2 as u32),
         SyscallNumber::InotifyInit | SyscallNumber::InotifyInit1 => {

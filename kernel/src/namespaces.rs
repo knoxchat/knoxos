@@ -688,6 +688,7 @@ pub fn init() {
     let _ = time_isolation_self_test();
     let _ = setns_join_self_test();
     let _ = crate::process::chroot_isolation_self_test();
+    let _ = crate::process::pivot_root_self_test();
 }
 
 pub const GATE_L2_MARKER: &str = "GATE_L2 uts ns";

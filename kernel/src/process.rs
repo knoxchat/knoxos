@@ -29,6 +29,10 @@ pub struct Process {
     pub cwd: String, // Current working directory (host VFS path)
     /// `chroot(2)` jail. Path lookups are clamped under this directory.
     pub root: String,
+    /// Previous root after `pivot_root(2)`; empty if unused.
+    pub old_root: String,
+    /// Host path where the old root is visible after `pivot_root(2)`; empty if unused.
+    pub put_old: String,
     pub priority: i8, // Nice value (-20 to 19)
     /// Whether this process has a per-process address space (VMM)
     pub has_address_space: bool,
@@ -73,6 +77,8 @@ impl ProcessTable {
             gid: 0,
             cwd: String::from("/"),
             root: String::from("/"),
+            old_root: String::new(),
+            put_old: String::new(),
             priority: 0,
             has_address_space: false,
             entry_point: 0,
@@ -89,6 +95,8 @@ impl ProcessTable {
             gid: 0,
             cwd: String::from("/"),
             root: String::from("/"),
+            old_root: String::new(),
+            put_old: String::new(),
             priority: 0,
             has_address_space: false,
             entry_point: 0,
@@ -106,6 +114,8 @@ impl ProcessTable {
             gid: 1000,
             cwd: String::from("/home/user"),
             root: String::from("/"),
+            old_root: String::new(),
+            put_old: String::new(),
             priority: 0,
             has_address_space: false,
             entry_point: 0,
@@ -131,6 +141,8 @@ impl ProcessTable {
             gid: 1000,
             cwd: String::from("/home/user"),
             root: String::from("/"),
+            old_root: String::new(),
+            put_old: String::new(),
             priority: 0,
             has_address_space: false,
             entry_point: 0,
@@ -314,6 +326,8 @@ impl ProcessTable {
             gid: parent.gid,
             cwd: parent.cwd.clone(),
             root: parent.root.clone(),
+            old_root: parent.old_root.clone(),
+            put_old: parent.put_old.clone(),
             priority: parent.priority,
             has_address_space: parent.has_address_space,
             entry_point: parent.entry_point,
@@ -417,6 +431,8 @@ pub fn exec_elf(elf_data: &[u8], name: &str, argv: &[&str], envp: &[&str]) -> Op
             gid: 1000,
             cwd: String::from("/"),
             root: String::from("/"),
+            old_root: String::new(),
+            put_old: String::new(),
             priority: 0,
             has_address_space: true,
             entry_point: 0,
@@ -557,12 +573,23 @@ fn path_components(path: &str) -> impl Iterator<Item = &str> {
 }
 
 /// Translate a process-visible path into a host VFS path, clamped under `chroot`.
+/// After `pivot_root`, paths under `put_old` remap onto the previous root.
 pub fn translate_path(pid: Pid, user_path: &str) -> String {
-    let (root, cwd) = {
+    let (root, cwd, old_root, put_old) = {
         let table = PROCESS_TABLE.lock();
         match table.get_process(pid) {
-            Some(p) => (p.root.clone(), p.cwd.clone()),
-            None => (String::from("/"), String::from("/")),
+            Some(p) => (
+                p.root.clone(),
+                p.cwd.clone(),
+                p.old_root.clone(),
+                p.put_old.clone(),
+            ),
+            None => (
+                String::from("/"),
+                String::from("/"),
+                String::new(),
+                String::new(),
+            ),
         }
     };
     let mut stack: Vec<&str> = if user_path.starts_with('/') {
@@ -583,12 +610,39 @@ pub fn translate_path(pid: Pid, user_path: &str) -> String {
             stack.push(part);
         }
     }
-    if stack.is_empty() {
+    let host = if stack.is_empty() {
         String::from("/")
     } else {
         let mut out = String::from("/");
         out.push_str(&stack.join("/"));
         out
+    };
+    remap_pivot(&host, &old_root, &put_old)
+}
+
+fn remap_pivot(host: &str, old_root: &str, put_old: &str) -> String {
+    if put_old.is_empty() {
+        return String::from(host);
+    }
+    let under = host == put_old || host.starts_with(&alloc::format!("{}/", put_old));
+    if !under {
+        return String::from(host);
+    }
+    let suffix = if host.len() == put_old.len() {
+        ""
+    } else {
+        &host[put_old.len()..]
+    };
+    if old_root == "/" {
+        if suffix.is_empty() {
+            String::from("/")
+        } else {
+            String::from(suffix)
+        }
+    } else if suffix.is_empty() {
+        String::from(old_root)
+    } else {
+        alloc::format!("{}{}", old_root, suffix)
     }
 }
 
@@ -642,6 +696,40 @@ pub fn chroot(pid: Pid, user_path: &str) -> Result<(), i32> {
     Ok(())
 }
 
+/// `pivot_root(2)`: make `new_root` the process root and expose the previous
+/// root at `put_old` (which must be a directory under `new_root`).
+pub fn pivot_root(pid: Pid, new_root_user: &str, put_old_user: &str) -> Result<(), i32> {
+    let new_host = translate_path(pid, new_root_user);
+    let put_host = translate_path(pid, put_old_user);
+    {
+        let vfs = crate::vfs::VFS.lock();
+        for host in [&new_host, &put_host] {
+            let ino = vfs.resolve_path(host).ok_or(-2i32)?;
+            let inode = vfs.get_inode(ino).ok_or(-2i32)?;
+            if inode.file_type != crate::vfs::FileType::Directory {
+                return Err(-20);
+            }
+        }
+    }
+    let under = put_host != new_host
+        && (put_host.starts_with(&alloc::format!("{}/", new_host))
+            || (new_host == "/" && put_host != "/"));
+    if !under {
+        return Err(-22);
+    }
+    let mut table = PROCESS_TABLE.lock();
+    let proc = table.get_process_mut(pid).ok_or(-3i32)?;
+    let prev_root = proc.root.clone();
+    proc.old_root = prev_root;
+    proc.put_old = put_host;
+    let cwd_under = proc.cwd == new_host || proc.cwd.starts_with(&alloc::format!("{}/", new_host));
+    if !cwd_under {
+        proc.cwd = new_host.clone();
+    }
+    proc.root = new_host;
+    Ok(())
+}
+
 pub const GATE_U1_MARKER: &str = "GATE_U1 chroot";
 const GATE_U1_PID: Pid = 0x0000_5501;
 const GATE_U1_JAIL: &str = "/tmp/gate_u1";
@@ -661,6 +749,8 @@ pub fn chroot_isolation_self_test() -> bool {
                 gid: 0,
                 cwd: String::from("/"),
                 root: String::from("/"),
+                old_root: String::new(),
+                put_old: String::new(),
                 priority: 0,
                 has_address_space: false,
                 entry_point: 0,
@@ -670,6 +760,8 @@ pub fn chroot_isolation_self_test() -> bool {
         } else if let Some(proc) = table.get_process_mut(GATE_U1_PID) {
             proc.root = String::from("/");
             proc.cwd = String::from("/");
+            proc.old_root.clear();
+            proc.put_old.clear();
         }
     }
     {
@@ -705,6 +797,79 @@ pub fn chroot_isolation_self_test() -> bool {
         return false;
     }
     crate::serial_println!("[proc] {}", GATE_U1_MARKER);
+    true
+}
+
+pub const GATE_V1_MARKER: &str = "GATE_V1 pivot_root";
+const GATE_V1_PID: Pid = 0x0000_5601;
+const GATE_V1_NEW: &str = "/tmp/gate_v1";
+const GATE_V1_INSIDE: &str = "/tmp/gate_v1/ok";
+const GATE_V1_OLD: &str = "/tmp/gate_v1/old";
+
+/// Child `pivot_root` must jail `/` at `new_root`, keep the old root at
+/// `put_old`, and leave the parent root unchanged.
+pub fn pivot_root_self_test() -> bool {
+    {
+        let mut table = PROCESS_TABLE.lock();
+        if table.get_process(GATE_V1_PID).is_none() {
+            table.processes.push(Process {
+                pid: GATE_V1_PID,
+                ppid: 1,
+                name: String::from("gate-v1"),
+                state: ProcessState::Ready,
+                uid: 0,
+                gid: 0,
+                cwd: String::from("/"),
+                root: String::from("/"),
+                old_root: String::new(),
+                put_old: String::new(),
+                priority: 0,
+                has_address_space: false,
+                entry_point: 0,
+                user_stack_top: 0,
+                exit_code: 0,
+            });
+        } else if let Some(proc) = table.get_process_mut(GATE_V1_PID) {
+            proc.root = String::from("/");
+            proc.cwd = String::from("/");
+            proc.old_root.clear();
+            proc.put_old.clear();
+        }
+    }
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.mkdir(GATE_V1_NEW, 0o755);
+        let _ = vfs.mkdir(GATE_V1_OLD, 0o755);
+        if !vfs.write_file(GATE_V1_INSIDE, b"pivoted") {
+            crate::serial_println!("[proc] Gate V1 FAILED: write new-root file");
+            return false;
+        }
+    }
+    if pivot_root(GATE_V1_PID, GATE_V1_NEW, GATE_V1_OLD).is_err() {
+        crate::serial_println!("[proc] Gate V1 FAILED: pivot_root");
+        return false;
+    }
+    let inside = translate_path(GATE_V1_PID, "/ok");
+    let escape = translate_path(GATE_V1_PID, "/etc");
+    let old_etc = translate_path(GATE_V1_PID, "/old/etc");
+    let parent_etc = translate_path(1, "/etc");
+    let vfs = crate::vfs::VFS.lock();
+    let inside_ok = inside == GATE_V1_INSIDE && vfs.resolve_path(&inside).is_some();
+    let escape_blocked = escape == "/tmp/gate_v1/etc" && vfs.resolve_path(&escape).is_none();
+    let old_visible = old_etc == "/etc" && vfs.resolve_path("/etc").is_some();
+    let parent_ok = parent_etc == "/etc";
+    drop(vfs);
+    if !inside_ok || !escape_blocked || !old_visible || !parent_ok {
+        crate::serial_println!(
+            "[proc] Gate V1 FAILED: inside={} escape={} old={} parent={}",
+            inside,
+            escape,
+            old_etc,
+            parent_etc
+        );
+        return false;
+    }
+    crate::serial_println!("[proc] {}", GATE_V1_MARKER);
     true
 }
 

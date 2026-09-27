@@ -10,7 +10,7 @@
 //! 6. vDSO mapping
 //! 7. Signal frame compatibility
 //!
-//! This module wires together elf.rs, dynlink.rs, libc_funcs.rs, posix_libc.rs,
+//! This module wires together elf.rs, dynlink.rs, libc_funcs.rs, posix_libc/,
 //! glibc_compat.rs, musl.rs, cabi.rs, and the syscall dispatcher to run
 //! real Linux x86_64 binaries such as busybox and coreutils.
 

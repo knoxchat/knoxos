@@ -355,6 +355,8 @@ pub fn restore(pid: Pid) -> Result<Pid, CriuError> {
             gid: image.gid,
             cwd: image.cwd.clone(),
             root: String::from("/"),
+            old_root: String::new(),
+            put_old: String::new(),
             priority: image.priority as i8,
             has_address_space: true,
             entry_point: image.regs.rip,

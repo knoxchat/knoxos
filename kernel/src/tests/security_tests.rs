@@ -174,6 +174,14 @@ fn test_chroot_isolation() {
 }
 
 #[test_case]
+fn test_pivot_root_isolation() {
+    assert!(
+        crate::process::pivot_root_self_test(),
+        "pivot_root must jail / at new_root, keep old root at put_old, parent unchanged"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

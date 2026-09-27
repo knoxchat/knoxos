@@ -718,7 +718,29 @@ impl VirtualFS {
             } else {
                 1
             },
+            atime: inode.atime,
+            mtime: inode.mtime,
+            ctime: inode.ctime,
         })
+    }
+
+    /// Set atime/mtime on a path. `None` leaves that stamp unchanged. Always bumps ctime.
+    pub fn set_times(
+        &mut self,
+        path: &str,
+        atime: Option<i64>,
+        mtime: Option<i64>,
+    ) -> Result<(), i32> {
+        let ino = self.resolve_path(path).ok_or(-2i32)?;
+        let inode = self.inodes.iter_mut().find(|i| i.ino == ino).ok_or(-2i32)?;
+        if let Some(t) = atime {
+            inode.atime = t;
+        }
+        if let Some(t) = mtime {
+            inode.mtime = t;
+        }
+        inode.ctime = now_timestamp();
+        Ok(())
     }
 
     /// Get total number of inodes
@@ -737,6 +759,9 @@ pub struct VfsStat {
     pub uid: u32,
     pub gid: u32,
     pub nlink: u64,
+    pub atime: i64,
+    pub mtime: i64,
+    pub ctime: i64,
 }
 
 /// Initialize the VFS
@@ -803,6 +828,9 @@ pub fn stat_dispatch(path: &str) -> Result<VfsStat, i32> {
                 uid: info.uid,
                 gid: info.gid,
                 nlink: info.links as u64,
+                atime: 0,
+                mtime: 0,
+                ctime: 0,
             });
         }
     }
