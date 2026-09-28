@@ -562,23 +562,23 @@ pub fn sys_umask(mask: u16) -> SyscallResult {
     Ok(old_mask as u64)
 }
 
-pub fn sys_statfs(path_or_fd: u64, buf: u64) -> SyscallResult {
+#[repr(C)]
+struct StatFs {
+    f_type: u64,
+    f_bsize: u64,
+    f_blocks: u64,
+    f_bfree: u64,
+    f_bavail: u64,
+    f_files: u64,
+    f_ffree: u64,
+    f_fsid: [u32; 2],
+    f_namelen: u64,
+    f_frsize: u64,
+}
+
+fn write_statfs(buf: u64) -> SyscallResult {
     if buf == 0 {
         return Err(SyscallError::InvalidArgument);
-    }
-    let _ = path_or_fd;
-    #[repr(C)]
-    struct StatFs {
-        f_type: u64,
-        f_bsize: u64,
-        f_blocks: u64,
-        f_bfree: u64,
-        f_bavail: u64,
-        f_files: u64,
-        f_ffree: u64,
-        f_fsid: [u32; 2],
-        f_namelen: u64,
-        f_frsize: u64,
     }
     let statfs = StatFs {
         f_type: 0xEF53, // EXT2_SUPER_MAGIC
@@ -592,9 +592,34 @@ pub fn sys_statfs(path_or_fd: u64, buf: u64) -> SyscallResult {
         f_namelen: 255,
         f_frsize: 4096,
     };
-    let out = unsafe { &mut *(buf as *mut StatFs) };
-    *out = statfs;
+    unsafe {
+        core::ptr::write(buf as *mut StatFs, statfs);
+    }
     Ok(0)
+}
+
+/// `statfs` — fill `struct statfs` for an existing VFS path.
+pub fn sys_statfs(path_ptr: u64, buf: u64) -> SyscallResult {
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = vfs_path(&path);
+    {
+        let vfs = crate::vfs::VFS.lock();
+        if vfs.resolve_path(&path).is_none() {
+            return Err(SyscallError::FileNotFound);
+        }
+    }
+    write_statfs(buf)
+}
+
+/// `fstatfs` — fill `struct statfs` for the filesystem behind `fd`.
+pub fn sys_fstatfs(fd: i32, buf: u64) -> SyscallResult {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    {
+        let tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let fd_table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+        let _ = fd_table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
+    }
+    write_statfs(buf)
 }
 
 fn truncate_path(path: &str, length: usize) -> SyscallResult {

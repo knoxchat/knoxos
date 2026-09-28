@@ -268,15 +268,19 @@ pub fn authenticate(username: &str, password: &str) -> Result<u32, &'static str>
 /// Set UID for current process (setuid)
 pub fn setuid(uid: u32) -> Result<(), i32> {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
-    let mut table = crate::process::PROCESS_TABLE.lock();
-    let proc = table.get_process_mut(pid).ok_or(-3i32)?;
-
-    // Only root (uid 0) can change to arbitrary UIDs
-    if proc.uid != 0 && uid != proc.uid {
+    // `getuid` reports the namespace mapping. A spawned boot task is root
+    // there even when `Process.uid` was initialized to 1000.
+    let current = crate::namespaces::ns_uid(pid);
+    if current != 0 && uid != current {
         return Err(-1); // EPERM
     }
 
-    proc.uid = uid;
+    {
+        let mut table = crate::process::PROCESS_TABLE.lock();
+        let proc = table.get_process_mut(pid).ok_or(-3i32)?;
+        proc.uid = uid;
+    }
+    crate::namespaces::set_host_uid(pid, uid);
     crate::serial_println!("[KnoxOS] setuid: PID {} -> UID {}", pid, uid);
     Ok(())
 }
@@ -284,14 +288,17 @@ pub fn setuid(uid: u32) -> Result<(), i32> {
 /// Set GID for current process (setgid)
 pub fn setgid(gid: u32) -> Result<(), i32> {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
-    let mut table = crate::process::PROCESS_TABLE.lock();
-    let proc = table.get_process_mut(pid).ok_or(-3i32)?;
-
-    if proc.uid != 0 && gid != proc.gid {
-        return Err(-1); // EPERM
+    // Same rule as `setuid`: a namespaced root may change gid even when
+    // `Process.uid` was initialized to 1000.
+    let current_uid = crate::namespaces::ns_uid(pid);
+    {
+        let mut table = crate::process::PROCESS_TABLE.lock();
+        let proc = table.get_process_mut(pid).ok_or(-3i32)?;
+        if current_uid != 0 && gid != proc.gid {
+            return Err(-1); // EPERM
+        }
+        proc.gid = gid;
     }
-
-    proc.gid = gid;
     crate::serial_println!("[KnoxOS] setgid: PID {} -> GID {}", pid, gid);
     Ok(())
 }

@@ -286,6 +286,22 @@ fn test_fchmod_fd() {
 }
 
 #[test_case]
+fn test_fstatfs_fd() {
+    assert!(
+        crate::syscall::fstatfs_self_test(),
+        "fstatfs must report f_bsize 4096 on a VFS fd and return EBADF for a bad fd"
+    );
+}
+
+#[test_case]
+fn test_fsetxattr_fd() {
+    assert!(
+        crate::syscall::fsetxattr_self_test(),
+        "fsetxattr must round-trip user.knox on a VFS fd and return EBADF for a bad fd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

@@ -337,6 +337,72 @@ pub fn fchmod_self_test() -> bool {
     true
 }
 
+pub const GATE_AJ1_MARKER: &str = "GATE_AJ1 fstatfs";
+const GATE_AJ1_PATH: &str = "/tmp/gate_aj1";
+
+/// `fstatfs` on a written VFS fd reports `f_bsize == 4096`; a bad fd returns EBADF.
+pub fn fstatfs_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AJ1_PATH);
+        if !vfs.write_file(GATE_AJ1_PATH, b"x") {
+            crate::serial_println!("[file] Gate AJ1 FAILED: write {}", GATE_AJ1_PATH);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let fd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[file] Gate AJ1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AJ1_PATH,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::Regular,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[file] Gate AJ1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let mut buf = [0u64; 12];
+    match crate::syscall::fs::sys_fstatfs(fd, buf.as_mut_ptr() as u64) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[file] Gate AJ1 FAILED: fstatfs {:?}", other);
+            return false;
+        }
+    }
+    // f_bsize is the second u64 in the kernel `StatFs` layout.
+    if buf[1] != 4096 {
+        crate::serial_println!("[file] Gate AJ1 FAILED: f_bsize {}", buf[1]);
+        return false;
+    }
+    match crate::syscall::fs::sys_fstatfs(-1, buf.as_mut_ptr() as u64) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[file] Gate AJ1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(fd);
+        }
+    }
+    crate::serial_println!("[file] {}", GATE_AJ1_MARKER);
+    true
+}
+
 // ── getdents (old, non-64 version) ──────────────────────────────────
 
 pub fn sys_getdents(fd: i32, dirp: u64, count: u32) -> SyscallResult {

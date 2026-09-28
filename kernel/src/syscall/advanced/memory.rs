@@ -116,7 +116,8 @@ pub fn sys_mremap(
 
 pub fn sys_set_mempolicy(mode: i32, nodemask: u64, maxnode: u64) -> SyscallResult {
     let _ = (mode, nodemask, maxnode);
-    Ok(0)
+    crate::serial_println!("[KnoxOS] set_mempolicy denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_get_mempolicy(
@@ -126,13 +127,9 @@ pub fn sys_get_mempolicy(
     addr: u64,
     flags: u64,
 ) -> SyscallResult {
-    if policy != 0 {
-        unsafe {
-            *(policy as *mut i32) = 0;
-        }
-    } // MPOL_DEFAULT
-    let _ = (nodemask, maxnode, addr, flags);
-    Ok(0)
+    let _ = (policy, nodemask, maxnode, addr, flags);
+    crate::serial_println!("[KnoxOS] get_mempolicy denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_mbind(
@@ -144,12 +141,14 @@ pub fn sys_mbind(
     flags: u32,
 ) -> SyscallResult {
     let _ = (addr, len, mode, nodemask, maxnode, flags);
-    Ok(0)
+    crate::serial_println!("[KnoxOS] mbind denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_migrate_pages(pid: u32, maxnode: u64, old_nodes: u64, new_nodes: u64) -> SyscallResult {
     let _ = (pid, maxnode, old_nodes, new_nodes);
-    Ok(0)
+    crate::serial_println!("[KnoxOS] migrate_pages denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_move_pages(
@@ -161,5 +160,6 @@ pub fn sys_move_pages(
     flags: i32,
 ) -> SyscallResult {
     let _ = (pid, count, pages, nodes, status, flags);
-    Ok(0)
+    crate::serial_println!("[KnoxOS] move_pages denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }

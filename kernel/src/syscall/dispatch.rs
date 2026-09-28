@@ -262,23 +262,8 @@ pub fn handle_syscall(
         SyscallNumber::Fchown => fs::sys_fchown(arg1 as i32, arg2 as u32, arg3 as u32),
         SyscallNumber::Umask => fs::sys_umask(arg1 as u16),
         SyscallNumber::Gettimeofday => time::sys_gettimeofday(arg1),
-        SyscallNumber::Getrlimit => {
-            // getrlimit(resource, rlim)
-            if arg2 != 0 {
-                unsafe {
-                    let p = arg2 as *mut u64;
-                    // rlim_cur
-                    *p = 0x7FFFFFFFFFFFFFFF; // RLIM_INFINITY
-                    // rlim_max
-                    *p.add(1) = 0x7FFFFFFFFFFFFFFF;
-                }
-            }
-            Ok(0)
-        }
-        SyscallNumber::Setrlimit => {
-            // setrlimit(resource, rlim) — accept silently
-            Ok(0)
-        }
+        SyscallNumber::Getrlimit => system::sys_getrlimit(arg1 as i32, arg2),
+        SyscallNumber::Setrlimit => system::sys_setrlimit(arg1 as i32, arg2),
         SyscallNumber::Getrusage => fs::sys_getrusage(arg1 as i32, arg2),
         SyscallNumber::Sysinfo => system::sys_sysinfo(arg1),
 
@@ -429,7 +414,8 @@ pub fn handle_syscall(
         }
         SyscallNumber::Personality => advanced::sys_personality(arg1),
         SyscallNumber::Ustat => Err(SyscallError::NotImplemented),
-        SyscallNumber::Statfs | SyscallNumber::Fstatfs => fs::sys_statfs(arg1, arg2),
+        SyscallNumber::Statfs => fs::sys_statfs(arg1, arg2),
+        SyscallNumber::Fstatfs => fs::sys_fstatfs(arg1 as i32, arg2),
         SyscallNumber::Sysfs => advanced::sys_sysfs(arg1 as i32, arg2, arg3),
         SyscallNumber::Getpriority => io::sys_getpriority(arg1 as i32, arg2 as u32),
         SyscallNumber::Setpriority => io::sys_setpriority(arg1 as i32, arg2 as u32, arg3 as i32),
@@ -918,7 +904,10 @@ pub fn handle_syscall(
             serial_println!("[KnoxOS] memfd_secret denied (ENOSYS)");
             Err(SyscallError::NotImplemented)
         }
-        SyscallNumber::ProcessMrelease => Err(SyscallError::NotImplemented),
+        SyscallNumber::ProcessMrelease => {
+            serial_println!("[KnoxOS] process_mrelease denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
+        }
         SyscallNumber::FutexWaitv => {
             advanced::sys_futex_waitv(arg1, arg2 as u32, arg3 as u32, arg4, arg5 as u32)
         }

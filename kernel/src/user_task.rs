@@ -92,6 +92,7 @@ pub fn spawn_elf(
     crate::fd::create_fd_table(pid);
     crate::signals::create_process_signals(pid);
     crate::namespaces::inherit_namespaces(pid, parent);
+    crate::rlimit::inherit_limits(parent, pid);
     let _ = crate::pidns::on_fork(parent, pid);
     let uid = crate::process::PROCESS_TABLE
         .lock()
@@ -571,6 +572,12 @@ extern "C" fn gate_boot_body() {
     run_gate_ai2();
     run_gate_ai3();
     run_gate_ai4();
+    run_gate_aj2();
+    run_gate_aj3();
+    run_gate_aj4();
+    run_gate_ak2();
+    run_gate_ak3();
+    run_gate_ak4();
 }
 
 fn run_gate_b3() {
@@ -1819,6 +1826,92 @@ fn run_gate_ai4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AI4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_AJ2_MARKER: &str = "GATE_AJ2 statfs";
+pub const GATE_AJ3_MARKER: &str = "GATE_AJ3 setuid";
+pub const GATE_AJ4_MARKER: &str = "GATE_AJ4 enosys";
+
+fn run_gate_aj2() {
+    serial_println!("[user_task] Gate AJ2: statfs reports f_bsize");
+    let elf = crate::init::statfs_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "statfs-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AJ2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_aj3() {
+    serial_println!("[user_task] Gate AJ3: setuid then getuid is 1000");
+    let elf = crate::init::setuid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "setuid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AJ3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_aj4() {
+    serial_println!("[user_task] Gate AJ4: process_mrelease returns ENOSYS");
+    let elf = crate::init::process_mrelease_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "process-mrelease-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AJ4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_AK2_MARKER: &str = "GATE_AK2 getrlimit";
+pub const GATE_AK3_MARKER: &str = "GATE_AK3 setgid";
+pub const GATE_AK4_MARKER: &str = "GATE_AK4 enosys";
+
+fn run_gate_ak2() {
+    serial_println!("[user_task] Gate AK2: getrlimit reports RLIMIT_NOFILE");
+    let elf = crate::init::getrlimit_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getrlimit-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AK2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ak3() {
+    serial_println!("[user_task] Gate AK3: setgid then getgid is 2000");
+    let elf = crate::init::setgid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "setgid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AK3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ak4() {
+    serial_println!("[user_task] Gate AK4: set_mempolicy returns ENOSYS");
+    let elf = crate::init::set_mempolicy_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "set-mempolicy-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AK4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

@@ -32,6 +32,7 @@ pub fn sys_fork() -> SyscallResult {
         }
 
         crate::namespaces::inherit_namespaces(child_pid, ppid);
+        crate::rlimit::inherit_limits(ppid, child_pid);
         let _ = crate::pidns::on_fork(ppid, child_pid);
         crate::scheduler::add_process(child_pid, 0);
         serial_println!("[KnoxOS] fork() -> PID {}", child_pid);
@@ -85,6 +86,7 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> Sysc
     }
 
     crate::namespaces::inherit_namespaces(child_pid, ppid);
+    crate::rlimit::inherit_limits(ppid, child_pid);
     if flags & CLONE_NEWNS != 0 {
         let _ = crate::namespaces::unshare(child_pid, CLONE_NEWNS as u32);
     }

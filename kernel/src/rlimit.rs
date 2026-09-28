@@ -233,15 +233,18 @@ pub fn inherit_limits(parent_pid: Pid, child_pid: Pid) {
 pub fn getrlimit(pid: Pid, resource: u32) -> Result<Rlimit, i32> {
     let res = Resource::from_u32(resource).ok_or(-22i32)?; // EINVAL
     let table = PROCESS_LIMITS.lock();
-    let limits = table.get(&pid).ok_or(-3i32)?; // ESRCH
-    Ok(limits.get(res))
+    if let Some(limits) = table.get(&pid) {
+        Ok(limits.get(res))
+    } else {
+        Ok(ProcessLimits::new().get(res))
+    }
 }
 
 /// Set a resource limit for a process
 pub fn setrlimit(pid: Pid, resource: u32, new_limit: Rlimit) -> Result<(), i32> {
     let res = Resource::from_u32(resource).ok_or(-22i32)?; // EINVAL
     let mut table = PROCESS_LIMITS.lock();
-    let limits = table.get_mut(&pid).ok_or(-3i32)?; // ESRCH
+    let limits = table.entry(pid).or_default();
     limits.set(res, new_limit)
 }
 
@@ -254,7 +257,7 @@ pub fn prlimit64(
 ) -> Result<(), i32> {
     let res = Resource::from_u32(resource).ok_or(-22i32)?;
     let mut table = PROCESS_LIMITS.lock();
-    let limits = table.get_mut(&pid).ok_or(-3i32)?;
+    let limits = table.entry(pid).or_default();
 
     // Get old limit
     *old_limit = Some(limits.get(res));

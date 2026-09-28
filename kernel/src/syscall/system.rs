@@ -320,55 +320,71 @@ pub fn sys_unshare(flags: u32) -> SyscallResult {
 
 // ── Resource limits & random ────────────────────────────────────────
 
-pub fn sys_prlimit64(pid: u32, resource: i32, new_limit: u64, old_limit: u64) -> SyscallResult {
-    let _ = (pid, new_limit);
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct Rlimit {
-        rlim_cur: u64,
-        rlim_max: u64,
+fn write_rlimit(pid: u32, dest: u64, limit: crate::rlimit::Rlimit) {
+    let mut buf = [0u8; 16];
+    buf[0..8].copy_from_slice(&limit.rlim_cur.to_ne_bytes());
+    buf[8..16].copy_from_slice(&limit.rlim_max.to_ne_bytes());
+    unsafe {
+        core::ptr::copy_nonoverlapping(buf.as_ptr(), dest as *mut u8, 16);
     }
-    let default = match resource {
-        0 => Rlimit {
-            rlim_cur: u64::MAX,
-            rlim_max: u64::MAX,
-        },
-        1 => Rlimit {
-            rlim_cur: u64::MAX,
-            rlim_max: u64::MAX,
-        },
-        2 => Rlimit {
-            rlim_cur: u64::MAX,
-            rlim_max: u64::MAX,
-        },
-        3 => Rlimit {
-            rlim_cur: 8388608,
-            rlim_max: u64::MAX,
-        },
-        4 => Rlimit {
-            rlim_cur: 0,
-            rlim_max: u64::MAX,
-        },
-        5 => Rlimit {
-            rlim_cur: u64::MAX,
-            rlim_max: u64::MAX,
-        },
-        6 => Rlimit {
-            rlim_cur: u64::MAX,
-            rlim_max: u64::MAX,
-        },
-        7 => Rlimit {
-            rlim_cur: 1024,
-            rlim_max: 4096,
-        },
-        _ => Rlimit {
-            rlim_cur: u64::MAX,
-            rlim_max: u64::MAX,
-        },
+    crate::vmm::write_user_memory(pid, dest, &buf);
+}
+
+fn read_rlimit(pid: u32, src: u64) -> crate::rlimit::Rlimit {
+    let mut buf = [0u8; 16];
+    unsafe {
+        core::ptr::copy_nonoverlapping(src as *const u8, buf.as_mut_ptr(), 16);
+    }
+    crate::vmm::read_user_memory(pid, src, &mut buf);
+    let mut cur = [0u8; 8];
+    let mut max = [0u8; 8];
+    cur.copy_from_slice(&buf[0..8]);
+    max.copy_from_slice(&buf[8..16]);
+    crate::rlimit::Rlimit {
+        rlim_cur: u64::from_ne_bytes(cur),
+        rlim_max: u64::from_ne_bytes(max),
+    }
+}
+
+/// `getrlimit` — fill `struct rlimit` from the live per-process table.
+pub fn sys_getrlimit(resource: i32, rlim_ptr: u64) -> SyscallResult {
+    if rlim_ptr == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let limit = crate::rlimit::getrlimit(pid, resource as u32)
+        .map_err(|_| SyscallError::InvalidArgument)?;
+    write_rlimit(pid, rlim_ptr, limit);
+    Ok(0)
+}
+
+/// `setrlimit` — apply a new soft/hard pair for the current process.
+pub fn sys_setrlimit(resource: i32, rlim_ptr: u64) -> SyscallResult {
+    if rlim_ptr == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let limit = read_rlimit(pid, rlim_ptr);
+    crate::rlimit::setrlimit(pid, resource as u32, limit)
+        .map(|_| 0u64)
+        .map_err(|_| SyscallError::PermissionDenied)
+}
+
+pub fn sys_prlimit64(pid: u32, resource: i32, new_limit: u64, old_limit: u64) -> SyscallResult {
+    let caller = crate::scheduler::current_pid().unwrap_or(1);
+    let target = if pid == 0 { caller } else { pid };
+    let new = if new_limit != 0 {
+        Some(read_rlimit(caller, new_limit))
+    } else {
+        None
     };
+    let mut old = None;
+    crate::rlimit::prlimit64(target, resource as u32, new, &mut old)
+        .map_err(|_| SyscallError::InvalidArgument)?;
     if old_limit != 0 {
-        let out = unsafe { &mut *(old_limit as *mut Rlimit) };
-        *out = default;
+        if let Some(lim) = old {
+            write_rlimit(caller, old_limit, lim);
+        }
     }
     Ok(0)
 }

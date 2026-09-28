@@ -91,6 +91,23 @@ pub fn sys_removexattr(path_ptr: u64, name_ptr: u64) -> SyscallResult {
         .map_err(|_| SyscallError::InvalidArgument)
 }
 
+fn inode_for_fd(fd: i32) -> Result<u64, SyscallError> {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let (inode, path) = {
+        let tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+        let file = table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
+        (file.inode, file.path.clone())
+    };
+    if inode != 0 {
+        return Ok(inode);
+    }
+    crate::vfs::VFS
+        .lock()
+        .resolve_path(&path)
+        .ok_or(SyscallError::FileNotFound)
+}
+
 pub fn sys_fsetxattr(
     fd: i32,
     name_ptr: u64,
@@ -98,50 +115,150 @@ pub fn sys_fsetxattr(
     size: usize,
     flags: i32,
 ) -> SyscallResult {
+    let ino = inode_for_fd(fd)?;
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let value = if size > 0 && value_ptr != 0 {
         unsafe { core::slice::from_raw_parts(value_ptr as *const u8, size) }
     } else {
         &[]
     };
-    let _ = fd; // Would resolve fd to inode
-    crate::xattr::setxattr(fd as u64, &name, value, flags)
+    crate::xattr::setxattr(ino, &name, value, flags)
         .map(|_| 0u64)
         .map_err(|_| SyscallError::InvalidArgument)
 }
 
 pub fn sys_fgetxattr(fd: i32, name_ptr: u64, value_ptr: u64, size: usize) -> SyscallResult {
+    let ino = inode_for_fd(fd)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     if size == 0 {
         let mut tmp = [0u8; 4096];
-        crate::xattr::getxattr(fd as u64, &name, &mut tmp)
+        crate::xattr::getxattr(ino, &name, &mut tmp)
             .map(|n| n as u64)
             .map_err(|_| SyscallError::InvalidArgument)
     } else {
-        let buf = unsafe { core::slice::from_raw_parts_mut(value_ptr as *mut u8, size) };
-        crate::xattr::getxattr(fd as u64, &name, buf)
-            .map(|n| n as u64)
-            .map_err(|_| SyscallError::InvalidArgument)
+        let mut tmp = alloc::vec![0u8; size.min(4096)];
+        match crate::xattr::getxattr(ino, &name, &mut tmp) {
+            Ok(n) => {
+                let n = n.min(tmp.len());
+                if value_ptr != 0 && n > 0 {
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(tmp.as_ptr(), value_ptr as *mut u8, n);
+                    }
+                    crate::vmm::write_user_memory(pid, value_ptr, &tmp[..n]);
+                }
+                Ok(n as u64)
+            }
+            Err(_) => Err(SyscallError::InvalidArgument),
+        }
     }
 }
 
 pub fn sys_flistxattr(fd: i32, list_ptr: u64, size: usize) -> SyscallResult {
+    let ino = inode_for_fd(fd)?;
     if size == 0 {
         let mut tmp = [0u8; 4096];
-        crate::xattr::listxattr(fd as u64, &mut tmp)
+        crate::xattr::listxattr(ino, &mut tmp)
             .map(|n| n as u64)
             .map_err(|_| SyscallError::InvalidArgument)
     } else {
         let buf = unsafe { core::slice::from_raw_parts_mut(list_ptr as *mut u8, size) };
-        crate::xattr::listxattr(fd as u64, buf)
+        crate::xattr::listxattr(ino, buf)
             .map(|n| n as u64)
             .map_err(|_| SyscallError::InvalidArgument)
     }
 }
 
 pub fn sys_fremovexattr(fd: i32, name_ptr: u64) -> SyscallResult {
+    let ino = inode_for_fd(fd)?;
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-    crate::xattr::removexattr(fd as u64, &name)
+    crate::xattr::removexattr(ino, &name)
         .map(|_| 0u64)
         .map_err(|_| SyscallError::InvalidArgument)
+}
+
+pub const GATE_AK1_MARKER: &str = "GATE_AK1 fsetxattr";
+const GATE_AK1_PATH: &str = "/tmp/gate_ak1";
+
+/// `fsetxattr`/`fgetxattr` on a written VFS fd round-trips `user.knox`; a bad fd is EBADF.
+pub fn fsetxattr_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AK1_PATH);
+        if !vfs.write_file(GATE_AK1_PATH, b"x") {
+            crate::serial_println!("[xattr] Gate AK1 FAILED: write {}", GATE_AK1_PATH);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let fd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[xattr] Gate AK1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AK1_PATH,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::Regular,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[xattr] Gate AK1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let name = b"user.knox\0";
+    let value = b"x";
+    match sys_fsetxattr(
+        fd,
+        name.as_ptr() as u64,
+        value.as_ptr() as u64,
+        value.len(),
+        0,
+    ) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[xattr] Gate AK1 FAILED: fsetxattr {:?}", other);
+            return false;
+        }
+    }
+    let mut buf = [0u8; 16];
+    match sys_fgetxattr(fd, name.as_ptr() as u64, buf.as_mut_ptr() as u64, buf.len()) {
+        Ok(1) if buf[0] == b'x' => {}
+        other => {
+            crate::serial_println!(
+                "[xattr] Gate AK1 FAILED: fgetxattr {:?} byte={}",
+                other,
+                buf[0]
+            );
+            return false;
+        }
+    }
+    match sys_fsetxattr(
+        -1,
+        name.as_ptr() as u64,
+        value.as_ptr() as u64,
+        value.len(),
+        0,
+    ) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[xattr] Gate AK1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(fd);
+        }
+    }
+    crate::serial_println!("[xattr] {}", GATE_AK1_MARKER);
+    true
 }
