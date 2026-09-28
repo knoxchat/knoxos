@@ -18,11 +18,13 @@ pub fn sys_clock_gettime(clock_id: u32, tp_ptr: u64) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let ts = crate::namespaces::namespaced_clock_gettime(pid, clock_id);
     if tp_ptr != 0 {
+        let mut buf = [0u8; 16];
+        buf[0..8].copy_from_slice(&ts.tv_sec.to_ne_bytes());
+        buf[8..16].copy_from_slice(&ts.tv_nsec.to_ne_bytes());
         unsafe {
-            let p = tp_ptr as *mut [i64; 2];
-            (*p)[0] = ts.tv_sec;
-            (*p)[1] = ts.tv_nsec;
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), tp_ptr as *mut u8, buf.len());
         }
+        crate::vmm::write_user_memory(pid, tp_ptr, &buf);
     }
     Ok(0)
 }

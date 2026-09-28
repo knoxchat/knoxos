@@ -42,9 +42,20 @@ pub fn setsid(pid: Pid) -> Result<Pid, i32> {
     let mut pid_pgid = PID_TO_PGID.lock();
     let mut pid_sid = PID_TO_SID.lock();
 
-    // Process must not already be a process group leader
-    if groups.contains_key(&pid) {
-        return Err(-1); // EPERM
+    // Linux EPERM if the caller is already a process group leader of a
+    // group that still has other members. Spawn makes each Ring 3 task
+    // its own sole-member group; that leader may still start a session.
+    if let Some(group) = groups.get(&pid) {
+        if group.members.len() != 1 || group.members[0] != pid {
+            return Err(-1); // EPERM
+        }
+    } else if let Some(&old_pgid) = pid_pgid.get(&pid) {
+        if let Some(old_group) = groups.get_mut(&old_pgid) {
+            old_group.members.retain(|&p| p != pid);
+            if old_group.members.is_empty() {
+                groups.remove(&old_pgid);
+            }
+        }
     }
 
     // Create new session with pid as session leader

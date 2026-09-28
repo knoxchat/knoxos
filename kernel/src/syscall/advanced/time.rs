@@ -10,15 +10,16 @@ pub fn sys_clock_settime(clock_id: u32, tp_ptr: u64) -> SyscallResult {
 }
 
 pub fn sys_clock_getres(clock_id: u32, res_ptr: u64) -> SyscallResult {
-    if res_ptr != 0 {
-        // Report 1ns resolution
-        unsafe {
-            let p = res_ptr as *mut [i64; 2];
-            (*p)[0] = 0;
-            (*p)[1] = 1;
-        }
-    }
     let _ = clock_id;
+    if res_ptr != 0 {
+        let pid = crate::scheduler::current_pid().unwrap_or(1);
+        let mut buf = [0u8; 16];
+        buf[8..16].copy_from_slice(&1i64.to_ne_bytes());
+        unsafe {
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), res_ptr as *mut u8, buf.len());
+        }
+        crate::vmm::write_user_memory(pid, res_ptr, &buf);
+    }
     Ok(0)
 }
 

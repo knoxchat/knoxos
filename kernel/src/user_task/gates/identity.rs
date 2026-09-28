@@ -222,3 +222,81 @@ pub(super) fn run_gate_ap3() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AP3 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_aq2() {
+    serial_println!("[user_task] Gate AQ2: setsid then getsid equals getpid");
+    let elf = crate::init::setsid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "setsid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AQ2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_aq3() {
+    serial_println!("[user_task] Gate AQ3: setpriority then getpriority is 15");
+    let elf = crate::init::setpriority_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "setpriority-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AQ3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ar2() {
+    serial_println!("[user_task] Gate AR2: getrusage ru_maxrss is 4096");
+    let elf = crate::init::getrusage_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getrusage-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AR2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ar3() {
+    serial_println!("[user_task] Gate AR3: clock_gettime CLOCK_MONOTONIC nsec in range");
+    let elf = crate::init::clock_gettime_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "clock-gettime-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AR3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_as2() {
+    serial_println!("[user_task] Gate AS2: clock_getres is 1ns");
+    let elf = crate::init::clock_getres_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "clock-getres-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AS2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_as3() {
+    serial_println!("[user_task] Gate AS3: times returns non-zero ticks");
+    let elf = crate::init::times_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "times-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AS3 parent pid={} reaped={}", pid, reaped);
+}

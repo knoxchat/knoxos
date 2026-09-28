@@ -147,3 +147,15 @@ pub const GATE_AO4_MARKER: &str = "GATE_AO4 enosys";
 pub const GATE_AP2_MARKER: &str = "GATE_AP2 getresgid";
 pub const GATE_AP3_MARKER: &str = "GATE_AP3 setpgid";
 pub const GATE_AP4_MARKER: &str = "GATE_AP4 enosys";
+
+pub const GATE_AQ2_MARKER: &str = "GATE_AQ2 setsid";
+pub const GATE_AQ3_MARKER: &str = "GATE_AQ3 setpriority";
+pub const GATE_AQ4_MARKER: &str = "GATE_AQ4 enosys";
+
+pub const GATE_AR2_MARKER: &str = "GATE_AR2 getrusage";
+pub const GATE_AR3_MARKER: &str = "GATE_AR3 clock_gettime";
+pub const GATE_AR4_MARKER: &str = "GATE_AR4 enosys";
+
+pub const GATE_AS2_MARKER: &str = "GATE_AS2 clock_getres";
+pub const GATE_AS3_MARKER: &str = "GATE_AS3 times";
+pub const GATE_AS4_MARKER: &str = "GATE_AS4 enosys";

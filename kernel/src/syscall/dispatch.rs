@@ -413,7 +413,10 @@ pub fn handle_syscall(
             Err(SyscallError::NotImplemented)
         }
         SyscallNumber::Personality => advanced::sys_personality(arg1),
-        SyscallNumber::Ustat => Err(SyscallError::NotImplemented),
+        SyscallNumber::Ustat => {
+            serial_println!("[KnoxOS] ustat denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
+        }
         SyscallNumber::Statfs => fs::sys_statfs(arg1, arg2),
         SyscallNumber::Fstatfs => fs::sys_fstatfs(arg1 as i32, arg2),
         SyscallNumber::Sysfs => advanced::sys_sysfs(arg1 as i32, arg2, arg3),
@@ -669,7 +672,7 @@ pub fn handle_syscall(
         SyscallNumber::Linkat => {
             advanced::sys_linkat(arg1 as i32, arg2, arg3 as i32, arg4, arg5 as i32)
         }
-        SyscallNumber::Symlinkat => fs::sys_symlink(arg2, arg3),
+        SyscallNumber::Symlinkat => advanced::sys_symlinkat(arg1, arg2 as i32, arg3),
         SyscallNumber::Readlinkat => fs::sys_readlink(arg2, arg3, arg4),
         SyscallNumber::Fchmodat => {
             advanced::sys_fchmodat(arg1 as i32, arg2, arg3 as u32, arg4 as i32)
@@ -912,7 +915,10 @@ pub fn handle_syscall(
         SyscallNumber::FutexWaitv => {
             advanced::sys_futex_waitv(arg1, arg2 as u32, arg3 as u32, arg4, arg5 as u32)
         }
-        SyscallNumber::MapShadowStack => Err(SyscallError::NotImplemented),
+        SyscallNumber::MapShadowStack => {
+            serial_println!("[KnoxOS] map_shadow_stack denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
+        }
 
         // ════════════════════════════════════════════════════════════
         // ── KnoxOS AI system calls ─────────────────────────────────

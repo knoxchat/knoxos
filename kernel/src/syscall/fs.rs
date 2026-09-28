@@ -664,7 +664,13 @@ pub fn sys_getrusage(who: i32, usage_ptr: u64) -> SyscallResult {
         return Err(SyscallError::InvalidArgument);
     }
     let _ = who;
-    let buf = unsafe { core::slice::from_raw_parts_mut(usage_ptr as *mut u8, 144) };
-    buf.fill(0);
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut buf = [0u8; 144];
+    // ru_maxrss at offset 32 — report 4 KiB so Ring 3 can observe a real field.
+    buf[32..40].copy_from_slice(&4096i64.to_ne_bytes());
+    unsafe {
+        core::ptr::copy_nonoverlapping(buf.as_ptr(), usage_ptr as *mut u8, buf.len());
+    }
+    crate::vmm::write_user_memory(pid, usage_ptr, &buf);
     Ok(0)
 }

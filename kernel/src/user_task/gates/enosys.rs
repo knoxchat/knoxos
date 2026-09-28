@@ -417,3 +417,42 @@ pub(super) fn run_gate_ap4() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AP4 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_aq4() {
+    serial_println!("[user_task] Gate AQ4: name_to_handle_at returns ENOSYS");
+    let elf = crate::init::name_to_handle_at_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "name-to-handle-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AQ4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ar4() {
+    serial_println!("[user_task] Gate AR4: map_shadow_stack returns ENOSYS");
+    let elf = crate::init::map_shadow_stack_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "map-shadow-stack-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AR4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_as4() {
+    serial_println!("[user_task] Gate AS4: ustat returns ENOSYS");
+    let elf = crate::init::ustat_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "ustat-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AS4 parent pid={} reaped={}", pid, reaped);
+}

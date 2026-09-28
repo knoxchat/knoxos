@@ -342,6 +342,30 @@ fn test_unlinkat_dirfd() {
 }
 
 #[test_case]
+fn test_renameat_dirfd() {
+    assert!(
+        crate::syscall::renameat_self_test(),
+        "renameat must move a dirfd-relative file, ENOENT for a missing source, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_linkat_dirfd() {
+    assert!(
+        crate::syscall::linkat_self_test(),
+        "linkat must create a dirfd-relative hard link, ENOENT for a missing source, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_symlinkat_dirfd() {
+    assert!(
+        crate::syscall::symlinkat_self_test(),
+        "symlinkat must create a dirfd-relative symlink, ENOENT for a missing parent, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),
