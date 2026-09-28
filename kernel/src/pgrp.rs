@@ -97,8 +97,12 @@ pub fn setpgid(pid: Pid, pgid: Pid) -> Result<(), i32> {
         }
     }
 
-    // Add to new group (create if needed)
-    let sid = PID_TO_SID.lock().get(&target_pid).copied().unwrap_or(1);
+    // Add to new group (create if needed). A spawned task that never
+    // called `register_process` still needs a session so `getsid` works.
+    let sid = {
+        let mut pid_sid = PID_TO_SID.lock();
+        *pid_sid.entry(target_pid).or_insert(1)
+    };
     groups
         .entry(target_pgid)
         .or_insert_with(|| ProcessGroup {

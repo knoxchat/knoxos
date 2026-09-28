@@ -1094,4 +1094,5 @@ pub fn init() {
     let _ = fstat_self_test();
     let _ = crate::syscall::fsync_self_test();
     let _ = crate::syscall::syncfs_self_test();
+    let _ = crate::syscall::fchmod_self_test();
 }

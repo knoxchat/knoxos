@@ -340,7 +340,8 @@ impl ProcessTable {
         // Clone signal dispositions from parent
         crate::signals::fork_process_signals(parent_pid, child_pid);
         crate::namespaces::inherit_namespaces(child_pid, parent_pid);
-        // Inherit process group from parent
+        // Inherit process group and session from parent
+        crate::pgrp::register_process(child_pid, parent_pid);
         if let Ok(parent_pgid) = crate::pgrp::getpgid(parent_pid) {
             let _ = crate::pgrp::setpgid(child_pid, parent_pgid);
         }

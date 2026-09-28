@@ -269,6 +269,74 @@ pub fn syncfs_self_test() -> bool {
     true
 }
 
+pub const GATE_AI1_MARKER: &str = "GATE_AI1 fchmod";
+const GATE_AI1_PATH: &str = "/tmp/gate_ai1";
+
+/// `fchmod` on a written VFS fd sets mode 0400; a bad fd returns EBADF.
+pub fn fchmod_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AI1_PATH);
+        if !vfs.write_file(GATE_AI1_PATH, b"x") {
+            crate::serial_println!("[file] Gate AI1 FAILED: write {}", GATE_AI1_PATH);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let fd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[file] Gate AI1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AI1_PATH,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::Regular,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[file] Gate AI1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    match crate::syscall::fs::sys_fchmod(fd, 0o400) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[file] Gate AI1 FAILED: fchmod {:?}", other);
+            return false;
+        }
+    }
+    match crate::syscall::fs::sys_fchmod(-1, 0o400) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[file] Gate AI1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let vfs = crate::vfs::VFS.lock();
+        let mode = vfs.stat(GATE_AI1_PATH).map(|s| s.permissions).unwrap_or(0);
+        if mode & 0o777 != 0o400 {
+            crate::serial_println!("[file] Gate AI1 FAILED: mode {:o}", mode);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(fd);
+        }
+    }
+    crate::serial_println!("[file] {}", GATE_AI1_MARKER);
+    true
+}
+
 // ── getdents (old, non-64 version) ──────────────────────────────────
 
 pub fn sys_getdents(fd: i32, dirp: u64, count: u32) -> SyscallResult {

@@ -487,15 +487,18 @@ pub fn sys_chmod(path_or_fd: u64, mode: u16) -> SyscallResult {
         }
         return Err(SyscallError::FileNotFound);
     }
-    // Treat as fd (fchmod)
+    sys_fchmod(path_or_fd as i32, mode)
+}
+
+/// `fchmod` — change mode of the inode behind `fd`.
+pub fn sys_fchmod(fd: i32, mode: u16) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
-    let tables = crate::fd::PROCESS_FD_TABLES.lock();
-    let fd_table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
-    let file = fd_table
-        .get(path_or_fd as i32)
-        .ok_or(SyscallError::BadFileDescriptor)?;
-    let file_path = file.path.clone();
-    drop(tables);
+    let file_path = {
+        let tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let fd_table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+        let file = fd_table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
+        file.path.clone()
+    };
     let mut vfs = crate::vfs::VFS.lock();
     if let Some(ino) = vfs.resolve_path(&file_path) {
         if let Some(inode) = vfs.get_inode_mut(ino) {
@@ -524,7 +527,31 @@ pub fn sys_chown(path_or_fd: u64, uid: u32, gid: u32) -> SyscallResult {
         }
         return Err(SyscallError::FileNotFound);
     }
-    Ok(0)
+    sys_fchown(path_or_fd as i32, uid, gid)
+}
+
+/// `fchown` — change owner of the inode behind `fd`.
+pub fn sys_fchown(fd: i32, uid: u32, gid: u32) -> SyscallResult {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let file_path = {
+        let tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let fd_table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+        let file = fd_table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
+        file.path.clone()
+    };
+    let mut vfs = crate::vfs::VFS.lock();
+    if let Some(ino) = vfs.resolve_path(&file_path) {
+        if let Some(inode) = vfs.get_inode_mut(ino) {
+            if uid != 0xFFFFFFFF {
+                inode.uid = uid;
+            }
+            if gid != 0xFFFFFFFF {
+                inode.gid = gid;
+            }
+            return Ok(0);
+        }
+    }
+    Err(SyscallError::FileNotFound)
 }
 
 pub fn sys_umask(mask: u16) -> SyscallResult {

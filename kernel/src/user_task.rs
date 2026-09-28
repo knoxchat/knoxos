@@ -100,6 +100,7 @@ pub fn spawn_elf(
         .unwrap_or(0);
     crate::capabilities::init_process_caps(pid, parent);
     crate::capabilities::apply_exec_caps(pid, uid);
+    crate::pgrp::register_process(pid, parent);
     let _ = crate::pgrp::setpgid(pid, pid);
 
     let cr3 = crate::vmm::get_cr3(pid).unwrap_or(0);
@@ -567,6 +568,9 @@ extern "C" fn gate_boot_body() {
     run_gate_ah2();
     run_gate_ah3();
     run_gate_ah4();
+    run_gate_ai2();
+    run_gate_ai3();
+    run_gate_ai4();
 }
 
 fn run_gate_b3() {
@@ -1772,6 +1776,49 @@ fn run_gate_ah4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AH4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_AI2_MARKER: &str = "GATE_AI2 fchown";
+pub const GATE_AI3_MARKER: &str = "GATE_AI3 getsid";
+pub const GATE_AI4_MARKER: &str = "GATE_AI4 enosys";
+
+fn run_gate_ai2() {
+    serial_println!("[user_task] Gate AI2: fchown then statx uid");
+    let elf = crate::init::fchown_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "fchown-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AI2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ai3() {
+    serial_println!("[user_task] Gate AI3: getsid is non-zero");
+    let elf = crate::init::getsid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getsid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AI3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_ai4() {
+    serial_println!("[user_task] Gate AI4: pkey_free returns ENOSYS");
+    let elf = crate::init::pkey_free_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "pkey-free-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AI4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

@@ -278,6 +278,14 @@ fn test_syncfs_fd() {
 }
 
 #[test_case]
+fn test_fchmod_fd() {
+    assert!(
+        crate::syscall::fchmod_self_test(),
+        "fchmod must set mode 0400 on a VFS fd and return EBADF for a bad fd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

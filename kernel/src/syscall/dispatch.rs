@@ -254,10 +254,12 @@ pub fn handle_syscall(
         SyscallNumber::Unlink => fs::sys_unlink(arg1),
         SyscallNumber::Symlink => fs::sys_symlink(arg1, arg2),
         SyscallNumber::Readlink => fs::sys_readlink(arg1, arg2, arg3),
-        SyscallNumber::Chmod | SyscallNumber::Fchmod => fs::sys_chmod(arg1, arg2 as u16),
-        SyscallNumber::Chown | SyscallNumber::Fchown | SyscallNumber::Lchown => {
+        SyscallNumber::Chmod => fs::sys_chmod(arg1, arg2 as u16),
+        SyscallNumber::Fchmod => fs::sys_fchmod(arg1 as i32, arg2 as u16),
+        SyscallNumber::Chown | SyscallNumber::Lchown => {
             fs::sys_chown(arg1, arg2 as u32, arg3 as u32)
         }
+        SyscallNumber::Fchown => fs::sys_fchown(arg1 as i32, arg2 as u32, arg3 as u32),
         SyscallNumber::Umask => fs::sys_umask(arg1 as u16),
         SyscallNumber::Gettimeofday => time::sys_gettimeofday(arg1),
         SyscallNumber::Getrlimit => {

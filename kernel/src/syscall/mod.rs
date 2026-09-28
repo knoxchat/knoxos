@@ -26,7 +26,7 @@ mod ai;
 mod dispatch;
 mod error;
 mod fd;
-mod fs;
+pub(crate) mod fs;
 mod helpers;
 mod io;
 mod memory;
@@ -39,7 +39,7 @@ mod thread;
 mod time;
 mod user;
 
-pub use advanced::{fsync_self_test, syncfs_self_test};
+pub use advanced::{fchmod_self_test, fsync_self_test, syncfs_self_test};
 pub use dispatch::handle_syscall;
 pub use error::{SyscallError, SyscallResult};
 pub(crate) use helpers::read_user_string;
