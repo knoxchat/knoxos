@@ -77,10 +77,14 @@ pub fn sys_getgroups(size: i32, list_ptr: u64) -> SyscallResult {
 
     if list_ptr != 0 {
         if let Some(gids) = group_list {
-            let out = unsafe { core::slice::from_raw_parts_mut(list_ptr as *mut u32, gids.len()) };
-            for (i, &gid) in gids.iter().enumerate() {
-                out[i] = gid;
+            let mut bytes = Vec::with_capacity(gids.len() * 4);
+            for gid in gids {
+                bytes.extend_from_slice(&gid.to_ne_bytes());
             }
+            unsafe {
+                core::ptr::copy_nonoverlapping(bytes.as_ptr(), list_ptr as *mut u8, bytes.len());
+            }
+            crate::vmm::write_user_memory(pid, list_ptr, &bytes);
         }
     }
     Ok(ngroups as u64)
@@ -89,13 +93,8 @@ pub fn sys_getgroups(size: i32, list_ptr: u64) -> SyscallResult {
 pub fn sys_setgroups(size: usize, list_ptr: u64) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
 
-    // Only root (uid 0) can call setgroups
-    let uid = crate::process::PROCESS_TABLE
-        .lock()
-        .get_process(pid)
-        .map(|p| p.uid)
-        .unwrap_or(0);
-    if uid != 0 {
+    // A spawned boot task is namespaced root even when Process.uid is 1000.
+    if crate::namespaces::ns_uid(pid) != 0 {
         return Err(SyscallError::PermissionDenied);
     }
 
@@ -107,8 +106,21 @@ pub fn sys_setgroups(size: usize, list_ptr: u64) -> SyscallResult {
     if size == 0 {
         groups.remove(&pid);
     } else if list_ptr != 0 {
-        let gids = unsafe { core::slice::from_raw_parts(list_ptr as *const u32, size) };
-        groups.insert(pid, gids.to_vec());
+        let nbytes = size.saturating_mul(4);
+        let mut bytes = alloc::vec![0u8; nbytes];
+        if nbytes > 0 {
+            unsafe {
+                core::ptr::copy_nonoverlapping(list_ptr as *const u8, bytes.as_mut_ptr(), nbytes);
+            }
+            crate::vmm::read_user_memory(pid, list_ptr, &mut bytes);
+        }
+        let mut gids = Vec::with_capacity(size);
+        for chunk in bytes.chunks_exact(4) {
+            let mut b = [0u8; 4];
+            b.copy_from_slice(chunk);
+            gids.push(u32::from_ne_bytes(b));
+        }
+        groups.insert(pid, gids);
     }
     Ok(0)
 }

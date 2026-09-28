@@ -542,10 +542,11 @@ pub fn handle_syscall(
             Ok(t as u64)
         }
         SyscallNumber::Futex => thread::sys_futex(arg1, arg2 as i32, arg3 as u32),
-        SyscallNumber::SchedSetaffinity
-        | SyscallNumber::SchedGetaffinity
-        | SyscallNumber::SchedSetattr
-        | SyscallNumber::SchedGetattr => Ok(0),
+        SyscallNumber::SchedSetaffinity | SyscallNumber::SchedGetaffinity => Ok(0),
+        SyscallNumber::SchedSetattr | SyscallNumber::SchedGetattr => {
+            serial_println!("[KnoxOS] sched_setattr denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
+        }
         SyscallNumber::SetThreadArea | SyscallNumber::GetThreadArea => {
             Err(SyscallError::NotImplemented)
         }

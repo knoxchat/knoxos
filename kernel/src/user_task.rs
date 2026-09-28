@@ -578,6 +578,15 @@ extern "C" fn gate_boot_body() {
     run_gate_ak2();
     run_gate_ak3();
     run_gate_ak4();
+    run_gate_al2();
+    run_gate_al3();
+    run_gate_al4();
+    run_gate_am2();
+    run_gate_am3();
+    run_gate_am4();
+    run_gate_an2();
+    run_gate_an3();
+    run_gate_an4();
 }
 
 fn run_gate_b3() {
@@ -1912,6 +1921,135 @@ fn run_gate_ak4() {
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AK4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_AL2_MARKER: &str = "GATE_AL2 setrlimit";
+pub const GATE_AL3_MARKER: &str = "GATE_AL3 setresuid";
+pub const GATE_AL4_MARKER: &str = "GATE_AL4 enosys";
+
+fn run_gate_al2() {
+    serial_println!("[user_task] Gate AL2: setrlimit then getrlimit is 512");
+    let elf = crate::init::setrlimit_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "setrlimit-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AL2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_al3() {
+    serial_println!("[user_task] Gate AL3: setresuid then geteuid is 1000");
+    let elf = crate::init::setresuid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "setresuid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AL3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_al4() {
+    serial_println!("[user_task] Gate AL4: get_mempolicy returns ENOSYS");
+    let elf = crate::init::get_mempolicy_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "get-mempolicy-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AL4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_AM2_MARKER: &str = "GATE_AM2 prlimit64";
+pub const GATE_AM3_MARKER: &str = "GATE_AM3 setresgid";
+pub const GATE_AM4_MARKER: &str = "GATE_AM4 enosys";
+
+fn run_gate_am2() {
+    serial_println!("[user_task] Gate AM2: prlimit64 then getrlimit is 256");
+    let elf = crate::init::prlimit64_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "prlimit64-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AM2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_am3() {
+    serial_println!("[user_task] Gate AM3: setresgid then getegid is 2000");
+    let elf = crate::init::setresgid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "setresgid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AM3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_am4() {
+    serial_println!("[user_task] Gate AM4: mbind returns ENOSYS");
+    let elf = crate::init::mbind_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "mbind-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AM4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub const GATE_AN2_MARKER: &str = "GATE_AN2 setreuid";
+pub const GATE_AN3_MARKER: &str = "GATE_AN3 getgroups";
+pub const GATE_AN4_MARKER: &str = "GATE_AN4 enosys";
+
+fn run_gate_an2() {
+    serial_println!("[user_task] Gate AN2: setreuid then geteuid is 1000");
+    let elf = crate::init::setreuid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "setreuid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AN2 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_an3() {
+    serial_println!("[user_task] Gate AN3: setgroups then getgroups is 2000");
+    let elf = crate::init::getgroups_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getgroups-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AN3 parent pid={} reaped={}", pid, reaped);
+}
+
+fn run_gate_an4() {
+    serial_println!("[user_task] Gate AN4: sched_setattr returns ENOSYS");
+    let elf = crate::init::sched_setattr_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sched-setattr-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AN4 parent pid={} reaped={}", pid, reaped);
 }
 
 fn run_gate_b7() {

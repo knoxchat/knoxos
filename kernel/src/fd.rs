@@ -1097,4 +1097,7 @@ pub fn init() {
     let _ = crate::syscall::fchmod_self_test();
     let _ = crate::syscall::fstatfs_self_test();
     let _ = crate::syscall::fsetxattr_self_test();
+    let _ = crate::syscall::flistxattr_self_test();
+    let _ = crate::syscall::listxattr_self_test();
+    let _ = crate::syscall::faccessat_self_test();
 }

@@ -40,7 +40,8 @@ mod time;
 mod user;
 
 pub use advanced::{
-    fchmod_self_test, fsetxattr_self_test, fstatfs_self_test, fsync_self_test, syncfs_self_test,
+    faccessat_self_test, fchmod_self_test, flistxattr_self_test, fsetxattr_self_test,
+    fstatfs_self_test, fsync_self_test, listxattr_self_test, syncfs_self_test,
 };
 pub use dispatch::handle_syscall;
 pub use error::{SyscallError, SyscallResult};

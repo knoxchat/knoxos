@@ -529,9 +529,120 @@ pub fn sys_utimensat(dirfd: i32, path_ptr: u64, times_ptr: u64, flags: i32) -> S
 
 // ── faccessat / faccessat2 ──────────────────────────────────────────
 
+const AT_FDCWD: i32 = -100;
+
+fn path_at(dirfd: i32, path: &str) -> Result<alloc::string::String, SyscallError> {
+    if path.starts_with('/') {
+        return Ok(alloc::string::String::from(path));
+    }
+    let dir = if dirfd == AT_FDCWD {
+        let pid = crate::scheduler::current_pid().unwrap_or(1);
+        crate::process::PROCESS_TABLE
+            .lock()
+            .get_process(pid)
+            .map(|p| p.cwd.clone())
+            .unwrap_or_else(|| alloc::string::String::from("/"))
+    } else {
+        let pid = crate::scheduler::current_pid().unwrap_or(1);
+        let tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+        let file = table.get(dirfd).ok_or(SyscallError::BadFileDescriptor)?;
+        file.path.clone()
+    };
+    let mut joined = dir;
+    if !joined.ends_with('/') {
+        joined.push('/');
+    }
+    joined.push_str(path);
+    Ok(joined)
+}
+
 pub fn sys_faccessat(dirfd: i32, path_ptr: u64, mode: u32, flags: i32) -> SyscallResult {
-    let _ = (dirfd, flags);
-    crate::syscall::fs::sys_access(path_ptr, mode)
+    let _ = flags;
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = path_at(dirfd, &path)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+    let path = crate::overlayfs::apply_overlay(pid, &path, false);
+    crate::vfs::VFS
+        .lock()
+        .access(&path, mode)
+        .map_err(|_| SyscallError::FileNotFound)?;
+    Ok(0)
+}
+
+pub const GATE_AN1_MARKER: &str = "GATE_AN1 faccessat";
+const GATE_AN1_DIR: &str = "/tmp/gate_an1";
+const GATE_AN1_FILE: &str = "/tmp/gate_an1/x";
+
+/// `faccessat` on a relative name via dirfd succeeds; a missing child is ENOENT; a bad dirfd is EBADF.
+pub fn faccessat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AN1_FILE);
+        if vfs.mkdir(GATE_AN1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_AN1_DIR).is_none() {
+            crate::serial_println!("[faccessat] Gate AN1 FAILED: mkdir {}", GATE_AN1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_AN1_FILE, b"x") {
+            crate::serial_println!("[faccessat] Gate AN1 FAILED: write {}", GATE_AN1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[faccessat] Gate AN1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AN1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[faccessat] Gate AN1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    match sys_faccessat(dirfd, child.as_ptr() as u64, 0, 0) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[faccessat] Gate AN1 FAILED: faccessat {:?}", other);
+            return false;
+        }
+    }
+    let missing = b"missing\0";
+    match sys_faccessat(dirfd, missing.as_ptr() as u64, 0, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[faccessat] Gate AN1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_faccessat(-1, child.as_ptr() as u64, 0, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[faccessat] Gate AN1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[faccessat] {}", GATE_AN1_MARKER);
+    true
 }
 
 // ── copy_file_range already handled, but add preadv2/pwritev2 ──────

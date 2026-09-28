@@ -302,6 +302,30 @@ fn test_fsetxattr_fd() {
 }
 
 #[test_case]
+fn test_flistxattr_fd() {
+    assert!(
+        crate::syscall::flistxattr_self_test(),
+        "flistxattr must list user.knox, fremovexattr must clear it, and a bad fd is EBADF"
+    );
+}
+
+#[test_case]
+fn test_listxattr_path() {
+    assert!(
+        crate::syscall::listxattr_self_test(),
+        "listxattr must list user.knox, removexattr must clear it, and a missing path is ENOENT"
+    );
+}
+
+#[test_case]
+fn test_faccessat_dirfd() {
+    assert!(
+        crate::syscall::faccessat_self_test(),
+        "faccessat must succeed on a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),
