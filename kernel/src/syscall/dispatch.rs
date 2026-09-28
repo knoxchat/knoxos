@@ -659,7 +659,7 @@ pub fn handle_syscall(
         SyscallNumber::Openat | SyscallNumber::Openat2 => {
             fs::sys_open(arg2, arg3 as u32, arg4 as u16)
         }
-        SyscallNumber::Mkdirat => fs::sys_mkdir(arg2, arg3 as u16),
+        SyscallNumber::Mkdirat => advanced::sys_mkdirat(arg1 as i32, arg2, arg3 as u16),
         SyscallNumber::Fchownat => {
             advanced::sys_fchownat(arg1 as i32, arg2, arg3 as u32, arg4 as u32, arg5 as i32)
         }

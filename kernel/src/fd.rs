@@ -1100,4 +1100,6 @@ pub fn init() {
     let _ = crate::syscall::flistxattr_self_test();
     let _ = crate::syscall::listxattr_self_test();
     let _ = crate::syscall::faccessat_self_test();
+    let _ = crate::syscall::mkdirat_self_test();
+    let _ = crate::syscall::unlinkat_self_test();
 }

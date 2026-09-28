@@ -61,28 +61,23 @@ pub fn sys_setresuid(ruid: u32, euid: u32, suid: u32) -> SyscallResult {
         .map_err(|_| SyscallError::PermissionDenied)
 }
 
+fn write_user_u32(pid: u32, ptr: u64, val: u32) {
+    if ptr == 0 {
+        return;
+    }
+    let bytes = val.to_ne_bytes();
+    unsafe {
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, 4);
+    }
+    crate::vmm::write_user_memory(pid, ptr, &bytes);
+}
+
 pub fn sys_getresuid(ruid_ptr: u64, euid_ptr: u64, suid_ptr: u64) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(0);
-    let uid = crate::process::PROCESS_TABLE
-        .lock()
-        .get_process(pid)
-        .map(|p| p.uid)
-        .unwrap_or(0);
-    if ruid_ptr != 0 {
-        unsafe {
-            *(ruid_ptr as *mut u32) = uid;
-        }
-    }
-    if euid_ptr != 0 {
-        unsafe {
-            *(euid_ptr as *mut u32) = uid;
-        }
-    }
-    if suid_ptr != 0 {
-        unsafe {
-            *(suid_ptr as *mut u32) = uid;
-        }
-    }
+    let uid = crate::namespaces::ns_uid(pid);
+    write_user_u32(pid, ruid_ptr, uid);
+    write_user_u32(pid, euid_ptr, uid);
+    write_user_u32(pid, suid_ptr, uid);
     Ok(0)
 }
 
@@ -100,21 +95,9 @@ pub fn sys_getresgid(rgid_ptr: u64, egid_ptr: u64, sgid_ptr: u64) -> SyscallResu
         .get_process(pid)
         .map(|p| p.gid)
         .unwrap_or(0);
-    if rgid_ptr != 0 {
-        unsafe {
-            *(rgid_ptr as *mut u32) = gid;
-        }
-    }
-    if egid_ptr != 0 {
-        unsafe {
-            *(egid_ptr as *mut u32) = gid;
-        }
-    }
-    if sgid_ptr != 0 {
-        unsafe {
-            *(sgid_ptr as *mut u32) = gid;
-        }
-    }
+    write_user_u32(pid, rgid_ptr, gid);
+    write_user_u32(pid, egid_ptr, gid);
+    write_user_u32(pid, sgid_ptr, gid);
     Ok(0)
 }
 
@@ -142,8 +125,8 @@ pub fn sys_futex_waitv(
     clockid: u32,
 ) -> SyscallResult {
     let _ = (waiters, nr_futexes, flags, timeout, clockid);
-    // Simplified: return immediately
-    Ok(0)
+    serial_println!("[KnoxOS] futex_waitv denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_set_robust_list(head: u64, len: usize) -> SyscallResult {

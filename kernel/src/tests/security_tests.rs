@@ -326,6 +326,22 @@ fn test_faccessat_dirfd() {
 }
 
 #[test_case]
+fn test_mkdirat_dirfd() {
+    assert!(
+        crate::syscall::mkdirat_self_test(),
+        "mkdirat must create a dirfd-relative directory, ENOENT for a missing parent, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_unlinkat_dirfd() {
+    assert!(
+        crate::syscall::unlinkat_self_test(),
+        "unlinkat must remove a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),
