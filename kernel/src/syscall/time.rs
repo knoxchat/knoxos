@@ -36,19 +36,28 @@ pub fn sys_nanosleep(req_ptr: u64) -> SyscallResult {
     if req_ptr == 0 {
         return Err(SyscallError::InvalidArgument);
     }
-    let ts = unsafe { &*(req_ptr as *const crate::rtc::Timespec) };
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut raw = [0u8; 16];
+    unsafe {
+        core::ptr::copy_nonoverlapping(req_ptr as *const u8, raw.as_mut_ptr(), 16);
+    }
+    crate::vmm::read_user_memory(pid, req_ptr, &mut raw);
+    let mut sec_bytes = [0u8; 8];
+    let mut nsec_bytes = [0u8; 8];
+    sec_bytes.copy_from_slice(&raw[0..8]);
+    nsec_bytes.copy_from_slice(&raw[8..16]);
+    let tv_sec = i64::from_ne_bytes(sec_bytes);
+    let tv_nsec = i64::from_ne_bytes(nsec_bytes);
 
     // Validate: tv_nsec must be 0..999999999
-    if ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 || ts.tv_sec < 0 {
+    if !(0..1_000_000_000).contains(&tv_nsec) || tv_sec < 0 {
         return Err(SyscallError::InvalidArgument);
     }
 
-    let total_ns = (ts.tv_sec as u64) * 1_000_000_000 + (ts.tv_nsec as u64);
+    let total_ns = (tv_sec as u64) * 1_000_000_000 + (tv_nsec as u64);
     let total_ms = total_ns / 1_000_000;
 
-    if total_ms == 0 && total_ns > 0 {
-        // Sub-millisecond sleep: just yield once
-        crate::arch_compat::instructions::interrupts::hlt();
+    if total_ms == 0 {
         return Ok(0);
     }
 

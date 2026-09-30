@@ -68,6 +68,6 @@ pub fn sys_io_submit(_ctx: u64, _nr: i64, _iocbpp: u64) -> SyscallResult {
 }
 
 pub fn sys_io_cancel(_ctx: u64, _iocb: u64, _result: u64) -> SyscallResult {
-    // AIO cancel is notoriously unreliable even in Linux
+    serial_println!("[KnoxOS] io_cancel denied (ENOSYS)");
     Err(SyscallError::NotImplemented)
 }

@@ -69,9 +69,13 @@ pub fn sys_write(fd: u64, buf_ptr: u64, count: u64) -> SyscallResult {
 
 pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    open_path(&path, flags, mode)
+}
+
+pub(crate) fn open_path(path: &str, flags: u32, mode: u16) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let write = flags & 0x3 != 0 || flags & 0x40 != 0;
-    let path = vfs_path_rw(&path, write);
+    let path = vfs_path_rw(path, write);
     serial_println!("[KnoxOS] open({}, {:#x})", path, flags);
 
     let access = if flags & 0x3 != 0 || flags & 0x40 != 0 {

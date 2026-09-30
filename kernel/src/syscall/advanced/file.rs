@@ -413,8 +413,125 @@ pub fn sys_getdents(fd: i32, dirp: u64, count: u32) -> SyscallResult {
 // ── newfstatat ──────────────────────────────────────────────────────
 
 pub fn sys_newfstatat(dirfd: i32, path_ptr: u64, stat_buf: u64, flags: i32) -> SyscallResult {
-    let _ = (dirfd, flags);
-    crate::syscall::fs::sys_stat(path_ptr, stat_buf)
+    let _ = flags;
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = path_at(dirfd, &path)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+    let path = crate::overlayfs::apply_overlay(pid, &path, false);
+    let vfs = crate::vfs::VFS.lock();
+    let s = vfs.stat(&path).map_err(|_| SyscallError::FileNotFound)?;
+    let mode = match s.file_type {
+        crate::vfs::FileType::Regular => 0o100000,
+        crate::vfs::FileType::Directory => 0o040000,
+        crate::vfs::FileType::CharDevice => 0o020000,
+        crate::vfs::FileType::BlockDevice => 0o060000,
+        crate::vfs::FileType::Pipe => 0o010000,
+        crate::vfs::FileType::Socket => 0o140000,
+        crate::vfs::FileType::SymLink => 0o120000,
+    } | s.permissions as u32;
+    let stat = crate::fd::FileStat {
+        st_dev: 0,
+        st_ino: s.ino,
+        st_mode: mode,
+        st_nlink: s.nlink,
+        st_uid: s.uid,
+        st_gid: s.gid,
+        st_rdev: 0,
+        st_size: s.size,
+        st_blksize: 4096,
+        st_blocks: s.size.div_ceil(512),
+        st_atime: 0,
+        st_mtime: 0,
+        st_ctime: 0,
+    };
+    if stat_buf != 0 {
+        unsafe {
+            core::ptr::write(stat_buf as *mut crate::fd::FileStat, stat);
+        }
+    }
+    Ok(0)
+}
+
+pub const GATE_AX1_MARKER: &str = "GATE_AX1 newfstatat";
+const GATE_AX1_DIR: &str = "/tmp/gate_ax1";
+const GATE_AX1_FILE: &str = "/tmp/gate_ax1/x";
+
+/// `newfstatat` on a relative name via dirfd reports `st_size == 1`; a missing
+/// child is ENOENT; a bad dirfd is EBADF.
+pub fn newfstatat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AX1_FILE);
+        if vfs.mkdir(GATE_AX1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_AX1_DIR).is_none() {
+            crate::serial_println!("[newfstatat] Gate AX1 FAILED: mkdir {}", GATE_AX1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_AX1_FILE, b"x") {
+            crate::serial_println!("[newfstatat] Gate AX1 FAILED: write {}", GATE_AX1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[newfstatat] Gate AX1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AX1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[newfstatat] Gate AX1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    let mut stat = core::mem::MaybeUninit::<crate::fd::FileStat>::uninit();
+    match sys_newfstatat(dirfd, child.as_ptr() as u64, stat.as_mut_ptr() as u64, 0) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[newfstatat] Gate AX1 FAILED: newfstatat {:?}", other);
+            return false;
+        }
+    }
+    let stat = unsafe { stat.assume_init() };
+    if stat.st_size != 1 {
+        crate::serial_println!("[newfstatat] Gate AX1 FAILED: st_size {}", stat.st_size);
+        return false;
+    }
+    let missing = b"missing\0";
+    match sys_newfstatat(dirfd, missing.as_ptr() as u64, 0, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[newfstatat] Gate AX1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_newfstatat(-1, child.as_ptr() as u64, 0, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[newfstatat] Gate AX1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[newfstatat] {}", GATE_AX1_MARKER);
+    true
 }
 
 // ── unlinkat / renameat / renameat2 / linkat / fchmodat / fchownat / futimesat / utimensat
@@ -1199,22 +1316,310 @@ pub fn mknodat_self_test() -> bool {
 }
 
 pub fn sys_fchmodat(dirfd: i32, path_ptr: u64, mode: u32, flags: i32) -> SyscallResult {
-    let _ = (dirfd, flags);
-    crate::syscall::fs::sys_chmod(path_ptr, mode as u16)
+    let _ = flags;
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = path_at(dirfd, &path)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+    let path = crate::overlayfs::apply_overlay(pid, &path, true);
+    let mut vfs = crate::vfs::VFS.lock();
+    if let Some(ino) = vfs.resolve_path(&path) {
+        if let Some(inode) = vfs.get_inode_mut(ino) {
+            inode.permissions = (mode as u16) & 0o7777;
+            return Ok(0);
+        }
+    }
+    Err(SyscallError::FileNotFound)
+}
+
+pub const GATE_AV1_MARKER: &str = "GATE_AV1 fchmodat";
+const GATE_AV1_DIR: &str = "/tmp/gate_av1";
+const GATE_AV1_FILE: &str = "/tmp/gate_av1/x";
+
+/// `fchmodat` on a relative name via dirfd sets mode 0400; a missing
+/// child is ENOENT; a bad dirfd is EBADF.
+pub fn fchmodat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AV1_FILE);
+        if vfs.mkdir(GATE_AV1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_AV1_DIR).is_none() {
+            crate::serial_println!("[fchmodat] Gate AV1 FAILED: mkdir {}", GATE_AV1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_AV1_FILE, b"x") {
+            crate::serial_println!("[fchmodat] Gate AV1 FAILED: write {}", GATE_AV1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[fchmodat] Gate AV1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AV1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[fchmodat] Gate AV1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    match sys_fchmodat(dirfd, child.as_ptr() as u64, 0o400, 0) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[fchmodat] Gate AV1 FAILED: fchmodat {:?}", other);
+            return false;
+        }
+    }
+    {
+        let vfs = crate::vfs::VFS.lock();
+        let mode = vfs.stat(GATE_AV1_FILE).map(|s| s.permissions).unwrap_or(0);
+        if mode & 0o777 != 0o400 {
+            crate::serial_println!("[fchmodat] Gate AV1 FAILED: mode {:o}", mode);
+            return false;
+        }
+    }
+    let missing = b"missing\0";
+    match sys_fchmodat(dirfd, missing.as_ptr() as u64, 0o400, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[fchmodat] Gate AV1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_fchmodat(-1, child.as_ptr() as u64, 0o400, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[fchmodat] Gate AV1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[fchmodat] {}", GATE_AV1_MARKER);
+    true
 }
 
 pub fn sys_fchownat(dirfd: i32, path_ptr: u64, uid: u32, gid: u32, flags: i32) -> SyscallResult {
-    let _ = (dirfd, flags);
-    crate::syscall::fs::sys_chown(path_ptr, uid, gid)
+    let _ = flags;
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = path_at(dirfd, &path)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+    let path = crate::overlayfs::apply_overlay(pid, &path, true);
+    let mut vfs = crate::vfs::VFS.lock();
+    if let Some(ino) = vfs.resolve_path(&path) {
+        if let Some(inode) = vfs.get_inode_mut(ino) {
+            if uid != 0xFFFFFFFF {
+                inode.uid = uid;
+            }
+            if gid != 0xFFFFFFFF {
+                inode.gid = gid;
+            }
+            return Ok(0);
+        }
+    }
+    Err(SyscallError::FileNotFound)
+}
+
+pub const GATE_AW1_MARKER: &str = "GATE_AW1 fchownat";
+const GATE_AW1_DIR: &str = "/tmp/gate_aw1";
+const GATE_AW1_FILE: &str = "/tmp/gate_aw1/x";
+
+/// `fchownat` on a relative name via dirfd sets uid 1000; a missing
+/// child is ENOENT; a bad dirfd is EBADF.
+pub fn fchownat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AW1_FILE);
+        if vfs.mkdir(GATE_AW1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_AW1_DIR).is_none() {
+            crate::serial_println!("[fchownat] Gate AW1 FAILED: mkdir {}", GATE_AW1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_AW1_FILE, b"x") {
+            crate::serial_println!("[fchownat] Gate AW1 FAILED: write {}", GATE_AW1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[fchownat] Gate AW1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AW1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[fchownat] Gate AW1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    match sys_fchownat(dirfd, child.as_ptr() as u64, 1000, 1000, 0) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[fchownat] Gate AW1 FAILED: fchownat {:?}", other);
+            return false;
+        }
+    }
+    {
+        let vfs = crate::vfs::VFS.lock();
+        match vfs.stat(GATE_AW1_FILE) {
+            Ok(s) if s.uid == 1000 => {}
+            other => {
+                crate::serial_println!(
+                    "[fchownat] Gate AW1 FAILED: uid {:?}",
+                    other.map(|s| s.uid)
+                );
+                return false;
+            }
+        }
+    }
+    let missing = b"missing\0";
+    match sys_fchownat(dirfd, missing.as_ptr() as u64, 1000, 1000, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[fchownat] Gate AW1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_fchownat(-1, child.as_ptr() as u64, 1000, 1000, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[fchownat] Gate AW1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[fchownat] {}", GATE_AW1_MARKER);
+    true
+}
+
+pub fn sys_openat(dirfd: i32, path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = path_at(dirfd, &path)?;
+    crate::syscall::fs::open_path(&path, flags, mode)
+}
+
+pub const GATE_AY1_MARKER: &str = "GATE_AY1 openat";
+const GATE_AY1_DIR: &str = "/tmp/gate_ay1";
+const GATE_AY1_FILE: &str = "/tmp/gate_ay1/x";
+
+/// `openat` on a relative name via dirfd opens the file; a missing child is
+/// ENOENT; a bad dirfd is EBADF.
+pub fn openat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AY1_FILE);
+        if vfs.mkdir(GATE_AY1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_AY1_DIR).is_none() {
+            crate::serial_println!("[openat] Gate AY1 FAILED: mkdir {}", GATE_AY1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_AY1_FILE, b"x") {
+            crate::serial_println!("[openat] Gate AY1 FAILED: write {}", GATE_AY1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[openat] Gate AY1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AY1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[openat] Gate AY1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    let fd = match sys_openat(dirfd, child.as_ptr() as u64, 0, 0) {
+        Ok(n) if n < 4096 => n as i32,
+        other => {
+            crate::serial_println!("[openat] Gate AY1 FAILED: openat {:?}", other);
+            return false;
+        }
+    };
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(fd);
+        }
+    }
+    let missing = b"missing\0";
+    match sys_openat(dirfd, missing.as_ptr() as u64, 0, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[openat] Gate AY1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_openat(-1, child.as_ptr() as u64, 0, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[openat] Gate AY1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[openat] {}", GATE_AY1_MARKER);
+    true
 }
 
 pub fn sys_utimensat(dirfd: i32, path_ptr: u64, times_ptr: u64, flags: i32) -> SyscallResult {
-    let _ = (dirfd, flags);
+    let _ = flags;
     let path = if path_ptr != 0 {
         unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?
     } else {
         return Err(SyscallError::InvalidArgument);
     };
+    let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let path = crate::process::translate_path(pid, &path);
 
@@ -1262,6 +1667,217 @@ pub fn sys_utimensat(dirfd: i32, path_ptr: u64, times_ptr: u64, flags: i32) -> S
         .set_times(&path, atime, mtime)
         .map(|_| 0u64)
         .map_err(|_| SyscallError::FileNotFound)
+}
+
+pub const GATE_AZ1_MARKER: &str = "GATE_AZ1 utimensat";
+const GATE_AZ1_DIR: &str = "/tmp/gate_az1";
+const GATE_AZ1_FILE: &str = "/tmp/gate_az1/x";
+
+/// `utimensat` on a relative name via dirfd sets mtime 42; a missing child is
+/// ENOENT; a bad dirfd is EBADF.
+pub fn utimensat_at_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AZ1_FILE);
+        if vfs.mkdir(GATE_AZ1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_AZ1_DIR).is_none() {
+            crate::serial_println!("[utimensat] Gate AZ1 FAILED: mkdir {}", GATE_AZ1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_AZ1_FILE, b"x") {
+            crate::serial_println!("[utimensat] Gate AZ1 FAILED: write {}", GATE_AZ1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[utimensat] Gate AZ1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AZ1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[utimensat] Gate AZ1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    let mut times = [0u8; 32];
+    times[8..16].copy_from_slice(&0x3fff_fffei64.to_ne_bytes());
+    times[16..24].copy_from_slice(&42i64.to_ne_bytes());
+    match sys_utimensat(dirfd, child.as_ptr() as u64, times.as_ptr() as u64, 0) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[utimensat] Gate AZ1 FAILED: utimensat {:?}", other);
+            return false;
+        }
+    }
+    {
+        let vfs = crate::vfs::VFS.lock();
+        match vfs.stat(GATE_AZ1_FILE) {
+            Ok(s) if s.mtime == 42 => {}
+            other => {
+                crate::serial_println!(
+                    "[utimensat] Gate AZ1 FAILED: mtime {:?}",
+                    other.map(|s| s.mtime)
+                );
+                return false;
+            }
+        }
+    }
+    let missing = b"missing\0";
+    match sys_utimensat(dirfd, missing.as_ptr() as u64, times.as_ptr() as u64, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[utimensat] Gate AZ1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_utimensat(-1, child.as_ptr() as u64, times.as_ptr() as u64, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[utimensat] Gate AZ1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[utimensat] {}", GATE_AZ1_MARKER);
+    true
+}
+
+pub fn sys_futimesat(dirfd: i32, path_ptr: u64, times_ptr: u64) -> SyscallResult {
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = path_at(dirfd, &path)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+
+    let (atime, mtime) = if times_ptr == 0 {
+        let now = crate::vfs::now_timestamp();
+        (Some(now), Some(now))
+    } else {
+        let mut buf = [0u8; 32];
+        unsafe {
+            core::ptr::copy_nonoverlapping(times_ptr as *const u8, buf.as_mut_ptr(), 32);
+        }
+        crate::vmm::read_user_memory(pid, times_ptr, &mut buf);
+        let i64_at = |off: usize| {
+            let mut b = [0u8; 8];
+            b.copy_from_slice(&buf[off..off + 8]);
+            i64::from_ne_bytes(b)
+        };
+        (Some(i64_at(0)), Some(i64_at(16)))
+    };
+
+    crate::vfs::VFS
+        .lock()
+        .set_times(&path, atime, mtime)
+        .map(|_| 0u64)
+        .map_err(|_| SyscallError::FileNotFound)
+}
+
+pub const GATE_BB1_MARKER: &str = "GATE_BB1 futimesat";
+const GATE_BB1_DIR: &str = "/tmp/gate_bb1";
+const GATE_BB1_FILE: &str = "/tmp/gate_bb1/x";
+
+/// `futimesat` on a relative name via dirfd sets mtime 42; a missing child is
+/// ENOENT; a bad dirfd is EBADF.
+pub fn futimesat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_BB1_FILE);
+        if vfs.mkdir(GATE_BB1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_BB1_DIR).is_none() {
+            crate::serial_println!("[futimesat] Gate BB1 FAILED: mkdir {}", GATE_BB1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_BB1_FILE, b"x") {
+            crate::serial_println!("[futimesat] Gate BB1 FAILED: write {}", GATE_BB1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[futimesat] Gate BB1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_BB1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[futimesat] Gate BB1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    let mut times = [0u8; 32];
+    times[16..24].copy_from_slice(&42i64.to_ne_bytes());
+    match sys_futimesat(dirfd, child.as_ptr() as u64, times.as_ptr() as u64) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[futimesat] Gate BB1 FAILED: futimesat {:?}", other);
+            return false;
+        }
+    }
+    {
+        let vfs = crate::vfs::VFS.lock();
+        match vfs.stat(GATE_BB1_FILE) {
+            Ok(s) if s.mtime == 42 => {}
+            other => {
+                crate::serial_println!(
+                    "[futimesat] Gate BB1 FAILED: mtime {:?}",
+                    other.map(|s| s.mtime)
+                );
+                return false;
+            }
+        }
+    }
+    let missing = b"missing\0";
+    match sys_futimesat(dirfd, missing.as_ptr() as u64, times.as_ptr() as u64) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[futimesat] Gate BB1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_futimesat(-1, child.as_ptr() as u64, times.as_ptr() as u64) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[futimesat] Gate BB1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[futimesat] {}", GATE_BB1_MARKER);
+    true
 }
 
 // ── faccessat / faccessat2 ──────────────────────────────────────────
@@ -1499,10 +2115,12 @@ pub fn sys_pwritev2(fd: i32, iov: u64, iovcnt: i32, offset: i64, flags: i32) -> 
 // ── statx ───────────────────────────────────────────────────────────
 
 pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: i32, mask: u32, statxbuf: u64) -> SyscallResult {
-    let _ = (dirfd, flags, mask);
+    let _ = (flags, mask);
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let path = crate::process::translate_path(pid, &path);
+    let path = crate::overlayfs::apply_overlay(pid, &path, false);
     let vfs = crate::vfs::VFS.lock();
     let s = vfs.stat(&path).map_err(|_| SyscallError::FileNotFound)?;
     drop(vfs);
@@ -1540,6 +2158,95 @@ pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: i32, mask: u32, statxbuf: u64
         crate::vmm::write_user_memory(pid, statxbuf, &buf);
     }
     Ok(0)
+}
+
+pub const GATE_BA1_MARKER: &str = "GATE_BA1 statx";
+const GATE_BA1_DIR: &str = "/tmp/gate_ba1";
+const GATE_BA1_FILE: &str = "/tmp/gate_ba1/x";
+
+/// `statx` on a relative name via dirfd reports `stx_size == 1`; a missing
+/// child is ENOENT; a bad dirfd is EBADF.
+pub fn statx_at_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_BA1_FILE);
+        if vfs.mkdir(GATE_BA1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_BA1_DIR).is_none() {
+            crate::serial_println!("[statx] Gate BA1 FAILED: mkdir {}", GATE_BA1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_BA1_FILE, b"x") {
+            crate::serial_println!("[statx] Gate BA1 FAILED: write {}", GATE_BA1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[statx] Gate BA1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_BA1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[statx] Gate BA1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    let mut buf = [0u8; 256];
+    match sys_statx(
+        dirfd,
+        child.as_ptr() as u64,
+        0,
+        0x7FF,
+        buf.as_mut_ptr() as u64,
+    ) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[statx] Gate BA1 FAILED: statx {:?}", other);
+            return false;
+        }
+    }
+    let mut size_bytes = [0u8; 8];
+    size_bytes.copy_from_slice(&buf[40..48]);
+    let size = u64::from_ne_bytes(size_bytes);
+    if size != 1 {
+        crate::serial_println!("[statx] Gate BA1 FAILED: stx_size {}", size);
+        return false;
+    }
+    let missing = b"missing\0";
+    match sys_statx(dirfd, missing.as_ptr() as u64, 0, 0, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[statx] Gate BA1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_statx(-1, child.as_ptr() as u64, 0, 0, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[statx] Gate BA1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[statx] {}", GATE_BA1_MARKER);
+    true
 }
 
 // ── name_to_handle_at / open_by_handle_at ───────────────────────────

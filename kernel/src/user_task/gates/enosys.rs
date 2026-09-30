@@ -482,3 +482,94 @@ pub(super) fn run_gate_au4() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AU4 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_av4() {
+    serial_println!("[user_task] Gate AV4: move_pages returns ENOSYS");
+    let elf = crate::init::move_pages_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "move-pages-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AV4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_aw4() {
+    serial_println!("[user_task] Gate AW4: remap_file_pages returns ENOSYS");
+    let elf = crate::init::remap_file_pages_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "remap-pages-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AW4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ax4() {
+    serial_println!("[user_task] Gate AX4: sched_getattr returns ENOSYS");
+    let elf = crate::init::sched_getattr_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sched-getattr-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AX4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ay4() {
+    serial_println!("[user_task] Gate AY4: io_destroy returns ENOSYS");
+    let elf = crate::init::io_destroy_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "io-destroy-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AY4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_az4() {
+    serial_println!("[user_task] Gate AZ4: set_thread_area returns ENOSYS");
+    let elf = crate::init::set_thread_area_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "set-thread-area-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AZ4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ba4() {
+    serial_println!("[user_task] Gate BA4: io_cancel returns ENOSYS");
+    let elf = crate::init::io_cancel_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "io-cancel-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BA4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bb4() {
+    serial_println!("[user_task] Gate BB4: add_key returns ENOSYS");
+    let elf = crate::init::add_key_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "add-key-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BB4 parent pid={} reaped={}", pid, reaped);
+}

@@ -106,11 +106,13 @@ pub fn sys_getresgid(rgid_ptr: u64, egid_ptr: u64, sgid_ptr: u64) -> SyscallResu
 pub fn sys_sched_rr_get_interval(pid: u32, tp_ptr: u64) -> SyscallResult {
     let _ = pid;
     if tp_ptr != 0 {
+        let caller = crate::scheduler::current_pid().unwrap_or(1);
+        let mut buf = [0u8; 16];
+        buf[8..16].copy_from_slice(&100_000_000i64.to_ne_bytes());
         unsafe {
-            let p = tp_ptr as *mut [i64; 2];
-            (*p)[0] = 0;
-            (*p)[1] = 100_000_000; // 100ms default quantum
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), tp_ptr as *mut u8, 16);
         }
+        crate::vmm::write_user_memory(caller, tp_ptr, &buf);
     }
     Ok(0)
 }

@@ -382,6 +382,62 @@ fn test_mknodat_dirfd() {
 }
 
 #[test_case]
+fn test_fchmodat_dirfd() {
+    assert!(
+        crate::syscall::fchmodat_self_test(),
+        "fchmodat must set mode 0400 on a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_fchownat_dirfd() {
+    assert!(
+        crate::syscall::fchownat_self_test(),
+        "fchownat must set uid 1000 on a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_newfstatat_dirfd() {
+    assert!(
+        crate::syscall::newfstatat_self_test(),
+        "newfstatat must report st_size == 1 on a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_openat_dirfd() {
+    assert!(
+        crate::syscall::openat_self_test(),
+        "openat must open a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_utimensat_dirfd() {
+    assert!(
+        crate::syscall::utimensat_at_self_test(),
+        "utimensat must set mtime 42 on a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_statx_dirfd() {
+    assert!(
+        crate::syscall::statx_at_self_test(),
+        "statx must report stx_size == 1 on a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_futimesat_dirfd() {
+    assert!(
+        crate::syscall::futimesat_self_test(),
+        "futimesat must set mtime 42 on a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

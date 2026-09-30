@@ -1107,4 +1107,11 @@ pub fn init() {
     let _ = crate::syscall::symlinkat_self_test();
     let _ = crate::syscall::readlinkat_self_test();
     let _ = crate::syscall::mknodat_self_test();
+    let _ = crate::syscall::fchmodat_self_test();
+    let _ = crate::syscall::fchownat_self_test();
+    let _ = crate::syscall::newfstatat_self_test();
+    let _ = crate::syscall::openat_self_test();
+    let _ = crate::syscall::utimensat_at_self_test();
+    let _ = crate::syscall::statx_at_self_test();
+    let _ = crate::syscall::futimesat_self_test();
 }

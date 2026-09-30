@@ -352,3 +352,185 @@ pub(super) fn run_gate_au3() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AU3 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_av2() {
+    serial_println!("[user_task] Gate AV2: getpid is non-zero");
+    let elf = crate::init::getpid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getpid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AV2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_av3() {
+    serial_println!("[user_task] Gate AV3: gettid is non-zero");
+    let elf = crate::init::gettid_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "gettid-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AV3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_aw2() {
+    serial_println!("[user_task] Gate AW2: sched_getscheduler is 0");
+    let elf = crate::init::sched_getscheduler_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getsched-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AW2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_aw3() {
+    serial_println!("[user_task] Gate AW3: sched_getparam returns 0");
+    let elf = crate::init::sched_getparam_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getparam-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AW3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ax2() {
+    serial_println!("[user_task] Gate AX2: sched_get_priority_max is 99");
+    let elf = crate::init::sched_get_priority_max_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "prio-max-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AX2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ax3() {
+    serial_println!("[user_task] Gate AX3: sched_get_priority_min is 0");
+    let elf = crate::init::sched_get_priority_min_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "prio-min-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AX3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ay2() {
+    serial_println!("[user_task] Gate AY2: sched_rr_get_interval is 100ms");
+    let elf = crate::init::sched_rr_get_interval_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "rr-interval-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AY2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ay3() {
+    serial_println!("[user_task] Gate AY3: getcpu returns 0");
+    let elf = crate::init::getcpu_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getcpu-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AY3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_az2() {
+    serial_println!("[user_task] Gate AZ2: set_robust_list returns 0");
+    let elf = crate::init::set_robust_list_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "set-robust-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AZ2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_az3() {
+    serial_println!("[user_task] Gate AZ3: get_robust_list returns 0");
+    let elf = crate::init::get_robust_list_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "get-robust-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AZ3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ba2() {
+    serial_println!("[user_task] Gate BA2: personality(-1) is 0");
+    let elf = crate::init::personality_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "personality-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BA2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_ba3() {
+    serial_println!("[user_task] Gate BA3: nanosleep({{0,1}}) returns 0");
+    let elf = crate::init::nanosleep_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "nanosleep-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BA3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bb2() {
+    serial_println!("[user_task] Gate BB2: capget returns 0");
+    let elf = crate::init::capget_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "capget-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BB2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bb3() {
+    serial_println!("[user_task] Gate BB3: ioprio_get is 4");
+    let elf = crate::init::ioprio_get_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "ioprio-get-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BB3 parent pid={} reaped={}", pid, reaped);
+}

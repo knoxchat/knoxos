@@ -332,7 +332,7 @@ pub fn handle_syscall(
         // ── FS & scheduling (131–155) ──────────────────────────────
         // ════════════════════════════════════════════════════════════
         SyscallNumber::Sigaltstack => signal::sys_sigaltstack(arg1, arg2),
-        SyscallNumber::Utime | SyscallNumber::Utimes | SyscallNumber::Futimesat => {
+        SyscallNumber::Utime | SyscallNumber::Utimes => {
             // Validate path exists (timestamps not tracked by in-memory VFS)
             if arg1 != 0 {
                 if let Some(path) = unsafe { read_user_string(arg1) } {
@@ -349,6 +349,7 @@ pub fn handle_syscall(
                 Ok(0)
             }
         }
+        SyscallNumber::Futimesat => advanced::sys_futimesat(arg1 as i32, arg2, arg3),
         SyscallNumber::Mknodat => advanced::sys_mknodat(arg1 as i32, arg2, arg3 as u32, arg4),
         SyscallNumber::Mknod => {
             // mknod(path, mode, dev) — create special file
@@ -431,11 +432,13 @@ pub fn handle_syscall(
             Ok(0)
         }
         SyscallNumber::SchedGetparam => {
-            // sched_getparam(pid, param)
             if arg2 != 0 {
+                let pid = crate::scheduler::current_pid().unwrap_or(1);
+                let buf = [0u8; 4];
                 unsafe {
-                    *(arg2 as *mut i32) = 0;
-                } // sched_priority = 0
+                    core::ptr::copy_nonoverlapping(buf.as_ptr(), arg2 as *mut u8, 4);
+                }
+                crate::vmm::write_user_memory(pid, arg2, &buf);
             }
             Ok(0)
         }
@@ -552,6 +555,7 @@ pub fn handle_syscall(
             Err(SyscallError::NotImplemented)
         }
         SyscallNumber::SetThreadArea | SyscallNumber::GetThreadArea => {
+            serial_println!("[KnoxOS] set_thread_area denied (ENOSYS)");
             Err(SyscallError::NotImplemented)
         }
         SyscallNumber::IoSetup => advanced::sys_io_setup(arg1 as u32, arg2),
@@ -578,7 +582,10 @@ pub fn handle_syscall(
         | SyscallNumber::EpollPwait2 => {
             io::sys_epoll_wait(arg1 as i32, arg2, arg3 as i32, arg4 as i32)
         }
-        SyscallNumber::RemapFilePages => Err(SyscallError::NotImplemented),
+        SyscallNumber::RemapFilePages => {
+            serial_println!("[KnoxOS] remap_file_pages denied (ENOSYS)");
+            Err(SyscallError::NotImplemented)
+        }
         SyscallNumber::Getdents64 => fs::sys_getdents64(arg1 as i32, arg2, arg3 as u32),
         SyscallNumber::SetTidAddress => thread::sys_set_tid_address(arg1),
         SyscallNumber::RestartSyscall => Ok(0),
@@ -661,7 +668,7 @@ pub fn handle_syscall(
         // ── *at() family (257–280) ─────────────────────────────────
         // ════════════════════════════════════════════════════════════
         SyscallNumber::Openat | SyscallNumber::Openat2 => {
-            fs::sys_open(arg2, arg3 as u32, arg4 as u16)
+            advanced::sys_openat(arg1 as i32, arg2, arg3 as u32, arg4 as u16)
         }
         SyscallNumber::Mkdirat => advanced::sys_mkdirat(arg1 as i32, arg2, arg3 as u16),
         SyscallNumber::Fchownat => {

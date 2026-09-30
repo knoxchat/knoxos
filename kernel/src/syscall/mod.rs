@@ -40,10 +40,12 @@ mod time;
 mod user;
 
 pub use advanced::{
-    faccessat_self_test, fchmod_self_test, flistxattr_self_test, fsetxattr_self_test,
-    fstatfs_self_test, fsync_self_test, linkat_self_test, listxattr_self_test, mkdirat_self_test,
-    mknodat_self_test, readlinkat_self_test, renameat_self_test, symlinkat_self_test,
-    syncfs_self_test, unlinkat_self_test,
+    faccessat_self_test, fchmod_self_test, fchmodat_self_test, fchownat_self_test,
+    flistxattr_self_test, fsetxattr_self_test, fstatfs_self_test, fsync_self_test,
+    futimesat_self_test, linkat_self_test, listxattr_self_test, mkdirat_self_test,
+    mknodat_self_test, newfstatat_self_test, openat_self_test, readlinkat_self_test,
+    renameat_self_test, statx_at_self_test, symlinkat_self_test, syncfs_self_test,
+    unlinkat_self_test, utimensat_at_self_test,
 };
 pub use dispatch::handle_syscall;
 pub use error::{SyscallError, SyscallResult};

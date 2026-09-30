@@ -167,3 +167,31 @@ pub const GATE_AT4_MARKER: &str = "GATE_AT4 enosys";
 pub const GATE_AU2_MARKER: &str = "GATE_AU2 sched_yield";
 pub const GATE_AU3_MARKER: &str = "GATE_AU3 alarm";
 pub const GATE_AU4_MARKER: &str = "GATE_AU4 enosys";
+
+pub const GATE_AV2_MARKER: &str = "GATE_AV2 getpid";
+pub const GATE_AV3_MARKER: &str = "GATE_AV3 gettid";
+pub const GATE_AV4_MARKER: &str = "GATE_AV4 enosys";
+
+pub const GATE_AW2_MARKER: &str = "GATE_AW2 getsched";
+pub const GATE_AW3_MARKER: &str = "GATE_AW3 getparam";
+pub const GATE_AW4_MARKER: &str = "GATE_AW4 enosys";
+
+pub const GATE_AX2_MARKER: &str = "GATE_AX2 prio_max";
+pub const GATE_AX3_MARKER: &str = "GATE_AX3 prio_min";
+pub const GATE_AX4_MARKER: &str = "GATE_AX4 enosys";
+
+pub const GATE_AY2_MARKER: &str = "GATE_AY2 rr_interval";
+pub const GATE_AY3_MARKER: &str = "GATE_AY3 getcpu";
+pub const GATE_AY4_MARKER: &str = "GATE_AY4 enosys";
+
+pub const GATE_AZ2_MARKER: &str = "GATE_AZ2 set_robust";
+pub const GATE_AZ3_MARKER: &str = "GATE_AZ3 get_robust";
+pub const GATE_AZ4_MARKER: &str = "GATE_AZ4 enosys";
+
+pub const GATE_BA2_MARKER: &str = "GATE_BA2 personality";
+pub const GATE_BA3_MARKER: &str = "GATE_BA3 nanosleep";
+pub const GATE_BA4_MARKER: &str = "GATE_BA4 enosys";
+
+pub const GATE_BB2_MARKER: &str = "GATE_BB2 capget";
+pub const GATE_BB3_MARKER: &str = "GATE_BB3 ioprio_get";
+pub const GATE_BB4_MARKER: &str = "GATE_BB4 enosys";
