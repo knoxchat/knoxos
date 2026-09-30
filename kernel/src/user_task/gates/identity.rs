@@ -300,3 +300,55 @@ pub(super) fn run_gate_as3() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AS3 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_at2() {
+    serial_println!("[user_task] Gate AT2: gettimeofday usec in range");
+    let elf = crate::init::gettimeofday_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "gettimeofday-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AT2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_at3() {
+    serial_println!("[user_task] Gate AT3: sysinfo totalram is non-zero");
+    let elf = crate::init::sysinfo_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sysinfo-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AT3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_au2() {
+    serial_println!("[user_task] Gate AU2: sched_yield returns 0");
+    let elf = crate::init::sched_yield_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sched-yield-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AU2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_au3() {
+    serial_println!("[user_task] Gate AU3: alarm(0) is non-negative");
+    let elf = crate::init::alarm_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "alarm-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AU3 parent pid={} reaped={}", pid, reaped);
+}

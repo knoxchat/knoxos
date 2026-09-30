@@ -366,6 +366,22 @@ fn test_symlinkat_dirfd() {
 }
 
 #[test_case]
+fn test_readlinkat_dirfd() {
+    assert!(
+        crate::syscall::readlinkat_self_test(),
+        "readlinkat must return a dirfd-relative symlink target, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
+fn test_mknodat_dirfd() {
+    assert!(
+        crate::syscall::mknodat_self_test(),
+        "mknodat must create a dirfd-relative regular file, ENOENT for a missing parent, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

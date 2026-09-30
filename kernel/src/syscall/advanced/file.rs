@@ -919,6 +919,285 @@ pub fn symlinkat_self_test() -> bool {
     true
 }
 
+pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf_ptr: u64, bufsiz: u64) -> SyscallResult {
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = path_at(dirfd, &path)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+    let path = crate::overlayfs::apply_overlay(pid, &path, false);
+    let target = {
+        let vfs = crate::vfs::VFS.lock();
+        let ino = vfs.resolve_path(&path).ok_or(SyscallError::FileNotFound)?;
+        let inode = vfs.get_inode(ino).ok_or(SyscallError::FileNotFound)?;
+        if inode.file_type != crate::vfs::FileType::SymLink {
+            return Err(SyscallError::InvalidArgument);
+        }
+        inode.data.clone()
+    };
+    let len = target.len().min(bufsiz as usize);
+    if buf_ptr != 0 && len > 0 {
+        unsafe {
+            core::ptr::copy_nonoverlapping(target.as_ptr(), buf_ptr as *mut u8, len);
+        }
+        crate::vmm::write_user_memory(pid, buf_ptr, &target[..len]);
+    }
+    Ok(len as u64)
+}
+
+pub const GATE_AT1_MARKER: &str = "GATE_AT1 readlinkat";
+const GATE_AT1_DIR: &str = "/tmp/gate_at1";
+const GATE_AT1_LINK: &str = "/tmp/gate_at1/y";
+
+/// `readlinkat` on a relative name via dirfd returns the target; a missing
+/// child is ENOENT; a bad dirfd is EBADF.
+pub fn readlinkat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AT1_LINK);
+        if vfs.mkdir(GATE_AT1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_AT1_DIR).is_none() {
+            crate::serial_println!("[readlinkat] Gate AT1 FAILED: mkdir {}", GATE_AT1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_AT1_LINK, b"x") {
+            crate::serial_println!("[readlinkat] Gate AT1 FAILED: write {}", GATE_AT1_LINK);
+            return false;
+        }
+        if let Some(ino) = vfs.resolve_path(GATE_AT1_LINK) {
+            if let Some(inode) = vfs.get_inode_mut(ino) {
+                inode.file_type = crate::vfs::FileType::SymLink;
+            }
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[readlinkat] Gate AT1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AT1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[readlinkat] Gate AT1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"y\0";
+    let mut buf = [0u8; 8];
+    match sys_readlinkat(dirfd, child.as_ptr() as u64, buf.as_mut_ptr() as u64, 8) {
+        Ok(1) if buf[0] == b'x' => {}
+        other => {
+            crate::serial_println!(
+                "[readlinkat] Gate AT1 FAILED: readlinkat {:?} buf={:?}",
+                other,
+                buf
+            );
+            return false;
+        }
+    }
+    let missing = b"missing\0";
+    match sys_readlinkat(dirfd, missing.as_ptr() as u64, buf.as_mut_ptr() as u64, 8) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[readlinkat] Gate AT1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_readlinkat(-1, child.as_ptr() as u64, buf.as_mut_ptr() as u64, 8) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[readlinkat] Gate AT1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[readlinkat] {}", GATE_AT1_MARKER);
+    true
+}
+
+fn parent_path(path: &str) -> alloc::string::String {
+    match path.rsplit_once('/') {
+        Some(("", _)) => alloc::string::String::from("/"),
+        Some((p, _)) => {
+            if p.is_empty() {
+                alloc::string::String::from("/")
+            } else {
+                alloc::string::String::from(p)
+            }
+        }
+        None => alloc::string::String::from("/"),
+    }
+}
+
+fn mknod_path(path: &str, mode: u32) -> SyscallResult {
+    let mut vfs = crate::vfs::VFS.lock();
+    if vfs.resolve_path(path).is_some() {
+        return Err(SyscallError::FileExists);
+    }
+    if vfs.resolve_path(&parent_path(path)).is_none() {
+        return Err(SyscallError::FileNotFound);
+    }
+    let file_type = mode & 0o170000;
+    let perms = (mode as u16) & 0o7777 & !crate::syscall::fs::current_umask();
+    match file_type {
+        0o010000 => {
+            drop(vfs);
+            crate::fifo::mkfifo(path, perms)
+                .map(|_| 0u64)
+                .map_err(|e| match e {
+                    -17 => SyscallError::FileExists,
+                    -2 => SyscallError::FileNotFound,
+                    _ => SyscallError::IoError,
+                })
+        }
+        0o100000 | 0 => {
+            if !vfs.write_file(path, &[]) {
+                return Err(SyscallError::IoError);
+            }
+            if let Some(ino) = vfs.resolve_path(path) {
+                if let Some(inode) = vfs.get_inode_mut(ino) {
+                    inode.permissions = perms;
+                }
+            }
+            Ok(0)
+        }
+        0o020000 | 0o060000 => {
+            if !vfs.write_file(path, &[]) {
+                return Err(SyscallError::IoError);
+            }
+            if let Some(ino) = vfs.resolve_path(path) {
+                if let Some(inode) = vfs.get_inode_mut(ino) {
+                    inode.file_type = if file_type == 0o020000 {
+                        crate::vfs::FileType::CharDevice
+                    } else {
+                        crate::vfs::FileType::BlockDevice
+                    };
+                    inode.permissions = perms;
+                }
+            }
+            Ok(0)
+        }
+        0o140000 => {
+            if !vfs.write_file(path, &[]) {
+                return Err(SyscallError::IoError);
+            }
+            if let Some(ino) = vfs.resolve_path(path) {
+                if let Some(inode) = vfs.get_inode_mut(ino) {
+                    inode.file_type = crate::vfs::FileType::Socket;
+                    inode.permissions = perms;
+                }
+            }
+            Ok(0)
+        }
+        _ => Err(SyscallError::InvalidArgument),
+    }
+}
+
+pub fn sys_mknodat(dirfd: i32, path_ptr: u64, mode: u32, _dev: u64) -> SyscallResult {
+    let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = path_at(dirfd, &path)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+    let path = crate::overlayfs::apply_overlay(pid, &path, true);
+    mknod_path(&path, mode)
+}
+
+pub const GATE_AU1_MARKER: &str = "GATE_AU1 mknodat";
+const GATE_AU1_DIR: &str = "/tmp/gate_au1";
+const GATE_AU1_FILE: &str = "/tmp/gate_au1/x";
+
+/// `mknodat` on a relative name via dirfd creates a regular file; a missing
+/// parent is ENOENT; a bad dirfd is EBADF.
+pub fn mknodat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_AU1_FILE);
+        if vfs.mkdir(GATE_AU1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_AU1_DIR).is_none() {
+            crate::serial_println!("[mknodat] Gate AU1 FAILED: mkdir {}", GATE_AU1_DIR);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[mknodat] Gate AU1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_AU1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[mknodat] Gate AU1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    const S_IFREG: u32 = 0o100000;
+    match sys_mknodat(dirfd, child.as_ptr() as u64, S_IFREG | 0o644, 0) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[mknodat] Gate AU1 FAILED: mknodat {:?}", other);
+            return false;
+        }
+    }
+    {
+        let vfs = crate::vfs::VFS.lock();
+        match vfs.stat(GATE_AU1_FILE) {
+            Ok(s) if s.file_type == crate::vfs::FileType::Regular => {}
+            other => {
+                crate::serial_println!("[mknodat] Gate AU1 FAILED: stat {:?}", other.err());
+                return false;
+            }
+        }
+    }
+    let nested = b"missing/z\0";
+    match sys_mknodat(dirfd, nested.as_ptr() as u64, S_IFREG | 0o644, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[mknodat] Gate AU1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_mknodat(-1, child.as_ptr() as u64, S_IFREG | 0o644, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[mknodat] Gate AU1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[mknodat] {}", GATE_AU1_MARKER);
+    true
+}
+
 pub fn sys_fchmodat(dirfd: i32, path_ptr: u64, mode: u32, flags: i32) -> SyscallResult {
     let _ = (dirfd, flags);
     crate::syscall::fs::sys_chmod(path_ptr, mode as u16)

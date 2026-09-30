@@ -5,11 +5,14 @@ use super::{SyscallError, SyscallResult};
 pub fn sys_gettimeofday(tv_ptr: u64) -> SyscallResult {
     let (tv, _tz) = crate::rtc::gettimeofday();
     if tv_ptr != 0 {
+        let pid = crate::scheduler::current_pid().unwrap_or(1);
+        let mut buf = [0u8; 16];
+        buf[0..8].copy_from_slice(&tv.tv_sec.to_ne_bytes());
+        buf[8..16].copy_from_slice(&tv.tv_usec.to_ne_bytes());
         unsafe {
-            let p = tv_ptr as *mut [i64; 2];
-            (*p)[0] = tv.tv_sec;
-            (*p)[1] = tv.tv_usec;
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), tv_ptr as *mut u8, buf.len());
         }
+        crate::vmm::write_user_memory(pid, tv_ptr, &buf);
     }
     Ok(0)
 }

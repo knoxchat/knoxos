@@ -1105,4 +1105,6 @@ pub fn init() {
     let _ = crate::syscall::renameat_self_test();
     let _ = crate::syscall::linkat_self_test();
     let _ = crate::syscall::symlinkat_self_test();
+    let _ = crate::syscall::readlinkat_self_test();
+    let _ = crate::syscall::mknodat_self_test();
 }

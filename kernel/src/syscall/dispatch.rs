@@ -349,7 +349,8 @@ pub fn handle_syscall(
                 Ok(0)
             }
         }
-        SyscallNumber::Mknod | SyscallNumber::Mknodat => {
+        SyscallNumber::Mknodat => advanced::sys_mknodat(arg1 as i32, arg2, arg3 as u32, arg4),
+        SyscallNumber::Mknod => {
             // mknod(path, mode, dev) — create special file
             let path = unsafe { read_user_string(arg1) };
             if let Some(p) = path {
@@ -673,7 +674,7 @@ pub fn handle_syscall(
             advanced::sys_linkat(arg1 as i32, arg2, arg3 as i32, arg4, arg5 as i32)
         }
         SyscallNumber::Symlinkat => advanced::sys_symlinkat(arg1, arg2 as i32, arg3),
-        SyscallNumber::Readlinkat => fs::sys_readlink(arg2, arg3, arg4),
+        SyscallNumber::Readlinkat => advanced::sys_readlinkat(arg1 as i32, arg2, arg3, arg4),
         SyscallNumber::Fchmodat => {
             advanced::sys_fchmodat(arg1 as i32, arg2, arg3 as u32, arg4 as i32)
         }

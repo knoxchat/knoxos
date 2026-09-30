@@ -84,8 +84,15 @@ pub fn sys_sysinfo(buf_ptr: u64) -> SyscallResult {
         freehigh: 0,
         mem_unit: 1,
     };
-    unsafe {
-        core::ptr::write(buf_ptr as *mut Si, si);
+    if buf_ptr != 0 {
+        let pid = crate::scheduler::current_pid().unwrap_or(1);
+        let bytes = unsafe {
+            core::slice::from_raw_parts((&si as *const Si).cast::<u8>(), core::mem::size_of::<Si>())
+        };
+        unsafe {
+            core::ptr::copy_nonoverlapping(bytes.as_ptr(), buf_ptr as *mut u8, bytes.len());
+        }
+        crate::vmm::write_user_memory(pid, buf_ptr, bytes);
     }
     Ok(0)
 }

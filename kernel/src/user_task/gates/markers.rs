@@ -159,3 +159,11 @@ pub const GATE_AR4_MARKER: &str = "GATE_AR4 enosys";
 pub const GATE_AS2_MARKER: &str = "GATE_AS2 clock_getres";
 pub const GATE_AS3_MARKER: &str = "GATE_AS3 times";
 pub const GATE_AS4_MARKER: &str = "GATE_AS4 enosys";
+
+pub const GATE_AT2_MARKER: &str = "GATE_AT2 gettimeofday";
+pub const GATE_AT3_MARKER: &str = "GATE_AT3 sysinfo";
+pub const GATE_AT4_MARKER: &str = "GATE_AT4 enosys";
+
+pub const GATE_AU2_MARKER: &str = "GATE_AU2 sched_yield";
+pub const GATE_AU3_MARKER: &str = "GATE_AU3 alarm";
+pub const GATE_AU4_MARKER: &str = "GATE_AU4 enosys";

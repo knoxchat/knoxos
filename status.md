@@ -1,6 +1,6 @@
 # KnoxOS Production Readiness Status
 
-> **Last Updated**: 2026-09-28
+> **Last Updated**: 2026-10-01
 > **Version**: 0.2.2 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.2)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
 > **Codebase**: 609 Rust files in `kernel/src` · ~347,000 lines · 407 `pub mod` entries
@@ -211,6 +211,14 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 164. **Gate AS2 clock_getres** — Ring 3 `clock_getres(CLOCK_MONOTONIC)` reports 1ns (`GATE_AS2 clock_getres`).
 165. **Gate AS3 times** — Ring 3 `times` returns a non-zero tick count (`GATE_AS3 times`).
 166. **Gate AS4 ENOSYS** — unimplemented `ustat` returns `-ENOSYS` (`GATE_AS4 enosys`).
+167. **Gate AT1 readlinkat** — `readlinkat` on a dirfd-relative symlink returns the target; a missing child is ENOENT; a bad dirfd is EBADF (`GATE_AT1 readlinkat`).
+168. **Gate AT2 gettimeofday** — Ring 3 `gettimeofday` writes `tv_usec < 1e6` (`GATE_AT2 gettimeofday`).
+169. **Gate AT3 sysinfo** — Ring 3 `sysinfo` reports non-zero `totalram` (`GATE_AT3 sysinfo`).
+170. **Gate AT4 ENOSYS** — unimplemented `migrate_pages` returns `-ENOSYS` (`GATE_AT4 enosys`).
+171. **Gate AU1 mknodat** — `mknodat` on a dirfd-relative name creates a regular file; a missing parent is ENOENT; a bad dirfd is EBADF (`GATE_AU1 mknodat`).
+172. **Gate AU2 sched_yield** — Ring 3 `sched_yield` returns 0 (`GATE_AU2 sched_yield`).
+173. **Gate AU3 alarm** — Ring 3 `alarm(0)` returns a non-negative remaining (`GATE_AU3 alarm`).
+174. **Gate AU4 ENOSYS** — unimplemented `swapoff` returns `-ENOSYS` (`GATE_AU4 enosys`).
 
 ### Architectural blockers (must fix first)
 
@@ -252,8 +260,8 @@ Percentages are **production usefulness**, not lines of code.
 |---|-----------|-------|--------|----------|----------------|
 | 1 | Kernel Core | Wired | 82% | High | Interrupts and timers work; GS-relative CpuLocal; per-CPU TSS; MADT IOAPIC + ISO; AP online then Ring 3 (I3). |
 | 2 | Memory Management | Wired | 74% | **Critical** | Demand paging + CoW #PF (H1) + file-backed fault-in (H2); leftover RAM in buddy (J2); LRU shrink (J3); swap I/O + #PF swap-in (K2); OOM on frame alloc; guarded kernel stacks (H4). |
-| 3 | Process & Scheduling | Wired | 99% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B8** scheduled Ring 3; IRQ GPR+FPU save (I2); AP Ring 3 (I3); `clone(CLONE_VM)` (J1); `CLONE_THREAD` join (K1); `%fs` TLS (L1); PID ns (M1); futex wait/wake (M3); mount ns (N1); net ns (O1); user ns (P1); IPC ns (Q1); cgroup ns (R1); time ns (S1); `setns` join (T1); `chroot` jail (U1); `pivot_root` (V1); `chdir`/`getcwd` (Z3); `fchdir` (AA2); Ring 3 `getppid` (AG3); Ring 3 `getpgid` (AH3); Ring 3 `getsid` (AI3); Ring 3 `setuid` (AJ3); Ring 3 `getrlimit` (AK2); Ring 3 `setgid` (AK3); Ring 3 `setrlimit` (AL2); Ring 3 `setresuid` (AL3); Ring 3 `prlimit64` (AM2); Ring 3 `setresgid` (AM3); Ring 3 `setreuid` (AN2); Ring 3 `setgroups`/`getgroups` (AN3); Ring 3 `setregid` (AO2); Ring 3 `getresuid` (AO3); Ring 3 `getresgid` (AP2); Ring 3 `setpgid`/`getpgrp` (AP3). |
-| 4 | Filesystem & Storage | Wired | 99% | **Critical** | VirtIO-blk + persist C1–C6 + AHCI/NVMe DMA; inotify on VFS mutate (H3); mount ns bind isolation (N1); OverlayFS merge+whiteout (W1); VFS hard links (X1); VFS chmod enforcement (Y1); VFS `rmdir` (Z1); Ring 3 `unlink` (Z2); named FIFO write/read (AA1); Ring 3 `fchdir` (AA2); Ring 3 `access` (AA3); VFS `list_dir`/`getdents` (AB1); Ring 3 `dup2` (AB2); `fcntl` CLOEXEC/DUPFD (AC1); Ring 3 `pread64` (AC2); `fstat` size (AD1); Ring 3 `pwrite64` (AD2); scatter-gather `writev` (AE1); Ring 3 `ftruncate` (AE2); scatter-gather `readv` (AF1); Ring 3 `lseek` (AF2); `fsync` EBADF-checked (AG1); Ring 3 `fdatasync` (AG2); `syncfs` EBADF-checked (AH1); Ring 3 `sync` (AH2); `fchmod` EBADF-checked (AI1); Ring 3 `fchown` (AI2); `fstatfs` EBADF-checked (AJ1); Ring 3 `statfs` (AJ2); `fsetxattr` EBADF-checked (AK1); `flistxattr`/`fremovexattr` EBADF-checked (AL1); `listxattr`/`removexattr` ENOENT-checked (AM1); `faccessat` dirfd-relative (AN1); `mkdirat` dirfd-relative (AO1); `unlinkat` dirfd-relative (AP1); Ring 3 `splice` (R2); Ring 3 `flock` (R3); Ring 3 `sendfile` (S2); Ring 3 `tee` (S3); Ring 3 `copy_file_range` (T2); Ring 3 `vmsplice` (T3); Ring 3 xattr (U2); Ring 3 `statx` (U3); Ring 3 `fallocate` (V2); Ring 3 `utimensat` (V3); Ring 3 umask (W2); Ring 3 symlink (W3); Ring 3 `rename` (X2); Ring 3 `truncate` (X3); Ring 3 `chown` (Y2); Ring 3 `mkdir` (Y3). |
+| 3 | Process & Scheduling | Wired | 99% | **Critical** | Kernel-thread RIP switch + idle HLT; **Gate B2–B8** scheduled Ring 3; IRQ GPR+FPU save (I2); AP Ring 3 (I3); `clone(CLONE_VM)` (J1); `CLONE_THREAD` join (K1); `%fs` TLS (L1); PID ns (M1); futex wait/wake (M3); mount ns (N1); net ns (O1); user ns (P1); IPC ns (Q1); cgroup ns (R1); time ns (S1); `setns` join (T1); `chroot` jail (U1); `pivot_root` (V1); `chdir`/`getcwd` (Z3); `fchdir` (AA2); Ring 3 `getppid` (AG3); Ring 3 `getpgid` (AH3); Ring 3 `getsid` (AI3); Ring 3 `setuid` (AJ3); Ring 3 `getrlimit` (AK2); Ring 3 `setgid` (AK3); Ring 3 `setrlimit` (AL2); Ring 3 `setresuid` (AL3); Ring 3 `prlimit64` (AM2); Ring 3 `setresgid` (AM3); Ring 3 `setreuid` (AN2); Ring 3 `setgroups`/`getgroups` (AN3); Ring 3 `setregid` (AO2); Ring 3 `getresuid` (AO3); Ring 3 `getresgid` (AP2); Ring 3 `setpgid`/`getpgrp` (AP3); Ring 3 `gettimeofday` (AT2); Ring 3 `sysinfo` (AT3); Ring 3 `sched_yield` (AU2); Ring 3 `alarm` (AU3). |
+| 4 | Filesystem & Storage | Wired | 99% | **Critical** | VirtIO-blk + persist C1–C6 + AHCI/NVMe DMA; inotify on VFS mutate (H3); mount ns bind isolation (N1); OverlayFS merge+whiteout (W1); VFS hard links (X1); VFS chmod enforcement (Y1); VFS `rmdir` (Z1); Ring 3 `unlink` (Z2); named FIFO write/read (AA1); Ring 3 `fchdir` (AA2); Ring 3 `access` (AA3); VFS `list_dir`/`getdents` (AB1); Ring 3 `dup2` (AB2); `fcntl` CLOEXEC/DUPFD (AC1); Ring 3 `pread64` (AC2); `fstat` size (AD1); Ring 3 `pwrite64` (AD2); scatter-gather `writev` (AE1); Ring 3 `ftruncate` (AE2); scatter-gather `readv` (AF1); Ring 3 `lseek` (AF2); `fsync` EBADF-checked (AG1); Ring 3 `fdatasync` (AG2); `syncfs` EBADF-checked (AH1); Ring 3 `sync` (AH2); `fchmod` EBADF-checked (AI1); Ring 3 `fchown` (AI2); `fstatfs` EBADF-checked (AJ1); Ring 3 `statfs` (AJ2); `fsetxattr` EBADF-checked (AK1); `flistxattr`/`fremovexattr` EBADF-checked (AL1); `listxattr`/`removexattr` ENOENT-checked (AM1); `faccessat` dirfd-relative (AN1); `mkdirat` dirfd-relative (AO1); `unlinkat` dirfd-relative (AP1); `readlinkat` dirfd-relative (AT1); `mknodat` dirfd-relative (AU1); Ring 3 `splice` (R2); Ring 3 `flock` (R3); Ring 3 `sendfile` (S2); Ring 3 `tee` (S3); Ring 3 `copy_file_range` (T2); Ring 3 `vmsplice` (T3); Ring 3 xattr (U2); Ring 3 `statx` (U3); Ring 3 `fallocate` (V2); Ring 3 `utimensat` (V3); Ring 3 umask (W2); Ring 3 symlink (W3); Ring 3 `rename` (X2); Ring 3 `truncate` (X3); Ring 3 `chown` (Y2); Ring 3 `mkdir` (Y3). |
 | 5 | Networking | Wired | 64% | **Critical** | Loopback live; VirtIO-net D2; DHCP applies eth0 (D3); DNS + TCP SYN/RTO/HTTP (D4); CUBIC cwnd (D5). |
 | 6 | Device Drivers | Wired | 40% | **Critical** | PCI, PS/2, UART, VirtIO-blk, AHCI DMA, NVMe DMA live; USB/GPU mostly stub. |
 | 7 | GUI & Desktop | Live | 82% | Medium | In-kernel demo plus Ring 3 SHM clients (F1–F4); interactive desktop terminal still in-kernel for PTY I/O. |
@@ -262,15 +270,15 @@ Percentages are **production usefulness**, not lines of code.
 | 10 | System Services | Wired | 42% | High | Ring 3 `/sbin/init` (K3); AF_UNIX system bus socket (L3); in-kernel units; no crash restart. |
 | 11 | Virtualization & Containers | Stub | 30% | Low | VMX `asm` unused; containers are comments. UTS/PID/mount/net/user/IPC/cgroup/time ns isolation live (L2, M1, N1, O1, P1, Q1, R1, S1); `setns` join live (T1); `chroot` (U1); `pivot_root` (V1); OverlayFS merge (W1). |
 | 12 | AI/ML | Wired | 22% | Low | GGUF parse + naive CPU; GPU matmul unused. |
-| 13 | Binary Compatibility | Wired | 99% | **Critical** | Static hello `iretq`s; `execve`/`fork`/`clone`/`CLONE_THREAD`/`/bin/sh`/`/sbin/init`; `arch_prctl` `%fs`; live `rt_sigreturn`; PID-ns `getpid`; `pipe`; futex wait/wake; `socketpair`; `eventfd`; `epoll`; `memfd_create`; `timerfd`; `signalfd`; `poll`; Ring 3 `inotify`; `splice`; `flock`; `sendfile`; `tee`; `copy_file_range`; `vmsplice`; `setxattr`/`getxattr`; `statx`; `fallocate`; `utimensat`; `umask`; `symlink`/`readlink`; `rename`; `truncate`; `chown`; `mkdir`; `unlink`; `chdir`/`getcwd`; `fchdir`; `access`; `dup2`; `uname`; `fcntl`; `pread64`; `getuid`; `fstat`; `pwrite64`; `getgid`; `writev`; `ftruncate`; `geteuid`; `readv`; `lseek`; `getegid`; `fsync`; `fdatasync`; `getppid`; `syncfs`; `sync`; `getpgid`; `fchmod`; `fchown`; `getsid`; `fstatfs`; `statfs`; `setuid`; `fsetxattr`; `getrlimit`; `setgid`; `flistxattr`; `setrlimit`; `setresuid`; `listxattr`; `prlimit64`; `setresgid`; `faccessat`; `setreuid`; `setgroups`/`getgroups`; `mkdirat`; `setregid`; `getresuid`; `unlinkat`; `getresgid`; `setpgid`/`getpgrp`. |
+| 13 | Binary Compatibility | Wired | 99% | **Critical** | Static hello `iretq`s; `execve`/`fork`/`clone`/`CLONE_THREAD`/`/bin/sh`/`/sbin/init`; `arch_prctl` `%fs`; live `rt_sigreturn`; PID-ns `getpid`; `pipe`; futex wait/wake; `socketpair`; `eventfd`; `epoll`; `memfd_create`; `timerfd`; `signalfd`; `poll`; Ring 3 `inotify`; `splice`; `flock`; `sendfile`; `tee`; `copy_file_range`; `vmsplice`; `setxattr`/`getxattr`; `statx`; `fallocate`; `utimensat`; `umask`; `symlink`/`readlink`; `rename`; `truncate`; `chown`; `mkdir`; `unlink`; `chdir`/`getcwd`; `fchdir`; `access`; `dup2`; `uname`; `fcntl`; `pread64`; `getuid`; `fstat`; `pwrite64`; `getgid`; `writev`; `ftruncate`; `geteuid`; `readv`; `lseek`; `getegid`; `fsync`; `fdatasync`; `getppid`; `syncfs`; `sync`; `getpgid`; `fchmod`; `fchown`; `getsid`; `fstatfs`; `statfs`; `setuid`; `fsetxattr`; `getrlimit`; `setgid`; `flistxattr`; `setrlimit`; `setresuid`; `listxattr`; `prlimit64`; `setresgid`; `faccessat`; `setreuid`; `setgroups`/`getgroups`; `mkdirat`; `setregid`; `getresuid`; `unlinkat`; `getresgid`; `setpgid`/`getpgrp`; `readlinkat`; `gettimeofday`; `sysinfo`; `mknodat`; `sched_yield`; `alarm`. |
 | 14 | Internationalization & Fonts | Live | 68% | Low | TTF, CJK, RTL on the compositor; locale loading partial. |
 | 15 | Build System & Tooling | Live | 75% | Medium | Make/QEMU work; `flake.nix` missing. |
-| 16 | Testing & Quality | Wired | 82% | **Critical** | Real VFS/widget/DNS/buddy tests; C4–C6/D3–D5/E1–E4/F2–F4/H1–H4/I1–I3/J1–J4/K1–K4/L1–L4/M1–M4/N1–N4/O1–O4/P1–P4/Q1–Q4/R1–R4/S1–S4/T1–T4/U1–U4/V1–V4/W1–W4/X1–X4/Y1–Y4/Z1–Z4/AA1–AA4/AB1–AB4/AC1–AC4/AD1–AD4/AE1–AE4/AF1–AF4/AG1–AG4/AH1–AH4/AI1–AI4/AJ1–AJ4/AK1–AK4/AL1–AL4/AM1–AM4/AN1–AN4/AO1–AO4/AP1–AP4/AQ1–AQ4 self-tests; `assert!(true)` tests removed. |
+| 16 | Testing & Quality | Wired | 82% | **Critical** | Real VFS/widget/DNS/buddy tests; C4–C6/D3–D5/E1–E4/F2–F4/H1–H4/I1–I3/J1–J4/K1–K4/L1–L4/M1–M4/N1–N4/O1–O4/P1–P4/Q1–Q4/R1–R4/S1–S4/T1–T4/U1–U4/V1–V4/W1–W4/X1–X4/Y1–Y4/Z1–Z4/AA1–AA4/AB1–AB4/AC1–AC4/AD1–AD4/AE1–AE4/AF1–AF4/AG1–AG4/AH1–AH4/AI1–AI4/AJ1–AJ4/AK1–AK4/AL1–AL4/AM1–AM4/AN1–AN4/AO1–AO4/AP1–AP4/AQ1–AQ4 self-tests; AR1–AU4 self-tests; `assert!(true)` tests removed. |
 | 17 | Documentation | Wired | 42% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + this file. Architecture guides still missing. |
 | 18 | CI/CD & Release | Wired | 30% | High | `.github/workflows/ci.yml` (fmt, clippy, size, QEMU boot); no signed releases. |
 
 **QEMU desktop demo readiness: ~99%** (boots, paints, clicks, types; serial prints `hello from userspace`; Gate B3–B8 scheduled userspace; Gate D1–D5 packets; Gate C1–C6 storage; Gate E1–E4 enforcement; Gate F1–F4 isolated clients; Gate H1–H4 memory/VFS; Gate I1–I3 SMP + IRQ GPRs + AP Ring 3; Gate J1–J4 clone/buddy/LRU/ENOSYS; Gate K1–K4 join/swap/init/landlock; Gate L1–L4 TLS/UTS/D-Bus/ENOSYS; Gate M1–M4 PID ns/pipe/futex/ENOSYS; Gate N1–N4 mount ns/socketpair/eventfd/ENOSYS; Gate O1–O4 net ns/epoll/memfd/ENOSYS; Gate P1–P4 user ns/timerfd/signalfd/ENOSYS; Gate Q1–Q4 IPC ns/poll/inotify/ENOSYS; Gate R1–R4 cgroup ns/splice/flock/ENOSYS; Gate S1–S4 time ns/sendfile/tee/ENOSYS; Gate T1–T4 setns/copy_file_range/vmsplice/ENOSYS; Gate U1–U4 chroot/xattr/statx/ENOSYS; Gate V1–V4 pivot_root/fallocate/utimensat/ENOSYS; Gate W1–W4 OverlayFS/umask/symlink/ENOSYS; Gate X1–X4 hardlink/rename/truncate/ENOSYS; Gate Y1–Y4 chmod/chown/mkdir/ENOSYS; Gate Z1–Z4 rmdir/unlink/chdir/ENOSYS; Gate AA1–AA4 mkfifo/fchdir/access/ENOSYS; Gate AB1–AB4 getdents/dup2/uname/ENOSYS; Gate AC1–AC4 fcntl/pread64/getuid/ENOSYS; Gate AD1–AD4 fstat/pwrite64/getgid/ENOSYS; Gate AE1–AE4 writev/ftruncate/geteuid/ENOSYS; Gate AF1–AF4 readv/lseek/getegid/ENOSYS; Gate AG1–AG4 fsync/fdatasync/getppid/ENOSYS; Gate AH1–AH4 syncfs/sync/getpgid/ENOSYS; Gate AI1–AI4 fchmod/fchown/getsid/ENOSYS; Gate AJ1–AJ4 fstatfs/statfs/setuid/ENOSYS; Gate AK1–AK4 fsetxattr/getrlimit/setgid/ENOSYS; Gate AL1–AL4 flistxattr/setrlimit/setresuid/ENOSYS; Gate AM1–AM4 listxattr/prlimit64/setresgid/ENOSYS; Gate AN1–AN4 faccessat/setreuid/getgroups/ENOSYS; Gate AO1–AO4 mkdirat/setregid/getresuid/ENOSYS; Gate AP1–AP4 unlinkat/getresgid/setpgid/ENOSYS; Gate AQ1–AQ4 renameat/setsid/setpriority/ENOSYS).
-**Production OS readiness: ~98%** (Gate B2–B8, C1–C6, D1–D5, E1–E4, F1–F4, H1–H4, I1–I3, J1–J4, K1–K4, L1–L4, M1–M4, N1–N4, O1–O4, P1–P4, Q1–Q4, R1–R4, S1–S4, T1–T4, U1–U4, V1–V4, W1–W4, X1–X4, Y1–Y4, Z1–Z4, AA1–AA4, AB1–AB4, AC1–AC4, AD1–AD4, AE1–AE4, AF1–AF4, AG1–AG4, AH1–AH4, AI1–AI4, AJ1–AJ4, AK1–AK4, AL1–AL4, AM1–AM4, AN1–AN4, AO1–AO4, AP1–AP4, AQ1–AQ4, AR1–AR4, AS1–AS4). `./tests/run_integration.sh` **190/190** on QEMU (2026-09-28).
+**Production OS readiness: ~98%** (Gate B2–B8, C1–C6, D1–D5, E1–E4, F1–F4, H1–H4, I1–I3, J1–J4, K1–K4, L1–L4, M1–M4, N1–N4, O1–O4, P1–P4, Q1–Q4, R1–R4, S1–S4, T1–T4, U1–U4, V1–V4, W1–W4, X1–X4, Y1–Y4, Z1–Z4, AA1–AA4, AB1–AB4, AC1–AC4, AD1–AD4, AE1–AE4, AF1–AF4, AG1–AG4, AH1–AH4, AI1–AI4, AJ1–AJ4, AK1–AK4, AL1–AL4, AM1–AM4, AN1–AN4, AO1–AO4, AP1–AP4, AQ1–AQ4, AR1–AR4, AS1–AS4, AT1–AT4, AU1–AU4). `./tests/run_integration.sh` **198/198** on QEMU (2026-10-01).
 
 ---
 
@@ -418,6 +426,10 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] **`setpriority`/`getpriority`** — Ring 3 `setpriority(PRIO_PROCESS, 0, 5)` then `getpriority` is 15 (`GATE_AQ3 setpriority`).
 - [x] **`getrusage`** — Ring 3 `getrusage(RUSAGE_SELF)` reports `ru_maxrss == 4096` (`GATE_AR2 getrusage`).
 - [x] **`clock_gettime`** — Ring 3 `CLOCK_MONOTONIC` `tv_nsec < 1e9` (`GATE_AR3 clock_gettime`).
+- [x] **`gettimeofday`** — Ring 3 `tv_usec < 1e6` (`GATE_AT2 gettimeofday`).
+- [x] **`sysinfo`** — Ring 3 `totalram` is non-zero (`GATE_AT3 sysinfo`).
+- [x] **`sched_yield`** — Ring 3 returns 0 (`GATE_AU2 sched_yield`).
+- [x] **`alarm`** — Ring 3 `alarm(0)` is non-negative (`GATE_AU3 alarm`).
 - [x] **futex wait/wake** — Ring 3 `FUTEX_WAIT` parks; `FUTEX_WAKE` resumes (`GATE_M3 futex`).
 - [ ] **sched_ext / eBPF** — not eBPF
 
@@ -502,6 +514,8 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] `renameat` — dirfd-relative rename succeeds; missing source is ENOENT; bad dirfd is EBADF (`GATE_AQ1 renameat`)
 - [x] `linkat` — dirfd-relative hard link succeeds; missing source is ENOENT; bad dirfd is EBADF (`GATE_AR1 linkat`)
 - [x] `symlinkat` — dirfd-relative symlink succeeds; missing parent is ENOENT; bad dirfd is EBADF (`GATE_AS1 symlinkat`)
+- [x] `readlinkat` — dirfd-relative read returns the target; missing child is ENOENT; bad dirfd is EBADF (`GATE_AT1 readlinkat`)
+- [x] `mknodat` — dirfd-relative create succeeds; missing parent is ENOENT; bad dirfd is EBADF (`GATE_AU1 mknodat`)
 - [ ] NTFS — parses MFT from a provided buffer; **never calls the block layer**
 - [x] `fsync`/`fdatasync` — flush dirty page-cache pages, re-persist the fd's VFS file through the WAL, and issue VirtIO-blk FLUSH
 
@@ -850,9 +864,15 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 - [x] **`linkat`** — dirfd-relative hard link; missing source ENOENT; bad dirfd EBADF (AR1)
 - [x] **`getrusage`** — Ring 3 `ru_maxrss == 4096` (AR2)
 - [x] **`clock_gettime`** — Ring 3 `CLOCK_MONOTONIC` `tv_nsec < 1e9` (AR3)
+- [x] **`readlinkat`** — dirfd-relative read returns the target; missing child ENOENT; bad dirfd EBADF (AT1)
+- [x] **`gettimeofday`** — Ring 3 `tv_usec < 1e6` (AT2)
+- [x] **`sysinfo`** — Ring 3 `totalram` is non-zero (AT3)
+- [x] **`mknodat`** — dirfd-relative create; missing parent ENOENT; bad dirfd EBADF (AU1)
+- [x] **`sched_yield`** — Ring 3 returns 0 (AU2)
+- [x] **`alarm`** — Ring 3 `alarm(0)` is non-negative (AU3)
 
 ### Perfect-OS next steps
-~~Ship **static musl hello** first.~~ Gate B2 hello is an in-kernel generated static ELF. ~~B6 PTY + `/bin/sh`.~~ ~~Live `sigreturn`.~~ Isolated GUI clients F1–F4 live. ~~`clone(CLONE_VM)` (J1).~~ ~~`arch_prctl` `%fs` (L1).~~ ~~PID ns / pipe / futex (M1–M3).~~ ~~`socketpair` / `eventfd` (N2–N3).~~ ~~`epoll` / `memfd_create` (O2–O3).~~ ~~`timerfd` / `signalfd` (P2–P3).~~ ~~`poll` / Ring 3 `inotify` (Q2–Q3).~~ ~~`splice` / `flock` (R2–R3).~~ ~~`sendfile` / `tee` (S2–S3).~~ ~~`copy_file_range` / `vmsplice` (T2–T3).~~ ~~`setxattr` / `statx` (U2–U3).~~ ~~`fallocate` / `utimensat` (V2–V3).~~ ~~OverlayFS / umask / symlink (W1–W3).~~ ~~Hard link / rename / truncate (X1–X3).~~ ~~chmod / chown / mkdir (Y1–Y3).~~ ~~rmdir / unlink / chdir (Z1–Z3).~~ ~~mkfifo / fchdir / access (AA1–AA3).~~ ~~getdents / dup2 / uname (AB1–AB3).~~ ~~fcntl / pread64 / getuid (AC1–AC3).~~ ~~fstat / pwrite64 / getgid (AD1–AD3).~~ ~~writev / ftruncate / geteuid (AE1–AE3).~~ ~~readv / lseek / getegid (AF1–AF3).~~ ~~fsync / fdatasync / getppid (AG1–AG3).~~ ~~syncfs / sync / getpgid (AH1–AH3).~~ ~~fchmod / fchown / getsid (AI1–AI3).~~ ~~fstatfs / statfs / setuid (AJ1–AJ3).~~ ~~fsetxattr / getrlimit / setgid (AK1–AK3).~~ ~~flistxattr / setrlimit / setresuid (AL1–AL3).~~ ~~listxattr / prlimit64 / setresgid (AM1–AM3).~~ ~~faccessat / setreuid / getgroups (AN1–AN3).~~ ~~mkdirat / setregid / getresuid (AO1–AO3).~~ ~~unlinkat / getresgid / setpgid (AP1–AP3).~~ ~~renameat / setsid / setpriority (AQ1–AQ3).~~ ~~linkat / getrusage / clock_gettime (AR1–AR3).~~ Next: dynamic linking.
+~~Ship **static musl hello** first.~~ Gate B2 hello is an in-kernel generated static ELF. ~~B6 PTY + `/bin/sh`.~~ ~~Live `sigreturn`.~~ Isolated GUI clients F1–F4 live. ~~`clone(CLONE_VM)` (J1).~~ ~~`arch_prctl` `%fs` (L1).~~ ~~PID ns / pipe / futex (M1–M3).~~ ~~`socketpair` / `eventfd` (N2–N3).~~ ~~`epoll` / `memfd_create` (O2–O3).~~ ~~`timerfd` / `signalfd` (P2–P3).~~ ~~`poll` / Ring 3 `inotify` (Q2–Q3).~~ ~~`splice` / `flock` (R2–R3).~~ ~~`sendfile` / `tee` (S2–S3).~~ ~~`copy_file_range` / `vmsplice` (T2–T3).~~ ~~`setxattr` / `statx` (U2–U3).~~ ~~`fallocate` / `utimensat` (V2–V3).~~ ~~OverlayFS / umask / symlink (W1–W3).~~ ~~Hard link / rename / truncate (X1–X3).~~ ~~chmod / chown / mkdir (Y1–Y3).~~ ~~rmdir / unlink / chdir (Z1–Z3).~~ ~~mkfifo / fchdir / access (AA1–AA3).~~ ~~getdents / dup2 / uname (AB1–AB3).~~ ~~fcntl / pread64 / getuid (AC1–AC3).~~ ~~fstat / pwrite64 / getgid (AD1–AD3).~~ ~~writev / ftruncate / geteuid (AE1–AE3).~~ ~~readv / lseek / getegid (AF1–AF3).~~ ~~fsync / fdatasync / getppid (AG1–AG3).~~ ~~syncfs / sync / getpgid (AH1–AH3).~~ ~~fchmod / fchown / getsid (AI1–AI3).~~ ~~fstatfs / statfs / setuid (AJ1–AJ3).~~ ~~fsetxattr / getrlimit / setgid (AK1–AK3).~~ ~~flistxattr / setrlimit / setresuid (AL1–AL3).~~ ~~listxattr / prlimit64 / setresgid (AM1–AM3).~~ ~~faccessat / setreuid / getgroups (AN1–AN3).~~ ~~mkdirat / setregid / getresuid (AO1–AO3).~~ ~~unlinkat / getresgid / setpgid (AP1–AP3).~~ ~~renameat / setsid / setpriority (AQ1–AQ3).~~ ~~linkat / getrusage / clock_gettime (AR1–AR3).~~ ~~symlinkat / clock_getres / times (AS1–AS3).~~ ~~readlinkat / gettimeofday / sysinfo (AT1–AT3).~~ ~~mknodat / sched_yield / alarm (AU1–AU3).~~ Next: `fchmodat` / `fchownat` / `newfstatat` via dirfd, then dynamic linking.
 
 ---
 
@@ -900,7 +920,7 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 ### Exists
 - [x] `#[test_case]` framework + QEMU exit ports
 - [x] Real tests: VFS read/write, allocator Box/Vec, some path tests (~subset of 103 `#[test_case]`)
-- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C6 / D1–D5 / E1–E4 / F1–F4 / H1–H4 / I1–I3 / J1–J4 / K1–K4 / L1–L4 / M1–M4 / N1–N4 / O1–O4 / P1–P4 / Q1–Q4 / R1–R4 / S1–S4 / T1–T4 / U1–U4 / V1–V4 / W1–W4 / X1–X4 / Y1–Y4 / Z1–Z4 / AA1–AA4 / AB1–AB4 / AC1–AC4 / AD1–AD4 / AE1–AE4 / AF1–AF4 / AG1–AG4 / AH1–AH4 / AI1–AI4 / AJ1–AJ4 / AK1–AK4 / AL1–AL4 / AM1–AM4 / AN1–AN4 / AO1–AO4 / AP1–AP4 / AQ1–AQ4 / AR1–AR4 / AS1–AS4 markers
+- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C6 / D1–D5 / E1–E4 / F1–F4 / H1–H4 / I1–I3 / J1–J4 / K1–K4 / L1–L4 / M1–M4 / N1–N4 / O1–O4 / P1–P4 / Q1–Q4 / R1–R4 / S1–S4 / T1–T4 / U1–U4 / V1–V4 / W1–W4 / X1–X4 / Y1–Y4 / Z1–Z4 / AA1–AA4 / AB1–AB4 / AC1–AC4 / AD1–AD4 / AE1–AE4 / AF1–AF4 / AG1–AG4 / AH1–AH4 / AI1–AI4 / AJ1–AJ4 / AK1–AK4 / AL1–AL4 / AM1–AM4 / AN1–AN4 / AO1–AO4 / AP1–AP4 / AQ1–AQ4 / AR1–AR4 / AS1–AS4 / AT1–AT4 / AU1–AU4 markers
 
 ### Harmful
 - [x] **`assert!(true)` tests removed** — widgets, VFS stress, DNS, TCP flags, creds, buddy, path normalize are real assertions
@@ -1365,6 +1385,24 @@ This **is** becoming an OS.
 | AS3 | `times` returns ticks | **Done** — Ring 3 `times` is non-zero (`GATE_AS3 times`) |
 | AS4 | More silent `Ok(0)` → ENOSYS | **Done** — Ring 3 `ustat` returns `-ENOSYS` (`GATE_AS4 enosys`) |
 
+### Gate AT — readlinkat, gettimeofday, sysinfo, honest syscalls (after AS)
+
+| ID | Task | Done when |
+|----|------|-----------|
+| AT1 | `readlinkat` via dirfd | **Done** — relative read returns the target; missing child is ENOENT; bad dirfd is EBADF (`GATE_AT1 readlinkat`) |
+| AT2 | `gettimeofday` usec in range | **Done** — Ring 3 `tv_usec < 1e6` (`GATE_AT2 gettimeofday`) |
+| AT3 | `sysinfo` reports RAM | **Done** — Ring 3 `totalram` is non-zero (`GATE_AT3 sysinfo`) |
+| AT4 | More silent `Ok(0)` → ENOSYS | **Done** — Ring 3 `migrate_pages` returns `-ENOSYS` (`GATE_AT4 enosys`) |
+
+### Gate AU — mknodat, sched_yield, alarm, honest syscalls (after AT)
+
+| ID | Task | Done when |
+|----|------|-----------|
+| AU1 | `mknodat` via dirfd | **Done** — relative create succeeds; missing parent is ENOENT; bad dirfd is EBADF (`GATE_AU1 mknodat`) |
+| AU2 | `sched_yield` from Ring 3 | **Done** — Ring 3 returns 0 (`GATE_AU2 sched_yield`) |
+| AU3 | `alarm(0)` is non-negative | **Done** — Ring 3 `alarm(0)` does not fail (`GATE_AU3 alarm`) |
+| AU4 | More silent `Ok(0)` → ENOSYS | **Done** — Ring 3 `swapoff` returns `-ENOSYS` (`GATE_AU4 enosys`) |
+
 ### Gate G — Quality bar (parallel from day one)
 
 | ID | Task | Done when |
@@ -1372,7 +1410,7 @@ This **is** becoming an OS.
 | G1 | `README.md` + `LICENSE` | **Done** |
 | G2 | GitHub Actions: fmt, clippy, size, QEMU boot | **Workflow present** (`.github/workflows/ci.yml`) |
 | G3 | Feature flags: `gui`, `net`, `fs-ext4`, `stub-drivers` | Default kernel compiles **Live** code only |
-| G4 | Syscall audit spreadsheet: implemented / no-op / ENOSYS | **Partial** — `bpf`/`pkey`/`process_mrelease`/`quotactl`/`remap_file_pages`/`io_uring_*`/`userfaultfd`/`perf_event_open`/`fanotify`/`io_setup`/`kexec`/`init_module`/`mount_setattr`/`fsopen`/`keyctl`/`ioperm`/`iopl`/`acct`/`swapon`/`swapoff`/`modify_ldt`/`sysfs`/`vhangup`/`lookup_dcookie`/`memfd_secret`/`uselib`/`pkey_mprotect`/`process_mrelease`/`set_mempolicy`/`get_mempolicy`/`mbind`/`migrate_pages`/`move_pages`/`sched_setattr`/`sched_getattr`/`futex_waitv`/`open_by_handle_at`/`name_to_handle_at`/`map_shadow_stack`/`ustat`/KVM vCPU regs return ENOSYS (J4, L4, M4, N4, O4, P4, Q4, R4, S4, T4, U4, V4, W4, X4, Y4, Z4, AA4, AB4, AC4, AD4, AE4, AF4, AG4, AH4, AI4, AJ4, AK4, AL4, AM4, AN4, AO4, AP4, AQ4, AR4, AS4); remaining silent `Ok(0)` still exist |
+| G4 | Syscall audit spreadsheet: implemented / no-op / ENOSYS | **Partial** — `bpf`/`pkey`/`process_mrelease`/`quotactl`/`remap_file_pages`/`io_uring_*`/`userfaultfd`/`perf_event_open`/`fanotify`/`io_setup`/`kexec`/`init_module`/`mount_setattr`/`fsopen`/`keyctl`/`ioperm`/`iopl`/`acct`/`swapon`/`swapoff`/`modify_ldt`/`sysfs`/`vhangup`/`lookup_dcookie`/`memfd_secret`/`uselib`/`pkey_mprotect`/`process_mrelease`/`set_mempolicy`/`get_mempolicy`/`mbind`/`migrate_pages`/`move_pages`/`sched_setattr`/`sched_getattr`/`futex_waitv`/`open_by_handle_at`/`name_to_handle_at`/`map_shadow_stack`/`ustat`/KVM vCPU regs return ENOSYS (J4, L4, M4, N4, O4, P4, Q4, R4, S4, T4, U4, V4, W4, X4, Y4, Z4, AA4, AB4, AC4, AD4, AE4, AF4, AG4, AH4, AI4, AJ4, AK4, AL4, AM4, AN4, AO4, AP4, AQ4, AR4, AS4, AT4, AU4); remaining silent `Ok(0)` still exist |
 | G5 | `unsafe` SAFETY comments + size budget | Clippy gate |
 
 ### Explicitly later (after Gates A–E)
@@ -1403,8 +1441,8 @@ Do not:
 ```
 Kernel Core:        ████████████████████░░░░░  82%  Wired         ← I1–I3 per-CPU TSS + GS + AP Ring 3
 Memory Mgmt:        ███████████████████░░░░░░  74%  Wired         ← H1–H4 + J2/J3 + K2 swap I/O
-Process/Sched:      ████████████████████████░  99%  Wired         ← B3–B8 + I2/I3 + J1 + K1 join + L1 TLS + M1 PID ns + M3 futex + N1 mount ns + O1 net ns + P1 user ns + Q1 IPC ns + R1 cgroup ns + S1 time ns + T1 setns + U1 chroot + V1 pivot_root + Z3 chdir + AA2 fchdir + AG3 getppid + AH3 getpgid + AI3 getsid + AJ3 setuid + AK2 getrlimit + AK3 setgid + AL2 setrlimit + AL3 setresuid + AM2 prlimit64 + AM3 setresgid + AN2 setreuid + AN3 getgroups + AO2 setregid + AO3 getresuid + AP2 getresgid + AP3 setpgid + AQ2 setsid + AQ3 setpriority
-Filesystem:         ████████████████████████░  99%  Wired         ← C1–C6 + inotify H3/Q3 + N1 mount ns + OverlayFS W1 + hardlink X1 + chmod Y1 + rmdir Z1 + unlink Z2 + AA1 mkfifo + AA2 fchdir + AA3 access + AB1 getdents + AB2 dup2 + AC1 fcntl + AC2 pread64 + AD1 fstat + AD2 pwrite64 + AE1 writev + AE2 ftruncate + AF1 readv + AF2 lseek + AG1 fsync + AG2 fdatasync + AH1 syncfs + AH2 sync + AI1 fchmod + AI2 fchown + AJ1 fstatfs + AJ2 statfs + AK1 fsetxattr + AL1 flistxattr + AM1 listxattr + AN1 faccessat + AO1 mkdirat + AP1 unlinkat + AQ1 renameat + R2 splice + R3 flock + S2 sendfile + S3 tee + T2 copy_file_range + T3 vmsplice + U2 xattr + U3 statx + V2 fallocate + V3 utimensat + W2 umask + W3 symlink + X2 rename + X3 truncate + Y2 chown + Y3 mkdir
+Process/Sched:      ████████████████████████░  99%  Wired         ← B3–B8 + I2/I3 + J1 + K1 join + L1 TLS + M1 PID ns + M3 futex + N1 mount ns + O1 net ns + P1 user ns + Q1 IPC ns + R1 cgroup ns + S1 time ns + T1 setns + U1 chroot + V1 pivot_root + Z3 chdir + AA2 fchdir + AG3 getppid + AH3 getpgid + AI3 getsid + AJ3 setuid + AK2 getrlimit + AK3 setgid + AL2 setrlimit + AL3 setresuid + AM2 prlimit64 + AM3 setresgid + AN2 setreuid + AN3 getgroups + AO2 setregid + AO3 getresuid + AP2 getresgid + AP3 setpgid + AQ2 setsid + AQ3 setpriority + AT2 gettimeofday + AT3 sysinfo + AU2 sched_yield + AU3 alarm
+Filesystem:         ████████████████████████░  99%  Wired         ← C1–C6 + inotify H3/Q3 + N1 mount ns + OverlayFS W1 + hardlink X1 + chmod Y1 + rmdir Z1 + unlink Z2 + AA1 mkfifo + AA2 fchdir + AA3 access + AB1 getdents + AB2 dup2 + AC1 fcntl + AC2 pread64 + AD1 fstat + AD2 pwrite64 + AE1 writev + AE2 ftruncate + AF1 readv + AF2 lseek + AG1 fsync + AG2 fdatasync + AH1 syncfs + AH2 sync + AI1 fchmod + AI2 fchown + AJ1 fstatfs + AJ2 statfs + AK1 fsetxattr + AL1 flistxattr + AM1 listxattr + AN1 faccessat + AO1 mkdirat + AP1 unlinkat + AQ1 renameat + AT1 readlinkat + AU1 mknodat + R2 splice + R3 flock + S2 sendfile + S3 tee + T2 copy_file_range + T3 vmsplice + U2 xattr + U3 statx + V2 fallocate + V3 utimensat + W2 umask + W3 symlink + X2 rename + X3 truncate + Y2 chown + Y3 mkdir
 Networking:         ████████████████░░░░░░░░░  64%  Wired         ← D1–D5
 Device Drivers:     ██████████░░░░░░░░░░░░░░░  40%  Wired         ← AHCI + NVMe DMA
 GUI & Desktop:      ████████████████████░░░░░  82%  Live          ← F1–F4 SHM clients
@@ -1436,7 +1474,7 @@ CI/CD:              ███████░░░░░░░░░░░░░
 | Networking | 22% | 64% | D1 loopback; D2 VirtIO-net; D3 DHCP apply; D4 DNS+TCP; D5 CUBIC |
 | Security | 15% | 80% | E1 W^X/ASLR; E2 ChaCha20; E3 seccomp EPERM; E4 CapNetBindService; K4 Landlock; J4/L4/M4/N4/O4/P4/Q4/R4/S4/T4/U4/V4/W4/X4/Y4/Z4/AA4/AB4/AC4/AD4/AE4/AF4/AG4/AH4/AI4/AJ4/AK4/AL4/AM4/AN4/AO4/AP4/AQ4 ENOSYS |
 | System services | — | 42% | K3 Ring 3 `/sbin/init`; L3 AF_UNIX D-Bus socket |
-| **Overall production** | **~40%** | **~98%** | Gates B3–B8 + C1–C6 + D1–D5 + E1–E4 + F1–F4 + H1–H4 + I1–I3 + J1–J4 + K1–K4 + L1–L4 + M1–M4 + N1–N4 + O1–O4 + P1–P4 + Q1–Q4 + R1–R4 + S1–S4 + T1–T4 + U1–U4 + V1–V4 + W1–W4 + X1–X4 + Y1–Y4 + Z1–Z4 + AA1–AA4 + AB1–AB4 + AC1–AC4 + AD1–AD4 + AE1–AE4 + AF1–AF4 + AG1–AG4 + AH1–AH4 + AI1–AI4 + AJ1–AJ4 + AK1–AK4 + AL1–AL4 + AM1–AM4 + AN1–AN4 + AO1–AO4 + AP1–AP4 + AQ1–AQ4 + AR1–AR4 + AS1–AS4 on the live boot path |
+| **Overall production** | **~40%** | **~98%** | Gates B3–B8 + C1–C6 + D1–D5 + E1–E4 + F1–F4 + H1–H4 + I1–I3 + J1–J4 + K1–K4 + L1–L4 + M1–M4 + N1–N4 + O1–O4 + P1–P4 + Q1–Q4 + R1–R4 + S1–S4 + T1–T4 + U1–U4 + V1–V4 + W1–W4 + X1–X4 + Y1–Y4 + Z1–Z4 + AA1–AA4 + AB1–AB4 + AC1–AC4 + AD1–AD4 + AE1–AE4 + AF1–AF4 + AG1–AG4 + AH1–AH4 + AI1–AI4 + AJ1–AJ4 + AK1–AK4 + AL1–AL4 + AM1–AM4 + AN1–AN4 + AO1–AO4 + AP1–AP4 + AQ1–AQ4 + AR1–AR4 + AS1–AS4 + AT1–AT4 + AU1–AU4 on the live boot path |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates to this file should tick **Gate** IDs, not module counts.
 

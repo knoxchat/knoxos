@@ -456,3 +456,29 @@ pub(super) fn run_gate_as4() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AS4 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_at4() {
+    serial_println!("[user_task] Gate AT4: migrate_pages returns ENOSYS");
+    let elf = crate::init::migrate_pages_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "migrate-pages-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AT4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_au4() {
+    serial_println!("[user_task] Gate AU4: swapoff returns ENOSYS");
+    let elf = crate::init::swapoff_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "swapoff-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate AU4 parent pid={} reaped={}", pid, reaped);
+}
