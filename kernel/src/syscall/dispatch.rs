@@ -107,7 +107,10 @@ pub fn handle_syscall(
                 Err(SyscallError::Interrupted)
             }
         }
-        SyscallNumber::Nanosleep | SyscallNumber::ClockNanosleep => time::sys_nanosleep(arg1),
+        SyscallNumber::Nanosleep => time::sys_nanosleep(arg1),
+        SyscallNumber::ClockNanosleep => {
+            time::sys_clock_nanosleep(arg1 as i32, arg2 as i32, arg3, arg4)
+        }
         SyscallNumber::Getitimer => advanced::sys_getitimer_linux(arg1 as i32, arg2),
         SyscallNumber::Alarm => advanced::sys_alarm_linux(arg1 as u32),
         SyscallNumber::Setitimer => advanced::sys_setitimer_linux(arg1 as i32, arg2, arg3),
@@ -685,8 +688,9 @@ pub fn handle_syscall(
         SyscallNumber::Fchmodat => {
             advanced::sys_fchmodat(arg1 as i32, arg2, arg3 as u32, arg4 as i32)
         }
-        SyscallNumber::Faccessat | SyscallNumber::Faccessat2 => {
-            advanced::sys_faccessat(arg1 as i32, arg2, arg3 as u32, arg4 as i32)
+        SyscallNumber::Faccessat => advanced::sys_faccessat(arg1 as i32, arg2, arg3 as u32, 0),
+        SyscallNumber::Faccessat2 => {
+            advanced::sys_faccessat2(arg1 as i32, arg2, arg3 as u32, arg4 as i32)
         }
         SyscallNumber::Unshare => system::sys_unshare(arg1 as u32),
         SyscallNumber::SetRobustList => advanced::sys_set_robust_list(arg1, arg2 as usize),

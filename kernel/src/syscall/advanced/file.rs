@@ -2105,6 +2105,84 @@ pub fn faccessat_self_test() -> bool {
     true
 }
 
+pub fn sys_faccessat2(dirfd: i32, path_ptr: u64, mode: u32, flags: i32) -> SyscallResult {
+    sys_faccessat(dirfd, path_ptr, mode, flags)
+}
+
+pub const GATE_BD1_MARKER: &str = "GATE_BD1 faccessat2";
+const GATE_BD1_DIR: &str = "/tmp/gate_bd1";
+const GATE_BD1_FILE: &str = "/tmp/gate_bd1/x";
+
+/// `faccessat2` on a relative name via dirfd succeeds; a missing child is ENOENT; a bad dirfd is EBADF.
+pub fn faccessat2_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_BD1_FILE);
+        if vfs.mkdir(GATE_BD1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_BD1_DIR).is_none() {
+            crate::serial_println!("[faccessat2] Gate BD1 FAILED: mkdir {}", GATE_BD1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_BD1_FILE, b"x") {
+            crate::serial_println!("[faccessat2] Gate BD1 FAILED: write {}", GATE_BD1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[faccessat2] Gate BD1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_BD1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[faccessat2] Gate BD1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    match sys_faccessat2(dirfd, child.as_ptr() as u64, 0, 0) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[faccessat2] Gate BD1 FAILED: faccessat2 {:?}", other);
+            return false;
+        }
+    }
+    let missing = b"missing\0";
+    match sys_faccessat2(dirfd, missing.as_ptr() as u64, 0, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[faccessat2] Gate BD1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_faccessat2(-1, child.as_ptr() as u64, 0, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[faccessat2] Gate BD1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[faccessat2] {}", GATE_BD1_MARKER);
+    true
+}
+
 // ── mkdirat ─────────────────────────────────────────────────────────
 
 pub fn sys_mkdirat(dirfd: i32, path_ptr: u64, mode: u16) -> SyscallResult {

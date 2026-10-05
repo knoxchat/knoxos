@@ -199,3 +199,7 @@ pub const GATE_BB4_MARKER: &str = "GATE_BB4 enosys";
 pub const GATE_BC2_MARKER: &str = "GATE_BC2 capset";
 pub const GATE_BC3_MARKER: &str = "GATE_BC3 ioprio_set";
 pub const GATE_BC4_MARKER: &str = "GATE_BC4 enosys";
+
+pub const GATE_BD2_MARKER: &str = "GATE_BD2 clock_nanosleep";
+pub const GATE_BD3_MARKER: &str = "GATE_BD3 getitimer";
+pub const GATE_BD4_MARKER: &str = "GATE_BD4 enosys";

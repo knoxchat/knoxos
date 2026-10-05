@@ -81,3 +81,13 @@ pub fn sys_nanosleep(req_ptr: u64) -> SyscallResult {
     }
     Ok(0)
 }
+
+/// `clock_nanosleep(clockid, flags, req, rem)` — relative sleep on a named clock.
+pub fn sys_clock_nanosleep(clockid: i32, flags: i32, req_ptr: u64, rem_ptr: u64) -> SyscallResult {
+    // CLOCK_REALTIME..CLOCK_TAI
+    if !(0..=11).contains(&clockid) {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let _ = (flags, rem_ptr);
+    sys_nanosleep(req_ptr)
+}

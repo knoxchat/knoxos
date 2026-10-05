@@ -560,3 +560,29 @@ pub(super) fn run_gate_bc3() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BC3 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bd2() {
+    serial_println!("[user_task] Gate BD2: clock_nanosleep returns 0");
+    let elf = crate::init::clock_nanosleep_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "clock-nanosleep-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BD2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bd3() {
+    serial_println!("[user_task] Gate BD3: getitimer returns 0");
+    let elf = crate::init::getitimer_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getitimer-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BD3 parent pid={} reaped={}", pid, reaped);
+}
