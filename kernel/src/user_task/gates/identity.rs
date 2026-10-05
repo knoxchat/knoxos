@@ -586,3 +586,29 @@ pub(super) fn run_gate_bd3() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BD3 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_be2() {
+    serial_println!("[user_task] Gate BE2: setitimer then getitimer is 1s");
+    let elf = crate::init::setitimer_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "setitimer-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BE2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_be3() {
+    serial_println!("[user_task] Gate BE3: timer_gettime reports remaining nsec");
+    let elf = crate::init::timer_gettime_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "timer-gettime-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BE3 parent pid={} reaped={}", pid, reaped);
+}

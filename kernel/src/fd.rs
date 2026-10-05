@@ -1116,4 +1116,5 @@ pub fn init() {
     let _ = crate::syscall::futimesat_self_test();
     let _ = crate::syscall::renameat2_self_test();
     let _ = crate::syscall::faccessat2_self_test();
+    let _ = crate::syscall::execveat_self_test();
 }

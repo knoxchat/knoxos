@@ -11,6 +11,21 @@ pub fn ease_out_cubic(t: f32) -> f32 {
     1.0 - t * t * t
 }
 
+fn begin_animation(kind: WindowAnimationType, from: Rect, to: Rect) -> WindowAnimation {
+    let tsc_freq = super::min_frame_ticks() * 60;
+    let duration = (tsc_freq * ANIM_DURATION_MS / 1000).max(1);
+    WindowAnimation {
+        kind,
+        progress: 0.0,
+        start_tsc: super::read_tsc_public(),
+        duration_ticks: duration,
+        start_tick: crate::interrupts::get_ticks(),
+        duration_ticks_wall: 15, // ~150ms at 100Hz APIC; still completes on PIT
+        from_rect: from,
+        to_rect: to,
+    }
+}
+
 impl Window {
     /// Returns true if this window is currently being animated
     pub fn is_animating(&self) -> bool {
@@ -19,8 +34,6 @@ impl Window {
 
     /// Start an open animation (scale up from 85% + fade in)
     pub fn start_open_animation(&mut self) {
-        let tsc_freq = super::min_frame_ticks() * 60; // approximate TSC freq (ticks-per-sec)
-        let duration = tsc_freq * ANIM_DURATION_MS / 1000;
         // Scale from 85% centered
         let scale = 0.85f32;
         let cx = self.rect.x + self.rect.width as i32 / 2;
@@ -28,68 +41,38 @@ impl Window {
         let sw = (self.rect.width as f32 * scale) as u32;
         let sh = (self.rect.height as f32 * scale) as u32;
         let from = Rect::new(cx - sw as i32 / 2, cy - sh as i32 / 2, sw, sh);
-        self.anim = Some(WindowAnimation {
-            kind: WindowAnimationType::Open,
-            progress: 0.0,
-            start_tsc: super::read_tsc_public(),
-            duration_ticks: duration.max(1),
-            from_rect: from,
-            to_rect: self.rect,
-        });
+        self.anim = Some(begin_animation(WindowAnimationType::Open, from, self.rect));
     }
 
     /// Start a close animation (scale down to 85% + fade out)
     pub fn start_close_animation(&mut self) {
-        let tsc_freq = super::min_frame_ticks() * 60;
-        let duration = tsc_freq * ANIM_DURATION_MS / 1000;
         let scale = 0.85f32;
         let cx = self.rect.x + self.rect.width as i32 / 2;
         let cy = self.rect.y + self.rect.height as i32 / 2;
         let sw = (self.rect.width as f32 * scale) as u32;
         let sh = (self.rect.height as f32 * scale) as u32;
         let to = Rect::new(cx - sw as i32 / 2, cy - sh as i32 / 2, sw, sh);
-        self.anim = Some(WindowAnimation {
-            kind: WindowAnimationType::Close,
-            progress: 0.0,
-            start_tsc: super::read_tsc_public(),
-            duration_ticks: duration.max(1),
-            from_rect: self.rect,
-            to_rect: to,
-        });
+        self.anim = Some(begin_animation(WindowAnimationType::Close, self.rect, to));
     }
 
     /// Start a minimize animation (scale down toward taskbar)
     pub fn start_minimize_animation(&mut self, screen_w: i32, screen_h: i32) {
-        let tsc_freq = super::min_frame_ticks() * 60;
-        let duration = tsc_freq * ANIM_DURATION_MS / 1000;
         // Target: small rect at bottom-center (taskbar area)
         let taskbar_h = scale::taskbar_height() as i32;
         let target_w = 80u32;
         let target_h = 40u32;
         let target_x = screen_w / 2 - target_w as i32 / 2;
         let target_y = screen_h - taskbar_h;
-        self.anim = Some(WindowAnimation {
-            kind: WindowAnimationType::Minimize,
-            progress: 0.0,
-            start_tsc: super::read_tsc_public(),
-            duration_ticks: duration.max(1),
-            from_rect: self.rect,
-            to_rect: Rect::new(target_x, target_y, target_w, target_h),
-        });
+        self.anim = Some(begin_animation(
+            WindowAnimationType::Minimize,
+            self.rect,
+            Rect::new(target_x, target_y, target_w, target_h),
+        ));
     }
 
     /// Start a rect transition animation (for maximize, restore, snap)
     pub fn start_transition_animation(&mut self, from: Rect, to: Rect) {
-        let tsc_freq = super::min_frame_ticks() * 60;
-        let duration = tsc_freq * ANIM_DURATION_MS / 1000;
-        self.anim = Some(WindowAnimation {
-            kind: WindowAnimationType::Transition,
-            progress: 0.0,
-            start_tsc: super::read_tsc_public(),
-            duration_ticks: duration.max(1),
-            from_rect: from,
-            to_rect: to,
-        });
+        self.anim = Some(begin_animation(WindowAnimationType::Transition, from, to));
     }
 
     /// Get the current animated rect and opacity (0.0-1.0).
@@ -122,12 +105,19 @@ impl Window {
     /// Advance the animation. Returns true if animation is still running.
     pub fn tick_animation(&mut self) -> bool {
         if let Some(ref mut a) = self.anim {
-            let now = super::read_tsc_public();
-            let elapsed = now.wrapping_sub(a.start_tsc);
-            a.progress = (elapsed as f32 / a.duration_ticks as f32).min(1.0);
+            let tsc_elapsed = super::read_tsc_public().wrapping_sub(a.start_tsc);
+            let tsc_p = (tsc_elapsed as f32 / a.duration_ticks as f32).min(1.0);
+            let wall_elapsed = crate::interrupts::get_ticks().saturating_sub(a.start_tick);
+            let wall_p = (wall_elapsed as f32 / a.duration_ticks_wall.max(1) as f32).min(1.0);
+            a.progress = tsc_p.max(wall_p);
             if a.progress >= 1.0 {
-                // Keep the animation struct so finish_closed_windows() can detect
-                // completed Close animations. It will be cleaned up there.
+                let kind = a.kind;
+                // Keep Close so finish_closed_windows() can drop the window.
+                // Clear everything else or minimize/open stay stuck on the
+                // animated rect and title-bar buttons miss their hit tests.
+                if !matches!(kind, WindowAnimationType::Close) {
+                    self.anim = None;
+                }
                 return false;
             }
             true

@@ -454,6 +454,14 @@ fn test_faccessat2_dirfd() {
 }
 
 #[test_case]
+fn test_execveat_dirfd() {
+    assert!(
+        crate::syscall::execveat_self_test(),
+        "execveat must succeed on a dirfd-relative file, ENOENT for a missing child, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

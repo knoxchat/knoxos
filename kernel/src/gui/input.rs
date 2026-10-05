@@ -629,6 +629,84 @@ fn handle_right_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     desktop::show_context_menu(x, y);
 }
 
+/// Close / maximize / minimize — must run before resize-edge grab.
+fn handle_chrome_button_click(x: i32, y: i32, screen_w: u32, screen_h: u32) -> bool {
+    let wm = window::WINDOW_MANAGER.lock();
+    let Some(wid) = wm.window_at(x, y) else {
+        return false;
+    };
+    let Some(win) = wm.windows.iter().rev().find(|w| w.id == wid) else {
+        return false;
+    };
+
+    let close = win.closeable && win.close_button_rect().contains(x, y);
+    let maximize = win.maximizable && win.maximize_button_rect().contains(x, y);
+    let minimize = win.minimizable && win.minimize_button_rect().contains(x, y);
+    if !close && !maximize && !minimize {
+        return false;
+    }
+
+    let id = win.id;
+    let is_terminal = win.content_type == WindowContentType::Terminal;
+    let is_browser = win.content_type == WindowContentType::Browser;
+    let is_ai = win.content_type == WindowContentType::AIAssistant;
+    let tab_ids: alloc::vec::Vec<u32> = win.terminal_tabs.clone();
+    drop(wm);
+
+    if close {
+        super::window_events::push_event(id, super::window_events::WindowEvent::CloseRequested);
+        window::WINDOW_MANAGER.lock().close_window(id);
+        super::window_events::unregister_window(id);
+        taskbar::remove_entry(id);
+        if is_terminal {
+            crate::terminal::destroy_for_window(id);
+            for tab_id in &tab_ids {
+                if *tab_id != id {
+                    crate::terminal::destroy_tab(*tab_id);
+                }
+            }
+        }
+        if is_browser {
+            super::browser::destroy_for_window(id);
+        }
+        if is_ai {
+            super::ai_assistant::destroy_for_window(id);
+        }
+        return true;
+    }
+
+    if maximize {
+        window::WINDOW_MANAGER
+            .lock()
+            .toggle_maximize(id, screen_w, screen_h);
+        let wm2 = window::WINDOW_MANAGER.lock();
+        if let Some(w) = wm2.windows.iter().find(|w| w.id == id) {
+            let evt = match w.state {
+                window::WindowState::Maximized => super::window_events::WindowEvent::Maximized,
+                _ => super::window_events::WindowEvent::Restored,
+            };
+            super::window_events::push_event(id, evt);
+        }
+        return true;
+    }
+
+    // minimize
+    super::window_events::push_event(id, super::window_events::WindowEvent::Minimized);
+    let mut wm = window::WINDOW_MANAGER.lock();
+    wm.minimize_window(id);
+    let new_focus = wm.focused_window;
+    drop(wm);
+    if let Some(fid) = new_focus {
+        taskbar::set_active(fid);
+    } else {
+        let mut tb = taskbar::TASKBAR.lock();
+        for e in tb.entries.iter_mut() {
+            e.active = false;
+        }
+    }
+    true
+}
+
 /// Handle a single click
 fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     crate::serial_println!(
@@ -769,6 +847,12 @@ fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             // Click outside — close panel and fall through
             nc.panel_open = false;
         }
+    }
+
+    // Title-bar buttons must win over the top-right resize grab zone.
+    if handle_chrome_button_click(x, y, screen_w, screen_h) {
+        crate::serial_println!("[CLICK-DBG] consumed by: chrome_button");
+        return;
     }
 
     // Check for resize edge on any visible window (before checking interior clicks)

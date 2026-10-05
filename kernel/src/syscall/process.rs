@@ -124,16 +124,45 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> Sysc
     Ok(child_pid as u64)
 }
 
-pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
+pub fn sys_execve(filename_ptr: u64, argv: u64, envp: u64) -> SyscallResult {
     let filename =
         unsafe { read_user_string(filename_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    execve_path(&filename, argv, envp)
+}
+
+/// `execveat(dirfd, pathname, argv, envp, flags)` — resolve `pathname` via
+/// `dirfd` (or `AT_FDCWD`), then exec. A missing child is ENOENT; a bad
+/// dirfd is EBADF.
+pub fn sys_execveat(
+    dirfd: i32,
+    pathname_ptr: u64,
+    argv: u64,
+    envp: u64,
+    flags: i32,
+) -> SyscallResult {
+    let _ = flags;
+    let path = unsafe { read_user_string(pathname_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    let path = super::advanced::path_at(dirfd, &path)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let path = crate::process::translate_path(pid, &path);
+    let path = crate::overlayfs::apply_overlay(pid, &path, false);
+    {
+        let vfs = crate::vfs::VFS.lock();
+        if vfs.resolve_path(&path).is_none() {
+            return Err(SyscallError::FileNotFound);
+        }
+    }
+    execve_path(&path, argv, envp)
+}
+
+fn execve_path(filename: &str, _argv: u64, _envp: u64) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
 
     // Gate B2's hello runs as a boot-time one-shot on the kernel's own page
     // tables, so there is no task to replace; keep the old name-only path.
     if pid <= crate::context::DESKTOP_PID {
         crate::serial_println!("[execve] {}: no user task for PID {}", filename, pid);
-        let name = filename.rsplit('/').next().unwrap_or(&filename);
+        let name = filename.rsplit('/').next().unwrap_or(filename);
         crate::process::PROCESS_TABLE.lock().exec(pid, name, &[]);
         return Ok(0);
     }
@@ -143,9 +172,9 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
     // Read the new image out of the VFS.
     let data_copy = {
         let vfs = crate::vfs::VFS.lock();
-        let data = vfs.read_file(&filename).ok_or(SyscallError::FileNotFound)?;
+        let data = vfs.read_file(filename).ok_or(SyscallError::FileNotFound)?;
         if !crate::elf::is_elf(data) {
-            let name = filename.rsplit('/').next().unwrap_or(&filename);
+            let name = filename.rsplit('/').next().unwrap_or(filename);
             drop(vfs);
             crate::process::PROCESS_TABLE.lock().exec(pid, name, &[]);
             return Ok(0);
@@ -175,7 +204,7 @@ pub fn sys_execve(filename_ptr: u64, _argv: u64, _envp: u64) -> SyscallResult {
         return Err(SyscallError::OutOfMemory);
     }
 
-    let name = filename.rsplit('/').next().unwrap_or(&filename);
+    let name = filename.rsplit('/').next().unwrap_or(filename);
     let argv_strs: &[&str] = &[name];
     let initial_rsp =
         crate::vmm::setup_initial_stack(pid, stack_top, argv_strs, &[], entry_point, 0, 0)
@@ -374,4 +403,78 @@ pub fn sys_getsid(pid: u32) -> SyscallResult {
     crate::pgrp::getsid(real_pid)
         .map(|sid| sid as u64)
         .map_err(|_| SyscallError::NoSuchProcess)
+}
+
+pub const GATE_BE1_MARKER: &str = "GATE_BE1 execveat";
+const GATE_BE1_DIR: &str = "/tmp/gate_be1";
+const GATE_BE1_FILE: &str = "/tmp/gate_be1/x";
+
+/// `execveat` on a relative name via dirfd succeeds; a missing child is ENOENT; a bad dirfd is EBADF.
+pub fn execveat_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_BE1_FILE);
+        if vfs.mkdir(GATE_BE1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_BE1_DIR).is_none() {
+            crate::serial_println!("[execveat] Gate BE1 FAILED: mkdir {}", GATE_BE1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_BE1_FILE, b"x") {
+            crate::serial_println!("[execveat] Gate BE1 FAILED: write {}", GATE_BE1_FILE);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[execveat] Gate BE1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_BE1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[execveat] Gate BE1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let child = b"x\0";
+    match sys_execveat(dirfd, child.as_ptr() as u64, 0, 0, 0) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[execveat] Gate BE1 FAILED: execveat {:?}", other);
+            return false;
+        }
+    }
+    let missing = b"missing\0";
+    match sys_execveat(dirfd, missing.as_ptr() as u64, 0, 0, 0) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[execveat] Gate BE1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_execveat(-1, child.as_ptr() as u64, 0, 0, 0) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[execveat] Gate BE1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[execveat] {}", GATE_BE1_MARKER);
+    true
 }

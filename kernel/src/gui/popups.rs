@@ -1,5 +1,5 @@
 /// System Popups — Calendar, Volume, Brightness, and Quick Settings panels
-/// These are popup panels that appear when clicking system tray icons or the clock.
+/// These are popup panels that appear when clicking system tray icons.
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;
@@ -10,7 +10,7 @@ use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CALENDAR POPUP — Shows when clicking the clock area
+// CALENDAR POPUP
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Calendar popup state

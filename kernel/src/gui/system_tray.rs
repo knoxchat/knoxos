@@ -2,8 +2,8 @@
 /// Provides Wi-Fi, Volume, Battery, and Notification bell indicators
 /// with hover effects and click actions (opens popups).
 ///
-/// The tray lives *inside* the dock pill, between the app entry separator
-/// and the clock. Each icon is 16×16 drawn within a 28×28 hover cell.
+/// The tray lives *inside* the dock pill, after the app entry separator.
+/// Each icon is 16×16 drawn within a 28×28 hover cell.
 use alloc::string::String;
 use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};

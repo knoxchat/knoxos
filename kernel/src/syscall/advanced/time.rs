@@ -178,12 +178,19 @@ pub fn sys_timer_settime_linux(
 }
 
 pub fn sys_timer_gettime_linux(timerid: u32, curr_value: u64) -> SyscallResult {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let (interval, value) = crate::posix_timer::timer_gettime(pid, timerid)
+        .map_err(|_| SyscallError::InvalidArgument)?;
     if curr_value != 0 {
-        // Zero out by default; posix_timer doesn't expose a timer_gettime API directly
-        // so write back zero values (timer disarmed)
+        let mut buf = [0u8; 32];
+        buf[0..8].copy_from_slice(&interval.tv_sec.to_ne_bytes());
+        buf[8..16].copy_from_slice(&interval.tv_nsec.to_ne_bytes());
+        buf[16..24].copy_from_slice(&value.tv_sec.to_ne_bytes());
+        buf[24..32].copy_from_slice(&value.tv_nsec.to_ne_bytes());
         unsafe {
-            core::ptr::write_bytes(curr_value as *mut u8, 0, 32);
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), curr_value as *mut u8, buf.len());
         }
+        crate::vmm::write_user_memory(pid, curr_value, &buf);
     }
     Ok(0)
 }

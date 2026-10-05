@@ -302,49 +302,44 @@ impl Window {
         }
     }
 
+    /// Rect currently drawn for this window (accounts for in-flight animation).
+    pub fn displayed_rect(&self) -> Rect {
+        self.animated_rect_opacity().0
+    }
+
+    /// Control button hit-rect. `index_from_right`: 0=close, 1=maximize, 2=minimize.
+    /// Uses the displayed rect and the full title-bar height so the clickable
+    /// area matches the glyphs and wins against the top-right resize grab zone.
+    fn control_button_rect(&self, index_from_right: i32) -> Rect {
+        let r = self.displayed_rect();
+        let btn_w = scaled_btn_width();
+        let margin = scaled_btn_margin_right();
+        let gap = scaled_btn_gap();
+        let tb = scaled_title_bar_height();
+        let bx =
+            r.x + r.width as i32 - margin - btn_w * (index_from_right + 1) - gap * index_from_right;
+        Rect::new(bx, r.y, btn_w as u32, tb)
+    }
+
     /// Get the title bar rectangle — scale-aware
     pub fn title_bar_rect(&self) -> Rect {
-        Rect::new(
-            self.rect.x,
-            self.rect.y,
-            self.rect.width,
-            scaled_title_bar_height(),
-        )
+        let r = self.displayed_rect();
+        Rect::new(r.x, r.y, r.width, scaled_title_bar_height())
     }
 
     /// Get the close button rectangle (rightmost) — scale-aware
     pub fn close_button_rect(&self) -> Rect {
-        let btn_w = scaled_btn_width();
-        let btn_h = scaled_btn_height();
-        let margin = scaled_btn_margin_right();
-        let top_pad = (scaled_title_bar_height() as i32 - btn_h) / 2;
-        let bx = self.rect.x + self.rect.width as i32 - btn_w - margin;
-        Rect::new(bx, self.rect.y + top_pad, btn_w as u32, btn_h as u32)
+        self.control_button_rect(0)
     }
 
     /// Get the maximize button rectangle (middle) — scale-aware
     pub fn maximize_button_rect(&self) -> Rect {
-        let btn_w = scaled_btn_width();
-        let btn_h = scaled_btn_height();
-        let margin = scaled_btn_margin_right();
-        let gap = scaled_btn_gap();
-        let top_pad = (scaled_title_bar_height() as i32 - btn_h) / 2;
-        let close_x = self.rect.x + self.rect.width as i32 - btn_w - margin;
-        let bx = close_x - btn_w - gap;
-        Rect::new(bx, self.rect.y + top_pad, btn_w as u32, btn_h as u32)
+        self.control_button_rect(1)
     }
 
     /// Get the minimize button rectangle (leftmost of three) — scale-aware
     pub fn minimize_button_rect(&self) -> Rect {
-        let btn_w = scaled_btn_width();
-        let btn_h = scaled_btn_height();
-        let margin = scaled_btn_margin_right();
-        let gap = scaled_btn_gap();
-        let top_pad = (scaled_title_bar_height() as i32 - btn_h) / 2;
-        let close_x = self.rect.x + self.rect.width as i32 - btn_w - margin;
-        let max_x = close_x - btn_w - gap;
-        let bx = max_x - btn_w - gap;
-        Rect::new(bx, self.rect.y + top_pad, btn_w as u32, btn_h as u32)
+        self.control_button_rect(2)
     }
 
     /// Get the content area rectangle — scale-aware

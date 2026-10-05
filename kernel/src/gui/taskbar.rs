@@ -28,6 +28,10 @@ const DOCK_FLOAT_GAP: u32 = 8;
 /// Min dock width (capsule)
 const DOCK_MIN_WIDTH: u32 = 360;
 
+/// Interior inset so icons sit in the pill's straight section, past the
+/// circular end caps (radius + a small gap).
+const DOCK_PADDING: i32 = DOCK_RADIUS as i32 + 8;
+
 /// Entry item size (icon-only square cells in dock)
 const DOCK_ITEM_SIZE: u32 = 36;
 
@@ -197,33 +201,35 @@ lazy_static::lazy_static! {
     });
 }
 
-/// Draw the Aurora floating dock — centered pill-shaped bar with warm app dots
-pub fn draw_taskbar(fb: &mut FrameBuffer) {
-    let screen_h = fb.height as i32;
-    let screen_w = fb.width as u32;
+/// Shared dock geometry so draw / hover / click stay aligned.
+struct DockLayout {
+    dock_x: i32,
+    dock_y: i32,
+    dock_w: u32,
+    dock_cy: i32,
+    /// Left edge of the launcher icon (already inset past the circular cap).
+    content_x: i32,
+    entry_spacing: i32,
+    start_btn_w: i32,
+    separator_w: i32,
+    workspace_area_w: i32,
+    workspace_dot_size: i32,
+    workspace_dot_gap: i32,
+    workspace_count: i32,
+}
 
-    let taskbar = TASKBAR.lock();
-    let entry_count = taskbar.entries.len().min(MAX_DOCK_ENTRIES);
-
-    // ══════════════════════════════════════════════════════════
-    // COMPUTE DOCK DIMENSIONS (dynamic width based on apps open)
-    // ══════════════════════════════════════════════════════════
-    // Dock width = left_pad + icon1 + ... + iconN + right_pad + clock_width
-    let dock_padding = 14i32; // Left/right interior padding
-    let entry_spacing = 8i32; // Space between app icons
-    let start_btn_w = DOCK_ITEM_SIZE as i32; // Launcher grid icon
-    let clock_w = font_engine::measure_ui_text(&taskbar.clock_text, 12) as i32 + 16;
-    let separator_w = 12i32; // Separator between apps and system tray
-    let tray_w = system_tray::tray_width() as i32; // System tray icons
-    let tray_separator_w = 10i32; // Separator between tray and clock
-    let workspace_dot_size = 14i32; // Size of each workspace dot
+fn compute_dock_layout(entry_count: usize, screen_width: u32, screen_height: u32) -> DockLayout {
+    let entry_spacing = 8i32;
+    let start_btn_w = DOCK_ITEM_SIZE as i32;
+    let separator_w = 12i32;
+    let tray_w = system_tray::tray_width() as i32;
+    let workspace_dot_size = 14i32;
     let workspace_dot_gap = 4i32;
     let workspace_count = crate::gui::window::NUM_WORKSPACES as i32;
     let workspace_area_w = workspace_count * workspace_dot_size
         + (workspace_count - 1) * workspace_dot_gap
-        + entry_spacing; // dots + spacing + gap
+        + entry_spacing;
 
-    // Total dock content width
     let dock_content_w = start_btn_w
         + workspace_area_w
         + (if entry_count > 0 {
@@ -232,15 +238,48 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
             0
         })
         + separator_w
-        + tray_w
-        + tray_separator_w
-        + clock_w;
-    let dock_w = (dock_content_w + dock_padding * 2).max(DOCK_MIN_WIDTH as i32) as u32;
+        + tray_w;
+    let dock_w = (dock_content_w + DOCK_PADDING * 2).max(DOCK_MIN_WIDTH as i32) as u32;
 
-    // Dock position: centered at bottom (with float gap)
-    let dock_x = (screen_w as i32 - dock_w as i32) / 2;
+    let dock_x = (screen_width as i32 - dock_w as i32) / 2;
     let hide_offset = auto_hide_offset() as i32;
-    let dock_y = screen_h - DOCK_BAR_HEIGHT as i32 - DOCK_FLOAT_GAP as i32 + hide_offset;
+    let dock_y =
+        screen_height as i32 - DOCK_BAR_HEIGHT as i32 - DOCK_FLOAT_GAP as i32 + hide_offset;
+    let dock_cy = dock_y + DOCK_BAR_HEIGHT as i32 / 2;
+    // Leftover min-width space is split so both circular caps stay empty.
+    let extra = (dock_w as i32 - DOCK_PADDING * 2 - dock_content_w).max(0);
+    let content_x = dock_x + DOCK_PADDING + extra / 2;
+
+    DockLayout {
+        dock_x,
+        dock_y,
+        dock_w,
+        dock_cy,
+        content_x,
+        entry_spacing,
+        start_btn_w,
+        separator_w,
+        workspace_area_w,
+        workspace_dot_size,
+        workspace_dot_gap,
+        workspace_count,
+    }
+}
+
+/// Draw the Aurora floating dock — centered pill-shaped bar with warm app dots
+pub fn draw_taskbar(fb: &mut FrameBuffer) {
+    let taskbar = TASKBAR.lock();
+    let entry_count = taskbar.entries.len().min(MAX_DOCK_ENTRIES);
+    let layout = compute_dock_layout(entry_count, fb.width as u32, fb.height as u32);
+    let dock_x = layout.dock_x;
+    let dock_y = layout.dock_y;
+    let dock_w = layout.dock_w;
+    let dock_cy = layout.dock_cy;
+    let entry_spacing = layout.entry_spacing;
+    let separator_w = layout.separator_w;
+    let workspace_dot_size = layout.workspace_dot_size;
+    let workspace_dot_gap = layout.workspace_dot_gap;
+    let workspace_count = layout.workspace_count;
 
     // ══════════════════════════════════════════════════════════
     // LIGHTWEIGHT DOCK SHADOW — Fast floating effect
@@ -309,8 +348,7 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
     // ══════════════════════════════════════════════════════════
     // DOCK CONTENT LAYOUT
     // ══════════════════════════════════════════════════════════
-    let mut cursor_x = dock_x + dock_padding;
-    let dock_cy = dock_y + DOCK_BAR_HEIGHT as i32 / 2;
+    let mut cursor_x = layout.content_x;
 
     let (hover_mx, hover_my) = {
         let m = super::input::MOUSE.lock();
@@ -512,37 +550,6 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
 
     // ── SYSTEM TRAY (Wi-Fi, Volume, Battery, Notifications) ────
     system_tray::draw(fb, cursor_x, dock_cy);
-    cursor_x += tray_w;
-
-    // ── SEPARATOR between tray and clock ────
-    cursor_x += tray_separator_w / 2;
-    fb.fill_rounded_rect_aa(
-        Rect::new(cursor_x - 1, dock_cy - 10, 2, 20),
-        Pixel::new(160, 130, 120, 30),
-        1,
-    );
-    cursor_x += tray_separator_w / 2;
-
-    // ── CLOCK (right side of dock) ──────────────────────────
-    {
-        let clock_rect = Rect::new(cursor_x, dock_cy - 10, clock_w as u32, 20);
-        let hovered = clock_rect.contains(hover_mx, hover_my);
-
-        if hovered {
-            fb.fill_rounded_rect_aa(clock_rect, colors::TASKBAR_HOVER, 8);
-        }
-
-        let clock_text_x = cursor_x + 8;
-        let clock_text_y = dock_cy - 6;
-        font_engine::draw_ui_bold(
-            fb,
-            clock_text_x,
-            clock_text_y,
-            &taskbar.clock_text,
-            12,
-            colors::TASKBAR_TEXT,
-        );
-    }
 }
 
 /// Draw a tiny icon (16×16) in the taskbar for a given window content type
@@ -653,46 +660,13 @@ pub fn set_active(window_id: window::WindowId) {
 pub fn update_hover(mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height: u32) {
     let mut taskbar = TASKBAR.lock();
     let entry_count = taskbar.entries.len().min(MAX_DOCK_ENTRIES);
-
-    // Compute dock dimensions (same logic as draw_taskbar)
-    let dock_padding = 14i32;
-    let entry_spacing = 8i32;
-    let start_btn_w = DOCK_ITEM_SIZE as i32;
-    let clock_w = font_engine::measure_ui_text(&taskbar.clock_text, 12) as i32 + 16;
-    let separator_w = 12i32;
-    let tray_w = system_tray::tray_width() as i32;
-    let tray_separator_w = 10i32;
-    let workspace_dot_size = 14i32;
-    let workspace_dot_gap = 4i32;
-    let workspace_count = crate::gui::window::NUM_WORKSPACES as i32;
-    let workspace_area_w = workspace_count * workspace_dot_size
-        + (workspace_count - 1) * workspace_dot_gap
-        + entry_spacing;
-
-    let dock_content_w = start_btn_w
-        + workspace_area_w
-        + (if entry_count > 0 {
-            entry_spacing + entry_count as i32 * DOCK_ITEM_SIZE as i32
-        } else {
-            0
-        })
-        + separator_w
-        + tray_w
-        + tray_separator_w
-        + clock_w;
-    let dock_w = (dock_content_w + dock_padding * 2).max(DOCK_MIN_WIDTH as i32) as u32;
-
-    let dock_x = (screen_width as i32 - dock_w as i32) / 2;
-    let hide_offset = auto_hide_offset() as i32;
-    let dock_y =
-        screen_height as i32 - DOCK_BAR_HEIGHT as i32 - DOCK_FLOAT_GAP as i32 + hide_offset;
-    let dock_cy = dock_y + DOCK_BAR_HEIGHT as i32 / 2;
+    let layout = compute_dock_layout(entry_count, screen_width, screen_height);
 
     // Check if mouse is even in dock area
-    if mouse_y < dock_y
-        || mouse_y > dock_y + DOCK_BAR_HEIGHT as i32
-        || mouse_x < dock_x
-        || mouse_x > dock_x + dock_w as i32
+    if mouse_y < layout.dock_y
+        || mouse_y > layout.dock_y + DOCK_BAR_HEIGHT as i32
+        || mouse_x < layout.dock_x
+        || mouse_x > layout.dock_x + layout.dock_w as i32
     {
         taskbar.hovered_entry = None;
         system_tray::clear_hover();
@@ -701,7 +675,7 @@ pub fn update_hover(mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height
 
     // Start button + workspace area + spacing
     let mut cursor_x =
-        dock_x + dock_padding + DOCK_ITEM_SIZE as i32 + entry_spacing + workspace_area_w;
+        layout.content_x + layout.start_btn_w + layout.entry_spacing + layout.workspace_area_w;
 
     // Check each entry
     let mut hovered = None;
@@ -711,7 +685,7 @@ pub fn update_hover(mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height
         }
         let item_rect = Rect::new(
             cursor_x,
-            dock_cy - DOCK_ITEM_SIZE as i32 / 2,
+            layout.dock_cy - DOCK_ITEM_SIZE as i32 / 2,
             DOCK_ITEM_SIZE,
             DOCK_ITEM_SIZE,
         );
@@ -724,10 +698,10 @@ pub fn update_hover(mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height
     taskbar.hovered_entry = hovered;
 
     // Advance past separator
-    cursor_x += separator_w;
+    cursor_x += layout.separator_w;
 
     // Update system tray hover
-    system_tray::update_hover(mouse_x, mouse_y, cursor_x, dock_cy);
+    system_tray::update_hover(mouse_x, mouse_y, cursor_x, layout.dock_cy);
 }
 
 /// Clear hover state (called when mouse leaves taskbar area)
@@ -740,84 +714,29 @@ pub fn clear_hover() {
 pub fn tray_layout(screen_width: u32, screen_height: u32) -> Option<(i32, i32)> {
     let taskbar = TASKBAR.lock();
     let entry_count = taskbar.entries.len().min(MAX_DOCK_ENTRIES);
-    let dock_padding = 14i32;
-    let entry_spacing = 8i32;
-    let start_btn_w = DOCK_ITEM_SIZE as i32;
-    let clock_w = font_engine::measure_ui_text(&taskbar.clock_text, 12) as i32 + 16;
-    let separator_w = 12i32;
-    let tray_w = system_tray::tray_width() as i32;
-    let tray_separator_w = 10i32;
-    let workspace_dot_size = 14i32;
-    let workspace_dot_gap = 4i32;
-    let workspace_count = crate::gui::window::NUM_WORKSPACES as i32;
-    let workspace_area_w = workspace_count * workspace_dot_size
-        + (workspace_count - 1) * workspace_dot_gap
-        + entry_spacing;
-    let dock_content_w = start_btn_w
-        + workspace_area_w
-        + (if entry_count > 0 {
-            entry_spacing + entry_count as i32 * DOCK_ITEM_SIZE as i32
-        } else {
-            0
-        })
-        + separator_w
-        + tray_w
-        + tray_separator_w
-        + clock_w;
-    let dock_w = (dock_content_w + dock_padding * 2).max(DOCK_MIN_WIDTH as i32) as u32;
-    let dock_x = (screen_width as i32 - dock_w as i32) / 2;
-    let hide_offset = auto_hide_offset() as i32;
-    let dock_y =
-        screen_height as i32 - DOCK_BAR_HEIGHT as i32 - DOCK_FLOAT_GAP as i32 + hide_offset;
-    let dock_cy = dock_y + DOCK_BAR_HEIGHT as i32 / 2;
-    let mut cursor_x = dock_x + dock_padding;
-    cursor_x += start_btn_w; // start button
-    cursor_x += workspace_area_w; // workspace dots
+    let layout = compute_dock_layout(entry_count, screen_width, screen_height);
+    let mut cursor_x = layout.content_x + layout.start_btn_w + layout.workspace_area_w;
     if entry_count > 0 {
-        cursor_x += entry_spacing + entry_count as i32 * DOCK_ITEM_SIZE as i32;
+        cursor_x += layout.entry_spacing + entry_count as i32 * DOCK_ITEM_SIZE as i32;
     }
-    cursor_x += separator_w; // separator
-    Some((cursor_x, dock_cy))
+    cursor_x += layout.separator_w;
+    Some((cursor_x, layout.dock_cy))
 }
 
 /// Handle taskbar/dock click
 pub fn handle_click(x: i32, y: i32, screen_width: u32, screen_height: u32) -> bool {
     let taskbar = TASKBAR.lock();
     let entry_count = taskbar.entries.len().min(MAX_DOCK_ENTRIES);
-
-    // Compute dock dimensions (same logic as draw_taskbar)
-    let dock_padding = 14i32;
-    let entry_spacing = 8i32;
-    let start_btn_w = DOCK_ITEM_SIZE as i32;
-    let clock_w = font_engine::measure_ui_text(&taskbar.clock_text, 12) as i32 + 16;
-    let separator_w = 12i32;
-    let tray_w = system_tray::tray_width() as i32;
-    let tray_separator_w = 10i32;
-    let workspace_dot_size = 14i32;
-    let workspace_dot_gap = 4i32;
-    let workspace_count = crate::gui::window::NUM_WORKSPACES as i32;
-    let workspace_area_w = workspace_count * workspace_dot_size
-        + (workspace_count - 1) * workspace_dot_gap
-        + entry_spacing;
-
-    let dock_content_w = start_btn_w
-        + workspace_area_w
-        + (if entry_count > 0 {
-            entry_spacing + entry_count as i32 * DOCK_ITEM_SIZE as i32
-        } else {
-            0
-        })
-        + separator_w
-        + tray_w
-        + tray_separator_w
-        + clock_w;
-    let dock_w = (dock_content_w + dock_padding * 2).max(DOCK_MIN_WIDTH as i32) as u32;
-
-    let dock_x = (screen_width as i32 - dock_w as i32) / 2;
-    let hide_offset = auto_hide_offset() as i32;
-    let dock_y =
-        screen_height as i32 - DOCK_BAR_HEIGHT as i32 - DOCK_FLOAT_GAP as i32 + hide_offset;
-    let dock_cy = dock_y + DOCK_BAR_HEIGHT as i32 / 2;
+    let layout = compute_dock_layout(entry_count, screen_width, screen_height);
+    let entry_spacing = layout.entry_spacing;
+    let separator_w = layout.separator_w;
+    let workspace_dot_size = layout.workspace_dot_size;
+    let workspace_dot_gap = layout.workspace_dot_gap;
+    let workspace_count = layout.workspace_count;
+    let dock_x = layout.dock_x;
+    let dock_y = layout.dock_y;
+    let dock_w = layout.dock_w;
+    let dock_cy = layout.dock_cy;
 
     // Check if click is even on the dock
     if y < dock_y || y > dock_y + DOCK_BAR_HEIGHT as i32 || x < dock_x || x > dock_x + dock_w as i32
@@ -825,7 +744,7 @@ pub fn handle_click(x: i32, y: i32, screen_width: u32, screen_height: u32) -> bo
         return false;
     }
 
-    let mut cursor_x = dock_x + dock_padding;
+    let mut cursor_x = layout.content_x;
 
     // ── START LAUNCHER BUTTON ──
     let start_rect = Rect::new(
@@ -923,26 +842,8 @@ pub fn handle_click(x: i32, y: i32, screen_width: u32, screen_height: u32) -> bo
     cursor_x += separator_w;
 
     // ── SYSTEM TRAY CLICKS ──
-    {
-        let tray_x = cursor_x;
-        if system_tray::handle_click(x, y, tray_x, dock_cy) {
-            drop(taskbar);
-            return true;
-        }
-        cursor_x += tray_w;
-    }
-
-    // Skip tray-clock separator
-    cursor_x += tray_separator_w;
-
-    // ── CLOCK ──
-    let clock_rect = Rect::new(cursor_x, dock_cy - 10, clock_w as u32, 20);
-    if clock_rect.contains(x, y) {
+    if system_tray::handle_click(x, y, cursor_x, dock_cy) {
         drop(taskbar);
-        super::popups::close_all_popups();
-        super::notifications::close_panel();
-        super::popups::toggle_calendar();
-        crate::serial_println!("[KnoxOS] Calendar popup toggled");
         return true;
     }
 
@@ -1150,42 +1051,15 @@ pub fn update_window_preview(screen_width: u32, screen_height: u32) {
             preview.content_type = entry.content_type;
 
             // Compute dock item center x (same layout math as update_hover)
-            let dock_padding = 14i32;
-            let entry_spacing = 8i32;
-            let start_btn_w = DOCK_ITEM_SIZE as i32;
-            let clock_w = font_engine::measure_ui_text(&taskbar.clock_text, 12) as i32 + 16;
-            let separator_w = 12i32;
-            let tray_w = system_tray::tray_width() as i32;
-            let tray_separator_w = 10i32;
-            let workspace_dot_size = 14i32;
-            let workspace_dot_gap = 4i32;
-            let workspace_count = crate::gui::window::NUM_WORKSPACES as i32;
-            let workspace_area_w = workspace_count * workspace_dot_size
-                + (workspace_count - 1) * workspace_dot_gap
-                + entry_spacing;
             let entry_count = taskbar.entries.len().min(MAX_DOCK_ENTRIES);
-            let dock_content_w = start_btn_w
-                + workspace_area_w
-                + (if entry_count > 0 {
-                    entry_spacing + entry_count as i32 * DOCK_ITEM_SIZE as i32
-                } else {
-                    0
-                })
-                + separator_w
-                + tray_w
-                + tray_separator_w
-                + clock_w;
-            let dock_w = (dock_content_w + dock_padding * 2).max(DOCK_MIN_WIDTH as i32);
-            let dock_x = (screen_width as i32 - dock_w) / 2;
-            let hide_offset = auto_hide_offset() as i32;
-            let dock_y =
-                screen_height as i32 - DOCK_BAR_HEIGHT as i32 - DOCK_FLOAT_GAP as i32 + hide_offset;
-
-            let items_start_x =
-                dock_x + dock_padding + start_btn_w + workspace_area_w + entry_spacing;
+            let layout = compute_dock_layout(entry_count, screen_width, screen_height);
+            let items_start_x = layout.content_x
+                + layout.start_btn_w
+                + layout.workspace_area_w
+                + layout.entry_spacing;
             preview.item_center_x =
                 items_start_x + idx as i32 * DOCK_ITEM_SIZE as i32 + DOCK_ITEM_SIZE as i32 / 2;
-            preview.dock_top_y = dock_y;
+            preview.dock_top_y = layout.dock_y;
 
             if changed {
                 super::request_redraw();
@@ -1768,7 +1642,6 @@ pub fn draw_monitor_taskbar(fb: &mut FrameBuffer, monitor_id: u32) {
     } else {
         tb.entries.clone()
     };
-    let clock = tb.clock_text.clone();
     drop(tb);
 
     let count = entries.len().min(MAX_DOCK_ENTRIES);
@@ -1796,16 +1669,6 @@ pub fn draw_monitor_taskbar(fb: &mut FrameBuffer, monitor_id: u32) {
             6,
         );
     }
-
-    // Clock
-    font_engine::draw_ui_text(
-        fb,
-        dock_x + dock_w as i32 - 48,
-        dock_y + 16,
-        &clock,
-        12,
-        Pixel::new(200, 210, 230, 200),
-    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

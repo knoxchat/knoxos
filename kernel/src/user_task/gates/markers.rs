@@ -203,3 +203,7 @@ pub const GATE_BC4_MARKER: &str = "GATE_BC4 enosys";
 pub const GATE_BD2_MARKER: &str = "GATE_BD2 clock_nanosleep";
 pub const GATE_BD3_MARKER: &str = "GATE_BD3 getitimer";
 pub const GATE_BD4_MARKER: &str = "GATE_BD4 enosys";
+
+pub const GATE_BE2_MARKER: &str = "GATE_BE2 setitimer";
+pub const GATE_BE3_MARKER: &str = "GATE_BE3 timer_gettime";
+pub const GATE_BE4_MARKER: &str = "GATE_BE4 enosys";

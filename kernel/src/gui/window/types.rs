@@ -281,6 +281,10 @@ pub struct WindowAnimation {
     pub start_tsc: u64,
     /// Animation duration in TSC ticks
     pub duration_ticks: u64,
+    /// Interrupt tick when animation started (fallback if TSC stalls)
+    pub start_tick: u64,
+    /// Wall duration in interrupt ticks (~150ms)
+    pub duration_ticks_wall: u64,
     /// Source rect (for interpolation)
     pub from_rect: Rect,
     /// Target rect (for interpolation)

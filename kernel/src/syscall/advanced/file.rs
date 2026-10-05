@@ -1991,7 +1991,7 @@ pub fn futimesat_self_test() -> bool {
 
 const AT_FDCWD: i32 = -100;
 
-fn path_at(dirfd: i32, path: &str) -> Result<alloc::string::String, SyscallError> {
+pub(crate) fn path_at(dirfd: i32, path: &str) -> Result<alloc::string::String, SyscallError> {
     if path.starts_with('/') {
         return Ok(alloc::string::String::from(path));
     }

@@ -51,3 +51,4 @@ pub use dispatch::handle_syscall;
 pub use error::{SyscallError, SyscallResult};
 pub(crate) use helpers::read_user_string;
 pub use numbers::SyscallNumber;
+pub use process::execveat_self_test;

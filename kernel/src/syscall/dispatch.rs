@@ -199,7 +199,10 @@ pub fn handle_syscall(
             process::sys_clone(arg1, arg2, arg3, arg4, arg5)
         }
         SyscallNumber::Fork | SyscallNumber::Vfork => process::sys_fork(),
-        SyscallNumber::Execve | SyscallNumber::Execveat => process::sys_execve(arg1, arg2, arg3),
+        SyscallNumber::Execve => process::sys_execve(arg1, arg2, arg3),
+        SyscallNumber::Execveat => {
+            process::sys_execveat(arg1 as i32, arg2, arg3, arg4, arg5 as i32)
+        }
         SyscallNumber::Exit | SyscallNumber::ExitGroup => process::sys_exit(arg1 as i32),
         SyscallNumber::Wait4 => process::sys_wait4(arg1 as i32, arg2, arg3 as i32),
         SyscallNumber::Kill => process::sys_kill(arg1 as u32, arg2 as u32),

@@ -599,3 +599,16 @@ pub(super) fn run_gate_bd4() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BD4 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_be4() {
+    serial_println!("[user_task] Gate BE4: io_getevents returns ENOSYS");
+    let elf = crate::init::io_getevents_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "io-getevents-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BE4 parent pid={} reaped={}", pid, reaped);
+}

@@ -245,6 +245,9 @@ extern "C" fn gate_boot_body() {
     run_gate_bd2();
     run_gate_bd3();
     run_gate_bd4();
+    run_gate_be2();
+    run_gate_be3();
+    run_gate_be4();
 }
 
 /// Spawn a Ring 3 SHM launcher without waiting (start-menu clicks).

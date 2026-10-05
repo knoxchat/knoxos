@@ -214,6 +214,19 @@ pub fn timer_delete(pid: u32, timer_id: u32) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// timer_gettime — remaining interval and value (`itimerspec`)
+pub fn timer_gettime(pid: u32, timer_id: u32) -> Result<(Timespec, Timespec), &'static str> {
+    let all = PROCESS_TIMERS.lock();
+    let pt = all.get(&pid).ok_or("No timers for process")?;
+    let timer = pt.posix_timers.get(&timer_id).ok_or("Timer not found")?;
+    let value = if timer.armed {
+        timer.next_expiry
+    } else {
+        Timespec::default()
+    };
+    Ok((timer.interval, value))
+}
+
 /// timer_getoverrun — get overrun count
 pub fn timer_getoverrun(pid: u32, timer_id: u32) -> Result<u32, &'static str> {
     let all = PROCESS_TIMERS.lock();
