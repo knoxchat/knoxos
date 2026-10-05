@@ -786,6 +786,113 @@ pub fn renameat_self_test() -> bool {
     true
 }
 
+pub const GATE_BC1_MARKER: &str = "GATE_BC1 renameat2";
+const GATE_BC1_DIR: &str = "/tmp/gate_bc1";
+const GATE_BC1_OLD: &str = "/tmp/gate_bc1/x";
+const GATE_BC1_NEW: &str = "/tmp/gate_bc1/y";
+
+/// `renameat2` on relative names via dirfd moves the file; a missing
+/// source is ENOENT; a bad dirfd is EBADF.
+pub fn renameat2_self_test() -> bool {
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_BC1_OLD);
+        let _ = vfs.unlink(GATE_BC1_NEW);
+        if vfs.mkdir(GATE_BC1_DIR, 0o755).is_err() && vfs.resolve_path(GATE_BC1_DIR).is_none() {
+            crate::serial_println!("[renameat2] Gate BC1 FAILED: mkdir {}", GATE_BC1_DIR);
+            return false;
+        }
+        if !vfs.write_file(GATE_BC1_OLD, b"x") {
+            crate::serial_println!("[renameat2] Gate BC1 FAILED: write {}", GATE_BC1_OLD);
+            return false;
+        }
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let dirfd = {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        tables.entry(pid).or_default();
+        let table = match tables.get_mut(&pid) {
+            Some(t) => t,
+            None => {
+                crate::serial_println!("[renameat2] Gate BC1 FAILED: no fd table");
+                return false;
+            }
+        };
+        match table.open(
+            GATE_BC1_DIR,
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY),
+            crate::fd::FileType::Directory,
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::serial_println!("[renameat2] Gate BC1 FAILED: open {}", e);
+                return false;
+            }
+        }
+    };
+    let old_child = b"x\0";
+    let new_child = b"y\0";
+    match sys_renameat2(
+        dirfd,
+        old_child.as_ptr() as u64,
+        dirfd,
+        new_child.as_ptr() as u64,
+        0,
+    ) {
+        Ok(0) => {}
+        other => {
+            crate::serial_println!("[renameat2] Gate BC1 FAILED: renameat2 {:?}", other);
+            return false;
+        }
+    }
+    {
+        let vfs = crate::vfs::VFS.lock();
+        if vfs.resolve_path(GATE_BC1_OLD).is_some() {
+            crate::serial_println!("[renameat2] Gate BC1 FAILED: old path still exists");
+            return false;
+        }
+        if vfs.resolve_path(GATE_BC1_NEW).is_none() {
+            crate::serial_println!("[renameat2] Gate BC1 FAILED: new path missing");
+            return false;
+        }
+    }
+    let missing = b"missing\0";
+    match sys_renameat2(
+        dirfd,
+        missing.as_ptr() as u64,
+        dirfd,
+        new_child.as_ptr() as u64,
+        0,
+    ) {
+        Err(SyscallError::FileNotFound) => {}
+        other => {
+            crate::serial_println!("[renameat2] Gate BC1 FAILED: missing {:?}", other);
+            return false;
+        }
+    }
+    match sys_renameat2(
+        -1,
+        old_child.as_ptr() as u64,
+        dirfd,
+        new_child.as_ptr() as u64,
+        0,
+    ) {
+        Err(SyscallError::BadFileDescriptor) => {}
+        other => {
+            crate::serial_println!("[renameat2] Gate BC1 FAILED: bad fd {:?}", other);
+            return false;
+        }
+    }
+    {
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(table) = tables.get_mut(&pid) {
+            let _ = table.close(dirfd);
+        }
+    }
+    crate::serial_println!("[renameat2] {}", GATE_BC1_MARKER);
+    true
+}
+
 pub fn sys_linkat(
     olddirfd: i32,
     oldpath_ptr: u64,

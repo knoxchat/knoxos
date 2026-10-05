@@ -534,3 +534,29 @@ pub(super) fn run_gate_bb3() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BB3 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bc2() {
+    serial_println!("[user_task] Gate BC2: capset returns 0");
+    let elf = crate::init::capset_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "capset-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BC2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bc3() {
+    serial_println!("[user_task] Gate BC3: ioprio_set returns 0");
+    let elf = crate::init::ioprio_set_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "ioprio-set-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BC3 parent pid={} reaped={}", pid, reaped);
+}

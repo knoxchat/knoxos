@@ -573,3 +573,16 @@ pub(super) fn run_gate_bb4() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BB4 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bc4() {
+    serial_println!("[user_task] Gate BC4: request_key returns ENOSYS");
+    let elf = crate::init::request_key_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "request-key-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BC4 parent pid={} reaped={}", pid, reaped);
+}

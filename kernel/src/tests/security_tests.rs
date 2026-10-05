@@ -438,6 +438,14 @@ fn test_futimesat_dirfd() {
 }
 
 #[test_case]
+fn test_renameat2_dirfd() {
+    assert!(
+        crate::syscall::renameat2_self_test(),
+        "renameat2 must move a dirfd-relative file, ENOENT for a missing source, and EBADF for a bad dirfd"
+    );
+}
+
+#[test_case]
 fn test_timerfd_expires() {
     assert!(
         crate::timerfd::timerfd_expire_self_test(),

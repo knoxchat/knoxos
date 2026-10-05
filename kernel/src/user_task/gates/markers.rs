@@ -195,3 +195,7 @@ pub const GATE_BA4_MARKER: &str = "GATE_BA4 enosys";
 pub const GATE_BB2_MARKER: &str = "GATE_BB2 capget";
 pub const GATE_BB3_MARKER: &str = "GATE_BB3 ioprio_get";
 pub const GATE_BB4_MARKER: &str = "GATE_BB4 enosys";
+
+pub const GATE_BC2_MARKER: &str = "GATE_BC2 capset";
+pub const GATE_BC3_MARKER: &str = "GATE_BC3 ioprio_set";
+pub const GATE_BC4_MARKER: &str = "GATE_BC4 enosys";

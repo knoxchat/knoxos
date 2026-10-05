@@ -1114,4 +1114,5 @@ pub fn init() {
     let _ = crate::syscall::utimensat_at_self_test();
     let _ = crate::syscall::statx_at_self_test();
     let _ = crate::syscall::futimesat_self_test();
+    let _ = crate::syscall::renameat2_self_test();
 }
