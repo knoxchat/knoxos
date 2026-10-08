@@ -27,3 +27,16 @@ pub(super) fn run_gate_d1() {
         );
     }
 }
+
+pub(super) fn run_gate_bg2() {
+    serial_println!("[user_task] Gate BG2: accept4 listen/connect");
+    let elf = crate::init::accept4_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "accept4-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BG2 parent pid={} reaped={}", pid, reaped);
+}

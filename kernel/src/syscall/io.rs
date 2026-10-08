@@ -105,6 +105,47 @@ pub fn sys_select(
     Ok(n as u64)
 }
 
+/// `pselect6` is `select` with a `timespec` timeout and an optional sigmask.
+/// Timeout and sigmask are ignored; readiness is sampled once (same as `poll`).
+pub fn sys_pselect6(
+    nfds: i32,
+    readfds: u64,
+    writefds: u64,
+    exceptfds: u64,
+    timeout: u64,
+    _sigmask: u64,
+) -> SyscallResult {
+    sys_select(nfds, readfds, writefds, exceptfds, timeout)
+}
+
+/// `ppoll` is `poll` with a `timespec` timeout and an optional sigmask.
+/// Sigmask is ignored; readiness is sampled once (same as `poll`).
+pub fn sys_ppoll(fds_ptr: u64, nfds: u32, timeout_ptr: u64, _sigmask: u64) -> SyscallResult {
+    let timeout_ms = if timeout_ptr == 0 {
+        -1i32
+    } else {
+        let sec = unsafe { core::ptr::read_unaligned(timeout_ptr as *const i64) };
+        let nsec = unsafe { core::ptr::read_unaligned((timeout_ptr + 8) as *const i64) };
+        if sec < 0 || !(0..1_000_000_000).contains(&nsec) {
+            return Err(SyscallError::InvalidArgument);
+        }
+        let ms = sec.saturating_mul(1000).saturating_add(nsec / 1_000_000);
+        ms.min(i32::MAX as i64) as i32
+    };
+    sys_poll(fds_ptr, nfds, timeout_ms)
+}
+
+/// `epoll_pwait` is `epoll_wait` with an optional sigmask (ignored).
+pub fn sys_epoll_pwait(
+    epfd: i32,
+    events_ptr: u64,
+    max_events: i32,
+    timeout: i32,
+    _sigmask: u64,
+) -> SyscallResult {
+    sys_epoll_wait(epfd, events_ptr, max_events, timeout)
+}
+
 // ── Eventfd ─────────────────────────────────────────────────────────
 
 pub fn sys_eventfd(initval: u32, flags: i32) -> SyscallResult {

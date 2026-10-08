@@ -197,6 +197,19 @@ pub(super) fn run_gate_ab2() {
     serial_println!("[user_task] Gate AB2 parent pid={} reaped={}", pid, reaped);
 }
 
+pub(super) fn run_gate_bf1() {
+    serial_println!("[user_task] Gate BF1: dup3 then CLOEXEC + read via new fd");
+    let elf = crate::init::dup3_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "dup3-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BF1 parent pid={} reaped={}", pid, reaped);
+}
+
 pub(super) fn run_gate_ab3() {
     serial_println!("[user_task] Gate AB3: uname sysname KnoxOS");
     let elf = crate::init::uname_userspace_elf_data();

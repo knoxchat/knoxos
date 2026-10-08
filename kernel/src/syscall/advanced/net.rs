@@ -4,8 +4,27 @@ use crate::syscall::{SyscallError, SyscallResult};
 // ── accept4 ─────────────────────────────────────────────────────────
 
 pub fn sys_accept4(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64, flags: i32) -> SyscallResult {
-    let _ = flags; // Would handle SOCK_NONBLOCK, SOCK_CLOEXEC
-    crate::syscall::net::sys_accept(sockfd, addr_ptr, addrlen_ptr)
+    const SOCK_CLOEXEC: i32 = 0x80000;
+    const SOCK_NONBLOCK: i32 = 0x800;
+    let fd = crate::syscall::net::sys_accept(sockfd, addr_ptr, addrlen_ptr)?;
+    if flags & (SOCK_CLOEXEC | SOCK_NONBLOCK) != 0 {
+        let pid = crate::scheduler::current_pid().unwrap_or(1);
+        let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+        if let Some(fd_table) = tables.get_mut(&pid) {
+            if flags & SOCK_CLOEXEC != 0 {
+                fd_table.set_cloexec(fd as i32, true);
+            }
+            if flags & SOCK_NONBLOCK != 0 {
+                fd_table.set_nonblock(fd as i32, true);
+            }
+        }
+    }
+    if flags & SOCK_NONBLOCK != 0 {
+        if let Some(socket) = crate::net::SOCKETS.lock().get_mut(&(fd as u32)) {
+            socket.nonblocking = true;
+        }
+    }
+    Ok(fd)
 }
 
 // ── recvmsg / sendmsg ───────────────────────────────────────────────

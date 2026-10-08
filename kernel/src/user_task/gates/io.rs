@@ -119,6 +119,58 @@ pub(super) fn run_gate_q2() {
     serial_println!("[user_task] Gate Q2 parent pid={} reaped={}", pid, reaped);
 }
 
+pub(super) fn run_gate_bf2() {
+    serial_println!("[user_task] Gate BF2: pipe2 write/read + CLOEXEC");
+    let elf = crate::init::pipe2_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "pipe2-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BF2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bf3() {
+    serial_println!("[user_task] Gate BF3: pselect6 on a pipe");
+    let elf = crate::init::pselect6_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "pselect6-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BF3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bg1() {
+    serial_println!("[user_task] Gate BG1: ppoll on a pipe");
+    let elf = crate::init::ppoll_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "ppoll-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BG1 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bg3() {
+    serial_println!("[user_task] Gate BG3: epoll_pwait on a pipe");
+    let elf = crate::init::epoll_pwait_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "epoll-pwait-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BG3 parent pid={} reaped={}", pid, reaped);
+}
+
 pub(super) fn run_gate_q3() {
     serial_println!("[user_task] Gate Q3: inotify_init1 + add_watch + read");
     let elf = crate::init::inotify_userspace_elf_data();

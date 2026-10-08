@@ -207,3 +207,13 @@ pub const GATE_BD4_MARKER: &str = "GATE_BD4 enosys";
 pub const GATE_BE2_MARKER: &str = "GATE_BE2 setitimer";
 pub const GATE_BE3_MARKER: &str = "GATE_BE3 timer_gettime";
 pub const GATE_BE4_MARKER: &str = "GATE_BE4 enosys";
+
+pub const GATE_BF1_MARKER: &str = "GATE_BF1 dup3";
+pub const GATE_BF2_MARKER: &str = "GATE_BF2 pipe2";
+pub const GATE_BF3_MARKER: &str = "GATE_BF3 pselect6";
+pub const GATE_BF4_MARKER: &str = "GATE_BF4 enosys";
+
+pub const GATE_BG1_MARKER: &str = "GATE_BG1 ppoll";
+pub const GATE_BG2_MARKER: &str = "GATE_BG2 accept4";
+pub const GATE_BG3_MARKER: &str = "GATE_BG3 epoll_pwait";
+pub const GATE_BG4_MARKER: &str = "GATE_BG4 enosys";

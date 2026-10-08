@@ -44,7 +44,8 @@ pub fn handle_syscall(
         SyscallNumber::Close => fs::sys_close(arg1 as i32),
         SyscallNumber::Stat | SyscallNumber::Lstat => fs::sys_stat(arg1, arg2),
         SyscallNumber::Fstat => fs::sys_fstat(arg1 as i32, arg2),
-        SyscallNumber::Poll | SyscallNumber::Ppoll => io::sys_poll(arg1, arg2 as u32, arg3 as i32),
+        SyscallNumber::Poll => io::sys_poll(arg1, arg2 as u32, arg3 as i32),
+        SyscallNumber::Ppoll => io::sys_ppoll(arg1, arg2 as u32, arg3, arg4),
         SyscallNumber::Lseek => fs::sys_lseek(arg1 as i32, arg2 as i64, arg3 as u32),
         SyscallNumber::Mmap => {
             memory::sys_mmap(arg1, arg2, arg3 as u32, arg4 as u32, arg5 as i32, arg6)
@@ -81,9 +82,8 @@ pub fn handle_syscall(
         // ════════════════════════════════════════════════════════════
         SyscallNumber::Access => fs::sys_access(arg1, arg2 as u32),
         SyscallNumber::Pipe => fd::sys_pipe(arg1),
-        SyscallNumber::Select | SyscallNumber::Pselect6 => {
-            io::sys_select(arg1 as i32, arg2, arg3, arg4, arg5)
-        }
+        SyscallNumber::Select => io::sys_select(arg1 as i32, arg2, arg3, arg4, arg5),
+        SyscallNumber::Pselect6 => io::sys_pselect6(arg1 as i32, arg2, arg3, arg4, arg5, arg6),
         SyscallNumber::SchedYield => crate::sched_ext::sched_yield()
             .map(|_| 0u64)
             .map_err(|_| SyscallError::NotImplemented),
@@ -566,8 +566,11 @@ pub fn handle_syscall(
         }
         SyscallNumber::IoSetup => advanced::sys_io_setup(arg1 as u32, arg2),
         SyscallNumber::IoDestroy => advanced::sys_io_destroy(arg1),
-        SyscallNumber::IoGetevents | SyscallNumber::IoPgetevents => {
+        SyscallNumber::IoGetevents => {
             advanced::sys_io_getevents(arg1, arg2 as i64, arg3 as i64, arg4, arg5)
+        }
+        SyscallNumber::IoPgetevents => {
+            advanced::sys_io_pgetevents(arg1, arg2 as i64, arg3 as i64, arg4, arg5, arg6)
         }
         SyscallNumber::IoSubmit => advanced::sys_io_submit(arg1, arg2 as i64, arg3),
         SyscallNumber::IoCancel => advanced::sys_io_cancel(arg1, arg2, arg3),
@@ -582,11 +585,11 @@ pub fn handle_syscall(
         SyscallNumber::EpollCtl | SyscallNumber::EpollCtlOld => {
             io::sys_epoll_ctl(arg1 as i32, arg2 as i32, arg3 as i32, arg4)
         }
-        SyscallNumber::EpollWait
-        | SyscallNumber::EpollWaitOld
-        | SyscallNumber::EpollPwait
-        | SyscallNumber::EpollPwait2 => {
+        SyscallNumber::EpollWait | SyscallNumber::EpollWaitOld | SyscallNumber::EpollPwait2 => {
             io::sys_epoll_wait(arg1 as i32, arg2, arg3 as i32, arg4 as i32)
+        }
+        SyscallNumber::EpollPwait => {
+            io::sys_epoll_pwait(arg1 as i32, arg2, arg3 as i32, arg4 as i32, arg5)
         }
         SyscallNumber::RemapFilePages => {
             serial_println!("[KnoxOS] remap_file_pages denied (ENOSYS)");

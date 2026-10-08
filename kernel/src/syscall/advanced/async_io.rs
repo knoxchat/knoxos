@@ -62,6 +62,18 @@ pub fn sys_io_getevents(
     Err(SyscallError::NotImplemented)
 }
 
+pub fn sys_io_pgetevents(
+    _ctx: u64,
+    _min_nr: i64,
+    _max_nr: i64,
+    _events_ptr: u64,
+    _timeout_ptr: u64,
+    _sigmask: u64,
+) -> SyscallResult {
+    serial_println!("[KnoxOS] io_pgetevents denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
+}
+
 pub fn sys_io_submit(_ctx: u64, _nr: i64, _iocbpp: u64) -> SyscallResult {
     serial_println!("[KnoxOS] io_submit denied (ENOSYS)");
     Err(SyscallError::NotImplemented)
