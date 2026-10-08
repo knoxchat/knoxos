@@ -25,6 +25,20 @@ impl Button {
         }
     }
 
+    /// Hit-test the button's clickable rectangle.
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        self.rect.contains(x, y)
+    }
+
+    /// Update hover/press from the pointer. Returns true on a click (press→release inside).
+    pub fn update_pointer(&mut self, x: i32, y: i32, primary_down: bool) -> bool {
+        let over = self.rect.contains(x, y);
+        let was_pressed = self.pressed;
+        self.hovered = over;
+        self.pressed = over && primary_down;
+        was_pressed && over && !primary_down
+    }
+
     pub fn draw(&self, fb: &mut FrameBuffer) {
         let bg = if self.pressed {
             colors::darken(self.bg_color, 51)

@@ -304,11 +304,88 @@ pub fn has_pending_work() -> bool {
 
 /// Request a full desktop redraw on the next frame.
 /// This pushes a screen-sized damage rect, so the entire desktop is recomposed.
-/// Prefer `push_damage(rect)` when only a small region changed.
+/// Prefer `push_damage(rect)` / `request_window_redraw` when only a small region changed.
 pub fn request_redraw() {
     // Push a full-screen damage rect. The actual screen size is read during
     // compositing; use a large sentinel that will be clamped.
     push_damage(framebuffer::Rect::new(0, 0, 8192, 8192));
+}
+
+/// Damage a window (with shadow/resize padding) instead of the whole screen.
+pub fn request_window_redraw(rect: framebuffer::Rect) {
+    let pad = 20i32;
+    push_damage(framebuffer::Rect::new(
+        rect.x - pad,
+        rect.y - pad,
+        rect.width.saturating_add((pad * 2) as u32),
+        rect.height.saturating_add((pad * 2) as u32),
+    ));
+}
+
+/// Damage the window with the given id, if it still exists.
+pub fn damage_window(id: window::WindowId) {
+    let wm = window::WINDOW_MANAGER.lock();
+    if let Some(win) = wm.windows.iter().find(|w| w.id == id) {
+        let rect = win.rect;
+        drop(wm);
+        request_window_redraw(rect);
+    }
+}
+
+/// Damage the taskbar strip (clock, dock hover, tray).
+pub fn request_taskbar_redraw() {
+    let (sw, sh) = cached_screen_size();
+    let th = scale::taskbar_height();
+    push_damage(framebuffer::Rect::new(0, sh - th as i32, sw as u32, th));
+}
+
+/// Damage the desktop info widgets (clock / stats card).
+pub fn request_desktop_widget_redraw() {
+    let (sw, _sh) = cached_screen_size();
+    push_damage(desktop_widgets::bounding_rect(sw as u32));
+}
+
+/// After a click, composite only what changed: the window under the pointer,
+/// the taskbar, or a small desktop region. Overlays still take a full redraw.
+pub fn request_redraw_at(x: i32, y: i32) {
+    if startmenu::is_visible()
+        || popups::any_popup_open()
+        || notifications::is_panel_open()
+        || expose::is_visible()
+        || file_picker::is_visible()
+        || shortcuts_overlay::is_visible()
+        || system_tray::is_context_menu_open()
+        || taskbar::is_context_menu_open()
+        || desktop::CONTEXT_MENU.lock().visible
+    {
+        request_redraw();
+        return;
+    }
+
+    {
+        let wm = window::WINDOW_MANAGER.lock();
+        if let Some(wid) = wm.window_at(x, y) {
+            if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
+                let rect = win.rect;
+                drop(wm);
+                request_window_redraw(rect);
+                return;
+            }
+        }
+    }
+
+    let (sw, sh) = cached_screen_size();
+    let th = scale::taskbar_height() as i32;
+    if y >= sh - th {
+        request_taskbar_redraw();
+        return;
+    }
+
+    // Desktop click: icon column + a local patch around the pointer.
+    if x < 220 {
+        push_damage(framebuffer::Rect::new(0, 0, 220, sh as u32));
+    }
+    push_damage(framebuffer::Rect::new(x - 96, y - 96, 192, 192));
 }
 
 /// Request only a cursor position update (fast path — no full redraw)

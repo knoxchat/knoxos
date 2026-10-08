@@ -69,6 +69,11 @@ pub fn close(wid: WindowId) {
 }
 
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, _scroll_y: i32) {
+    let (mx, my, mouse_down) = {
+        let mouse = crate::gui::input::MOUSE.lock();
+        (mouse.x, mouse.y, mouse.left_button)
+    };
+
     let states = STATES.lock();
     let state = match states.iter().find(|s| s.window_id == wid) {
         Some(s) => s,
@@ -133,14 +138,26 @@ pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, _scroll_y: 
             let bw = (btn_w - gap * 2) as u32;
             let bh = (btn_h - gap * 2) as u32;
 
-            // Button colors
-            let (bg, fg) = match *label {
+            let btn_rect = Rect::new(bx, by, bw, bh);
+            let hovered = btn_rect.contains(mx, my);
+            let pressed = hovered && mouse_down;
+
+            // Button colors — hover/press so keys feel clickable
+            let (mut bg, fg) = match *label {
                 "C" | "±" | "%" => (Pixel::rgb(60, 60, 68), colors::WHITE),
                 "÷" | "×" | "−" | "+" | "=" => (Pixel::rgb(82, 139, 255), colors::WHITE),
                 _ => (Pixel::rgb(48, 48, 55), Pixel::rgb(220, 220, 230)),
             };
+            if pressed {
+                bg = colors::darken(bg, 40);
+            } else if hovered {
+                bg = colors::lighten(bg, 36);
+            }
 
-            fb.fill_rounded_rect_aa(Rect::new(bx, by, bw, bh), bg, 6);
+            fb.fill_rounded_rect_aa(btn_rect, bg, 6);
+            if hovered {
+                fb.draw_rounded_rect(btn_rect, colors::lighten(bg, 50), 6, 1);
+            }
 
             // Center text
             let text_px_w = label.chars().count() as i32 * 7;

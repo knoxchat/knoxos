@@ -64,8 +64,12 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
         let mouse = super::input::MOUSE.lock();
         (mouse.x, mouse.y)
     };
+    let frame_input = super::input::frame_input();
 
     if let Some(ref mut fb) = *FRAMEBUFFER.lock() {
+        super::ui::UI_MEMORY.lock().begin_frame(&frame_input);
+        super::FRAME_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
         let screen_w = fb.width as u32;
         let screen_h = fb.height as u32;
         let screen_rect = Rect::new(0, 0, screen_w, screen_h);
@@ -305,6 +309,7 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
             damage_union.width,
             damage_union.height,
         );
+        super::input::end_frame();
     }
 }
 
@@ -345,8 +350,12 @@ pub fn on_timer_tick(ticks: u64) {
     notifs.tick();
     drop(notifs);
 
-    // Only request a full redraw if something actually changed
-    if old_clock != new_clock || has_active {
+    // Clock lives in the desktop widget card + taskbar strip — not the whole FB.
+    if old_clock != new_clock {
+        super::request_taskbar_redraw();
+        super::request_desktop_widget_redraw();
+    }
+    if has_active {
         super::request_redraw();
     }
 }

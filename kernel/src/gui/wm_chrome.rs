@@ -379,7 +379,7 @@ impl Window {
         if self.closeable {
             let bx = close_x;
             let cr = Rect::new(bx, self.rect.y + btn_top_pad, btn_w as u32, btn_h as u32);
-            let hovered = cr.contains(mouse_x, mouse_y) && self.focused;
+            let hovered = self.close_button_rect().contains(mouse_x, mouse_y) && self.focused;
 
             if hovered {
                 fb.fill_rounded_rect_aa(cr, Pixel::new(220, 40, 50, 70), 6);

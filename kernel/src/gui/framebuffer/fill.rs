@@ -19,16 +19,22 @@ impl FrameBuffer {
             let row_pixel_count = x_end - x_start;
             let row_byte_len = row_pixel_count * bpp;
 
-            // Stamp first row pixel-by-pixel (no bounds check needed, already clamped)
-            {
+            // Stamp first row as packed BGRA u32s (unaligned-safe)
+            if bpp == 4 {
+                let packed = u32::from_le_bytes([color.b, color.g, color.r, color.a]);
+                unsafe {
+                    let mut p = self.buffer.as_mut_ptr().add(first_row_offset);
+                    for _ in 0..row_pixel_count {
+                        (p as *mut u32).write_unaligned(packed);
+                        p = p.add(4);
+                    }
+                }
+            } else {
                 let mut off = first_row_offset;
                 for _ in 0..row_pixel_count {
                     self.buffer[off] = color.b;
                     self.buffer[off + 1] = color.g;
                     self.buffer[off + 2] = color.r;
-                    if bpp >= 4 {
-                        self.buffer[off + 3] = color.a;
-                    }
                     off += bpp;
                 }
             }

@@ -52,22 +52,38 @@ pub(super) fn handle_right_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
 }
 
 /// Close / maximize / minimize — must run before resize-edge grab.
+/// Hit-tests chrome rects directly (not `window_at`) so a click on the X
+/// still wins when the pointer is in the top-right resize grab.
 fn handle_chrome_button_click(x: i32, y: i32, screen_w: u32, screen_h: u32) -> bool {
     let wm = window::WINDOW_MANAGER.lock();
-    let Some(wid) = wm.window_at(x, y) else {
+    let mut hit: Option<(window::WindowId, u8)> = None;
+    for win in wm.windows.iter().rev() {
+        if !win.is_visible() {
+            continue;
+        }
+        if win.closeable && win.close_button_rect().contains(x, y) {
+            hit = Some((win.id, 0));
+            break;
+        }
+        if win.maximizable && win.maximize_button_rect().contains(x, y) {
+            hit = Some((win.id, 1));
+            break;
+        }
+        if win.minimizable && win.minimize_button_rect().contains(x, y) {
+            hit = Some((win.id, 2));
+            break;
+        }
+    }
+    let Some((wid, action)) = hit else {
         return false;
     };
     let Some(win) = wm.windows.iter().rev().find(|w| w.id == wid) else {
         return false;
     };
+    let close = action == 0;
+    let maximize = action == 1;
 
-    let close = win.closeable && win.close_button_rect().contains(x, y);
-    let maximize = win.maximizable && win.maximize_button_rect().contains(x, y);
-    let minimize = win.minimizable && win.minimize_button_rect().contains(x, y);
-    if !close && !maximize && !minimize {
-        return false;
-    }
-
+    let old_rect = win.rect;
     let id = win.id;
     let is_terminal = win.content_type == WindowContentType::Terminal;
     let is_browser = win.content_type == WindowContentType::Browser;
@@ -97,13 +113,16 @@ fn handle_chrome_button_click(x: i32, y: i32, screen_w: u32, screen_h: u32) -> b
         if is_ai {
             crate::gui::ai_assistant::destroy_for_window(id);
         }
+        crate::gui::request_redraw();
         return true;
     }
 
     if maximize {
+        crate::gui::request_window_redraw(old_rect);
         window::WINDOW_MANAGER
             .lock()
             .toggle_maximize(id, screen_w, screen_h);
+        crate::gui::damage_window(id);
         let wm2 = window::WINDOW_MANAGER.lock();
         if let Some(w) = wm2.windows.iter().find(|w| w.id == id) {
             let evt = match w.state {
@@ -119,6 +138,7 @@ fn handle_chrome_button_click(x: i32, y: i32, screen_w: u32, screen_h: u32) -> b
     crate::gui::window_events::push_event(id, crate::gui::window_events::WindowEvent::Minimized);
     let mut wm = window::WINDOW_MANAGER.lock();
     wm.minimize_window(id);
+    crate::gui::request_window_redraw(old_rect);
     let new_focus = wm.focused_window;
     drop(wm);
     if let Some(fid) = new_focus {
@@ -134,36 +154,28 @@ fn handle_chrome_button_click(x: i32, y: i32, screen_w: u32, screen_h: u32) -> b
 
 /// Handle a single click
 pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
-    crate::serial_println!(
-        "[CLICK-DBG] handle_click({},{}) screen={}x{}",
-        x,
-        y,
-        screen_w,
-        screen_h
-    );
     // If login screen is active, route clicks there
     if !crate::gui::login::is_logged_in() {
-        crate::serial_println!("[CLICK-DBG] consumed by: login");
         crate::gui::login::handle_click(x, y, screen_w as i32, screen_h as i32);
+        crate::gui::request_redraw();
         return;
     }
 
     // If screen is locked, route clicks to lock screen
     if crate::gui::lock_screen::is_locked() {
-        crate::serial_println!("[CLICK-DBG] consumed by: lock_screen");
         crate::gui::lock_screen::handle_click(x, y, screen_w as i32, screen_h as i32);
+        crate::gui::request_redraw();
         return;
     }
 
     // Check context menu first (if visible, clicking an item)
     if desktop::handle_context_menu_click(x, y) {
-        crate::serial_println!("[CLICK-DBG] consumed by: context_menu");
+        crate::gui::request_redraw();
         return;
     }
 
     // Exposé / Mission Control — intercepts clicks when visible
     if crate::gui::expose::is_visible() {
-        crate::serial_println!("[CLICK-DBG] consumed by: expose");
         if let Some(wid) = crate::gui::expose::handle_click(x, y) {
             let mut wm = window::WINDOW_MANAGER.lock();
             wm.focus_window(wid);
@@ -176,19 +188,19 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
 
     // Check taskbar context menu
     if taskbar::handle_context_menu_click(x, y) {
-        crate::serial_println!("[CLICK-DBG] consumed by: taskbar_context_menu");
+        crate::gui::request_redraw();
         return;
     }
 
     // File picker modal — intercepts all clicks when visible
     if crate::gui::file_picker::handle_click(x, y) {
-        crate::serial_println!("[CLICK-DBG] consumed by: file_picker");
+        crate::gui::request_redraw();
         return;
     }
 
     // Keyboard shortcuts overlay — intercepts clicks when visible
     if crate::gui::shortcuts_overlay::handle_click(x, y) {
-        crate::serial_println!("[CLICK-DBG] consumed by: shortcuts_overlay");
+        crate::gui::request_redraw();
         return;
     }
 
@@ -196,13 +208,13 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     if crate::gui::system_tray::is_context_menu_open()
         && crate::gui::system_tray::handle_context_menu_click(x, y)
     {
-        crate::serial_println!("[CLICK-DBG] consumed by: tray_context_menu");
+        crate::gui::request_redraw();
         return;
     }
 
     // Check toast notification clicks (top-right toasts)
     if crate::gui::notifications::handle_toast_click(x, y, screen_w as i32) {
-        crate::serial_println!("[CLICK-DBG] consumed by: toast");
+        crate::gui::request_redraw();
         return;
     }
 
@@ -210,7 +222,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     if crate::gui::notifications::is_panel_open()
         && crate::gui::notifications::handle_panel_click(x, y, screen_w as i32, screen_h as i32)
     {
-        crate::serial_println!("[CLICK-DBG] consumed by: notification_panel");
+        crate::gui::request_redraw();
         return;
     }
 
@@ -218,7 +230,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     // properly toggles the menu (instead of close→reopen race)
     let taskbar_y = screen_h as i32 - crate::gui::scale::taskbar_height() as i32;
     if y >= taskbar_y && taskbar::handle_click(x, y, screen_w, screen_h) {
-        crate::serial_println!("[CLICK-DBG] consumed by: taskbar");
+        crate::gui::request_taskbar_redraw();
         return;
     }
 
@@ -238,15 +250,15 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
         let sw = screen_w as i32;
         let sh = screen_h as i32;
         if crate::gui::popups::handle_calendar_click(x, y, sw, sh) {
-            crate::serial_println!("[CLICK-DBG] consumed by: calendar_popup");
+            crate::gui::request_redraw();
             return;
         }
         if crate::gui::popups::handle_volume_click(x, y, sw, sh) {
-            crate::serial_println!("[CLICK-DBG] consumed by: volume_popup");
+            crate::gui::request_redraw();
             return;
         }
         if crate::gui::popups::handle_quick_settings_click(x, y, sw, sh) {
-            crate::serial_println!("[CLICK-DBG] consumed by: quick_settings_popup");
+            crate::gui::request_redraw();
             return;
         }
         // Click outside all popups — close them
@@ -265,7 +277,6 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             let panel_rect = crate::gui::framebuffer::Rect::new(panel_x, 36, panel_w, 400);
             if panel_rect.contains(x, y) {
                 // Click inside panel — already handled above; consume
-                crate::serial_println!("[CLICK-DBG] consumed by: notification_panel_inside");
                 drop(nc);
                 return;
             }
@@ -276,7 +287,6 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
 
     // Title-bar buttons must win over the top-right resize grab zone.
     if handle_chrome_button_click(x, y, screen_w, screen_h) {
-        crate::serial_println!("[CLICK-DBG] consumed by: chrome_button");
         return;
     }
 
@@ -286,11 +296,6 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
         let (resize_wid, edge) = wm.resize_edge_at(x, y);
         if let Some(wid) = resize_wid {
             if edge.is_resizing() {
-                crate::serial_println!(
-                    "[CLICK-DBG] consumed by: resize_edge wid={} edge={:?}",
-                    wid,
-                    edge
-                );
                 drop(wm);
                 let mut wm = window::WINDOW_MANAGER.lock();
                 wm.focus_window(wid);
@@ -305,7 +310,6 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     }
 
     // Check windows (top to bottom z-order)
-    crate::serial_println!("[CLICK-DBG] reached window check at ({},{})", x, y);
     let wm = window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.window_at(x, y) {
         drop(wm);
@@ -316,19 +320,9 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
         // Check title bar buttons (using scale-aware button rects)
         if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
             let close_rect = win.close_button_rect();
-            crate::serial_println!(
-                "[HIT] wid={} click=({},{}) close_rect=({},{},{}x{}) closeable={}",
-                wid,
-                x,
-                y,
-                close_rect.x,
-                close_rect.y,
-                close_rect.width,
-                close_rect.height,
-                win.closeable
-            );
             if win.closeable && close_rect.contains(x, y) {
                 let id = win.id;
+                let old_rect = win.rect;
                 let is_terminal = win.content_type == WindowContentType::Terminal;
                 let is_browser = win.content_type == WindowContentType::Browser;
                 let is_ai = win.content_type == WindowContentType::AIAssistant;
@@ -362,11 +356,14 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                 if is_ai {
                     crate::gui::ai_assistant::destroy_for_window(id);
                 }
+                crate::gui::request_window_redraw(old_rect);
                 return;
             }
             if win.maximizable && win.maximize_button_rect().contains(x, y) {
                 let id = win.id;
+                let old_rect = win.rect;
                 drop(wm);
+                crate::gui::request_window_redraw(old_rect);
                 window::WINDOW_MANAGER
                     .lock()
                     .toggle_maximize(id, screen_w, screen_h);
@@ -385,6 +382,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
             if win.minimizable && win.minimize_button_rect().contains(x, y) {
                 let id = win.id;
+                let old_rect = win.rect;
                 drop(wm);
                 crate::gui::window_events::push_event(
                     id,
@@ -392,6 +390,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                 );
                 let mut wm = window::WINDOW_MANAGER.lock();
                 wm.minimize_window(id);
+                crate::gui::request_window_redraw(old_rect);
                 // Sync taskbar active state with newly focused window
                 let new_focus = wm.focused_window;
                 drop(wm);
@@ -410,19 +409,11 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             // Check for clicks on window content (settings tabs, etc.)
             if win.content_type == WindowContentType::Settings {
                 let content = win.content_rect();
-                crate::serial_println!(
-                    "[CLICK-DBG] Settings content check: mouse=({},{}) rect=({},{},{}x{})",
-                    x,
-                    y,
-                    content.x,
-                    content.y,
-                    content.width,
-                    content.height
-                );
                 if content.contains(x, y) {
                     drop(wm);
                     handle_settings_content_click(x, y, wid);
                     taskbar::set_active(wid);
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -434,7 +425,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::ai_assistant::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -456,7 +447,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                         scroll,
                     );
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -468,7 +459,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::explorer::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -480,7 +471,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::archive_manager::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -492,7 +483,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::disk_utility::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -504,7 +495,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::bt_manager::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -516,7 +507,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::calendar_app::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -528,7 +519,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::log_viewer::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -540,7 +531,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::software_updater::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -552,7 +543,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::software_center::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -564,7 +555,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::setup_wizard::handle_click(wid, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -576,7 +567,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::task_manager::handle_click(wid, content, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -588,7 +579,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::calculator::handle_click(wid, content, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -600,7 +591,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     drop(wm);
                     crate::gui::image_viewer::handle_click(wid, content, x, y);
                     taskbar::set_active(wid);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -626,7 +617,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                     };
                     drop(wm);
                     crate::terminal::handle_ctrl_click(term_id, x, y, term_area);
-                    crate::gui::request_redraw();
+                    crate::gui::damage_window(wid);
                     return;
                 }
             }
@@ -770,7 +761,6 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     drop(wm);
 
     // Click on desktop (no window found)
-    crate::serial_println!("[CLICK] no window at ({},{}), desktop click", x, y);
     desktop::handle_click(x, y);
 }
 

@@ -608,11 +608,11 @@ pub fn init() {
         commit_hash: String::from("HEAD"),
         artifacts: Vec::new(),
         release_notes: String::from(
-            "KnoxOS v0.2.2 — Package management, MIDI, A2DP, performance tracking",
+            "KnoxOS v0.2.3 — Package management, MIDI, A2DP, performance tracking",
         ),
         min_upgrade_version: Some(SemVer::new(0, 1, 0)),
     };
     register_release(current);
 
-    serial_println!("[KnoxOS] Release signing subsystem initialized (v0.2.2)");
+    serial_println!("[KnoxOS] Release signing subsystem initialized (v0.2.3)");
 }

@@ -1299,6 +1299,12 @@ pub fn window_shm_pixels(window_id: u32) -> Option<(Vec<u8>, u32, u32)> {
     WINDOW_PIXELS.lock().get(&window_id).cloned()
 }
 
+/// Drop compositor mappings when a chrome window is closed.
+pub fn forget_window(window_id: u32) {
+    WINDOW_SURFACES.lock().remove(&window_id);
+    WINDOW_PIXELS.lock().remove(&window_id);
+}
+
 /// Kernel-only SHM pool write/read round-trip (no Ring 3).
 pub fn shm_pool_self_test() -> bool {
     let len = 64;

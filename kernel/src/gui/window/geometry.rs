@@ -10,9 +10,8 @@ use crate::gui::scale;
 use crate::gui::window_attrs::{WindowAttributes, WindowButtons, WindowLevel};
 
 use super::decorations::{
-    scaled_btn_gap, scaled_btn_height, scaled_btn_margin_right, scaled_btn_width,
-    scaled_min_height, scaled_min_visible, scaled_min_width, scaled_resize_border,
-    scaled_title_bar_height,
+    scaled_btn_gap, scaled_btn_margin_right, scaled_btn_width, scaled_min_height,
+    scaled_min_visible, scaled_min_width, scaled_resize_border, scaled_title_bar_height,
 };
 use super::types::{
     BORDER_WIDTH, CURRENT_WORKSPACE, ExplorerSort, MAX_SCROLL_Y, NEXT_WINDOW_ID, ResizeEdge,
@@ -316,8 +315,15 @@ impl Window {
         let margin = scaled_btn_margin_right();
         let gap = scaled_btn_gap();
         let tb = scaled_title_bar_height();
+        let rb = scaled_resize_border();
         let bx =
             r.x + r.width as i32 - margin - btn_w * (index_from_right + 1) - gap * index_from_right;
+        // Close sits in the top-right resize corner. Extend its hit box through
+        // the right margin and the resize grab so the X always wins.
+        if index_from_right == 0 {
+            let x1 = r.x + r.width as i32 + rb;
+            return Rect::new(bx, r.y - rb, (x1 - bx).max(btn_w) as u32, tb + rb as u32);
+        }
         Rect::new(bx, r.y, btn_w as u32, tb)
     }
 
@@ -360,19 +366,20 @@ impl Window {
 
     /// Check if a point is within the window (including resize border) — scale-aware
     pub fn hit_test(&self, x: i32, y: i32) -> bool {
+        let r = self.displayed_rect();
         let rb = scaled_resize_border();
         let expanded = Rect::new(
-            self.rect.x - rb,
-            self.rect.y - rb,
-            self.rect.width + (rb * 2) as u32,
-            self.rect.height + (rb * 2) as u32,
+            r.x - rb,
+            r.y - rb,
+            r.width + (rb * 2) as u32,
+            r.height + (rb * 2) as u32,
         );
         expanded.contains(x, y)
     }
 
     /// Check if a point is strictly inside the window rect (no border expansion)
     pub fn hit_test_inner(&self, x: i32, y: i32) -> bool {
-        self.rect.contains(x, y)
+        self.displayed_rect().contains(x, y)
     }
 
     /// Determine which resize edge (if any) a point is on — scale-aware
@@ -400,7 +407,7 @@ impl Window {
             return ResizeEdge::None;
         }
 
-        let r = &self.rect;
+        let r = self.displayed_rect();
         let b = scaled_resize_border();
         let on_left = x >= r.x - b && x < r.x + b;
         let on_right = x >= r.x + r.width as i32 - b && x < r.x + r.width as i32 + b;

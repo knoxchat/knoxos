@@ -220,6 +220,7 @@ fn process_mouse_byte(byte: u8) {
         let x = mouse.x;
         let y = mouse.y;
         let moved = dx != 0 || dy != 0;
+        super::frame::update_pointer(x, y, mouse.left_button, mouse.right_button);
 
         // Handle scroll wheel events (respects natural scrolling setting)
         if scroll_z != 0 {
@@ -232,6 +233,7 @@ fn process_mouse_byte(byte: u8) {
             drop(settings);
             mouse.scroll_delta = effective_scroll;
             drop(mouse);
+            super::frame::note_scroll(effective_scroll as i32);
             handle_scroll(x, y, effective_scroll, screen_w as u32, screen_h as u32);
             // Scroll only affects one window — push damage for it
             let wm = window::WINDOW_MANAGER.lock();
@@ -251,7 +253,6 @@ fn process_mouse_byte(byte: u8) {
 
         // Handle left click events
         if mouse.left_button && !prev_left {
-            crate::serial_println!("[MOUSE] LEFT CLICK at ({}, {})", x, y);
             // Mouse down - check for double click (~400ms window).
             // APIC timer runs at 100Hz → 40 ticks ≈ 400ms.
             // Before APIC timer init, PIT runs at 18.2Hz → 40 ticks ≈ 2.2s (fine, no GUI yet).
@@ -271,6 +272,7 @@ fn process_mouse_byte(byte: u8) {
             crate::gui::system_tray::close_context_menu();
 
             if is_double_click {
+                super::frame::note_double_click();
                 let on_button = is_on_window_button(x, y);
                 if on_button {
                     handle_click(x, y, screen_w as u32, screen_h as u32);
@@ -280,22 +282,22 @@ fn process_mouse_byte(byte: u8) {
             } else {
                 handle_click(x, y, screen_w as u32, screen_h as u32);
             }
-            crate::gui::request_redraw();
+            finish_pointer_redraw(x, y);
         } else if mouse.right_button && !prev_right {
             // Right-click
             drop(mouse);
             handle_right_click(x, y, screen_w as u32, screen_h as u32);
-            crate::gui::request_redraw();
+            finish_pointer_redraw(x, y);
         } else if mouse.middle_button && !prev_middle && middle_paste {
             // Middle-click paste — pastes clipboard content at cursor position
             drop(mouse);
             handle_middle_click_paste(x, y);
-            crate::gui::request_redraw();
+            finish_pointer_redraw(x, y);
         } else if !mouse.left_button && prev_left {
             // Mouse up - stop dragging/resizing and apply snap zones
             drop(mouse);
             handle_mouse_up(x, y);
-            crate::gui::request_redraw();
+            finish_pointer_redraw(x, y);
         } else if mouse.left_button {
             // Mouse drag — handle_drag pushes targeted damage rects
             drop(mouse);
@@ -380,6 +382,7 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
         mouse.right_button = right;
     }
     mouse.middle_button = middle;
+    super::frame::update_pointer(mouse.x, mouse.y, mouse.left_button, mouse.right_button);
 
     // Sync with tablet driver for cursor rendering
     crate::virtio_tablet::set_position(mouse.x, mouse.y);
@@ -394,6 +397,7 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
         let effective_scroll = if natural_scrolling { -scroll } else { scroll };
         mouse.scroll_delta = effective_scroll;
         drop(mouse);
+        super::frame::note_scroll(effective_scroll as i32);
         handle_scroll(cx, cy, effective_scroll, screen_w as u32, screen_h as u32);
         let wm = window::WINDOW_MANAGER.lock();
         if let Some(wid) = wm.window_at(cx, cy) {
@@ -427,6 +431,7 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
         crate::gui::system_tray::close_context_menu();
 
         if is_double_click {
+            super::frame::note_double_click();
             let on_button = is_on_window_button(cx, cy);
             if on_button {
                 handle_click(cx, cy, screen_w as u32, screen_h as u32);
@@ -436,22 +441,22 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
         } else {
             handle_click(cx, cy, screen_w as u32, screen_h as u32);
         }
-        crate::gui::request_redraw();
+        finish_pointer_redraw(cx, cy);
     } else if mouse.right_button && !prev_right {
         // Right-click
         drop(mouse);
         handle_right_click(cx, cy, screen_w as u32, screen_h as u32);
-        crate::gui::request_redraw();
+        finish_pointer_redraw(cx, cy);
     } else if mouse.middle_button && !prev_middle && middle_paste {
         // Middle-click paste
         drop(mouse);
         handle_middle_click_paste(cx, cy);
-        crate::gui::request_redraw();
+        finish_pointer_redraw(cx, cy);
     } else if !mouse.left_button && prev_left {
         // Mouse up — stop dragging, apply snap zones
         drop(mouse);
         handle_mouse_up(cx, cy);
-        crate::gui::request_redraw();
+        finish_pointer_redraw(cx, cy);
     } else if mouse.left_button {
         // Mouse drag
         drop(mouse);
@@ -489,4 +494,13 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
     } else {
         drop(mouse);
     }
+}
+
+/// If a handler already queued damage (or a full redraw), keep it.
+/// Otherwise composite only the window / taskbar / desktop patch under the pointer.
+fn finish_pointer_redraw(x: i32, y: i32) {
+    if crate::gui::NEEDS_REDRAW.load(core::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    crate::gui::request_redraw_at(x, y);
 }

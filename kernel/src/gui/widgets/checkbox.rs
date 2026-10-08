@@ -83,4 +83,15 @@ impl Checkbox {
             && my >= self.y
             && my < self.y + 16
     }
+
+    /// Update hover from the pointer. Returns true if the checkbox was clicked.
+    pub fn update_pointer(&mut self, mx: i32, my: i32, primary_pressed: bool) -> bool {
+        self.hovered = self.hit_test(mx, my);
+        if self.hovered && primary_pressed {
+            self.checked = !self.checked;
+            true
+        } else {
+            false
+        }
+    }
 }

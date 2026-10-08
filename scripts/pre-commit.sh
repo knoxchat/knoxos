@@ -2,6 +2,11 @@
 #
 # KnoxOS pre-commit — rustc/cargo quality gate for the kernel, boot, and tools.
 #
+# rustfmt drift is applied automatically (import order, spacing, etc.). When
+# this script is invoked as the git hook, reformatted files are re-staged so
+# the commit includes the formatted sources. Missing rustup components are
+# installed instead of failing with a manual command.
+#
 # Install the git hook:
 #   ./scripts/pre-commit.sh --install-hook
 #
@@ -25,8 +30,9 @@ MIN_RUSTC_MINOR=85
 MODE="full"
 FROM_HOOK=0
 KEEP_GOING=0
-APPLY_FMT=0
+AUTO_FIX=1
 OFFLINE=0
+FMT_REWROTE=0
 
 export CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-always}"
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
@@ -61,12 +67,14 @@ Usage:
   scripts/pre-commit.sh [options]
 
 Modes:
-  (default)       Full gate: hygiene, fmt, kernel+boot check, clippy,
-                  compile kernel tests (no QEMU boot)
-  --quick         Fast loop: hygiene, fmt, check, clippy (no tests)
+  (default)       Full gate: hygiene, auto rustfmt, kernel+boot check,
+                  clippy, compile kernel tests (no QEMU boot)
+  --quick         Fast loop: hygiene, auto rustfmt, check, clippy (no tests)
   --strict        Full gate plus clippy extra warnings and cargo-audit /
                   cargo-deny when those tools are installed
-  --fix           Apply `cargo fmt` in each crate then run the full gate
+  --fix           Same as default: apply rustfmt (and clippy --fix on
+                  clippy failure) then run the gate
+  --check-only    Do not rewrite files; rustfmt --check and clippy only
 
 Git:
   --install-hook  Install .git/hooks/pre-commit (runs this script when
@@ -126,6 +134,13 @@ print_summary() {
   total="$(elapsed_since "$SUITE_START")"
   log ""
   log "${BOLD}summary${RESET}  $(format_duration "$total")"
+  if ((FMT_REWROTE)); then
+    if ((FROM_HOOK)); then
+      log "  ${CYAN}rustfmt${RESET}  applied and re-staged"
+    else
+      log "  ${CYAN}rustfmt${RESET}  applied automatically — git add the updated files before commit"
+    fi
+  fi
   if ((${#PASSED_STEPS[@]})); then
     log "  ${GREEN}passed${RESET}  ${PASSED_STEPS[*]}"
   fi
@@ -136,6 +151,11 @@ print_summary() {
     log "  ${RED}failed${RESET}  ${FAILED_STEPS[*]}"
     log ""
     log "Fix the failed step(s) and re-run: scripts/pre-commit.sh"
+    if ((AUTO_FIX)); then
+      log "rustfmt / clippy --fix already ran; remaining failures need a code edit."
+    else
+      log "Re-run without --check-only to auto-apply rustfmt, or: cargo fmt --all"
+    fi
     return 1
   fi
   log "${GREEN}${BOLD}KnoxOS is commit-ready${RESET}"
@@ -196,7 +216,8 @@ parse_args() {
     case "$1" in
       --quick) MODE="quick" ;;
       --strict) MODE="strict" ;;
-      --fix) APPLY_FMT=1 ;;
+      --fix) AUTO_FIX=1 ;;
+      --check-only) AUTO_FIX=0 ;;
       --from-hook) FROM_HOOK=1 ;;
       --install-hook)
         install_git_hook
@@ -241,6 +262,7 @@ HOOK
   chmod +x "$hook"
   ok "Installed git pre-commit hook: $hook"
   log "The hook runs the KnoxOS Rust gate when staged files touch kernel, boot, tools, or scripts."
+  log "rustfmt is applied automatically and reformatted files are re-staged."
 }
 
 knox_paths_staged() {
@@ -286,6 +308,32 @@ print_banner() {
 
 # --- checks ----------------------------------------------------------------
 
+ensure_rustup_components() {
+  local missing=() sysroot
+
+  cargo fmt --version >/dev/null 2>&1 || missing+=(rustfmt)
+  cargo clippy --version >/dev/null 2>&1 || missing+=(clippy)
+
+  if ! rustc --print sysroot >/dev/null 2>&1; then
+    die "rustc sysroot is unavailable"
+  fi
+  sysroot="$(rustc --print sysroot)"
+  if [[ ! -d "$sysroot/lib/rustlib/src/rust/library/core" ]]; then
+    missing+=(rust-src)
+  fi
+
+  if ((${#missing[@]} == 0)); then
+    return 0
+  fi
+
+  if ! have_cmd rustup; then
+    die "Missing toolchain components: ${missing[*]}. Install rustup from https://rustup.rs"
+  fi
+
+  info "Installing rustup components: ${missing[*]}"
+  rustup component add "${missing[@]}"
+}
+
 check_toolchain() {
   (
     cd "$KERNEL_DIR"
@@ -293,17 +341,16 @@ check_toolchain() {
     have_cmd rustc || die "rustc not found. Install https://rustup.rs and retry."
     have_cmd cargo || die "cargo not found. Install the Rust toolchain and retry."
 
+    ensure_rustup_components
+
     if ! cargo fmt --version >/dev/null 2>&1; then
-      die "rustfmt is missing. Run: rustup component add rustfmt"
+      die "rustfmt is still missing after rustup component add rustfmt"
     fi
     if ! cargo clippy --version >/dev/null 2>&1; then
-      die "clippy is missing. Run: rustup component add clippy"
-    fi
-    if ! rustc --print sysroot >/dev/null 2>&1; then
-      die "rustc sysroot is unavailable"
+      die "clippy is still missing after rustup component add clippy"
     fi
     if [[ ! -d "$(rustc --print sysroot)/lib/rustlib/src/rust/library/core" ]]; then
-      die "rust-src is missing (needed for build-std). Run: rustup component add rust-src"
+      die "rust-src is still missing (needed for build-std)"
     fi
 
     local ver major minor
@@ -395,19 +442,64 @@ check_dbg_macros() {
   fi
 }
 
-run_fmt() {
-  if ((APPLY_FMT)); then
-    cargo_in "$KERNEL_DIR" fmt --all
-    cargo_in "$BOOT_DIR" fmt --all
-    if [[ -f "$TOOLS_DIR/Cargo.toml" ]]; then
-      cargo_in "$TOOLS_DIR" fmt --all
-    fi
-  fi
-  cargo_in "$KERNEL_DIR" fmt --all -- --check
-  cargo_in "$BOOT_DIR" fmt --all -- --check
+fmt_all_crates() {
+  cargo_in "$KERNEL_DIR" fmt --all "$@" || return 1
+  cargo_in "$BOOT_DIR" fmt --all "$@" || return 1
   if [[ -f "$TOOLS_DIR/Cargo.toml" ]]; then
-    cargo_in "$TOOLS_DIR" fmt --all -- --check
+    cargo_in "$TOOLS_DIR" fmt --all "$@" || return 1
   fi
+}
+
+# Re-stage .rs files that were already in the index and rustfmt/clippy --fix
+# rewrote in the worktree. Does not add unstaged files that were not part of
+# the commit.
+restage_rewritten_rust() {
+  ((FROM_HOOK)) || return 0
+
+  local root f
+  local -a staged=() to_add=()
+  root="$(repo_root)"
+
+  git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    staged+=("$f")
+  done < <(git -C "$root" diff --cached --name-only --diff-filter=ACMR | grep -E '\.rs$' || true)
+
+  ((${#staged[@]})) || return 0
+
+  for f in "${staged[@]}"; do
+    if ! git -C "$root" diff --quiet -- "$f" 2>/dev/null; then
+      to_add+=("$f")
+    fi
+  done
+
+  ((${#to_add[@]})) || return 0
+
+  git -C "$root" add -- "${to_add[@]}"
+  info "Re-staged ${#to_add[@]} rustfmt/clippy-fixed file(s) for this commit"
+  local p
+  for p in "${to_add[@]}"; do
+    log "  ${DIM}${p}${RESET}"
+  done
+}
+
+run_fmt() {
+  if fmt_all_crates -- --check; then
+    return 0
+  fi
+
+  if ((!AUTO_FIX)); then
+    err "rustfmt drift. Re-run without --check-only, or: cargo fmt --all"
+    return 1
+  fi
+
+  info "Applying cargo fmt --all"
+  fmt_all_crates || return 1
+  FMT_REWROTE=1
+  restage_rewritten_rust || return 1
+  fmt_all_crates -- --check
 }
 
 run_check() {
@@ -433,14 +525,29 @@ clippy_deny_args() {
   fi
 }
 
+# Clippy check, then one auto-fix retry for machine-applicable lints.
+clippy_with_optional_fix() {
+  local dir="$1"
+  shift
+  if cargo_in "$dir" clippy "$@"; then
+    return 0
+  fi
+  ((AUTO_FIX)) || return 1
+
+  info "clippy failed — applying auto-fixable lints (--fix --allow-dirty --allow-staged)"
+  cargo_in "$dir" clippy --fix --allow-dirty --allow-staged "$@" || true
+  restage_rewritten_rust || return 1
+  cargo_in "$dir" clippy "$@"
+}
+
 run_clippy() {
   clippy_deny_args
-  cargo_in "$KERNEL_DIR" clippy "${CARGO_COMMON[@]}" --target "$KERNEL_TARGET" -- "${CLIPPY_DENY[@]}"
+  clippy_with_optional_fix "$KERNEL_DIR" "${CARGO_COMMON[@]}" --target "$KERNEL_TARGET" -- "${CLIPPY_DENY[@]}"
 }
 
 run_clippy_boot() {
   clippy_deny_args
-  cargo_in "$BOOT_DIR" clippy "${CARGO_COMMON[@]}" -- "${CLIPPY_DENY[@]}"
+  clippy_with_optional_fix "$BOOT_DIR" "${CARGO_COMMON[@]}" -- "${CLIPPY_DENY[@]}"
 }
 
 # Compile the kernel test harness. Do not boot QEMU (too slow for a git hook).

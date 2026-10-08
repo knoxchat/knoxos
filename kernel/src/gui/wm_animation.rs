@@ -112,6 +112,15 @@ impl Window {
             a.progress = tsc_p.max(wall_p);
             if a.progress >= 1.0 {
                 let kind = a.kind;
+                // Erase the start-rect ghost (open anim used to leave a second
+                // "Paint" title and a dead X that no longer hit-tested).
+                if matches!(
+                    kind,
+                    WindowAnimationType::Open | WindowAnimationType::Transition
+                ) {
+                    super::request_window_redraw(a.from_rect);
+                    super::request_window_redraw(a.to_rect);
+                }
                 // Keep Close so finish_closed_windows() can drop the window.
                 // Clear everything else or minimize/open stay stuck on the
                 // animated rect and title-bar buttons miss their hit tests.

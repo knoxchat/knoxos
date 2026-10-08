@@ -243,7 +243,10 @@ impl FrameBuffer {
         }
     }
 
-    /// Fill a rounded rectangle with anti-aliased edges (single color)
+    /// Fill a rounded rectangle with anti-aliased edges (single color).
+    ///
+    /// Fast path: opaque body is one `fill_rect` plus two side strips; only the
+    /// four corner squares do per-pixel coverage.
     pub fn fill_rounded_rect_aa(&mut self, rect: Rect, color: Pixel, radius: u32) {
         let x0 = rect.x;
         let y0 = rect.y;
@@ -254,30 +257,42 @@ impl FrameBuffer {
         if w <= 0 || h <= 0 {
             return;
         }
+        if r <= 0 {
+            self.fill_rect(rect, color);
+            return;
+        }
 
-        for py in y0.max(0)..(y0 + h).min(self.height as i32) {
-            // Find the span of fully-inside pixels for this row for fast fill
-            let ly = py - y0; // local y within rect
+        // Vertical middle strip (full height, inset by radius)
+        if w > r * 2 {
+            self.fill_rect(Rect::new(x0 + r, y0, (w - r * 2) as u32, h as u32), color);
+        }
+        // Left/right strips between the corner squares
+        if h > r * 2 {
+            self.fill_rect(Rect::new(x0, y0 + r, r as u32, (h - r * 2) as u32), color);
+            self.fill_rect(
+                Rect::new(x0 + w - r, y0 + r, r as u32, (h - r * 2) as u32),
+                color,
+            );
+        }
 
-            // Check if we're in a corner row
-            let in_top_corner = ly < r;
-            let in_bottom_corner = ly >= h - r;
-
-            if !in_top_corner && !in_bottom_corner {
-                // Middle rows: full width, no AA needed
-                let xs = x0.max(0);
-                let xe = (x0 + w).min(self.width as i32);
-                if xe > xs {
-                    self.fill_rect(Rect::new(xs, py, (xe - xs) as u32, 1), color);
-                }
-            } else {
-                // Corner rows: need per-pixel AA
-                for px in x0.max(0)..(x0 + w).min(self.width as i32) {
+        // Four corner squares — coverage AA only
+        let corners = [
+            (x0, y0),
+            (x0 + w - r, y0),
+            (x0, y0 + h - r),
+            (x0 + w - r, y0 + h - r),
+        ];
+        for (cx, cy) in corners {
+            let x_start = cx.max(0);
+            let y_start = cy.max(0);
+            let x_end = (cx + r).min(self.width as i32);
+            let y_end = (cy + r).min(self.height as i32);
+            for py in y_start..y_end {
+                for px in x_start..x_end {
                     let coverage = rounded_rect_coverage(px, py, x0, y0, w, h, r);
                     if coverage == 0 {
                         continue;
                     }
-
                     if coverage == 255 {
                         self.blend_pixel(px as usize, py as usize, color);
                     } else {

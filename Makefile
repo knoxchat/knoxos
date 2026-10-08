@@ -315,14 +315,14 @@ pre-commit: ## Run the rustc/cargo quality gate (scripts/pre-commit.sh)
 pre-commit-quick: ## Fast quality gate (no kernel test compile)
 	@./scripts/pre-commit.sh --quick
 
-pre-commit-fix: ## cargo fmt --all in each crate, then full quality gate
+pre-commit-fix: ## same as pre-commit (rustfmt is applied automatically)
 	@./scripts/pre-commit.sh --fix
 
 pre-commit-install: ## Install .git/hooks/pre-commit
 	@./scripts/pre-commit.sh --install-hook
 
-release-tag: ## Create a release tag (usage: make release-tag VERSION=v0.2.2)
-	@if [ -z "$(VERSION)" ]; then echo "$(RED)Usage: make release-tag VERSION=v0.2.2$(NC)"; exit 1; fi
+release-tag: ## Create a release tag (usage: make release-tag VERSION=v0.2.3)
+	@if [ -z "$(VERSION)" ]; then echo "$(RED)Usage: make release-tag VERSION=v0.2.3$(NC)"; exit 1; fi
 	@echo "$(BLUE)[KnoxOS] Creating release $(VERSION)...$(NC)"
 	git tag -a $(VERSION) -m "Release $(VERSION)"
 	@echo "$(GREEN)[✓] Tag created. Push with: git push origin $(VERSION)$(NC)"

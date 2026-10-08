@@ -14,6 +14,19 @@ pub struct TextInput {
 }
 
 impl TextInput {
+    /// Hit-test the input field.
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        self.rect.contains(x, y)
+    }
+
+    /// Focus when clicked inside; blur when clicked outside.
+    pub fn update_pointer(&mut self, x: i32, y: i32, primary_pressed: bool) -> bool {
+        if primary_pressed {
+            self.focused = self.rect.contains(x, y);
+        }
+        self.focused
+    }
+
     pub fn new(x: i32, y: i32, width: u32, height: u32, placeholder: &str) -> Self {
         Self {
             rect: Rect::new(x, y, width, height),

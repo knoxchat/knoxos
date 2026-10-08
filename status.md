@@ -1,7 +1,7 @@
 # KnoxOS Production Readiness Status
 
 > **Last Updated**: 2026-10-08
-> **Version**: 0.2.2 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.2)
+> **Version**: 0.2.3 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.3)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
 > **Codebase**: 609 Rust files in `kernel/src` · ~347,000 lines · 407 `pub mod` entries
 > **Honesty rule**: a module that compiles is not a feature. Only **Live** work counts toward production.
@@ -312,7 +312,7 @@ Percentages are **production usefulness**, not lines of code.
 | 4 | Filesystem & Storage | Wired | 99% | **Critical** | VirtIO-blk + persist C1–C6 + AHCI/NVMe DMA; inotify on VFS mutate (H3); mount ns bind isolation (N1); OverlayFS merge+whiteout (W1); VFS hard links (X1); VFS chmod enforcement (Y1); VFS `rmdir` (Z1); Ring 3 `unlink` (Z2); named FIFO write/read (AA1); Ring 3 `fchdir` (AA2); Ring 3 `access` (AA3); VFS `list_dir`/`getdents` (AB1); Ring 3 `dup2` (AB2); `fcntl` CLOEXEC/DUPFD (AC1); Ring 3 `pread64` (AC2); `fstat` size (AD1); Ring 3 `pwrite64` (AD2); scatter-gather `writev` (AE1); Ring 3 `ftruncate` (AE2); scatter-gather `readv` (AF1); Ring 3 `lseek` (AF2); `fsync` EBADF-checked (AG1); Ring 3 `fdatasync` (AG2); `syncfs` EBADF-checked (AH1); Ring 3 `sync` (AH2); `fchmod` EBADF-checked (AI1); Ring 3 `fchown` (AI2); `fstatfs` EBADF-checked (AJ1); Ring 3 `statfs` (AJ2); `fsetxattr` EBADF-checked (AK1); `flistxattr`/`fremovexattr` EBADF-checked (AL1); `listxattr`/`removexattr` ENOENT-checked (AM1); `faccessat` dirfd-relative (AN1); `mkdirat` dirfd-relative (AO1); `unlinkat` dirfd-relative (AP1); `readlinkat` dirfd-relative (AT1); `mknodat` dirfd-relative (AU1); `fchmodat` dirfd-relative (AV1); `renameat2` dirfd-relative (BC1); `faccessat2` dirfd-relative (BD1); Ring 3 `splice` (R2); Ring 3 `flock` (R3); Ring 3 `sendfile` (S2); Ring 3 `tee` (S3); Ring 3 `copy_file_range` (T2); Ring 3 `vmsplice` (T3); Ring 3 xattr (U2); Ring 3 `statx` (U3); Ring 3 `fallocate` (V2); Ring 3 `utimensat` (V3); Ring 3 umask (W2); Ring 3 symlink (W3); Ring 3 `rename` (X2); Ring 3 `truncate` (X3); Ring 3 `chown` (Y2); Ring 3 `mkdir` (Y3). |
 | 5 | Networking | Wired | 64% | **Critical** | Loopback live; VirtIO-net D2; DHCP applies eth0 (D3); DNS + TCP SYN/RTO/HTTP (D4); CUBIC cwnd (D5). |
 | 6 | Device Drivers | Wired | 40% | **Critical** | PCI, PS/2, UART, VirtIO-blk, AHCI DMA, NVMe DMA live; USB/GPU mostly stub. |
-| 7 | GUI & Desktop | Live | 82% | Medium | In-kernel demo plus Ring 3 SHM clients (F1–F4); interactive desktop terminal still in-kernel for PTY I/O. |
+| 7 | GUI & Desktop | Live | 84% | Medium | In-kernel demo plus Ring 3 SHM clients (F1–F4); widget hover/press + window-local damage; interactive desktop terminal still in-kernel for PTY I/O. |
 | 8 | Shell & Terminal | Live | 82% | Medium | Real parser/PTY/glob; Ring 3 `/bin/sh` on a PTY; live `sigreturn`; desktop terminal still in-kernel. |
 | 9 | Security & Cryptography | Wired | 80% | **Critical** | AES/SHA software; W^X + ChaCha20 CSPRNG + seccomp deny + CapNetBindService live (E1–E4); Landlock on VFS (K4); bpf/pkey/quotactl/io_uring/userfaultfd/perf_event_open/fanotify/io_setup/kexec/init_module/mount_setattr/fsopen/keyctl/ioperm/iopl/acct/swapon/modify_ldt/sysfs/vhangup/lookup_dcookie/memfd_secret/uselib/pkey_mprotect/pkey_free/process_mrelease/set_mempolicy/get_mempolicy/mbind/sched_setattr/futex_waitv/open_by_handle_at/name_to_handle_at/move_pages ENOSYS (J4, L4, M4, N4, O4, P4, Q4, R4, S4, T4, U4, V4, W4, X4, Y4, Z4, AA4, AB4, AC4, AD4, AE4, AF4, AG4, AH4, AI4, AJ4, AK4, AL4, AM4, AN4, AO4, AP4, AQ4, AR4, AS4, AT4, AU4, AV4). |
 | 10 | System Services | Wired | 42% | High | Ring 3 `/sbin/init` (K3); AF_UNIX system bus socket (L3); in-kernel units; no crash restart. |
@@ -665,7 +665,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 
 ## 7. GUI & Desktop Environment
 
-**Grade: Live (82%)** · `gui/` 161 files, ~91,700 lines
+**Grade: Live (84%)** · `gui/` 162 files, ~91,700 lines
 
 The compositor is the most complete **product** in the tree. It is not a Unix display server.
 
@@ -678,6 +678,10 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 - [x] Lock/login screens, screenshot, in-process DnD, blur, night light, on-screen keyboard
 - [x] Clipboard used by terminal/explorer/input (`clipboard.rs`)
 - [x] **17 real in-process apps**: Terminal, Files, Browser (tag HTML), AI Assistant, Editor, Settings, Task Manager, Calculator, Image Viewer, Log Viewer, Calendar, Disk Utility, Bluetooth manager, Software Updater, Software Center, Archive Manager, Setup Wizard
+- [x] **Widget hover/press** — calculator keys and settings tabs highlight under the pointer; retained widgets (`Button`/`Checkbox`/`Toggle`/`TextInput`) have `update_pointer`
+- [x] **Frame input latch** — `gui::input::frame_input()` feeds KnoxUI / `Ui::button_at` with press/release edges
+- [x] **Window-local damage** — content clicks, chrome hover, and clock ticks composite the window/taskbar instead of 1920×1080
+- [x] **Faster software blit** — opaque `fill_rect` stamps packed BGRA; `fill_rounded_rect_aa` fills the body as rects and AA-only the corners
 
 ### Unused / stub
 - [ ] **Wayland** — object model plus a live `/dev/wl0` present ioctl; one Ring 3 SHM client (F1–F2); no bind/listen Unix socket
@@ -1632,7 +1636,7 @@ Process/Sched:      ████████████████████
 Filesystem:         ████████████████████████░  99%  Wired         ← C1–C6 + inotify H3/Q3 + N1 mount ns + OverlayFS W1 + hardlink X1 + chmod Y1 + rmdir Z1 + unlink Z2 + AA1 mkfifo + AA2 fchdir + AA3 access + AB1 getdents + AB2 dup2 + AC1 fcntl + AC2 pread64 + AD1 fstat + AD2 pwrite64 + AE1 writev + AE2 ftruncate + AF1 readv + AF2 lseek + AG1 fsync + AG2 fdatasync + AH1 syncfs + AH2 sync + AI1 fchmod + AI2 fchown + AJ1 fstatfs + AJ2 statfs + AK1 fsetxattr + AL1 flistxattr + AM1 listxattr + AN1 faccessat + AO1 mkdirat + AP1 unlinkat + AQ1 renameat + AT1 readlinkat + AU1 mknodat + AV1 fchmodat + BC1 renameat2 + BD1 faccessat2 + R2 splice + R3 flock + S2 sendfile + S3 tee + T2 copy_file_range + T3 vmsplice + U2 xattr + U3 statx + V2 fallocate + V3 utimensat + W2 umask + W3 symlink + X2 rename + X3 truncate + Y2 chown + Y3 mkdir
 Networking:         ████████████████░░░░░░░░░  64%  Wired         ← D1–D5 + accept4 (BG2)
 Device Drivers:     ██████████░░░░░░░░░░░░░░░  40%  Wired         ← AHCI + NVMe DMA
-GUI & Desktop:      ████████████████████░░░░░  82%  Live          ← F1–F4 SHM clients
+GUI & Desktop:      █████████████████████░░░░  84%  Live          ← F1–F4 SHM clients + widget hover/damage
 Shell & Terminal:   ████████████████████░░░░░  82%  Live          ← sigreturn
 Security:           ████████████████████░░░░░  80%  Wired         ← E1–E4 + K4 Landlock + J4/L4/M4/N4/O4/P4/Q4/R4/S4/T4/U4/V4/W4/X4/Y4/Z4/AA4/AB4/AC4/AD4/AE4/AF4/AG4/AH4/AI4/AJ4/AK4/AL4/AM4/AN4/AO4/AP4/AQ4/AR4/AS4/AT4/AU4/AV4/AW4/AX4/AY4/AZ4/BA4/BB4/BC4/BD4 ENOSYS
 System Services:    ███████████░░░░░░░░░░░░░░  42%  Wired         ← K3 /sbin/init + L3 D-Bus AF_UNIX
@@ -1655,7 +1659,7 @@ CI/CD:              ███████░░░░░░░░░░░░░
 | Binary compat | 40% | 99% | Static hello + scheduled `execve`/`fork`/`clone`/`CLONE_THREAD` + `/bin/sh` + `/sbin/init` + `arch_prctl` `%fs` + `pipe` + futex + `socketpair` + `eventfd` + `epoll` + `memfd` + `timerfd` + `signalfd` + `poll` + `inotify` + `splice` + `flock` + `sendfile` + `tee` + `copy_file_range` + `vmsplice` + `setxattr` + `statx` + `fallocate` + `utimensat` + `umask` + `symlink` + `rename` + `truncate` + `chown` + `mkdir` + `unlink` + `chdir`/`getcwd` + `fchdir` + `access` + `mkfifo` + `getdents` + `dup2` + `uname` + `fcntl` + `pread64` + `getuid` + `fstat` + `pwrite64` + `getgid` + `writev` + `ftruncate` + `geteuid` + `readv` + `lseek` + `getegid` + `fsync` + `fdatasync` + `getppid` + `syncfs` + `sync` + `getpgid` + `fchmod` + `fchown` + `getsid` + `fstatfs` + `statfs` + `setuid` + `fsetxattr` + `getrlimit` + `setgid` + `flistxattr` + `setrlimit` + `setresuid` + `listxattr` + `prlimit64` + `setresgid` + `faccessat` + `setreuid` + `setgroups`/`getgroups` + `mkdirat` + `setregid` + `getresuid` + `unlinkat` + `getresgid` + `setpgid`/`getpgrp` + `renameat` + `setsid` + `setpriority`/`getpriority` + `fchmodat` + `getpid` + `gettid`; 452 numbers still ≠ 452 behaviors |
 | Memory | — | 74% | H1 CoW #PF; H2 file-backed fault-in; H4 OOM-on-alloc + guarded stacks; J2 leftover buddy RAM; J3 LRU; K2 swap I/O |
 | Filesystem | 35% | 99% | VirtIO-blk + C1–C6 + inotify on VFS mutate (H3) + mount ns (N1) + OverlayFS (W1) + hardlink (X1) + chmod (Y1) + rmdir (Z1) + unlink (Z2) + mkfifo (AA1) + fchdir (AA2) + access (AA3) + getdents (AB1) + dup2 (AB2) + fcntl (AC1) + pread64 (AC2) + fstat (AD1) + pwrite64 (AD2) + writev (AE1) + ftruncate (AE2) + readv (AF1) + lseek (AF2) + fsync (AG1) + fdatasync (AG2) + syncfs (AH1) + sync (AH2) + fchmod (AI1) + fchown (AI2) + fstatfs (AJ1) + statfs (AJ2) + fsetxattr (AK1) + flistxattr (AL1) + listxattr (AM1) + faccessat (AN1) + mkdirat (AO1) + unlinkat (AP1) + renameat (AQ1) + fchmodat (AV1) + splice (R2) + flock (R3) + sendfile (S2) + tee (S3) + copy_file_range (T2) + vmsplice (T3) + xattr (U2) + statx (U3) + fallocate (V2) + utimensat (V3) + umask (W2) + symlink (W3) + rename (X2) + truncate (X3) + chown (Y2) + mkdir (Y3) |
-| GUI | 85% | 82% | Ring 3 SHM clients (F1–F4); remaining apps still in-process |
+| GUI | 85% | 84% | Ring 3 SHM clients (F1–F4); widget hover/press + window-local damage; remaining apps still in-process |
 | Shell | 90% | 82% | PTY/glob/env real; Ring 3 `/bin/sh`; live `sigreturn`; desktop terminal still in-kernel for PTY I/O |
 | Docs / CI | 10% / 25% | 42% / 30% | README, LICENSE, BUILDING, CONTRIBUTING, GitHub Actions; flake still missing |
 | Networking | 22% | 64% | D1 loopback; D2 VirtIO-net; D3 DHCP apply; D4 DNS+TCP; D5 CUBIC |

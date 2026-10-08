@@ -76,15 +76,25 @@ impl WindowManager {
     }
 
     pub fn close_window(&mut self, id: WindowId) {
+        let mut reap_now = false;
         if let Some(w) = self.windows.iter_mut().find(|w| w.id == id) {
-            if w.anim
+            let already_closing = w
+                .anim
                 .as_ref()
                 .map(|a| matches!(a.kind, WindowAnimationType::Close))
-                .unwrap_or(false)
-            {
-                return;
+                .unwrap_or(false);
+            if already_closing {
+                // Second click on X: finish a stuck close animation immediately.
+                if let Some(a) = w.anim.as_mut() {
+                    a.progress = 1.0;
+                }
+                reap_now = true;
+            } else {
+                w.start_close_animation();
+                // Hide immediately so a missed animation tick cannot leave a
+                // clickable zombie window (Paint / SHM clients were stuck this way).
+                w.visible = false;
             }
-            w.start_close_animation();
             if self.focused_window == Some(id) {
                 self.focused_window = self
                     .windows
@@ -102,8 +112,12 @@ impl WindowManager {
         super::task_manager::close(id);
         super::calculator::close(id);
         super::image_viewer::close(id);
+        crate::wayland::forget_window(id);
 
         super::sounds::window_close();
+        if reap_now {
+            self.finish_closed_windows();
+        }
     }
 
     /// Remove windows whose close animation has finished
