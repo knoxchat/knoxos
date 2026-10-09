@@ -23,7 +23,7 @@ TOOLS_DIR="$PROJECT_ROOT/tools/svg2rgba"
 KERNEL_CRATE="knoxos-kernel"
 KERNEL_TARGET="x86_64-unknown-none"
 
-# Edition 2024 requires rustc 1.85+. kernel/Cargo.toml rust-version is 1.98.1.
+# Edition 2024 requires rustc 1.85+. kernel/Cargo.toml rust-version is 1.99.0.
 MIN_RUSTC_MAJOR=1
 MIN_RUSTC_MINOR=85
 
