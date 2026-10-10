@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble Gate BH/BI Ring 3 ELF payloads and print Rust byte arrays."""
+"""Assemble Gate BH/BI/BJ Ring 3 ELF payloads and print Rust byte arrays."""
 
 from __future__ import annotations
 
@@ -405,6 +405,117 @@ def shutdown_elf() -> Asm:
     return a
 
 
+def sendmmsg_recvmmsg_elf(which: str, port_imm: int) -> Asm:
+    """UDP bind + sendmmsg + recvmmsg of two bytes 'xy'. Returns message count 1."""
+    a = Asm()
+    a.emit(0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00)
+    # recv UDP socket
+    mov_rax_imm(a, 41)
+    mov_rdi_imm(a, 2)
+    mov_rsi_imm(a, 2)  # SOCK_DGRAM
+    xor_rdx(a)
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    a.emit(0x49, 0x89, 0xC4)  # r12 = recv
+    inet_sockaddr_on_stack(a, port_imm)
+    mov_rax_imm(a, 49)  # bind
+    a.emit(0x4C, 0x89, 0xE7)
+    a.emit(0x48, 0x89, 0xE6)
+    mov_rdx_imm(a, 16)
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    # send UDP socket
+    mov_rax_imm(a, 41)
+    mov_rdi_imm(a, 2)
+    mov_rsi_imm(a, 2)
+    xor_rdx(a)
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    a.emit(0x49, 0x89, 0xC5)  # r13 = send
+    # iovec at [rsp+0x20]: base=&xy, len=2
+    a.lea_rsi_label("xy")
+    a.emit(0x48, 0x89, 0x74, 0x24, 0x20)
+    a.emit(0x48, 0xC7, 0x44, 0x24, 0x28, 0x02, 0x00, 0x00, 0x00)
+    # mmsghdr at [rsp+0x30]
+    a.emit(0x48, 0x89, 0x64, 0x24, 0x30)  # msg_name = rsp
+    a.emit(0xC7, 0x44, 0x24, 0x38, 0x10, 0x00, 0x00, 0x00)  # namelen=16
+    a.emit(0x48, 0x8D, 0x44, 0x24, 0x20)
+    a.emit(0x48, 0x89, 0x44, 0x24, 0x40)  # msg_iov
+    a.emit(0x48, 0xC7, 0x44, 0x24, 0x48, 0x01, 0x00, 0x00, 0x00)  # iovlen=1
+    xor_rax(a)
+    a.emit(0x48, 0x89, 0x44, 0x24, 0x50)  # control
+    a.emit(0x48, 0x89, 0x44, 0x24, 0x58)
+    a.emit(0x48, 0x89, 0x44, 0x24, 0x60)  # flags
+    a.emit(0xC7, 0x44, 0x24, 0x68, 0x00, 0x00, 0x00, 0x00)  # msg_len=0
+    mov_rax_imm(a, 307)  # sendmmsg
+    a.emit(0x4C, 0x89, 0xEF)
+    a.emit(0x48, 0x8D, 0x74, 0x24, 0x30)
+    mov_rdx_imm(a, 1)  # vlen=1
+    xor_r10(a)
+    syscall(a)
+    cmp_rax_imm(a, 1)
+    jne_fail(a)
+    # recv buffer at [rsp+0x70]
+    a.emit(0x66, 0xC7, 0x44, 0x24, 0x70, 0x00, 0x00)
+    a.emit(0x48, 0x8D, 0x44, 0x24, 0x70)
+    a.emit(0x48, 0x89, 0x44, 0x24, 0x20)
+    a.emit(0x48, 0xC7, 0x44, 0x24, 0x28, 0x02, 0x00, 0x00, 0x00)
+    xor_rax(a)
+    a.emit(0x48, 0x89, 0x44, 0x24, 0x30)
+    a.emit(0x48, 0x89, 0x44, 0x24, 0x38)
+    a.emit(0x48, 0x8D, 0x44, 0x24, 0x20)
+    a.emit(0x48, 0x89, 0x44, 0x24, 0x40)
+    a.emit(0x48, 0xC7, 0x44, 0x24, 0x48, 0x01, 0x00, 0x00, 0x00)
+    mov_rax_imm(a, 299)  # recvmmsg
+    a.emit(0x4C, 0x89, 0xE7)
+    a.emit(0x48, 0x8D, 0x74, 0x24, 0x30)
+    mov_rdx_imm(a, 1)
+    xor_r10(a)
+    xor_r8(a)
+    syscall(a)
+    cmp_rax_imm(a, 1)
+    jne_fail(a)
+    a.emit(0x66, 0x81, 0x7C, 0x24, 0x70, 0x78, 0x79)  # cmp word [rsp+0x70], 'xy'
+    jne_fail(a)
+    write_marker_and_exit(a, which)
+    a.label("xy")
+    a.buf.extend(b"xy")
+    return a
+
+
+def getsockopt_elf() -> Asm:
+    """SOCK_DGRAM socket; getsockopt(SOL_SOCKET, SO_TYPE) == 2."""
+    a = Asm()
+    a.emit(0x48, 0x83, 0xEC, 0x20)
+    mov_rax_imm(a, 41)
+    mov_rdi_imm(a, 2)
+    mov_rsi_imm(a, 2)  # SOCK_DGRAM
+    xor_rdx(a)
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    a.emit(0x49, 0x89, 0xC4)
+    xor_rax(a)
+    a.emit(0x48, 0x89, 0x04, 0x24)  # [rsp] = 0
+    a.emit(0xC7, 0x44, 0x24, 0x08, 0x04, 0x00, 0x00, 0x00)  # optlen = 4
+    mov_rax_imm(a, 55)  # getsockopt
+    a.emit(0x4C, 0x89, 0xE7)
+    mov_rsi_imm(a, 1)  # SOL_SOCKET
+    mov_rdx_imm(a, 3)  # SO_TYPE
+    a.emit(0x4C, 0x8D, 0x14, 0x24)  # lea r10, [rsp]
+    a.emit(0x4C, 0x8D, 0x44, 0x24, 0x08)  # lea r8, [rsp+8]
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    a.emit(0x83, 0x3C, 0x24, 0x02)  # cmp dword [rsp], 2
+    jne_fail(a)
+    write_marker_and_exit(a, "GATE_BJ3 getsockopt\n")
+    return a
+
+
 def rust_fn(name: str, doc: str, asm: Asm) -> str:
     return (
         f"/// {doc}\n"
@@ -457,6 +568,26 @@ def main() -> None:
             "open_tree_enosys_elf_data",
             "`open_tree(0, 0, 0)` must return `-ENOSYS`; then write `GATE_BI4 enosys\\n`.",
             enosys_elf(428, "GATE_BI4 enosys\n"),
+        ),
+        rust_fn(
+            "sendmmsg_userspace_elf_data",
+            "UDP `sendmmsg` of `xy` then `recvmmsg`; write `GATE_BJ1 sendmmsg\\n`.",
+            sendmmsg_recvmmsg_elf("GATE_BJ1 sendmmsg\n", 0xA075),
+        ),
+        rust_fn(
+            "recvmmsg_userspace_elf_data",
+            "UDP `sendmmsg`/`recvmmsg` of `xy`; write `GATE_BJ2 recvmmsg\\n`.",
+            sendmmsg_recvmmsg_elf("GATE_BJ2 recvmmsg\n", 0xA076),
+        ),
+        rust_fn(
+            "getsockopt_userspace_elf_data",
+            "AF_INET `SOCK_DGRAM` then `getsockopt(SOL_SOCKET, SO_TYPE)` is 2; write `GATE_BJ3 getsockopt\\n`.",
+            getsockopt_elf(),
+        ),
+        rust_fn(
+            "move_mount_enosys_elf_data",
+            "`move_mount(0, 0, 0, 0, 0)` must return `-ENOSYS`; then write `GATE_BJ4 enosys\\n`.",
+            enosys_elf(429, "GATE_BJ4 enosys\n"),
         ),
     ]
     print("\n".join(parts))

@@ -105,3 +105,42 @@ pub(super) fn run_gate_bi3() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BI3 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bj1() {
+    serial_println!("[user_task] Gate BJ1: sendmmsg UDP");
+    let elf = crate::init::sendmmsg_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sendmmsg-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BJ1 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bj2() {
+    serial_println!("[user_task] Gate BJ2: recvmmsg UDP");
+    let elf = crate::init::recvmmsg_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "recvmmsg-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BJ2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bj3() {
+    serial_println!("[user_task] Gate BJ3: getsockopt SO_TYPE");
+    let elf = crate::init::getsockopt_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getsockopt-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BJ3 parent pid={} reaped={}", pid, reaped);
+}

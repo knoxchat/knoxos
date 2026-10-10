@@ -227,3 +227,8 @@ pub const GATE_BI1_MARKER: &str = "GATE_BI1 sendmsg";
 pub const GATE_BI2_MARKER: &str = "GATE_BI2 recvmsg";
 pub const GATE_BI3_MARKER: &str = "GATE_BI3 shutdown";
 pub const GATE_BI4_MARKER: &str = "GATE_BI4 enosys";
+
+pub const GATE_BJ1_MARKER: &str = "GATE_BJ1 sendmmsg";
+pub const GATE_BJ2_MARKER: &str = "GATE_BJ2 recvmmsg";
+pub const GATE_BJ3_MARKER: &str = "GATE_BJ3 getsockopt";
+pub const GATE_BJ4_MARKER: &str = "GATE_BJ4 enosys";

@@ -134,11 +134,13 @@ pub fn handle_syscall(
         SyscallNumber::Recvfrom => {
             net::sys_recvfrom(arg1 as i32, arg2, arg3 as usize, arg4 as i32, arg5, arg6)
         }
-        SyscallNumber::Sendmsg | SyscallNumber::Sendmmsg => {
-            advanced::sys_sendmsg(arg1 as i32, arg2, arg3 as i32)
+        SyscallNumber::Sendmsg => advanced::sys_sendmsg(arg1 as i32, arg2, arg3 as i32),
+        SyscallNumber::Sendmmsg => {
+            advanced::sys_sendmmsg(arg1 as i32, arg2, arg3 as u32, arg4 as i32)
         }
-        SyscallNumber::Recvmsg | SyscallNumber::Recvmmsg => {
-            advanced::sys_recvmsg(arg1 as i32, arg2, arg3 as i32)
+        SyscallNumber::Recvmsg => advanced::sys_recvmsg(arg1 as i32, arg2, arg3 as i32),
+        SyscallNumber::Recvmmsg => {
+            advanced::sys_recvmmsg(arg1 as i32, arg2, arg3 as u32, arg4 as i32, arg5)
         }
         SyscallNumber::Shutdown => net::sys_shutdown(arg1 as i32, arg2 as i32),
         SyscallNumber::Bind => net::sys_bind(arg1 as i32, arg2, arg3 as u32),
@@ -162,33 +164,7 @@ pub fn handle_syscall(
             Ok(0)
         }
         SyscallNumber::Getsockopt => {
-            // getsockopt(fd, level, optname, optval, optlen_ptr)
-            let level = arg2 as i32;
-            let optname = arg3 as i32;
-            let optval = arg4;
-            let optlen_ptr = arg5;
-            // SOL_SOCKET(1) + SO_ERROR(4): return 0 (no error)
-            if level == 1 && optname == 4 && optval != 0 {
-                unsafe {
-                    *(optval as *mut i32) = 0;
-                }
-                if optlen_ptr != 0 {
-                    unsafe {
-                        *(optlen_ptr as *mut u32) = 4;
-                    }
-                }
-            } else if optval != 0 {
-                // Default: return 0
-                unsafe {
-                    *(optval as *mut i32) = 0;
-                }
-                if optlen_ptr != 0 {
-                    unsafe {
-                        *(optlen_ptr as *mut u32) = 4;
-                    }
-                }
-            }
-            Ok(0)
+            advanced::sys_getsockopt(arg1 as i32, arg2 as i32, arg3 as i32, arg4, arg5)
         }
 
         // ════════════════════════════════════════════════════════════

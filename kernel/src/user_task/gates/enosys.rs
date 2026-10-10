@@ -664,3 +664,16 @@ pub(super) fn run_gate_bi4() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BI4 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bj4() {
+    serial_println!("[user_task] Gate BJ4: move_mount returns ENOSYS");
+    let elf = crate::init::move_mount_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "move-mount-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BJ4 parent pid={} reaped={}", pid, reaped);
+}
