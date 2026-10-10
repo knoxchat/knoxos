@@ -85,6 +85,8 @@ pub struct Socket {
     pub nonblocking: bool,
     /// Connected peer socket id (TCP loopback / paired sockets).
     pub peer_id: Option<u32>,
+    /// `SO_REUSEADDR` — allow bind when the local address is already in use.
+    pub reuseaddr: bool,
 }
 
 /// Socket state
@@ -126,6 +128,7 @@ impl Socket {
             max_backlog: 128,
             nonblocking: false,
             peer_id: None,
+            reuseaddr: false,
         }
     }
 

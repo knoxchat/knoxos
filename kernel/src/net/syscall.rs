@@ -312,13 +312,15 @@ pub fn sys_bind(sockfd: u32, addr_ptr: u64) -> Result<(), i32> {
         addr = SocketAddress::Inet(ip, port);
         let mut sockets = SOCKETS.lock();
         let sock_type = sockets.get(&sockfd).ok_or(-9i32)?.sock_type;
-        let conflict = sockets.iter().any(|(id, s)| {
-            *id != sockfd
-                && s.sock_type == sock_type
-                && s.local_addr
-                    .as_ref()
-                    .is_some_and(|existing| bind_conflict(existing, ip, port))
-        });
+        let reuseaddr = sockets.get(&sockfd).ok_or(-9i32)?.reuseaddr;
+        let conflict = !reuseaddr
+            && sockets.iter().any(|(id, s)| {
+                *id != sockfd
+                    && s.sock_type == sock_type
+                    && s.local_addr
+                        .as_ref()
+                        .is_some_and(|existing| bind_conflict(existing, ip, port))
+            });
         if conflict {
             return Err(-98); // EADDRINUSE
         }

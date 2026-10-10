@@ -151,17 +151,7 @@ pub fn handle_syscall(
             net::sys_socketpair(arg1 as i32, arg2 as i32, arg3 as i32, arg4)
         }
         SyscallNumber::Setsockopt => {
-            // setsockopt(fd, level, optname, optval, optlen)
-            // Accept most options silently for compatibility
-            let _level = arg2 as i32;
-            let _optname = arg3 as i32;
-            serial_println!(
-                "[KnoxOS] setsockopt(fd={}, level={}, opt={})",
-                arg1,
-                _level,
-                _optname
-            );
-            Ok(0)
+            advanced::sys_setsockopt(arg1 as i32, arg2 as i32, arg3 as i32, arg4, arg5 as u32)
         }
         SyscallNumber::Getsockopt => {
             advanced::sys_getsockopt(arg1 as i32, arg2 as i32, arg3 as i32, arg4, arg5)

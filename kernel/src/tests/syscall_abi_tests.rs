@@ -163,6 +163,29 @@ fn test_loopback_udp_and_tcp_send_recv() {
     );
 }
 
+#[test_case]
+fn test_setsockopt_reuseaddr_roundtrip() {
+    let fd = do_syscall(41, 2, 2, 0, 0, 0, 0);
+    assert!(fd >= 0, "socket() failed: {}", fd);
+    let val: i32 = 1;
+    let ret = do_syscall(54, fd as u64, 1, 2, &val as *const i32 as u64, 4, 0);
+    assert_eq!(ret, 0, "setsockopt SO_REUSEADDR failed: {}", ret);
+    let mut got: i32 = 0;
+    let mut optlen: u32 = 4;
+    let ret = do_syscall(
+        55,
+        fd as u64,
+        1,
+        2,
+        &mut got as *mut i32 as u64,
+        &mut optlen as *mut u32 as u64,
+        0,
+    );
+    assert_eq!(ret, 0, "getsockopt SO_REUSEADDR failed: {}", ret);
+    assert_eq!(got, 1, "SO_REUSEADDR should round-trip as 1");
+    let _ = do_syscall(3, fd as u64, 0, 0, 0, 0, 0);
+}
+
 // ─── Filesystem meta syscalls ──────────────────────────────
 
 #[test_case]

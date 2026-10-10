@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble Gate BH/BI/BJ Ring 3 ELF payloads and print Rust byte arrays."""
+"""Assemble Gate BH–BK Ring 3 ELF payloads and print Rust byte arrays."""
 
 from __future__ import annotations
 
@@ -486,6 +486,112 @@ def sendmmsg_recvmmsg_elf(which: str, port_imm: int) -> Asm:
     return a
 
 
+def setsockopt_elf() -> Asm:
+    """SOCK_DGRAM socket; setsockopt(SO_REUSEADDR, 1) then getsockopt == 1."""
+    a = Asm()
+    a.emit(0x48, 0x83, 0xEC, 0x20)
+    mov_rax_imm(a, 41)
+    mov_rdi_imm(a, 2)
+    mov_rsi_imm(a, 2)  # SOCK_DGRAM
+    xor_rdx(a)
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    a.emit(0x49, 0x89, 0xC4)
+    a.emit(0xC7, 0x04, 0x24, 0x01, 0x00, 0x00, 0x00)  # [rsp] = 1
+    mov_rax_imm(a, 54)  # setsockopt
+    a.emit(0x4C, 0x89, 0xE7)
+    mov_rsi_imm(a, 1)  # SOL_SOCKET
+    mov_rdx_imm(a, 2)  # SO_REUSEADDR
+    a.emit(0x4C, 0x8D, 0x14, 0x24)  # lea r10, [rsp]
+    a.emit(0x49, 0xC7, 0xC0, 0x04, 0x00, 0x00, 0x00)  # mov r8, 4
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    xor_rax(a)
+    a.emit(0x48, 0x89, 0x04, 0x24)  # [rsp] = 0
+    a.emit(0xC7, 0x44, 0x24, 0x08, 0x04, 0x00, 0x00, 0x00)  # optlen = 4
+    mov_rax_imm(a, 55)  # getsockopt
+    a.emit(0x4C, 0x89, 0xE7)
+    mov_rsi_imm(a, 1)
+    mov_rdx_imm(a, 2)
+    a.emit(0x4C, 0x8D, 0x14, 0x24)
+    a.emit(0x4C, 0x8D, 0x44, 0x24, 0x08)  # lea r8, [rsp+8]
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    a.emit(0x83, 0x3C, 0x24, 0x01)  # cmp dword [rsp], 1
+    jne_fail(a)
+    write_marker_and_exit(a, "GATE_BK1 setsockopt\n")
+    return a
+
+
+def tcp_send_recv_elf(which: str, port_imm: int) -> Asm:
+    """TCP listen/connect/accept then sendto/recvfrom of one byte 'x'."""
+    a = Asm()
+    a.emit(0x48, 0x83, 0xEC, 0x40)
+    socket_tcp(a)
+    a.emit(0x49, 0x89, 0xC4)  # r12 = listen
+    inet_sockaddr_on_stack(a, port_imm)
+    mov_rax_imm(a, 49)  # bind
+    a.emit(0x4C, 0x89, 0xE7)
+    a.emit(0x48, 0x89, 0xE6)
+    mov_rdx_imm(a, 16)
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    mov_rax_imm(a, 50)  # listen
+    a.emit(0x4C, 0x89, 0xE7)
+    mov_rsi_imm(a, 1)
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    socket_tcp(a)
+    a.emit(0x49, 0x89, 0xC5)  # r13 = client
+    mov_rax_imm(a, 42)  # connect
+    a.emit(0x4C, 0x89, 0xEF)
+    a.emit(0x48, 0x89, 0xE6)
+    mov_rdx_imm(a, 16)
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    mov_rax_imm(a, 43)  # accept
+    a.emit(0x4C, 0x89, 0xE7)
+    xor_rsi(a)
+    xor_rdx(a)
+    syscall(a)
+    test_rax(a)
+    js_fail(a)
+    a.emit(0x49, 0x89, 0xC6)  # r14 = accepted
+    mov_rax_imm(a, 44)  # sendto
+    a.emit(0x4C, 0x89, 0xEF)
+    a.lea_rsi_label("xbyte")
+    mov_rdx_imm(a, 1)
+    xor_r10(a)
+    xor_r8(a)
+    xor_r9(a)
+    syscall(a)
+    cmp_rax_imm(a, 1)
+    jne_fail(a)
+    a.emit(0xC6, 0x44, 0x24, 0x20, 0x00)  # mov byte [rsp+0x20], 0
+    mov_rax_imm(a, 45)  # recvfrom
+    a.emit(0x4C, 0x89, 0xF7)  # mov rdi, r14
+    a.emit(0x48, 0x8D, 0x74, 0x24, 0x20)
+    mov_rdx_imm(a, 1)
+    xor_r10(a)
+    xor_r8(a)
+    xor_r9(a)
+    syscall(a)
+    cmp_rax_imm(a, 1)
+    jne_fail(a)
+    a.emit(0x80, 0x7C, 0x24, 0x20, 0x78)  # cmp byte [rsp+0x20], 'x'
+    jne_fail(a)
+    write_marker_and_exit(a, which)
+    a.label("xbyte")
+    a.buf.extend(b"x")
+    return a
+
+
 def getsockopt_elf() -> Asm:
     """SOCK_DGRAM socket; getsockopt(SOL_SOCKET, SO_TYPE) == 2."""
     a = Asm()
@@ -588,6 +694,26 @@ def main() -> None:
             "move_mount_enosys_elf_data",
             "`move_mount(0, 0, 0, 0, 0)` must return `-ENOSYS`; then write `GATE_BJ4 enosys\\n`.",
             enosys_elf(429, "GATE_BJ4 enosys\n"),
+        ),
+        rust_fn(
+            "setsockopt_userspace_elf_data",
+            "AF_INET `SOCK_DGRAM` `setsockopt(SO_REUSEADDR, 1)` then `getsockopt` is 1; write `GATE_BK1 setsockopt\\n`.",
+            setsockopt_elf(),
+        ),
+        rust_fn(
+            "tcp_send_userspace_elf_data",
+            "TCP listen/connect/accept then `sendto`/`recvfrom` of `x`; write `GATE_BK2 tcp_send\\n`.",
+            tcp_send_recv_elf("GATE_BK2 tcp_send\n", 0xA077),
+        ),
+        rust_fn(
+            "tcp_recv_userspace_elf_data",
+            "TCP listen/connect/accept then `sendto`/`recvfrom` of `x`; write `GATE_BK3 tcp_recv\\n`.",
+            tcp_send_recv_elf("GATE_BK3 tcp_recv\n", 0xA078),
+        ),
+        rust_fn(
+            "fspick_enosys_elf_data",
+            "`fspick(0, 0, 0)` must return `-ENOSYS`; then write `GATE_BK4 enosys\\n`.",
+            enosys_elf(433, "GATE_BK4 enosys\n"),
         ),
     ]
     print("\n".join(parts))

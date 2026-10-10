@@ -677,3 +677,16 @@ pub(super) fn run_gate_bj4() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BJ4 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bk4() {
+    serial_println!("[user_task] Gate BK4: fspick returns ENOSYS");
+    let elf = crate::init::fspick_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "fspick-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BK4 parent pid={} reaped={}", pid, reaped);
+}

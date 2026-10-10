@@ -1,4 +1,4 @@
-/// accept4, sendmsg/recvmsg/sendmmsg/recvmmsg, getsockname/getpeername, getsockopt
+/// accept4, sendmsg/recvmsg/sendmmsg/recvmmsg, getsockname/getpeername, get/setsockopt
 use crate::syscall::{SyscallError, SyscallResult};
 
 // ── accept4 ─────────────────────────────────────────────────────────
@@ -101,6 +101,37 @@ pub fn sys_recvmmsg(
     Ok(got)
 }
 
+pub fn sys_setsockopt(
+    sockfd: i32,
+    level: i32,
+    optname: i32,
+    optval: u64,
+    optlen: u32,
+) -> SyscallResult {
+    const SOL_SOCKET: i32 = 1;
+    const SO_REUSEADDR: i32 = 2;
+
+    let sock_id = socket_id_from_fd(sockfd)?;
+    if matches!((level, optname), (SOL_SOCKET, SO_REUSEADDR)) && optlen < 4 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let on = if optval != 0 && optlen >= 4 {
+        unsafe { *(optval as *const i32) != 0 }
+    } else {
+        false
+    };
+    {
+        let mut sockets = crate::net::SOCKETS.lock();
+        let sock = sockets
+            .get_mut(&sock_id)
+            .ok_or(SyscallError::BadFileDescriptor)?;
+        if level == SOL_SOCKET && optname == SO_REUSEADDR {
+            sock.reuseaddr = on;
+        }
+    }
+    Ok(0)
+}
+
 pub fn sys_getsockopt(
     sockfd: i32,
     level: i32,
@@ -109,6 +140,7 @@ pub fn sys_getsockopt(
     optlen_ptr: u64,
 ) -> SyscallResult {
     const SOL_SOCKET: i32 = 1;
+    const SO_REUSEADDR: i32 = 2;
     const SO_TYPE: i32 = 3;
     const SO_ERROR: i32 = 4;
     const SO_ACCEPTCONN: i32 = 30;
@@ -118,6 +150,7 @@ pub fn sys_getsockopt(
         let sockets = crate::net::SOCKETS.lock();
         let sock = sockets.get(&sock_id);
         match (level, optname) {
+            (SOL_SOCKET, SO_REUSEADDR) => sock.is_some_and(|s| s.reuseaddr) as i32,
             (SOL_SOCKET, SO_TYPE) => sock.map(|s| s.sock_type as i32).unwrap_or(0),
             (SOL_SOCKET, SO_ERROR) => 0,
             (SOL_SOCKET, SO_ACCEPTCONN) => {
