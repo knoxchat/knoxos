@@ -638,3 +638,29 @@ pub(super) fn run_gate_bg4() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BG4 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bh4() {
+    serial_println!("[user_task] Gate BH4: fsmount returns ENOSYS");
+    let elf = crate::init::fsmount_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "fsmount-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BH4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bi4() {
+    serial_println!("[user_task] Gate BI4: open_tree returns ENOSYS");
+    let elf = crate::init::open_tree_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "open-tree-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BI4 parent pid={} reaped={}", pid, reaped);
+}

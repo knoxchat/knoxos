@@ -39,34 +39,47 @@ pub fn sys_recvmsg(sockfd: i32, msg_ptr: u64, flags: i32) -> SyscallResult {
 
 // ── getsockname / getpeername ───────────────────────────────────────
 
-pub fn sys_getsockname(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallResult {
-    // Look up the socket's local address from the fd table
+/// `socket()` returns the `SOCKETS` id as the userspace fd. Fall back to the
+/// process fd table (Unix sockets / accept4 CLOEXEC wrappers) when needed.
+fn socket_id_from_fd(sockfd: i32) -> Result<u32, SyscallError> {
+    {
+        let sockets = crate::net::SOCKETS.lock();
+        if sockets.contains_key(&(sockfd as u32)) {
+            return Ok(sockfd as u32);
+        }
+    }
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let tables = crate::fd::PROCESS_FD_TABLES.lock();
     let fd_table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
     let file = fd_table
         .get(sockfd)
         .ok_or(SyscallError::BadFileDescriptor)?;
-    let sock_id = file.inode;
-    drop(tables);
+    Ok(file.inode as u32)
+}
+
+fn write_inet_addr(addr_ptr: u64, addrlen_ptr: u64, ip: crate::net::Ipv4Address, port: u16) {
+    unsafe {
+        core::ptr::write_bytes(addr_ptr as *mut u8, 0, 16);
+        *(addr_ptr as *mut u16) = 2; // AF_INET
+        *((addr_ptr + 2) as *mut u16) = port.to_be();
+        core::ptr::copy_nonoverlapping(ip.0.as_ptr(), (addr_ptr + 4) as *mut u8, 4);
+    }
+    if addrlen_ptr != 0 {
+        unsafe {
+            *(addrlen_ptr as *mut u32) = 16;
+        }
+    }
+}
+
+pub fn sys_getsockname(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallResult {
+    let sock_id = socket_id_from_fd(sockfd)?;
 
     let sockets = crate::net::SOCKETS.lock();
-    if let Some(sock) = sockets.get(&(sock_id as u32)) {
+    if let Some(sock) = sockets.get(&sock_id) {
         if addr_ptr != 0 {
             match &sock.local_addr {
                 Some(crate::net::SocketAddress::Inet(ip, port)) => {
-                    // sockaddr_in: sa_family(2) + port(2) + addr(4) + zero(8)
-                    unsafe {
-                        core::ptr::write_bytes(addr_ptr as *mut u8, 0, 16);
-                        *(addr_ptr as *mut u16) = 2; // AF_INET
-                        *((addr_ptr + 2) as *mut u16) = port.to_be();
-                        *((addr_ptr + 4) as *mut u32) = u32::from_be_bytes(ip.0);
-                    }
-                    if addrlen_ptr != 0 {
-                        unsafe {
-                            *(addrlen_ptr as *mut u32) = 16;
-                        }
-                    }
+                    write_inet_addr(addr_ptr, addrlen_ptr, *ip, *port);
                 }
                 Some(crate::net::SocketAddress::Unix(path)) => {
                     let path_bytes = path.as_bytes();
@@ -119,34 +132,17 @@ pub fn sys_getsockname(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallR
 }
 
 pub fn sys_getpeername(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallResult {
-    let pid = crate::scheduler::current_pid().unwrap_or(1);
-    let tables = crate::fd::PROCESS_FD_TABLES.lock();
-    let fd_table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
-    let file = fd_table
-        .get(sockfd)
-        .ok_or(SyscallError::BadFileDescriptor)?;
-    let sock_id = file.inode;
-    drop(tables);
+    let sock_id = socket_id_from_fd(sockfd)?;
 
     let sockets = crate::net::SOCKETS.lock();
-    if let Some(sock) = sockets.get(&(sock_id as u32)) {
+    if let Some(sock) = sockets.get(&sock_id) {
         if sock.state != crate::net::SocketState::Connected {
             return Err(SyscallError::NotConnected);
         }
         if addr_ptr != 0 {
             match &sock.remote_addr {
                 Some(crate::net::SocketAddress::Inet(ip, port)) => {
-                    unsafe {
-                        core::ptr::write_bytes(addr_ptr as *mut u8, 0, 16);
-                        *(addr_ptr as *mut u16) = 2; // AF_INET
-                        *((addr_ptr + 2) as *mut u16) = port.to_be();
-                        *((addr_ptr + 4) as *mut u32) = u32::from_be_bytes(ip.0);
-                    }
-                    if addrlen_ptr != 0 {
-                        unsafe {
-                            *(addrlen_ptr as *mut u32) = 16;
-                        }
-                    }
+                    write_inet_addr(addr_ptr, addrlen_ptr, *ip, *port);
                 }
                 Some(crate::net::SocketAddress::Unix(path)) => {
                     let path_bytes = path.as_bytes();

@@ -217,3 +217,13 @@ pub const GATE_BG1_MARKER: &str = "GATE_BG1 ppoll";
 pub const GATE_BG2_MARKER: &str = "GATE_BG2 accept4";
 pub const GATE_BG3_MARKER: &str = "GATE_BG3 epoll_pwait";
 pub const GATE_BG4_MARKER: &str = "GATE_BG4 enosys";
+
+pub const GATE_BH1_MARKER: &str = "GATE_BH1 select";
+pub const GATE_BH2_MARKER: &str = "GATE_BH2 getsockname";
+pub const GATE_BH3_MARKER: &str = "GATE_BH3 getpeername";
+pub const GATE_BH4_MARKER: &str = "GATE_BH4 enosys";
+
+pub const GATE_BI1_MARKER: &str = "GATE_BI1 sendmsg";
+pub const GATE_BI2_MARKER: &str = "GATE_BI2 recvmsg";
+pub const GATE_BI3_MARKER: &str = "GATE_BI3 shutdown";
+pub const GATE_BI4_MARKER: &str = "GATE_BI4 enosys";

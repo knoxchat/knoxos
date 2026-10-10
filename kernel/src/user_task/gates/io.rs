@@ -171,6 +171,19 @@ pub(super) fn run_gate_bg3() {
     serial_println!("[user_task] Gate BG3 parent pid={} reaped={}", pid, reaped);
 }
 
+pub(super) fn run_gate_bh1() {
+    serial_println!("[user_task] Gate BH1: select on a pipe");
+    let elf = crate::init::select_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "select-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BH1 parent pid={} reaped={}", pid, reaped);
+}
+
 pub(super) fn run_gate_q3() {
     serial_println!("[user_task] Gate Q3: inotify_init1 + add_watch + read");
     let elf = crate::init::inotify_userspace_elf_data();

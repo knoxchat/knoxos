@@ -40,3 +40,68 @@ pub(super) fn run_gate_bg2() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BG2 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bh2() {
+    serial_println!("[user_task] Gate BH2: getsockname after bind");
+    let elf = crate::init::getsockname_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getsockname-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BH2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bh3() {
+    serial_println!("[user_task] Gate BH3: getpeername after connect");
+    let elf = crate::init::getpeername_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "getpeername-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BH3 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bi1() {
+    serial_println!("[user_task] Gate BI1: sendmsg UDP byte");
+    let elf = crate::init::sendmsg_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "sendmsg-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BI1 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bi2() {
+    serial_println!("[user_task] Gate BI2: recvmsg UDP byte");
+    let elf = crate::init::recvmsg_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "recvmsg-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BI2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bi3() {
+    serial_println!("[user_task] Gate BI3: shutdown SHUT_RDWR");
+    let elf = crate::init::shutdown_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "shutdown-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BI3 parent pid={} reaped={}", pid, reaped);
+}
