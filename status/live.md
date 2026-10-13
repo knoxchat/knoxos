@@ -30,8 +30,10 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 22. **Gate I2 IRQ GPRs** — naked APIC-timer stub saves all GPRs + FXSAVE; spinner `rbx` magic survives preemption (`GATE_I2 irq gprs`).
 23. **Gate I3 AP Ring 3** — a `getcpu` ELF affinity-pinned to CPU 1 `iretq`s on the AP, syscalls, and exits (`GATE_I3 ap ring3`).
 24. **Gate BM1 userspace `ld.so`** — a Ring 3 ELF with `PT_INTERP` `/lib/ld-knoxos.so` and `DT_NEEDED libgate_bm.so` runs: the interpreter maps the `.so`, applies GNU_RELRO, and the first PLT call resolves `gate_hello` (`GATE_BM1 dynlink complete`).
-25. **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual.
+25. **Gate BM2 real `dlopen`** — a static Ring 3 program `open`s `/lib/libgate_bm.so`, `mmap`s it through the VMM, walks dynsym for `gate_hello`, calls it (`0x42`), and writes the marker (`GATE_BM2 dlopen complete`).
+26. **Gate BM3 static musl CRT** — a Ring 3 binary that is not the hello fixture: musl `crt1` `_start` calls `__libc_start_main`, which calls `main` (`GATE_BM3 musl abi`). Not a toolchain-built musl binary; dynamically linked musl is still open.
+27. **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual.
 
 Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are proven on the same boot path. They are archived under [gates/syscalls.md](gates/syscalls.md), not repeated here.
 
-Integration: `./tests/run_integration.sh` **268/268** on QEMU (2026-10-13).
+Integration: `./tests/run_integration.sh` **270/270** on QEMU (2026-10-13).

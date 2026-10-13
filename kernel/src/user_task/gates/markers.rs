@@ -244,3 +244,5 @@ pub const GATE_BL3_MARKER: &str = "GATE_BL3 clone3";
 pub const GATE_BL4_MARKER: &str = "GATE_BL4 enosys";
 
 pub const GATE_BM1_MARKER: &str = "GATE_BM1 dynlink complete";
+pub const GATE_BM2_MARKER: &str = "GATE_BM2 dlopen complete";
+pub const GATE_BM3_MARKER: &str = "GATE_BM3 musl abi";

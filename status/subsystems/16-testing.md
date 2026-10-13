@@ -7,7 +7,7 @@
 ### Exists
 - [x] `#[test_case]` framework + QEMU exit ports
 - [x] Real tests: VFS read/write, allocator Box/Vec, some path tests (~subset of 103 `#[test_case]`)
-- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C7 / D1–D5 / E1–E4 / F1–F4 / H1–H4 / I1–I3 / J–BL / BM1 markers
+- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C7 / D1–D5 / E1–E4 / F1–F4 / H1–H4 / I1–I3 / J–BL / BM1–BM3 markers
 
 ### Harmful
 - [x] **`assert!(true)` tests removed** — widgets, VFS stress, DNS, TCP flags, creds, buddy, path normalize are real assertions

@@ -200,6 +200,34 @@ pub(super) fn run_gate_bm1() {
     serial_println!("[user_task] Gate BM1 parent pid={} reaped={}", pid, reaped);
 }
 
+pub(super) fn run_gate_bm2() {
+    serial_println!("[user_task] Gate BM2: dlopen via VMM mmap");
+    crate::init::install_dynlink_files();
+    let elf = crate::init::dlopen_user_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "gate-dlopen") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BM2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bm3() {
+    serial_println!("[user_task] Gate BM3: static musl CRT ABI");
+    crate::init::install_dynlink_files();
+    let elf = crate::init::musl_static_user_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "gate-musl") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BM3 parent pid={} reaped={}", pid, reaped);
+}
+
 pub(super) fn run_gate_k3() {
     serial_println!("[user_task] Gate K3: /sbin/init in Ring 3");
     let elf = {

@@ -36,13 +36,13 @@ Percentages are **production usefulness**, not lines of code.
 | 10 | [Services](subsystems/10-services.md) | Wired | 42% | High | Ring 3 `/sbin/init` (K3); AF_UNIX D-Bus. No crash restart. |
 | 11 | [Virt](subsystems/11-virt.md) | Stub | 30% | Low | Namespaces live; KVM `vmlaunch` unused. **Later.** |
 | 12 | [AI/ML](subsystems/12-ai.md) | Wired | 22% | Low | GGUF parse + naive CPU. **Later.** |
-| 13 | [Binary compat](subsystems/13-binary-compat.md) | Wired | 99% | **Do first** | Static ELF + 200+ Ring 3 syscalls + userspace `ld.so` (BM1). Next: real `dlopen`. |
+| 13 | [Binary compat](subsystems/13-binary-compat.md) | Wired | 99% | **Do first** | Static ELF + 200+ Ring 3 syscalls + `ld.so` (BM1) + VMM `dlopen` (BM2) + static musl CRT (BM3). Next: dynamically linked musl. |
 | 14 | [i18n](subsystems/14-i18n.md) | Live | 68% | Low | TTF, CJK, RTL on the compositor; locale loading partial. |
 | 15 | [Build](subsystems/15-build.md) | Live | 75% | Medium | Make/QEMU work; `flake.nix` missing. |
-| 16 | [Testing](subsystems/16-testing.md) | Wired | 82% | **Critical** | `268/268` QEMU markers; `assert!(true)` gone. |
+| 16 | [Testing](subsystems/16-testing.md) | Wired | 82% | **Critical** | `270/270` QEMU markers; `assert!(true)` gone. |
 | 17 | [Docs](subsystems/17-docs.md) | Wired | 42% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + `status/`. Architecture guides missing. |
 | 18 | [CI/CD](subsystems/18-ci.md) | Wired | 30% | High | GitHub Actions fmt/clippy/size/QEMU boot; no signed releases. |
 
-**QEMU desktop demo: ~99%.** **Production OS: ~98%.** Gates A–F, H–I, J–BL, BM1, and C7 are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **268/268** on QEMU (2026-10-13). What to do next: [next.md](next.md).
+**QEMU desktop demo: ~99%.** **Production OS: ~98%.** Gates A–F, H–I, J–BL, BM1–BM3, and C7 are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **270/270** on QEMU (2026-10-13). What to do next: [next.md](next.md).
 
 ---

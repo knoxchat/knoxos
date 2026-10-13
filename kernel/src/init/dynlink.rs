@@ -1,16 +1,22 @@
 //! Userspace dynamic linker fixtures (Gate BM1).
 //!
-//! Builds three Ring 3 ELFs that the kernel maps on `execve`/`spawn`:
+//! Builds Ring 3 ELFs that the kernel maps on `execve`/`spawn`:
 //!   * `/lib/ld-knoxos.so` — a real userspace linker (auxv, DT_NEEDED, lazy PLT, RELRO)
 //!   * `/lib/libgate_bm.so` — shared object exporting `gate_hello`
-//!   * a `DT_NEEDED` executable that calls `gate_hello@plt` and writes the gate marker
+//!   * a `DT_NEEDED` executable that calls `gate_hello@plt` (Gate BM1)
+//!   * a static `dlopen` program that `mmap`s the `.so` through the VMM (Gate BM2)
+//!   * a static musl-CRT binary (`_start` → `__libc_start_main` → `main`) (Gate BM3)
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 pub const LDSO_PATH: &str = "/lib/ld-knoxos.so";
 pub const LIBGATE_PATH: &str = "/lib/libgate_bm.so";
 pub const DYNBIN_PATH: &str = "/bin/gate_dyn";
+pub const DLOPEN_BIN_PATH: &str = "/bin/gate_dlopen";
+pub const MUSL_BIN_PATH: &str = "/bin/gate_musl";
 pub const GATE_BM1_MARKER: &str = "GATE_BM1 dynlink complete";
+pub const GATE_BM2_MARKER: &str = "GATE_BM2 dlopen complete";
+pub const GATE_BM3_MARKER: &str = "GATE_BM3 musl abi";
 
 const MAIN_BASE: u64 = 0x0000_0080_0000_0000;
 const INTERP_BASE: u64 = 0x0000_0090_0000_0000;
@@ -266,7 +272,7 @@ pub fn libgate_elf_data() -> Vec<u8> {
     // .dynsym
     let dynsym = 0x1080u64;
     push_sym(&mut elf, 0, 0, 0, 0, 0);
-    push_sym(&mut elf, 16, 0x12, 1, 0x1000, 6); // gate_hello GLOBAL FUNC
+    push_sym(&mut elf, 15, 0x12, 1, 0x1000, 6); // gate_hello GLOBAL FUNC
 
     // .dynstr at 0x10B0
     let dynstr = 0x10B0u64;
@@ -363,7 +369,7 @@ pub fn dyn_user_elf_data() -> Vec<u8> {
     elf.resize(0x1000, 0);
     // .dynsym at 0x1000
     push_sym(&mut elf, 0, 0, 0, 0, 0);
-    push_sym(&mut elf, 16, 0x12, 0, 0, 0); // undef gate_hello
+    push_sym(&mut elf, 15, 0x12, 0, 0, 0); // undef gate_hello
 
     // .dynstr at 0x1030
     elf.resize(0x1030, 0);
@@ -800,6 +806,8 @@ pub fn install_dynlink_files() {
     vfs.write_file(LDSO_PATH, &ldso_elf_data());
     vfs.write_file(LIBGATE_PATH, &libgate_elf_data());
     vfs.write_file(DYNBIN_PATH, &dyn_user_elf_data());
+    vfs.write_file(DLOPEN_BIN_PATH, &dlopen_user_elf_data());
+    vfs.write_file(MUSL_BIN_PATH, &musl_static_user_elf_data());
 }
 
 /// Userspace `/lib/ld-knoxos.so` — Ring 3 ELF interpreter.
@@ -834,4 +842,239 @@ pub fn ldso_elf_data() -> Vec<u8> {
     elf.extend_from_slice(&text);
     elf.resize(0x3000, 0);
     elf
+}
+
+// ─── Runtime dlopen (Gate BM2) ──────────────────────────────────────────
+
+/// Ring 3 `dlopen`: `open` + VMM `mmap` of `/lib/libgate_bm.so`, dynsym
+/// lookup of `gate_hello`, call (expects `0x42`), then the BM2 marker.
+///
+/// This is not `DT_NEEDED` at exec (BM1) and not `ldknoxos.rs`'s fake base.
+fn emit_dlopen_text() -> Vec<u8> {
+    let mut a = Asm::new();
+
+    a.emit(&[0x48, 0x8D, 0x3D]);
+    a.rel32("path");
+    a.emit(&[0x48, 0x31, 0xF6]);
+    a.emit(&[0x48, 0x31, 0xD2]);
+    rex_mov_imm(&mut a, 0, 2);
+    syscall(&mut a);
+    a.emit(&[0x48, 0x85, 0xC0]);
+    a.js("fail");
+    a.emit(&[0x49, 0x89, 0xC4]); // r12 = fd
+
+    rex_mov_imm(&mut a, 0, 9);
+    a.emit(&[0x48, 0x31, 0xFF]);
+    rex_mov_imm(&mut a, 6, 0x3000);
+    rex_mov_imm(&mut a, 2, 5);
+    rex_mov_imm(&mut a, 10, 0x02);
+    a.emit(&[0x4D, 0x89, 0xE0]); // r8 = fd
+    a.emit(&[0x4D, 0x31, 0xC9]);
+    syscall(&mut a);
+    a.emit(&[0x48, 0x85, 0xC0]);
+    a.jns("mapped");
+
+    rex_mov_imm(&mut a, 0, 9);
+    a.emit(&[0x48, 0x31, 0xFF]);
+    rex_mov_imm(&mut a, 6, 0x3000);
+    rex_mov_imm(&mut a, 2, 3);
+    rex_mov_imm(&mut a, 10, 0x8022);
+    rex_mov_imm(&mut a, 8, u64::MAX);
+    a.emit(&[0x4D, 0x31, 0xC9]);
+    syscall(&mut a);
+    a.emit(&[0x48, 0x85, 0xC0]);
+    a.js("fail");
+    a.emit(&[0x49, 0x89, 0xC5]); // r13 = base
+    rex_mov_imm(&mut a, 0, 0);
+    a.emit(&[0x4C, 0x89, 0xE7]);
+    a.emit(&[0x4C, 0x89, 0xEE]);
+    rex_mov_imm(&mut a, 2, 0x3000);
+    syscall(&mut a);
+    a.emit(&[0x48, 0x85, 0xC0]);
+    a.js("fail");
+    rex_mov_imm(&mut a, 0, 10);
+    a.emit(&[0x4C, 0x89, 0xEF]);
+    rex_mov_imm(&mut a, 6, 0x2000);
+    rex_mov_imm(&mut a, 2, 5);
+    syscall(&mut a);
+    a.jmp("have_lib");
+
+    a.label("mapped");
+    a.emit(&[0x49, 0x89, 0xC5]);
+
+    a.label("have_lib");
+    rex_mov_imm(&mut a, 0, 3);
+    a.emit(&[0x4C, 0x89, 0xE7]);
+    syscall(&mut a);
+
+    a.emit(&[0x41, 0x8B, 0x45, 0x00]);
+    rex_mov_imm(&mut a, 1, 0x464C457F);
+    a.emit(&[0x48, 0x39, 0xC8]);
+    a.jne("fail");
+
+    a.emit(&[0x49, 0x8B, 0x5D, 0x20]); // rbx = e_phoff
+    a.emit(&[0x4C, 0x01, 0xEB]);
+    a.emit(&[0x41, 0x0F, 0xB7, 0x45, 0x36]);
+    a.emit(&[0x49, 0x89, 0xC0]); // r8 = phent
+    a.emit(&[0x41, 0x0F, 0xB7, 0x45, 0x38]);
+    a.emit(&[0x49, 0x89, 0xC1]); // r9 = phnum
+    a.emit(&[0x4D, 0x31, 0xF6]);
+    a.label("ph_loop");
+    a.emit(&[0x4D, 0x39, 0xF1]);
+    a.je("fail");
+    a.emit(&[0x8B, 0x03]);
+    a.emit(&[0x48, 0x83, 0xF8, 0x02]);
+    a.je("found_dyn");
+    a.emit(&[0x4C, 0x01, 0xC3]);
+    a.emit(&[0x49, 0xFF, 0xC6]);
+    a.jmp("ph_loop");
+
+    a.label("found_dyn");
+    a.emit(&[0x48, 0x8B, 0x7B, 0x10]);
+    a.emit(&[0x4C, 0x01, 0xEF]);
+    a.emit(&[0x4D, 0x31, 0xF6]);
+    a.emit(&[0x4D, 0x31, 0xFF]);
+
+    a.label("dyn_loop");
+    a.emit(&[0x48, 0x8B, 0x07]);
+    a.emit(&[0x48, 0x8B, 0x57, 0x08]);
+    a.emit(&[0x48, 0x85, 0xC0]);
+    a.jz("dyn_done");
+    a.emit(&[0x48, 0x83, 0xF8, 0x06]);
+    a.jne("d_str");
+    a.emit(&[0x4C, 0x01, 0xEA]);
+    a.emit(&[0x49, 0x89, 0xD6]);
+    a.jmp("dyn_next");
+    a.label("d_str");
+    a.emit(&[0x48, 0x83, 0xF8, 0x05]);
+    a.jne("dyn_next");
+    a.emit(&[0x4C, 0x01, 0xEA]);
+    a.emit(&[0x49, 0x89, 0xD7]);
+    a.label("dyn_next");
+    a.emit(&[0x48, 0x83, 0xC7, 0x10]);
+    a.jmp("dyn_loop");
+
+    a.label("dyn_done");
+    a.emit(&[0x4D, 0x85, 0xF6]);
+    a.jz("fail");
+    a.emit(&[0x4D, 0x85, 0xFF]);
+    a.jz("fail");
+
+    a.emit(&[0x49, 0x83, 0xC6, 0x18]);
+    a.emit(&[0xB1, 0x40]);
+    a.label("sym_loop");
+    a.emit(&[0x41, 0x8B, 0x06]);
+    a.emit(&[0x4C, 0x01, 0xF8]);
+    a.emit(&[0x48, 0x89, 0xC6]);
+    a.emit(&[0x48, 0x8D, 0x3D]);
+    a.rel32("want");
+    a.label("scmp");
+    a.emit(&[0x8A, 0x07]);
+    a.emit(&[0x3A, 0x06]);
+    a.jne("sym_next");
+    a.emit(&[0x84, 0xC0]);
+    a.jz("sym_hit");
+    a.emit(&[0x48, 0xFF, 0xC7]);
+    a.emit(&[0x48, 0xFF, 0xC6]);
+    a.jmp("scmp");
+    a.label("sym_next");
+    a.emit(&[0x49, 0x83, 0xC6, 0x18]);
+    a.emit(&[0xFE, 0xC9]);
+    a.jnz("sym_loop");
+    a.jmp("fail");
+
+    a.label("sym_hit");
+    a.emit(&[0x49, 0x8B, 0x46, 0x08]);
+    a.emit(&[0x4C, 0x01, 0xE8]);
+    a.emit(&[0xFF, 0xD0]);
+    a.emit(&[0x48, 0x83, 0xF8, 0x42]);
+    a.jne("fail");
+
+    rex_mov_imm(&mut a, 0, 1);
+    rex_mov_imm(&mut a, 7, 1);
+    a.emit(&[0x48, 0x8D, 0x35]);
+    a.rel32("marker");
+    rex_mov_imm(&mut a, 2, GATE_BM2_MARKER.len() as u64 + 1);
+    syscall(&mut a);
+    rex_mov_imm(&mut a, 0, 60);
+    a.emit(&[0x48, 0x31, 0xFF]);
+    syscall(&mut a);
+
+    a.label("fail");
+    rex_mov_imm(&mut a, 0, 60);
+    rex_mov_imm(&mut a, 7, 1);
+    syscall(&mut a);
+    a.label("path");
+    a.emit(b"/lib/libgate_bm.so\0");
+    a.label("want");
+    a.emit(b"gate_hello\0");
+    a.label("marker");
+    a.emit(GATE_BM2_MARKER.as_bytes());
+    a.emit(b"\n");
+
+    a.finish()
+}
+
+/// Static Ring 3 program that `dlopen`s `libgate_bm.so` through the VMM.
+pub fn dlopen_user_elf_data() -> Vec<u8> {
+    let text = emit_dlopen_text();
+    assert!(text.len() < 0x1000, "dlopen text overflow {}", text.len());
+    super::elf::build_static_user_elf(&text)
+}
+
+// ─── Static musl CRT (Gate BM3) ─────────────────────────────────────────
+
+/// musl `crt1` ABI: `_start` calls `__libc_start_main(main, argc, argv, …)`.
+/// This is not the Gate B2 hello fixture (that `write`s then `exit`s from `_start`).
+fn emit_musl_text() -> Vec<u8> {
+    let mut a = Asm::new();
+
+    a.emit(&[0x31, 0xED]); // xor ebp, ebp
+    a.emit(&[0x48, 0x8D, 0x3D]);
+    a.rel32("main");
+    a.emit(&[0x48, 0x8B, 0x34, 0x24]); // mov rsi, [rsp] argc
+    a.emit(&[0x48, 0x8D, 0x54, 0x24, 0x08]); // lea rdx, [rsp+8] argv
+    a.emit(&[0x31, 0xC9]); // xor ecx, ecx  init
+    a.emit(&[0x4D, 0x31, 0xC0]); // xor r8, r8  fini
+    a.emit(&[0x4D, 0x31, 0xC9]); // xor r9, r9  ldso_fini
+    a.emit(&[0x48, 0x83, 0xE4, 0xF0]); // and rsp, -16
+    a.emit(&[0xE8]);
+    a.rel32("libc_start_main");
+    a.emit(&[0xF4]); // hlt if libc_start_main returns
+
+    a.label("libc_start_main");
+    a.emit(&[0x57]); // push rdi (main)
+    a.emit(&[0x48, 0x89, 0xF0]); // mov rax, rsi (argc)
+    a.emit(&[0x48, 0xFF, 0xC0]); // inc rax
+    a.emit(&[0x48, 0x8D, 0x0C, 0xC2]); // lea rcx, [rdx+rax*8] envp
+    a.emit(&[0x48, 0x89, 0xF7]); // mov rdi, rsi (argc)
+    a.emit(&[0x48, 0x89, 0xD6]); // mov rsi, rdx (argv)
+    a.emit(&[0x48, 0x89, 0xCA]); // mov rdx, rcx (envp)
+    a.emit(&[0x58]); // pop rax (main)
+    a.emit(&[0xFF, 0xD0]); // call main
+    a.emit(&[0x48, 0x89, 0xC7]); // mov rdi, rax
+    rex_mov_imm(&mut a, 0, 60);
+    syscall(&mut a);
+
+    a.label("main");
+    rex_mov_imm(&mut a, 0, 1);
+    rex_mov_imm(&mut a, 7, 1);
+    a.emit(&[0x48, 0x8D, 0x35]);
+    a.rel32("marker");
+    rex_mov_imm(&mut a, 2, GATE_BM3_MARKER.len() as u64 + 1);
+    syscall(&mut a);
+    a.emit(&[0x31, 0xC0]); // xor eax, eax
+    a.emit(&[0xC3]);
+    a.label("marker");
+    a.emit(GATE_BM3_MARKER.as_bytes());
+    a.emit(b"\n");
+
+    a.finish()
+}
+
+/// Static musl-CRT ELF: `_start` → `__libc_start_main` → `main`.
+pub fn musl_static_user_elf_data() -> Vec<u8> {
+    let text = emit_musl_text();
+    assert!(text.len() < 0x1000, "musl text overflow {}", text.len());
+    super::elf::build_static_user_elf(&text)
 }

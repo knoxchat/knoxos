@@ -32,10 +32,10 @@ Security:           ████████████████████
 System Services:    ███████████░░░░░░░░░░░░░░  42%  Wired         ← K3 /sbin/init + L3 D-Bus AF_UNIX
 Virtualization:     ████████░░░░░░░░░░░░░░░░░  30%  Stub          ← L2/M1/N1/O1/P1/Q1/R1/S1 namespaces + T1 setns + U1 chroot + V1 pivot_root + W1 OverlayFS
 AI/ML:              █████░░░░░░░░░░░░░░░░░░░░  22%  Wired
-Binary Compat:      ████████████████████████░  99%  Wired         ← execve + fork + clone + TLS %fs + userspace ld.so (BM1) + 200+ Ring 3 syscalls
+Binary Compat:      ████████████████████████░  99%  Wired         ← execve + fork + clone + TLS %fs + userspace ld.so (BM1) + VMM dlopen (BM2) + static musl CRT (BM3) + 200+ Ring 3 syscalls
 i18n & Fonts:       █████████████████░░░░░░░░  68%  Live
 Build System:       ███████████████████░░░░░░  75%  Live
-Testing:            ████████████████████░░░░░  82%  Wired         ← 268/268 integration
+Testing:            ████████████████████░░░░░  82%  Wired         ← 270/270 integration
 Documentation:      ██████████░░░░░░░░░░░░░░░  42%  Wired         ← BUILDING + CONTRIBUTING
 CI/CD:              ███████░░░░░░░░░░░░░░░░░░  30%  Wired
 ```
@@ -46,7 +46,7 @@ CI/CD:              ███████░░░░░░░░░░░░░
 |-----------|-----|-----|-----|
 | Kernel Core | 95% | 82% | Per-CPU TSS + GS CpuLocal; AP INIT/SIPI online (I1); AP Ring 3 (I3); NMI/MCE; MADT IOAPIC |
 | Process | 90% | 99% | Gate B3–B8 scheduled Ring 3; IRQ GPR+FPU save (I2); AP Ring 3 (I3); clone (J1); CLONE_THREAD join (K1); `%fs` TLS (L1); PID ns (M1); futex (M3); mount ns (N1); net ns (O1); user ns (P1); IPC ns (Q1); cgroup ns (R1); time ns (S1); setns (T1); chroot (U1); pivot_root (V1); chdir/getcwd (Z3); fchdir (AA2); getppid (AG3); getpgid (AH3); getsid (AI3); setuid (AJ3); getrlimit (AK2); setgid (AK3); setrlimit (AL2); setresuid (AL3); prlimit64 (AM2); setresgid (AM3); setreuid (AN2); getgroups (AN3); setregid (AO2); getresuid (AO3); getresgid (AP2); setpgid (AP3); setsid (AQ2); setpriority (AQ3); getpid (AV2); gettid (AV3) |
-| Binary compat | 40% | 99% | Static hello + scheduled `execve`/`fork`/`clone` + userspace `ld.so` (BM1) + 200+ Ring 3 syscalls; 452 numbers still ≠ 452 behaviors |
+| Binary compat | 40% | 99% | Static hello + scheduled `execve`/`fork`/`clone` + userspace `ld.so` (BM1) + VMM `dlopen` (BM2) + static musl CRT (BM3) + 200+ Ring 3 syscalls; 452 numbers still ≠ 452 behaviors |
 | Memory | — | 74% | H1 CoW #PF; H2 file-backed fault-in; H4 OOM-on-alloc + guarded stacks; J2 leftover buddy RAM; J3 LRU; K2 swap I/O |
 | Filesystem | 35% | 99% | VirtIO-blk + C1–C6 + inotify on VFS mutate (H3) + mount ns (N1) + OverlayFS (W1) + hardlink (X1) + chmod (Y1) + rmdir (Z1) + unlink (Z2) + mkfifo (AA1) + fchdir (AA2) + access (AA3) + getdents (AB1) + dup2 (AB2) + fcntl (AC1) + pread64 (AC2) + fstat (AD1) + pwrite64 (AD2) + writev (AE1) + ftruncate (AE2) + readv (AF1) + lseek (AF2) + fsync (AG1) + fdatasync (AG2) + syncfs (AH1) + sync (AH2) + fchmod (AI1) + fchown (AI2) + fstatfs (AJ1) + statfs (AJ2) + fsetxattr (AK1) + flistxattr (AL1) + listxattr (AM1) + faccessat (AN1) + mkdirat (AO1) + unlinkat (AP1) + renameat (AQ1) + fchmodat (AV1) + splice (R2) + flock (R3) + sendfile (S2) + tee (S3) + copy_file_range (T2) + vmsplice (T3) + xattr (U2) + statx (U3) + fallocate (V2) + utimensat (V3) + umask (W2) + symlink (W3) + rename (X2) + truncate (X3) + chown (Y2) + mkdir (Y3) |
 | GUI | 85% | 84% | Ring 3 SHM clients (F1–F4); widget hover/press + window-local damage; remaining apps still in-process |
@@ -55,7 +55,7 @@ CI/CD:              ███████░░░░░░░░░░░░░
 | Networking | 22% | 72% | D1 loopback; D2 VirtIO-net; D3 DHCP apply; D4 DNS+TCP; D5 CUBIC; BH2–BH3 name; BI1–BI3 msg/shutdown; BJ1–BJ3 sendmmsg/recvmmsg/getsockopt; BK1 setsockopt; BK2–BK3 TCP send/recv |
 | Security | 15% | 80% | E1 W^X/ASLR; E2 ChaCha20; E3 seccomp EPERM; E4 CapNetBindService; K4 Landlock; J4/L4/M4/N4/O4/P4/Q4/R4/S4/T4/U4/V4/W4/X4/Y4/Z4/AA4/AB4/AC4/AD4/AE4/AF4/AG4/AH4/AI4/AJ4/AK4/AL4/AM4/AN4/AO4/AP4/AQ4/AR4/AS4/AT4/AU4/AV4/AW4/AX4/AY4/AZ4/BA4/BB4/BC4/BD4/BK4 ENOSYS |
 | System services | — | 42% | K3 Ring 3 `/sbin/init`; L3 AF_UNIX D-Bus socket |
-| **Overall production** | **~40%** | **~98%** | Gates B3–B8 + C1–C7 + D1–D5 + E1–E4 + F1–F4 + H1–H4 + I1–I3 + J–BL + BM1 on the live boot path |
+| **Overall production** | **~40%** | **~98%** | Gates B3–B8 + C1–C7 + D1–D5 + E1–E4 + F1–F4 + H1–H4 + I1–I3 + J–BL + BM1–BM3 on the live boot path |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates should tick items on [next.md](next.md), not module counts.
 

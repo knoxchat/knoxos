@@ -2,7 +2,7 @@
 
 ← [Status index](README.md)
 
-Gates **A–F, H–I**, syscall gates **J–BL**, **BM1** (userspace `ld.so`), and **C7** (`/bin` persist) are done on QEMU (`./tests/run_integration.sh` **268/268**). Adding another `GATE_xx` ENOSYS is **not** the critical path.
+Gates **A–F, H–I**, syscall gates **J–BL**, **BM1** (userspace `ld.so`), **BM2** (real `dlopen`), **BM3** (static musl CRT), and **C7** (`/bin` persist) are done on QEMU (`./tests/run_integration.sh` **270/270**). Adding another `GATE_xx` ENOSYS is **not** the critical path.
 
 Work top to bottom. Skip anything marked later.
 
@@ -15,10 +15,10 @@ Static Ring 3 works (`execve`, `fork`, `clone`/`clone3`, `/bin/sh`, `/sbin/init`
 | Do | Done when | Details |
 |----|-----------|---------|
 | Userspace `ld.so` | **Done** — Ring 3 ELF with `DT_NEEDED` runs via `/lib/ld-knoxos.so` (lazy PLT, GNU_RELRO) (`GATE_BM1 dynlink complete`) | [13-binary-compat.md](subsystems/13-binary-compat.md) |
-| Real `dlopen` | Maps a `.so` through the VMM (`ldknoxos.rs` fake base does not count) | same |
-| musl or glibc ABI | A static musl binary that is not the in-kernel hello fixture runs; then a dynamically linked one | same |
+| Real `dlopen` | **Done** — Ring 3 `open` + VMM `mmap` of `libgate_bm.so`, dynsym `gate_hello`, call returns `0x42` (`GATE_BM2 dlopen complete`) | same |
+| musl or glibc ABI | **Partial** — static musl CRT (`_start` → `__libc_start_main` → `main`) is live (`GATE_BM3 musl abi`). A dynamically linked musl binary is still open. | same |
 
-`ld.so` is live (BM1). Remaining desktop apps still stay in-kernel `WindowContentType` until `dlopen` and a musl/glibc ABI exist; “binary compat 99%” is still mostly syscall coverage.
+`ld.so` (BM1), runtime `dlopen` (BM2), and static musl CRT (BM3) are live. Remaining desktop apps still stay in-kernel `WindowContentType` until a dynamically linked musl/glibc binary runs; “binary compat 99%” is still mostly syscall coverage.
 
 ---
 

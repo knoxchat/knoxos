@@ -416,6 +416,8 @@ check_marker "GATE_BL2 pidfd_open"
 check_marker "GATE_BL3 clone3"
 check_marker "GATE_BL4 enosys"
 check_marker "GATE_BM1 dynlink complete"
+check_marker "GATE_BM2 dlopen complete"
+check_marker "GATE_BM3 musl abi"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

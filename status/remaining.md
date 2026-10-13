@@ -130,8 +130,9 @@ Details: [subsystems/12-ai.md](subsystems/12-ai.md)
 Details: [subsystems/13-binary-compat.md](subsystems/13-binary-compat.md)
 
 - [x] Dynamic linker as a userspace `ld.so` (DT_NEEDED, lazy PLT, RELRO) — **Gate BM1**
-- [ ] `dlopen` that maps `.so` via VMM (`ldknoxos.rs` fake base)
-- [ ] glibc/musl ABI for Ring 3
+- [x] `dlopen` that maps `.so` via VMM (`open` + file-backed `mmap`, not `ldknoxos.rs` fake base) — **Gate BM2**
+- [x] Static musl CRT ABI (`_start` → `__libc_start_main` → `main`) — **Gate BM3**
+- [ ] Dynamically linked musl/glibc binary for Ring 3
 
 ## 14. Internationalization & Fonts
 

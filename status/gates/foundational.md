@@ -91,3 +91,5 @@ This **is** becoming an OS.
 | ID | Task | Done when |
 |----|------|-----------|
 | BM1 | Userspace `ld.so` + `DT_NEEDED` | **Done** — `/lib/ld-knoxos.so` maps `libgate_bm.so`, lazy PLT resolves `gate_hello`, GNU_RELRO (`GATE_BM1 dynlink complete`) |
+| BM2 | Real `dlopen` via VMM | **Done** — Ring 3 `open` + file-backed `mmap` of `libgate_bm.so`, dynsym `gate_hello` call returns `0x42` (`GATE_BM2 dlopen complete`) |
+| BM3 | Static musl CRT ABI | **Done** — `_start` → `__libc_start_main` → `main` (not the hello fixture) (`GATE_BM3 musl abi`) |
