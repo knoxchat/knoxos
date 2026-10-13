@@ -1,0 +1,33 @@
+← [Status index](../README.md) · [Do this first](../next.md)
+
+# 9. Security & Cryptography
+
+**Grade: Wired (80%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
+
+### Wired
+- [x] AES-128/256 block + CBC (software)
+- [x] SHA-256 / SHA-512
+- [x] ChaCha20 block function + RFC 8439 known-answer (E2)
+- [x] dm-crypt AES-XTS / LUKS **structures** + sector crypto helpers
+- [x] `seccomp::check_syscall` denies listed syscalls with EPERM (E3)
+- [x] Entropy pool + RDRAND mix; **ChaCha20 CSPRNG** for `getrandom` (E2)
+- [x] `__stack_chk_fail` + canary (`ssp.rs`); compiler SSP not shown enabled
+- [x] Unix permission bits on VFS inodes
+- [x] W^X + NX on user maps; `mprotect` RWX fails; ASLR randomizes (E1)
+- [x] CapNetBindService on `bind`; unprivileged `:80` fails; dropped on exec (E4)
+- [x] Unimplemented security-sensitive syscalls (`bpf`, `pkey_alloc`/`pkey_free`/`pkey_mprotect`, `process_mrelease`, `quotactl`, `remap_file_pages`, `io_uring_*`, `userfaultfd`, `perf_event_open`, `fanotify_init`/`fanotify_mark`, Linux AIO `io_setup`/`io_submit`/`io_getevents`, `kexec_load`/`kexec_file_load`, `init_module`/`finit_module`/`delete_module`, `mount_setattr`, `fsopen`/`fsconfig`/`fsmount`/`move_mount`/`open_tree`/`fspick`, `add_key`/`request_key`/`keyctl`, `ioperm`, `iopl`, `acct`, `swapon`/`swapoff`, `modify_ldt`, `sysfs`, `vhangup`, `lookup_dcookie`, `memfd_secret`, `uselib`, `set_mempolicy`/`get_mempolicy`/`mbind`/`migrate_pages`/`move_pages`, `sched_setattr`/`sched_getattr`/`futex_waitv`, KVM vCPU regs) return ENOSYS (J4, L4, M4, N4, O4, P4, Q4, R4, S4, T4, U4, V4, W4, X4, Y4, Z4, AA4, AB4, AC4, AD4, AE4, AF4, AG4, AH4, AI4, AJ4, AK4, AL4, AM4, AN4, AO4)
+- [x] Landlock deny-by-default on VFS open/write (K4)
+
+### Stub / unused
+- [ ] AES-GCM, Poly1305, TLS 1.3 key schedule, X.509 chain verify
+- [ ] RSA / ECDSA / Ed25519 / X25519 production-quality
+- [x] **Landlock** hooked on VFS (`GATE_K4 landlock vfs`). SELinux / AppArmor still unused.
+- [ ] Kernel lockdown, secure wipe on free, IMA
+
+### Perfect-OS next steps
+1. ~~Replace xorshift userspace RNG with ChaCha20 from a real entropy pool (RDRAND + jitter + timings).~~ **E2 done.**
+2. ~~W^X + NX on user maps the day Ring 3 boots.~~ **E1 done.**
+3. ~~Deny-by-default seccomp for desktop apps; capabilities on `execve`.~~ Seccomp EPERM + CapNetBindService live; desktop default-deny still later.
+4. Landlock on VFS is live (K4). MAC labels on disk still later.
+
+---

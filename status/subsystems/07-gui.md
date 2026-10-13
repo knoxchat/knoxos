@@ -1,0 +1,37 @@
+← [Status index](../README.md) · [Do this first](../next.md)
+
+# 7. GUI & Desktop Environment
+
+**Grade: Live (84%)** · `gui/` 162 files, ~91,700 lines
+
+The compositor is the most complete **product** in the tree. It is not a Unix display server.
+
+### Live
+- [x] 32bpp BGRA software FB, double-buffer, ≤16 damage rects, `present_rect`
+- [x] Window manager: z-order, focus, min/max, snap, workspaces, chrome, shadows, animations
+- [x] Desktop, wallpaper, icons, context menu, pill taskbar, tray, start menu, Alt-Tab, hot corners
+- [x] TTF raster, glyph cache, subpixel/grayscale, CJK, RTL runs, KnoxUI widgets, immediate-mode UI
+- [x] Mouse (click/drag/resize), keyboard focus, shortcuts, theme (dark/light), notifications
+- [x] Lock/login screens, screenshot, in-process DnD, blur, night light, on-screen keyboard
+- [x] Clipboard used by terminal/explorer/input (`clipboard.rs`)
+- [x] **17 real in-process apps**: Terminal, Files, Browser (tag HTML), AI Assistant, Editor, Settings, Task Manager, Calculator, Image Viewer, Log Viewer, Calendar, Disk Utility, Bluetooth manager, Software Updater, Software Center, Archive Manager, Setup Wizard
+- [x] **Widget hover/press** — calculator keys and settings tabs highlight under the pointer; retained widgets (`Button`/`Checkbox`/`Toggle`/`TextInput`) have `update_pointer`
+- [x] **Frame input latch** — `gui::input::frame_input()` feeds KnoxUI / `Ui::button_at` with press/release edges
+- [x] **Window-local damage** — content clicks, chrome hover, and clock ticks composite the window/taskbar instead of 1920×1080
+- [x] **Faster software blit** — opaque `fill_rect` stamps packed BGRA; `fill_rounded_rect_aa` fills the body as rects and AA-only the corners
+
+### Unused / stub
+- [ ] **Wayland** — object model plus a live `/dev/wl0` present ioctl; one Ring 3 SHM client (F1–F2); no bind/listen Unix socket
+- [ ] **GPU compositor** — `gpu_compositor.rs` never invoked; desktop software-blits
+- [x] **Client isolation (demo)** — Gate F Ring 3 clients paint SHM (F1–F4); remaining in-kernel apps still `WindowContentType`
+- [ ] Hardware cursor probed (`hw_cursor::init`); desktop still draws a software cursor
+- [ ] VSync module unused; pacing is TSC ~60 FPS
+- [x] Start-menu **Paint / Video Player / Webamp / Doom / ClassiCube / Quake III** removed; Paint is a Ring 3 SHM client (F4)
+- [ ] HDR, VRR, TrueType bytecode hinting, full IME framework
+
+### Perfect-OS next steps
+1. Freeze new in-kernel apps. Every new app should be a Ring 3 binary.
+2. After `execve` works: Wayland (or a tiny custom protocol) over Unix sockets, SHM buffers, kernel compositor scanout.
+3. Then VirtIO-GPU scanout + hardware cursor. Not before userspace exists.
+
+---

@@ -16,11 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Require README, LICENSE, status.md
+      - name: Require README, LICENSE, status tree
         run: |
           test -f README.md
           test -f LICENSE
           test -f status.md
+          test -f status/README.md
+          test -f status/next.md
 
   fmt:
     name: rustfmt

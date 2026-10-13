@@ -2,7 +2,7 @@
 
 An operating system written in Rust. It boots in QEMU to an in-kernel software desktop plus scheduled Ring 3 tasks.
 
-This is **not** a production OS yet. The kernel compiles a large tree of modules; only the **live path** (what runs after `./run.sh`) counts. See [status.md](status.md) for an honest subsystem-by-subsystem score.
+This is **not** a production OS yet. The kernel compiles a large tree of modules; only the **live path** (what runs after `./run.sh`) counts. See [status/next.md](status/next.md) for what to do first, and [status/README.md](status/README.md) for the subsystem scores.
 
 | What works today | What does not |
 |------------------|---------------|
@@ -59,13 +59,13 @@ async executor (~60 FPS)
     → idle thread HLT when the desktop has no work
 ```
 
-See [status.md](status.md) for the gate list. [CONTRIBUTING.md](CONTRIBUTING.md) explains what “live path” means.
+See [status/next.md](status/next.md) for remaining work and [status/gates/](status/gates/README.md) for the completed gate list. [CONTRIBUTING.md](CONTRIBUTING.md) explains what “live path” means.
 
 ## Layout
 
 - `kernel/` — `no_std` kernel (`x86_64-unknown-none`; aarch64/riscv64 compile with shims)
 - `boot/` — disk-image builder (`bootloader` crate, BIOS + UEFI)
-- `status.md` — production-readiness score (source of truth)
+- `status/` — production-readiness score (source of truth); start at [status/next.md](status/next.md)
 - `tests/run_integration.sh` — QEMU serial-marker boot check
 
 ## License

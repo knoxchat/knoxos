@@ -151,11 +151,11 @@ clean: ## Clean all build artifacts
 
 # ─── Documentation ──────────────────────────────────────────────────────
 
-docs: ## Open documentation (status.md)
+docs: ## Open documentation (status/next.md)
 	@if command -v less &> /dev/null; then \
-		less status.md; \
+		less status/next.md; \
 	else \
-		cat status.md; \
+		cat status/next.md; \
 	fi
 
 status: ## Show project status
@@ -170,6 +170,7 @@ status: ## Show project status
 	@echo ""
 	@echo "$(YELLOW)Documentation:$(NC)"
 	@test -f status.md && echo "  $(GREEN)[✓]$(NC) status.md exists" || echo "  $(RED)[✗]$(NC) status.md missing"
+	@test -f status/next.md && echo "  $(GREEN)[✓]$(NC) status/next.md exists" || echo "  $(RED)[✗]$(NC) status/next.md missing"
 	@test -f README.md && echo "  $(GREEN)[✓]$(NC) README.md exists" || echo "  $(RED)[✗]$(NC) README.md missing"
 	@test -f LICENSE && echo "  $(GREEN)[✓]$(NC) LICENSE exists" || echo "  $(RED)[✗]$(NC) LICENSE missing"
 	@echo ""
@@ -284,7 +285,7 @@ info: ## Show KnoxOS information
 	@echo "  $(GREEN)make status$(NC)       - Check build status"
 	@echo ""
 	@echo "$(YELLOW)Documentation:$(NC)"
-	@echo "  $(GREEN)make docs$(NC)         - Read status.md"
+	@echo "  $(GREEN)make docs$(NC)         - Read status/next.md"
 	@echo "  $(GREEN)make help$(NC)         - Show this help"
 	@echo ""
 

@@ -37,7 +37,7 @@ sudo apt install qemu-system-x86 ovmf
 
 - `kernel/` — kernel crate (`src/main.rs` + `src/lib.rs`)
 - `boot/` — disk-image builder (`bootloader` crate)
-- `status.md` — production-readiness score (source of truth)
+- `status/` — production-readiness score (source of truth); start at [status/next.md](status/next.md)
 - `tests/` — QEMU integration harness
 
-Do not add a new `pub mod` unless it is on the live boot path. See [CONTRIBUTING.md](CONTRIBUTING.md) and [status.md](status.md).
+Do not add a new `pub mod` unless it is on the live boot path. See [CONTRIBUTING.md](CONTRIBUTING.md) and [status/next.md](status/next.md).
