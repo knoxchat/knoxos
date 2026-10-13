@@ -293,6 +293,40 @@ pub fn is_elf(data: &[u8]) -> bool {
     data.len() >= 4 && data[0..4] == ELF_MAGIC
 }
 
+/// PT_INTERP path, if the binary is dynamically linked.
+pub fn interpreter_path(data: &[u8]) -> Option<String> {
+    load_elf(data).ok().and_then(|r| r.interpreter)
+}
+
+/// Virtual address of the program header table once the image is mapped.
+pub fn phdr_vaddr(data: &[u8]) -> u64 {
+    let Ok(header) = validate_elf(data) else {
+        return 0;
+    };
+    let phdrs = parse_program_headers(data, header);
+    if let Some(p) = phdrs.iter().find(|p| p.p_type == PT_PHDR) {
+        return p.p_vaddr;
+    }
+    0
+}
+
+pub fn phnum(data: &[u8]) -> u64 {
+    validate_elf(data).map(|h| h.e_phnum as u64).unwrap_or(0)
+}
+
+/// Lowest PT_LOAD `p_vaddr` — used as AT_BASE for the interpreter.
+pub fn pt_load_base(data: &[u8]) -> u64 {
+    let Ok(header) = validate_elf(data) else {
+        return 0;
+    };
+    parse_program_headers(data, header)
+        .iter()
+        .filter(|p| p.p_type == PT_LOAD)
+        .map(|p| p.p_vaddr)
+        .min()
+        .unwrap_or(0)
+}
+
 /// Map ELF segments into a process address space
 ///
 /// # Safety

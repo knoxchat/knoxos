@@ -18,7 +18,8 @@
 - [x] **Gate C3 page cache writeback** — dirty 4 KiB page overlays backing file at offset; sibling pages survive (`GATE_C3 writeback complete`)
 - [x] **Gate C4 AHCI DMA** — command list + PRDT write then read a marker sector (`GATE_C4 ahci dma complete`)
 - [x] **Gate C5 NVMe DMA** — admin + I/O queues; PRP1 bounce write/read round-trip (`GATE_C5 nvme dma complete`)
-- [x] **Gate C6 VFS root persist** — `/etc` (and the rest of the RAM namespace except virtual FS and `/bin`) round-trips through VirtIO-blk (`GATE_C6 vfs persist`)
+- [x] **Gate C6 VFS root persist** — `/etc` (and the rest of the RAM namespace except virtual FS) round-trips through VirtIO-blk (`GATE_C6 vfs persist`)
+- [x] **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual.
 - [x] 4 MB ramdisk always created
 
 ### Wired / partial
@@ -90,7 +91,7 @@
 - [ ] Quotas — counters, not enforced
 
 ### Perfect-OS next steps
-1. Make ext4 (or a single production FS) the root on VirtIO-blk by default, not RAM. Persist snapshot covers the RAM namespace (C6); virtual FS still rebuilt at boot.
+1. Make ext4 (or a single production FS) the root on VirtIO-blk by default, not RAM. Persist snapshot covers `/etc` (C6) and `/bin` (C7); virtual FS still rebuilt at boot.
 2. ~~Journal commit + crash recovery that is tested by killing QEMU mid-write.~~ **Done** for the persist blob WAL (in-boot: commit journal, skip checkpoint, restore replays). JBD2 still missing.
 3. ~~Complete VirtIO-blk DMA (guest-physical, not heap pointers).~~ **Done** — contiguous buddy frames + bounce buffer. ~~AHCI DMA still missing.~~ **C4 done.** ~~NVMe DMA still missing.~~ **C5 done.**
 4. ~~Hook inotify on VFS mutate.~~ **Done** (H3). Page-cache writeback (C3) overlays dirty pages.

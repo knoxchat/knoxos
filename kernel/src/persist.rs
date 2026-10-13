@@ -34,9 +34,9 @@ const JRNL_HEADER_SIZE: usize = 40;
 /// This prevents OOM when persisting very large files like 125MB .deb packages
 const MAX_PERSIST_SIZE: usize = 64 * 1024 * 1024; // 64 MB
 
-/// Paths that should NOT be persisted (virtual FS and boot-generated ELFs).
-/// Everything else — including `/etc` — is the RAM VFS root snapshot.
-const SKIP_PREFIXES: &[&str] = &["/dev/", "/proc/", "/sys/", "/run/", "/bin/", "/sbin/"];
+/// Paths that should NOT be persisted (virtual FS rebuilt at boot).
+/// `/bin` and `/sbin` round-trip so user-installed ELFs survive reboot (C7).
+const SKIP_PREFIXES: &[&str] = &["/dev/", "/proc/", "/sys/", "/run/"];
 
 /// Check if a path should be persisted across reboot.
 fn should_persist(path: &str) -> bool {
@@ -617,6 +617,7 @@ pub fn init() {
     let _ = roundtrip_self_test();
     let _ = journal_recovery_self_test();
     let _ = root_persist_self_test();
+    let _ = bin_persist_self_test();
 }
 
 /// Serial marker the integration test waits for once a file has been written
@@ -802,6 +803,57 @@ pub fn root_persist_self_test() -> bool {
         }
         None => {
             crate::serial_println!("[persist] Gate C6 FAILED: /etc file missing after restore");
+            false
+        }
+    }
+}
+
+pub const GATE_C7_MARKER: &str = "GATE_C7 bin persist";
+const GATE_C7_PATH: &str = "/bin/gate_c7";
+const GATE_C7_PAYLOAD: &[u8] = b"knoxos-c7-bin\n";
+
+/// Persist a file under `/bin` (previously skipped as boot-generated).
+/// Unlink, restore from VirtIO-blk, and require the bytes back.
+pub fn bin_persist_self_test() -> bool {
+    if !crate::virtio_blk::is_available() {
+        crate::serial_println!("[persist] Gate C7 skipped: no virtio-blk");
+        return false;
+    }
+    if !should_persist(GATE_C7_PATH) {
+        crate::serial_println!("[persist] Gate C7 FAILED: /bin is still skipped");
+        return false;
+    }
+
+    if !crate::vfs::write_file_dispatch(GATE_C7_PATH, GATE_C7_PAYLOAD) {
+        crate::serial_println!("[persist] Gate C7 FAILED: could not write {}", GATE_C7_PATH);
+        return false;
+    }
+    if crate::vfs::remove_dispatch(GATE_C7_PATH).is_err() {
+        crate::serial_println!("[persist] Gate C7 FAILED: unlink {}", GATE_C7_PATH);
+        return false;
+    }
+    if crate::vfs::read_file_dispatch(GATE_C7_PATH).is_some() {
+        crate::serial_println!("[persist] Gate C7 FAILED: RAM copy survived unlink");
+        return false;
+    }
+
+    restore_all();
+
+    match crate::vfs::read_file_dispatch(GATE_C7_PATH) {
+        Some(data) if data.as_slice() == GATE_C7_PAYLOAD => {
+            crate::serial_println!("[persist] {}", GATE_C7_MARKER);
+            true
+        }
+        Some(data) => {
+            crate::serial_println!(
+                "[persist] Gate C7 FAILED: restored {} bytes, expected {}",
+                data.len(),
+                GATE_C7_PAYLOAD.len()
+            );
+            false
+        }
+        None => {
+            crate::serial_println!("[persist] Gate C7 FAILED: /bin file missing after restore");
             false
         }
     }

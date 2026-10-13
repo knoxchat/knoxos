@@ -190,13 +190,14 @@ fn execve_path(filename: &str, _argv: u64, _envp: u64) -> SyscallResult {
         return Err(SyscallError::OutOfMemory);
     }
 
-    let entry_point = match crate::vmm::load_elf_into_address_space(pid, &data_copy) {
-        Ok((entry, _brk)) => entry,
+    let loaded = match crate::vmm::load_exec_image(pid, &data_copy) {
+        Ok(img) => img,
         Err(e) => {
             serial_println!("[execve] ELF load failed: {}", e);
             return Err(SyscallError::InvalidArgument);
         }
     };
+    let entry_point = loaded.start_entry;
 
     let stack_top = crate::vmm::STACK_TOP;
     if crate::vmm::setup_user_stack(pid, stack_top, crate::vmm::STACK_SIZE).is_none() {
@@ -206,9 +207,18 @@ fn execve_path(filename: &str, _argv: u64, _envp: u64) -> SyscallResult {
 
     let name = filename.rsplit('/').next().unwrap_or(filename);
     let argv_strs: &[&str] = &[name];
-    let initial_rsp =
-        crate::vmm::setup_initial_stack(pid, stack_top, argv_strs, &[], entry_point, 0, 0)
-            .unwrap_or(stack_top - 8);
+    let initial_rsp = crate::vmm::setup_initial_stack(
+        pid,
+        stack_top,
+        argv_strs,
+        &[],
+        loaded.main_entry,
+        loaded.phdr,
+        loaded.phnum,
+        loaded.phent,
+        loaded.interp_base,
+    )
+    .unwrap_or(stack_top - 8);
 
     {
         let mut table = crate::process::PROCESS_TABLE.lock();

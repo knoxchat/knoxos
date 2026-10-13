@@ -38,7 +38,8 @@ This **is** becoming an OS.
 | C3 | Page cache writeback | **Done** — dirty middle page flushes via `pwrite_file`; sibling pages survive (`GATE_C3 writeback complete`) |
 | C4 | AHCI or NVMe **one** real DMA path | **Done** — AHCI command-list + PRDT write/read round-trip (`GATE_C4 ahci dma complete`). NVMe DMA also live (C5). |
 | C5 | NVMe PRP DMA | **Done** — admin + I/O queues; PRP bounce write/read (`GATE_C5 nvme dma complete`) |
-| C6 | RAM VFS root snapshot | **Done** — `/etc` and the rest of the namespace (except virtual FS and `/bin`) persist (`GATE_C6 vfs persist`) |
+| C6 | RAM VFS root snapshot | **Done** — `/etc` and the rest of the namespace (except virtual FS) persist (`GATE_C6 vfs persist`) |
+| C7 | Persist `/bin` | **Done** — `/bin/gate_c7` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual. |
 
 ### Gate D — Packets (4–8 weeks)
 
@@ -84,3 +85,9 @@ This **is** becoming an OS.
 | I1 | Per-CPU TSS + GS `CpuLocal`; AP online | **Done** — BSP `str` matches TSS[0]; GS_BASE → `CpuLocal[0]`; AP loads a distinct TSS (`GATE_I1 smp online`) |
 | I2 | IRQ saves GPRs + FXSAVE | **Done** — spinner `mov rbx, magic; jmp $`; after timer preempt, saved `rbx` and FXSAVE area are live (`GATE_I2 irq gprs`) |
 | I3 | AP runs Ring 3 | **Done** — `getcpu` ELF affinity-pinned to CPU 1 syscalls on the AP (`GATE_I3 ap ring3`) |
+
+### Gate BM — Userspace dynamic linker (after B)
+
+| ID | Task | Done when |
+|----|------|-----------|
+| BM1 | Userspace `ld.so` + `DT_NEEDED` | **Done** — `/lib/ld-knoxos.so` maps `libgate_bm.so`, lazy PLT resolves `gate_hello`, GNU_RELRO (`GATE_BM1 dynlink complete`) |

@@ -1310,9 +1310,10 @@ fn install_builtin_binaries() {
     vfs.write_file("/bin/paint", &crate::init::launcher_client_elf_data());
     vfs.write_file("/bin/term", &crate::init::terminal_client_elf_data());
     drop(vfs);
+    crate::init::install_dynlink_files();
 
     crate::serial_println!(
-        "[VFS] Installed built-in binaries: /bin/sh, /bin/bash, /bin/ash, /sbin/init, /bin/hello, /bin/paint, /bin/term"
+        "[VFS] Installed built-in binaries: /bin/sh, /bin/bash, /bin/ash, /sbin/init, /bin/hello, /bin/paint, /bin/term, /lib/ld-knoxos.so"
     );
 }
 

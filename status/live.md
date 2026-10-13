@@ -29,7 +29,9 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 21. **Gate I1 SMP online** — per-CPU TSS + GS-relative `CpuLocal`; AP INIT/SIPI reaches 64-bit and loads its own TSS (`GATE_I1 smp online`).
 22. **Gate I2 IRQ GPRs** — naked APIC-timer stub saves all GPRs + FXSAVE; spinner `rbx` magic survives preemption (`GATE_I2 irq gprs`).
 23. **Gate I3 AP Ring 3** — a `getcpu` ELF affinity-pinned to CPU 1 `iretq`s on the AP, syscalls, and exits (`GATE_I3 ap ring3`).
+24. **Gate BM1 userspace `ld.so`** — a Ring 3 ELF with `PT_INTERP` `/lib/ld-knoxos.so` and `DT_NEEDED libgate_bm.so` runs: the interpreter maps the `.so`, applies GNU_RELRO, and the first PLT call resolves `gate_hello` (`GATE_BM1 dynlink complete`).
+25. **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual.
 
 Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are proven on the same boot path. They are archived under [gates/syscalls.md](gates/syscalls.md), not repeated here.
 
-Integration: `./tests/run_integration.sh` **266/266** on QEMU (2026-10-13).
+Integration: `./tests/run_integration.sh` **268/268** on QEMU (2026-10-13).

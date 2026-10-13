@@ -44,7 +44,8 @@ pub use layout::{
     aslr_program_base, aslr_stack_top, init_aslr_seed, page_align_down, page_align_up, reseed_aslr,
 };
 pub use loader::{
-    load_elf_into_address_space, map_static_elf_into_current, setup_initial_stack, setup_user_stack,
+    LoadedExec, load_elf_into_address_space, load_exec_image, map_static_elf_into_current,
+    setup_initial_stack, setup_user_stack,
 };
 pub use page_table::{
     activate_cr3, activate_kernel_cr3, get_kernel_cr3, get_phys_mem_offset, map_mmio,

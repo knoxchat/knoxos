@@ -15,11 +15,13 @@
 ///   elf      — static ELF64 packer and the Gate B2 hello image
 ///   launch   — filesystem search, hello iretq, start_init
 ///   programs — Ring 3 gate fixtures (process, I/O, fs, identity, net, display, ENOSYS)
+mod dynlink;
 mod elf;
 mod launch;
 mod programs;
 mod types;
 
+pub use dynlink::*;
 pub use elf::*;
 pub use launch::*;
 pub use programs::*;

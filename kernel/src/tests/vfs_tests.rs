@@ -72,6 +72,17 @@ fn test_persist_root_if_virtio() {
 }
 
 #[test_case]
+fn test_persist_bin_if_virtio() {
+    if !crate::virtio_blk::is_available() {
+        return;
+    }
+    assert!(
+        crate::persist::bin_persist_self_test(),
+        "/bin must round-trip through VirtIO-blk"
+    );
+}
+
+#[test_case]
 fn test_page_cache_writeback() {
     assert!(
         crate::page_cache::writeback_self_test(),

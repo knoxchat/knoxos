@@ -53,14 +53,15 @@ pub fn spawn_elf(
         return SpawnOutcome::NoMemory("address space");
     }
 
-    let entry = match crate::vmm::load_elf_into_address_space(pid, elf_data) {
-        Ok((entry, _brk)) => entry_override.unwrap_or(entry),
+    let loaded = match crate::vmm::load_exec_image(pid, elf_data) {
+        Ok(img) => img,
         Err(e) => {
             serial_println!("[user_task] PID {}: ELF load failed: {}", pid, e);
             crate::process::destroy_process(pid);
             return SpawnOutcome::NoMemory("ELF load");
         }
     };
+    let entry = entry_override.unwrap_or(loaded.start_entry);
 
     let stack_top = crate::vmm::STACK_TOP;
     if crate::vmm::setup_user_stack(pid, stack_top, crate::vmm::STACK_SIZE).is_none() {
@@ -68,8 +69,18 @@ pub fn spawn_elf(
         crate::process::destroy_process(pid);
         return SpawnOutcome::NoMemory("stack");
     }
-    let initial_rsp = crate::vmm::setup_initial_stack(pid, stack_top, argv, envp, entry, 0, 0)
-        .unwrap_or(stack_top - 8);
+    let initial_rsp = crate::vmm::setup_initial_stack(
+        pid,
+        stack_top,
+        argv,
+        envp,
+        loaded.main_entry,
+        loaded.phdr,
+        loaded.phnum,
+        loaded.phent,
+        loaded.interp_base,
+    )
+    .unwrap_or(stack_top - 8);
 
     crate::fd::create_fd_table(pid);
     crate::signals::create_process_signals(pid);

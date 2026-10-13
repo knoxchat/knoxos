@@ -475,7 +475,7 @@ pub fn exec_elf(elf_data: &[u8], name: &str, argv: &[&str], envp: &[&str]) -> Op
 
     // 5. Set up initial stack contents (argc, argv, envp, auxv)
     let initial_rsp =
-        crate::vmm::setup_initial_stack(pid, stack_top, argv, envp, entry_point, 0, 0)
+        crate::vmm::setup_initial_stack(pid, stack_top, argv, envp, entry_point, 0, 0, 56, 0)
             .unwrap_or(stack_top - 8);
 
     // 6. Update process entry with entry point and stack

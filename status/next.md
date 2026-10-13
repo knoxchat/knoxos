@@ -2,7 +2,7 @@
 
 ← [Status index](README.md)
 
-Gates **A–F, H–I**, and syscall gates **J–BL** are done on QEMU (`./tests/run_integration.sh` **266/266**). Adding another `GATE_xx` ENOSYS is **not** the critical path.
+Gates **A–F, H–I**, syscall gates **J–BL**, **BM1** (userspace `ld.so`), and **C7** (`/bin` persist) are done on QEMU (`./tests/run_integration.sh` **268/268**). Adding another `GATE_xx` ENOSYS is **not** the critical path.
 
 Work top to bottom. Skip anything marked later.
 
@@ -14,11 +14,11 @@ Static Ring 3 works (`execve`, `fork`, `clone`/`clone3`, `/bin/sh`, `/sbin/init`
 
 | Do | Done when | Details |
 |----|-----------|---------|
-| Userspace `ld.so` | A Ring 3 ELF with `DT_NEEDED` runs (lazy PLT, RELRO) | [13-binary-compat.md](subsystems/13-binary-compat.md) |
+| Userspace `ld.so` | **Done** — Ring 3 ELF with `DT_NEEDED` runs via `/lib/ld-knoxos.so` (lazy PLT, GNU_RELRO) (`GATE_BM1 dynlink complete`) | [13-binary-compat.md](subsystems/13-binary-compat.md) |
 | Real `dlopen` | Maps a `.so` through the VMM (`ldknoxos.rs` fake base does not count) | same |
 | musl or glibc ABI | A static musl binary that is not the in-kernel hello fixture runs; then a dynamically linked one | same |
 
-Until this lands, remaining desktop apps stay in-kernel `WindowContentType`, and “binary compat 99%” is syscall coverage, not a Unix userspace.
+`ld.so` is live (BM1). Remaining desktop apps still stay in-kernel `WindowContentType` until `dlopen` and a musl/glibc ABI exist; “binary compat 99%” is still mostly syscall coverage.
 
 ---
 
@@ -40,7 +40,7 @@ Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered 
 
 These are the unfinished rows in [blockers.md](blockers.md). Do them after (or with) the linker, not instead of it.
 
-1. **Persist `/bin` and virtual FS** — reboot still loses `/dev` `/proc` `/sys` and boot-generated `/bin`. Root snapshot covers `/etc` (C6). [04-filesystem.md](subsystems/04-filesystem.md)
+1. **Persist `/bin`** — **Done** (C7). Virtual FS (`/dev` `/proc` `/sys` `/run`) is still rebuilt at boot. [04-filesystem.md](subsystems/04-filesystem.md)
 2. **Move desktop apps to Ring 3** — freeze new in-kernel apps; each new app is a userspace binary. Interactive terminal is still in-kernel for PTY I/O. [07-gui.md](subsystems/07-gui.md)
 3. **SMP load balance** — AP can run a pinned Ring 3 task (I3). Further APs still share one CFS `current` for the BSP desktop. [01-kernel-core.md](subsystems/01-kernel-core.md)
 4. **Wayland over a Unix socket** — `/dev/wl0` present ioctl + one SHM client (F1–F2) is not a display server. [07-gui.md](subsystems/07-gui.md)

@@ -37,10 +37,9 @@ pub fn sys_brk(addr: u64) -> SyscallResult {
     }
 }
 
-pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, _off: u64) -> SyscallResult {
+pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -> SyscallResult {
     const MAP_ANONYMOUS: u32 = 0x20;
     const MAP_FIXED: u32 = 0x10;
-    let _ = fd;
 
     if len == 0 {
         return Err(SyscallError::InvalidArgument);
@@ -54,7 +53,11 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, _off: u64) 
         .unwrap_or(false);
 
     if has_as {
-        let result = crate::vmm::mmap(pid, addr, len, prot as u64, flags as u64);
+        let result = if fd >= 0 && flags & MAP_ANONYMOUS == 0 {
+            crate::mmap::sys_mmap(pid, addr, len, prot as u64, flags as u64, fd as i64, off)
+        } else {
+            crate::vmm::mmap(pid, addr, len, prot as u64, flags as u64)
+        };
         if result >= 0 {
             Ok(result as u64)
         } else if result == -13 {

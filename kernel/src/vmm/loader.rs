@@ -161,6 +161,58 @@ pub fn load_elf_into_address_space(pid: Pid, elf_data: &[u8]) -> Result<(u64, u6
     Ok((header.e_entry, brk))
 }
 
+/// Result of mapping a user ELF, including a PT_INTERP image when present.
+pub struct LoadedExec {
+    /// Address `iretq` should enter (interpreter if dynamically linked).
+    pub start_entry: u64,
+    /// `AT_ENTRY` — the main binary's entry, not the interpreter's.
+    pub main_entry: u64,
+    pub phdr: u64,
+    pub phnum: u64,
+    pub phent: u64,
+    pub interp_base: u64,
+}
+
+/// Map `elf_data` and, if it names a PT_INTERP, also map that interpreter.
+pub fn load_exec_image(pid: Pid, elf_data: &[u8]) -> Result<LoadedExec, &'static str> {
+    let main_entry = load_elf_into_address_space(pid, elf_data)?.0;
+    let phdr = crate::elf::phdr_vaddr(elf_data);
+    let phnum = crate::elf::phnum(elf_data);
+    let mut start_entry = main_entry;
+    let mut interp_base = 0u64;
+
+    if let Some(path) = crate::elf::interpreter_path(elf_data) {
+        let interp = {
+            let vfs = crate::vfs::VFS.lock();
+            vfs.read_file(&path)
+                .ok_or("PT_INTERP not found in VFS")?
+                .to_vec()
+        };
+        if !crate::elf::is_elf(&interp) {
+            return Err("PT_INTERP is not ELF");
+        }
+        start_entry = load_elf_into_address_space(pid, &interp)?.0;
+        interp_base = crate::elf::pt_load_base(&interp);
+        serial_println!(
+            "[VMM] PT_INTERP {} base={:#x} entry={:#x} AT_ENTRY={:#x} AT_PHDR={:#x}",
+            path,
+            interp_base,
+            start_entry,
+            main_entry,
+            phdr
+        );
+    }
+
+    Ok(LoadedExec {
+        start_entry,
+        main_entry,
+        phdr,
+        phnum,
+        phent: 56,
+        interp_base,
+    })
+}
+
 /// Map a static ELF plus a small user stack into the **current** page tables
 /// with `USER_ACCESSIBLE`. Used for Gate B2 (first Ring 3 hello) so `iretq`
 /// does not need a CR3 switch.
@@ -314,6 +366,8 @@ pub fn setup_initial_stack(
     entry_point: u64,
     phdr_addr: u64,
     phdr_num: u64,
+    phdr_ent: u64,
+    interp_base: u64,
 ) -> Option<u64> {
     let offset = PHYS_MEM_OFFSET.load(Ordering::Relaxed);
     if offset == 0 {
@@ -396,8 +450,12 @@ pub fn setup_initial_stack(
     push_u64(&mut sp, 0); // AT_NULL
     push_u64(&mut sp, PAGE_SIZE);
     push_u64(&mut sp, 6); // AT_PAGESZ = 6
+    push_u64(&mut sp, interp_base);
+    push_u64(&mut sp, 7); // AT_BASE = 7
     push_u64(&mut sp, entry_point);
     push_u64(&mut sp, 9); // AT_ENTRY = 9
+    push_u64(&mut sp, if phdr_ent == 0 { 56 } else { phdr_ent });
+    push_u64(&mut sp, 4); // AT_PHENT = 4
     push_u64(&mut sp, phdr_num);
     push_u64(&mut sp, 5); // AT_PHNUM = 5
     push_u64(&mut sp, phdr_addr);
