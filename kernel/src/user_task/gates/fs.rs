@@ -365,3 +365,16 @@ pub(super) fn run_gate_am2() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate AM2 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bl1() {
+    serial_println!("[user_task] Gate BL1: close_range then read is EBADF");
+    let elf = crate::init::close_range_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "close-range-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BL1 parent pid={} reaped={}", pid, reaped);
+}

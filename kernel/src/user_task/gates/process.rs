@@ -160,6 +160,32 @@ pub(super) fn run_gate_k1() {
     serial_println!("[user_task] Gate K1 parent pid={} reaped={}", pid, reaped);
 }
 
+pub(super) fn run_gate_bl2() {
+    serial_println!("[user_task] Gate BL2: pidfd_open of self");
+    let elf = crate::init::pidfd_open_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "pidfd-open-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BL2 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_bl3() {
+    serial_println!("[user_task] Gate BL3: clone3 child then wait4");
+    let elf = crate::init::clone3_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "clone3-demo") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BL3 parent pid={} reaped={}", pid, reaped);
+}
+
 pub(super) fn run_gate_k3() {
     serial_println!("[user_task] Gate K3: /sbin/init in Ring 3");
     let elf = {

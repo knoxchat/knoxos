@@ -237,3 +237,8 @@ pub const GATE_BK1_MARKER: &str = "GATE_BK1 setsockopt";
 pub const GATE_BK2_MARKER: &str = "GATE_BK2 tcp_send";
 pub const GATE_BK3_MARKER: &str = "GATE_BK3 tcp_recv";
 pub const GATE_BK4_MARKER: &str = "GATE_BK4 enosys";
+
+pub const GATE_BL1_MARKER: &str = "GATE_BL1 close_range";
+pub const GATE_BL2_MARKER: &str = "GATE_BL2 pidfd_open";
+pub const GATE_BL3_MARKER: &str = "GATE_BL3 clone3";
+pub const GATE_BL4_MARKER: &str = "GATE_BL4 enosys";

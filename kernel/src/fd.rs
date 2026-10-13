@@ -108,6 +108,11 @@ pub(crate) fn inotify_id_from_path(path: &str) -> Option<i32> {
     path.strip_prefix("inotify:")?.parse().ok()
 }
 
+/// Parse `pidfd:{id}` written by `sys_pidfd_open`.
+pub(crate) fn pidfd_id_from_path(path: &str) -> Option<u64> {
+    path.strip_prefix("pidfd:")?.parse().ok()
+}
+
 /// Path recorded for a process fd, if the fd is open.
 pub fn path_for_fd(pid: u32, fd: Fd) -> Option<String> {
     PROCESS_FD_TABLES
@@ -317,6 +322,43 @@ impl FdTable {
         }
         if let Some(id) = inotify_id_from_path(&file.path) {
             crate::inotify::inotify_close(id);
+        }
+        if let Some(id) = pidfd_id_from_path(&file.path) {
+            crate::pidfd::pidfd_close(id);
+        }
+        Ok(())
+    }
+
+    /// close_range(first, last, flags) — close or set CLOEXEC on fds in [first, last].
+    pub fn close_range(&mut self, first: u32, last: u32, flags: u32) -> Result<(), i32> {
+        const CLOSE_RANGE_UNSHARE: u32 = 1 << 1;
+        const CLOSE_RANGE_CLOEXEC: u32 = 1 << 2;
+        if first > last {
+            return Err(-22); // EINVAL
+        }
+        if flags & !(CLOSE_RANGE_UNSHARE | CLOSE_RANGE_CLOEXEC) != 0 {
+            return Err(-22);
+        }
+        let last_fd = if last == u32::MAX {
+            i32::MAX
+        } else {
+            last as i32
+        };
+        let first_fd = first as i32;
+        let fds: Vec<Fd> = self
+            .files
+            .keys()
+            .copied()
+            .filter(|&fd| fd >= first_fd && fd <= last_fd)
+            .collect();
+        if flags & CLOSE_RANGE_CLOEXEC != 0 {
+            for fd in fds {
+                self.set_cloexec(fd, true);
+            }
+        } else {
+            for fd in fds {
+                let _ = self.close(fd);
+            }
         }
         Ok(())
     }
@@ -816,6 +858,17 @@ pub fn sys_close(fd: Fd) -> Result<(), i32> {
     let mut tables = PROCESS_FD_TABLES.lock();
     if let Some(table) = tables.get_mut(&pid) {
         table.close(fd)
+    } else {
+        Err(-9) // EBADF
+    }
+}
+
+/// close_range(first, last, flags) on the current process's fd table
+pub fn sys_close_range(first: u32, last: u32, flags: u32) -> Result<(), i32> {
+    let pid = current_pid();
+    let mut tables = PROCESS_FD_TABLES.lock();
+    if let Some(table) = tables.get_mut(&pid) {
+        table.close_range(first, last, flags)
     } else {
         Err(-9) // EBADF
     }

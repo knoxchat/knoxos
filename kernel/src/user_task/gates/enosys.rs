@@ -690,3 +690,16 @@ pub(super) fn run_gate_bk4() {
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate BK4 parent pid={} reaped={}", pid, reaped);
 }
+
+pub(super) fn run_gate_bl4() {
+    serial_println!("[user_task] Gate BL4: delete_module returns ENOSYS");
+    let elf = crate::init::delete_module_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "delete-module-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate BL4 parent pid={} reaped={}", pid, reaped);
+}

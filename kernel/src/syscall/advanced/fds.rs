@@ -4,7 +4,29 @@ use crate::syscall::{SyscallError, SyscallResult, read_user_string};
 // ── pidfd operations ────────────────────────────────────────────────
 
 pub fn sys_pidfd_open(pid: u64, flags: u32) -> SyscallResult {
-    crate::pidfd::sys_pidfd_open(pid, flags).map_err(|_| SyscallError::InvalidArgument)
+    let id = crate::pidfd::sys_pidfd_open(pid, flags).map_err(|e| match e {
+        crate::pidfd::PidFdError::NotFound => SyscallError::NoSuchProcess,
+        crate::pidfd::PidFdError::TooMany => SyscallError::TooManyFiles,
+        _ => SyscallError::InvalidArgument,
+    })?;
+    let caller = crate::scheduler::current_pid().unwrap_or(1);
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables.get_mut(&caller).ok_or(SyscallError::TooManyFiles)?;
+    let mut o_flags = crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDONLY);
+    if flags & crate::pidfd::PIDFD_NONBLOCK != 0 {
+        o_flags.0 |= crate::fd::OpenFlags::O_NONBLOCK;
+    }
+    match fd_table.open(
+        &alloc::format!("pidfd:{}", id),
+        o_flags,
+        crate::fd::FileType::CharDevice,
+    ) {
+        Ok(fd) => Ok(fd as u64),
+        Err(_) => {
+            crate::pidfd::pidfd_close(id);
+            Err(SyscallError::TooManyFiles)
+        }
+    }
 }
 
 pub fn sys_pidfd_send_signal(pidfd: u64, sig: i32, info: u64, flags: u32) -> SyscallResult {
@@ -50,10 +72,12 @@ pub fn sys_userfaultfd(flags: u32) -> SyscallResult {
 // ── close_range ─────────────────────────────────────────────────────
 
 pub fn sys_close_range(first: u32, last: u32, flags: u32) -> SyscallResult {
-    let pid = crate::scheduler::current_pid().unwrap_or(1);
-    crate::close_range::close_range(pid, first, last, flags)
+    crate::fd::sys_close_range(first, last, flags)
         .map(|_| 0u64)
-        .map_err(|_| SyscallError::InvalidArgument)
+        .map_err(|e| match e {
+            -22 => SyscallError::InvalidArgument,
+            _ => SyscallError::BadFileDescriptor,
+        })
 }
 
 // ── signalfd ────────────────────────────────────────────────────────

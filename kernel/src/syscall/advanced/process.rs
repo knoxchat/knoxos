@@ -13,38 +13,32 @@ pub fn sys_gettid() -> SyscallResult {
 // ── clone3 ──────────────────────────────────────────────────────────
 
 pub fn sys_clone3(cl_args_ptr: u64, size: u64) -> SyscallResult {
-    // clone3 uses a clone_args struct
-    // Parse the flags from clone_args (first u64 field)
-    let flags = if cl_args_ptr != 0 && size >= 8 {
-        unsafe { *(cl_args_ptr as *const u64) }
-    } else {
-        0
+    // Linux clone_args: flags@0, pidfd@8, child_tid@16, parent_tid@24,
+    // exit_signal@32, stack@40, stack_size@48, tls@56. VER0 size is 64.
+    const CLONE_ARGS_SIZE_VER0: u64 = 64;
+    if cl_args_ptr == 0 || size < CLONE_ARGS_SIZE_VER0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let n = core::cmp::min(size, 88) as usize;
+    let mut buf = [0u8; 88];
+    unsafe {
+        core::ptr::copy_nonoverlapping(cl_args_ptr as *const u8, buf.as_mut_ptr(), n);
+    }
+    let u64_at = |off: usize| -> u64 {
+        let mut b = [0u8; 8];
+        if off + 8 <= n {
+            b.copy_from_slice(&buf[off..off + 8]);
+        }
+        u64::from_ne_bytes(b)
     };
+    let flags = u64_at(0);
+    let child_tid = u64_at(16);
+    let parent_tid = u64_at(24);
+    let stack = u64_at(40);
+    let tls = u64_at(56);
 
     const CLONE_NEWNS: u64 = 0x00020000;
     const CLONE_NEWPID: u64 = 0x20000000;
-
-    let stack = if cl_args_ptr != 0 && size >= 48 {
-        unsafe { *((cl_args_ptr + 40) as *const u64) }
-    } else {
-        0
-    };
-    let parent_tid = if cl_args_ptr != 0 && size >= 32 {
-        unsafe { *((cl_args_ptr + 16) as *const u64) }
-    } else {
-        0
-    };
-    let child_tid = if cl_args_ptr != 0 && size >= 72 {
-        unsafe { *((cl_args_ptr + 64) as *const u64) }
-    } else {
-        0
-    };
-    let tls = if cl_args_ptr != 0 && size >= 88 {
-        unsafe { *((cl_args_ptr + 80) as *const u64) }
-    } else {
-        0
-    };
-
     if flags & CLONE_NEWNS != 0 || flags & CLONE_NEWPID != 0 {
         serial_println!("[KnoxOS] clone3 with namespace flags {:#x}", flags);
     }

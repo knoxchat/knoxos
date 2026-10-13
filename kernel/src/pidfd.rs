@@ -78,22 +78,24 @@ pub fn sys_pidfd_open(pid: u64, flags: u32) -> Result<u64, PidFdError> {
     if pid == 0 {
         return Err(PidFdError::InvalidPid);
     }
+    if flags & !(PIDFD_NONBLOCK | PIDFD_THREAD) != 0 {
+        return Err(PidFdError::InvalidPid);
+    }
 
-    // Check process exists
     let process_exists = crate::process::PROCESS_TABLE
         .lock()
-        .processes
-        .get(pid as usize)
+        .get_process(pid as u32)
         .is_some();
     if !process_exists {
         return Err(PidFdError::NotFound);
     }
 
+    let owner = crate::scheduler::current_pid().unwrap_or(0) as u64;
     let mut table = PIDFDS.lock();
     let id = table.next_id;
     table.next_id += 1;
 
-    let pidfd = PidFd::new(id, pid, flags, 0);
+    let pidfd = PidFd::new(id, pid, flags, owner);
     table.fds.insert(id, pidfd);
 
     // Register as watcher
