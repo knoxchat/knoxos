@@ -6,9 +6,9 @@
 
 | Blocker | Evidence | Why it blocks a perfect OS |
 |---------|----------|----------------------------|
-| **Scheduled Ring 3** | Hello is a CFS task with its own CR3; `execve`/`waitpid`/`fork`/`clone(CLONE_VM)`/`/bin/sh` run on the boot path. | Desktop apps other than the Gate F demo are still in-kernel. |
+| **Scheduled Ring 3** | Hello is a CFS task with its own CR3; `execve`/`waitpid`/`fork`/`clone(CLONE_VM)`/`/bin/sh` run on the boot path. Calculator is Ring 3 SHM (F6). | Interactive terminal, Files, Browser, Editor, Settings, Task Manager, AI Assistant still in-kernel. |
 | **Ring 3 timer preemption** | Naked APIC-timer stub saves GPRs + FXSAVE then `enter_context`s (`GATE_B8` + `GATE_I2 irq gprs`). | Done for the spinning-user case. |
-| **SMP** | INIT/SIPI trampoline; AP loads per-CPU TSS + GS, starts its LAPIC timer, and runs a pinned Ring 3 task (`GATE_I1 smp online`, `GATE_I3 ap ring3`). | Further APs still share one CFS `current` for the BSP desktop. |
+| **SMP** | INIT/SIPI trampoline; AP loads per-CPU TSS + GS, starts its LAPIC timer, runs pinned (I3) and unpinned (I4) Ring 3; per-CPU CFS `current`. | Further APs beyond the QEMU `-smp 2` pair unproven. |
 | **Signal frames for handlers** | Default terminate plus a live SIGINT handler + `rt_sigreturn` (B7). | Catching SIGINT in a user handler is done. |
 | **Sockets do not transmit off-box** | Loopback `send` delivers to a peer `recv_buf`. VirtIO-net TX/RX rings are live (D2). DHCP writes `eth0`. DNS + TCP SYN/retransmit/HTTP are live (D4). CUBIC cwnd limits send (D5). | Off-box TCP is live; CUBIC is wired. |
 | **AHCI and NVMe DMA are live** | AHCI command-list + PRDT round-trips a sector (C4). NVMe admin/I/O queues + PRP bounce round-trip a sector (C5). | Bare-metal beyond QEMU still unproven. |

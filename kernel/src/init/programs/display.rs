@@ -19,6 +19,11 @@ pub fn launcher_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF33_66CC, b"GATE_F4 launcher userspace\n")
 }
 
+/// Gate F6: Calculator is a Ring 3 SHM client, not `WindowContentType::Calculator`.
+pub fn calculator_client_elf_data() -> Vec<u8> {
+    shm_present_client_elf(0xFF20_C997, b"GATE_F6 calculator userspace\n")
+}
+
 /// Gate F5: mmap SHM, `connect(/run/wayland-0)`, `sendto` the buffer vaddr.
 pub fn wayland_unix_client_elf_data() -> Vec<u8> {
     let marker = b"GATE_F5 wayland unix\n";

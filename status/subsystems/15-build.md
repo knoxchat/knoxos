@@ -13,9 +13,9 @@
 - [x] **`.github/workflows/ci.yml`** — docs, fmt, clippy+size, QEMU BIOS boot
 
 ### Missing (old status was wrong)
-- [ ] **`flake.nix`** — `make nix-build` would fail; file absent
+- [x] **`flake.nix`** — present (devShell + QEMU/Make; kernel still rustup nightly)
 - [ ] Cargo workspace unifying `kernel` + `boot` + `tools`
-- [ ] Feature flags so Unused modules do not compile into the demo kernel
+- [x] Feature flags so Unused modules do not compile into the demo kernel (`gui`/`net` default)
 - [ ] Signed ISO / Secure Boot artifacts
 
 ---

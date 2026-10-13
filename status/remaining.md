@@ -8,9 +8,9 @@ Every remaining `- [ ]` in the subsystem files, plus unfinished Gate G. This is 
 
 | ID | Task | Done when |
 |----|------|-----------|
-| G3 | Feature flags: `gui`, `net`, `fs-ext4`, `stub-drivers` | Default kernel compiles **Live** code only |
-| G4 | Syscall audit spreadsheet: implemented / no-op / ENOSYS | **Partial** — `bpf`/`pkey`/`process_mrelease`/`quotactl`/`remap_file_pages`/`io_uring_*`/`userfaultfd`/`perf_event_open`/`fanotify`/`io_setup`/`io_destroy`/`kexec`/`init_module`/`mount_setattr`/`fsopen`/`keyctl`/`ioperm`/`iopl`/`acct`/`swapon`/`swapoff`/`modify_ldt`/`sysfs`/`vhangup`/`lookup_dcookie`/`memfd_secret`/`uselib`/`pkey_mprotect`/`process_mrelease`/`set_mempolicy`/`get_mempolicy`/`mbind`/`migrate_pages`/`move_pages`/`sched_setattr`/`sched_getattr`/`futex_waitv`/`open_by_handle_at`/`name_to_handle_at`/`map_shadow_stack`/`ustat`/`set_thread_area`/`add_key`/`request_key`/`io_submit`/`io_getevents`/`io_pgetevents`/`fsconfig`/`fsmount`/`open_tree`/`move_mount`/`fspick`/`delete_module`/KVM vCPU regs return ENOSYS (J4, L4, M4, N4, O4, P4, Q4, R4, S4, T4, U4, V4, W4, X4, Y4, Z4, AA4, AB4, AC4, AD4, AE4, AF4, AG4, AH4, AI4, AJ4, AK4, AL4, AM4, AN4, AO4, AP4, AQ4, AR4, AS4, AT4, AU4, AV4, AW4, AX4, AY4, AZ4, BA4, BB4, BC4, BD4, BE4, BF4, BG4, BH4, BI4, BJ4, BK4, BL4); remaining silent `Ok(0)` still exist |
-| G5 | `unsafe` SAFETY comments + size budget | Clippy gate |
+| G3 | Feature flags: `gui`, `net`, `fs-ext4`, `stub-drivers` | **Done** — default `gui`+`net`; stubs/ext4 opt-in (`GATE_G3 features live`) |
+| G4 | Syscall audit spreadsheet: implemented / no-op / ENOSYS | **Partial** — prior ENOSYS gates plus `adjtimex`/`settimeofday`/`clock_settime`/`mq_notify` (`GATE_G4 enosys`); `sched_setaffinity`/`sched_getaffinity` write a real mask. Remaining documented no-ops: `madvise`, `mlock*`, `readahead`, `fadvise64`, `set_robust_list` |
+| G5 | `unsafe` SAFETY comments + size budget | **Partial** — 16 MB size gate; SAFETY on boot PIC/memory + SMP idle. Crate-level `undocumented_unsafe_blocks = warn` is off (`pre-commit.sh` clippy `-D warnings`). Deny-all still open |
 
 ## 1. Kernel Core
 
@@ -147,9 +147,9 @@ Details: [subsystems/14-i18n.md](subsystems/14-i18n.md)
 
 Details: [subsystems/15-build.md](subsystems/15-build.md)
 
-- [ ] **`flake.nix`** — `make nix-build` would fail; file absent
+- [x] **`flake.nix`** — present (devShell + QEMU/Make; kernel still rustup nightly)
 - [ ] Cargo workspace unifying `kernel` + `boot` + `tools`
-- [ ] Feature flags so Unused modules do not compile into the demo kernel
+- [x] Feature flags so Unused modules do not compile into the demo kernel (`gui`/`net` default; `stub-drivers`/`fs-ext4` opt-in)
 - [ ] Signed ISO / Secure Boot artifacts
 
 ## 16. Testing & Quality
@@ -157,7 +157,7 @@ Details: [subsystems/15-build.md](subsystems/15-build.md)
 Details: [subsystems/16-testing.md](subsystems/16-testing.md)
 
 - [ ] No `#[test]` (expected for `no_std`, but host-side tests could exist)
-- [ ] 300+ `unsafe` blocks without a systematic SAFETY audit
+- [ ] Clippy `undocumented_unsafe_blocks` stays **allow** (crate-level warn would fail `scripts/pre-commit.sh` `-D warnings` on ~1100 existing `unsafe`); deny-all still open
 - [ ] No Miri, no fuzz of ELF/ext4/packet parsers, no coverage
 
 ## 17. Documentation

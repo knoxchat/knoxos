@@ -19,6 +19,10 @@ pub const GATE_B8_MARKER: &str = "GATE_B8 timer preempt complete";
 pub const GATE_I2_MARKER: &str = "GATE_I2 irq gprs";
 /// Application Processor ran a Ring 3 task (`getcpu` reported CPU 1).
 pub const GATE_I3_MARKER: &str = "GATE_I3 ap ring3";
+/// Unpinned Ring 3 task ran on an idle AP via load balance (not BSP CFS current).
+pub const GATE_I4_MARKER: &str = "GATE_I4 smp balance";
+/// Remaining silent clock/time no-ops return ENOSYS.
+pub const GATE_G4_MARKER: &str = "GATE_G4 enosys";
 /// Ring 3 client presented a buffer; not an in-kernel WindowContentType app.
 pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
 /// Ring 3 client presented via AF_UNIX `/run/wayland-0`, not ioctl(`/dev/wl0`).

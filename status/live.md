@@ -34,7 +34,11 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 26. **Gate BM3 static musl CRT** — a Ring 3 binary that is not the hello fixture: musl `crt1` `_start` calls `__libc_start_main`, which calls `main` (`GATE_BM3 musl abi`).
 27. **Gate BM4 dynamically linked musl** — PT_INTERP `/lib/ld-knoxos.so`, DT_NEEDED `/lib/libc.so`; crt1 `_start` calls `__libc_start_main@plt`, which calls `main` (`GATE_BM4 musl dynlink`). Generated in-kernel (same class as BM1–BM3), not a host musl-gcc binary.
 28. **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual.
+29. **Gate G3 feature flags** — default kernel is `gui`+`net`; `stub-drivers` and `fs-ext4` are off (`GATE_G3 features live`).
+30. **Gate G4 honesty** — `adjtimex` returns `-ENOSYS` from Ring 3 (`GATE_G4 enosys`); `sched_setaffinity` writes a real mask.
+31. **Gate F6 calculator userspace** — Ring 3 SHM client, not `WindowContentType::Calculator` (`GATE_F6 calculator userspace`).
+32. **Gate I4 SMP balance** — unpinned Ring 3 `getcpu` runs on idle CPU 1 without claiming BSP CFS current (`GATE_I4 smp balance`).
 
 Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are proven on the same boot path. They are archived under [gates/syscalls.md](gates/syscalls.md), not repeated here.
 
-Integration: `./tests/run_integration.sh` **272/272** on QEMU (2026-10-13).
+Integration: `./tests/run_integration.sh` **276/276** on QEMU (2026-10-13).

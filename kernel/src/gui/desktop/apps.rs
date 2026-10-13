@@ -10,7 +10,10 @@ use super::types::IconType;
 pub fn open_application(name: &str, icon_type: IconType) {
     // Route Empty launcher stubs to a Ring 3 SHM client (Gate F4).
     match name {
-        "Paint" | "Video Player" | "Webamp" | "Doom" | "ClassiCube" | "Quake III" => {
+        "Paint" | "Video Player" | "Webamp" | "Doom" | "ClassiCube" | "Quake III"
+        | "Image Viewer" | "Log Viewer" | "Logs" | "Calendar" | "Bluetooth"
+        | "Bluetooth Manager" | "Software Updater" | "Updates" | "Software Center"
+        | "App Store" | "Disk Utility" | "Disks" | "Setup Wizard" | "Archive Manager" => {
             crate::user_task::spawn_launcher_app(name);
             return;
         }
@@ -19,39 +22,7 @@ pub fn open_application(name: &str, icon_type: IconType) {
             return;
         }
         "Calculator" => {
-            crate::gui::calculator::open();
-            return;
-        }
-        "Image Viewer" => {
-            crate::gui::image_viewer::open();
-            return;
-        }
-        "Log Viewer" | "Logs" => {
-            crate::gui::log_viewer::open();
-            return;
-        }
-        "Calendar" => {
-            crate::gui::calendar_app::open();
-            return;
-        }
-        "Bluetooth" | "Bluetooth Manager" => {
-            crate::gui::bt_manager::open();
-            return;
-        }
-        "Software Updater" | "Updates" => {
-            crate::gui::software_updater::open();
-            return;
-        }
-        "Software Center" | "App Store" => {
-            crate::gui::software_center::open();
-            return;
-        }
-        "Disk Utility" | "Disks" => {
-            crate::gui::disk_utility::open();
-            return;
-        }
-        "Setup Wizard" => {
-            crate::gui::setup_wizard::open();
+            crate::user_task::spawn_calculator_app();
             return;
         }
         _ => {}

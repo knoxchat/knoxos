@@ -10,13 +10,13 @@ The full status tree lives in [`status/`](status/README.md). This file is the st
 
 | File | Purpose |
 |------|---------|
-| [status/next.md](status/next.md) | Ordered remaining work (`ld.so` + musl dynlink + Wayland AF_UNIX done, Gate G, live-path gaps) |
+| [status/next.md](status/next.md) | Ordered remaining work (G3 features + F6 calculator + I4 SMP balance live; G4/G5 partial) |
 | [status/README.md](status/README.md) | Honesty tags, what a perfect OS is, file map |
 | [status/remaining.md](status/remaining.md) | Every open checkbox (inventory, not sequence) |
 | [status/blockers.md](status/blockers.md) | Architectural gaps |
 | [status/live.md](status/live.md) | What the QEMU boot path actually does |
 | [status/subsystems.md](status/subsystems.md) | 18-area grades |
-| [status/gates/](status/gates/README.md) | Gates A–BL + BM1–BM4 + F5 + C7 (G3–G5 still open) |
+| [status/gates/](status/gates/README.md) | Gates A–BL + BM1–BM4 + F5 + C7 + G3 + F6 + I4 (G4/G5 still partial) |
 | [status/progress.md](status/progress.md) | Score bars and anti-goals |
 
-Integration: `./tests/run_integration.sh` **272/272** on QEMU (2026-10-13).
+Integration: `./tests/run_integration.sh` **276/276** on QEMU (2026-10-13).

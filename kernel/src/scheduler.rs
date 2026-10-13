@@ -48,7 +48,7 @@ pub enum SchedPolicy {
 }
 
 /// SCHED_DEADLINE parameters for a process
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DeadlineParams {
     /// Runtime budget per period (in ticks)
     pub runtime: u64,
@@ -67,7 +67,7 @@ pub struct DeadlineParams {
 }
 
 /// Per-process scheduling info
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SchedInfo {
     pub pid: Pid,
     pub policy: SchedPolicy,
@@ -77,6 +77,8 @@ pub struct SchedInfo {
     pub vruntime: u64,      // Virtual runtime (for CFS-like fairness)
     pub cpu_affinity: u64,  // CPU affinity mask (bitmask of allowed CPUs)
     pub deadline_params: Option<DeadlineParams>, // SCHED_DEADLINE params
+    /// CPU that owns this task for SMP dispatch (`None` = BSP CFS).
+    pub placed_cpu: Option<u32>,
 }
 
 impl SchedInfo {
@@ -90,6 +92,7 @@ impl SchedInfo {
             vruntime: 0,
             cpu_affinity: u64::MAX, // all CPUs allowed
             deadline_params: None,
+            placed_cpu: None,
         }
     }
 
@@ -116,8 +119,8 @@ impl SchedInfo {
 pub struct Scheduler {
     /// Run queue - processes ready to execute
     run_queue: VecDeque<SchedInfo>,
-    /// Currently running process
-    current: Option<SchedInfo>,
+    /// Per-CPU currently running process. Slot 0 is the BSP desktop CFS.
+    current_by_cpu: [Option<SchedInfo>; crate::smp::MAX_CPUS],
     /// Wait queue - processes waiting for events
     wait_queue: Vec<SchedInfo>,
     /// Idle process PID
@@ -137,10 +140,23 @@ impl Default for Scheduler {
 }
 
 impl Scheduler {
+    fn cpu_i() -> usize {
+        crate::usermode::current_cpu_index().min(crate::smp::MAX_CPUS as u32 - 1) as usize
+    }
+
+    fn current_slot(&self) -> &Option<SchedInfo> {
+        &self.current_by_cpu[Self::cpu_i()]
+    }
+
+    fn current_slot_mut(&mut self) -> &mut Option<SchedInfo> {
+        let i = Self::cpu_i();
+        &mut self.current_by_cpu[i]
+    }
+
     pub fn new() -> Self {
         Self {
             run_queue: VecDeque::new(),
-            current: None,
+            current_by_cpu: [None; crate::smp::MAX_CPUS],
             wait_queue: Vec::new(),
             idle_pid: 0,
             enabled: false,
@@ -158,7 +174,7 @@ impl Scheduler {
             .run_queue
             .iter()
             .map(|s| s.vruntime)
-            .chain(self.current.iter().map(|s| s.vruntime))
+            .chain(self.current_by_cpu.iter().flatten().map(|s| s.vruntime))
             .min()
             .unwrap_or(0);
         info.vruntime = min_vr;
@@ -169,9 +185,9 @@ impl Scheduler {
     pub fn remove_process(&mut self, pid: Pid) {
         self.run_queue.retain(|s| s.pid != pid);
         self.wait_queue.retain(|s| s.pid != pid);
-        if let Some(ref current) = self.current {
-            if current.pid == pid {
-                self.current = None;
+        for slot in self.current_by_cpu.iter_mut() {
+            if slot.as_ref().map(|c| c.pid) == Some(pid) {
+                *slot = None;
             }
         }
     }
@@ -184,9 +200,9 @@ impl Scheduler {
             self.wait_queue.push(info);
         }
         // If it's the current process, force reschedule
-        if let Some(ref current) = self.current {
+        if let Some(ref current) = *self.current_slot() {
             if current.pid == pid {
-                let mut info = self.current.take().unwrap();
+                let mut info = self.current_slot_mut().take().unwrap();
                 info.time_slice = info.effective_time_slice(); // Reset time slice
                 self.wait_queue.push(info);
             }
@@ -210,7 +226,7 @@ impl Scheduler {
                 return;
             }
         }
-        if let Some(ref mut current) = self.current {
+        if let Some(ref mut current) = *self.current_slot_mut() {
             if current.pid == pid {
                 current.priority = priority;
             }
@@ -219,7 +235,7 @@ impl Scheduler {
 
     /// Get the currently running process PID
     pub fn current_pid(&self) -> Option<Pid> {
-        self.current.as_ref().map(|s| s.pid)
+        self.current_slot().as_ref().map(|s| s.pid)
     }
 
     /// Forget the running task without requeueing it.
@@ -228,30 +244,30 @@ impl Scheduler {
     /// `current` back onto the run queue, which would resurrect a task that is
     /// no longer runnable.
     pub fn clear_current(&mut self) {
-        self.current = None;
+        *self.current_slot_mut() = None;
     }
 
     /// Make `pid` the running task without putting the outgoing task back
     /// on the run queue (exit / block / abandon).
     pub fn set_running(&mut self, pid: Pid) {
-        if self.current.as_ref().map(|c| c.pid) == Some(pid) {
+        if self.current_slot().as_ref().map(|c| c.pid) == Some(pid) {
             return;
         }
-        self.current = None;
+        *self.current_slot_mut() = None;
         if let Some(pos) = self.run_queue.iter().position(|s| s.pid == pid) {
-            self.current = self.run_queue.remove(pos);
+            *self.current_slot_mut() = self.run_queue.remove(pos);
         } else if let Some(pos) = self.wait_queue.iter().position(|s| s.pid == pid) {
-            self.current = Some(self.wait_queue.remove(pos));
+            *self.current_slot_mut() = Some(self.wait_queue.remove(pos));
         } else {
-            self.current = Some(SchedInfo::new(pid, 0));
+            *self.current_slot_mut() = Some(SchedInfo::new(pid, 0));
         }
     }
 
     /// Cooperative switch: the outgoing task stays runnable.
     pub fn switch_running(&mut self, pid: Pid) {
-        if let Some(cur) = self.current.take() {
+        if let Some(cur) = self.current_slot_mut().take() {
             if cur.pid == pid {
-                self.current = Some(cur);
+                *self.current_slot_mut() = Some(cur);
                 return;
             }
             if !self.run_queue.iter().any(|s| s.pid == cur.pid)
@@ -272,7 +288,8 @@ impl Scheduler {
 
         self.tick_count += 1;
 
-        if let Some(ref mut current) = self.current {
+        let min_vr = self.run_queue.iter().map(|s| s.vruntime).min();
+        if let Some(ref mut current) = *self.current_slot_mut() {
             current.total_runtime += 1;
             // CFS: vruntime grows inversely proportional to weight.
             // delta_vruntime = delta_exec * (NICE_0_WEIGHT / weight)
@@ -291,7 +308,7 @@ impl Scheduler {
 
             // CFS preemption: if a process in the run queue has a much smaller
             // vruntime, preempt early to maintain fairness.
-            if let Some(min_vr) = self.run_queue.iter().map(|s| s.vruntime).min() {
+            if let Some(min_vr) = min_vr {
                 if current.vruntime > min_vr + 4 {
                     return true; // Preempt: current has run ahead by >4 vruntime units
                 }
@@ -310,7 +327,7 @@ impl Scheduler {
         let cpu_bit = 1u64 << crate::usermode::current_cpu_index().min(63);
 
         // Put current process back in the run queue
-        if let Some(mut current) = self.current.take() {
+        if let Some(mut current) = self.current_slot_mut().take() {
             current.time_slice = current.effective_time_slice();
             self.run_queue.push_back(current);
         }
@@ -319,8 +336,11 @@ impl Scheduler {
             return Some(self.idle_pid);
         }
 
+        let cpu = Self::cpu_i() as u32;
         let allowed = |s: &SchedInfo| {
-            !crate::context::is_ap_idle_pid(s.pid) && (s.cpu_affinity & cpu_bit) != 0
+            !crate::context::is_ap_idle_pid(s.pid)
+                && (s.cpu_affinity & cpu_bit) != 0
+                && s.placed_cpu.is_none_or(|p| p == cpu)
         };
 
         // 1. SCHED_DEADLINE: pick earliest absolute deadline (EDF) that isn't throttled
@@ -345,7 +365,7 @@ impl Scheduler {
                     .as_ref()
                     .map_or(next.effective_time_slice(), |d| d.remaining_runtime.max(1));
                 let pid = next.pid;
-                self.current = Some(next);
+                *self.current_slot_mut() = Some(next);
                 self.context_switches += 1;
                 return Some(pid);
             }
@@ -365,7 +385,7 @@ impl Scheduler {
             if let Some(mut next) = self.run_queue.remove(idx) {
                 next.time_slice = next.effective_time_slice();
                 let pid = next.pid;
-                self.current = Some(next);
+                *self.current_slot_mut() = Some(next);
                 self.context_switches += 1;
                 return Some(pid);
             }
@@ -400,7 +420,7 @@ impl Scheduler {
         if let Some(mut next) = self.run_queue.remove(min_idx) {
             next.time_slice = next.effective_time_slice();
             let pid = next.pid;
-            self.current = Some(next);
+            *self.current_slot_mut() = Some(next);
             self.context_switches += 1;
             Some(pid)
         } else {
@@ -420,7 +440,7 @@ impl Scheduler {
             run_queue_len: self.run_queue.len(),
             wait_queue_len: self.wait_queue.len(),
             context_switches: self.context_switches,
-            current_pid: self.current.as_ref().map(|s| s.pid),
+            current_pid: self.current_slot().as_ref().map(|s| s.pid),
             tick_count: self.tick_count,
         }
     }
@@ -729,8 +749,11 @@ pub fn process_exists(pid: Pid) -> bool {
     if sched.wait_queue.iter().any(|e| e.pid == pid) {
         return true;
     }
-    // Check if it's the currently running process
-    if sched.current.as_ref().map(|c| c.pid) == Some(pid) {
+    if sched
+        .current_by_cpu
+        .iter()
+        .any(|c| c.as_ref().map(|s| s.pid) == Some(pid))
+    {
         return true;
     }
     false
@@ -762,7 +785,11 @@ pub fn set_deadline(
     // Admission control: check total utilization
     let mut total_util_num: u64 = 0;
     let mut total_util_den: u64 = 1;
-    for entry in sched.run_queue.iter().chain(sched.current.iter()) {
+    for entry in sched
+        .run_queue
+        .iter()
+        .chain(sched.current_by_cpu.iter().flatten())
+    {
         if entry.policy == SchedPolicy::Deadline && entry.pid != pid {
             if let Some(ref dl) = entry.deadline_params {
                 // Accumulate runtime/period using cross multiplication
@@ -794,7 +821,7 @@ pub fn set_deadline(
         for entry in entries.iter_mut() {
             if entry.pid == pid {
                 entry.policy = SchedPolicy::Deadline;
-                entry.deadline_params = Some(dl_params.clone());
+                entry.deadline_params = Some(dl_params);
                 return true;
             }
         }
@@ -802,7 +829,7 @@ pub fn set_deadline(
     };
 
     if !find_and_set(&mut sched.run_queue) {
-        if let Some(ref mut current) = sched.current {
+        if let Some(ref mut current) = *sched.current_slot_mut() {
             if current.pid == pid {
                 current.policy = SchedPolicy::Deadline;
                 current.deadline_params = Some(dl_params);
@@ -834,7 +861,7 @@ pub fn update_deadline_tasks() {
             }
         }
     }
-    if let Some(ref mut current) = sched.current {
+    if let Some(ref mut current) = *sched.current_slot_mut() {
         if current.policy == SchedPolicy::Deadline {
             if let Some(ref mut dl) = current.deadline_params {
                 if tick >= dl.period_start + dl.period {
@@ -864,7 +891,7 @@ pub fn set_cpu_affinity(pid: Pid, mask: u64) -> Result<(), &'static str> {
             return Ok(());
         }
     }
-    if let Some(ref mut current) = sched.current {
+    for current in sched.current_by_cpu.iter_mut().flatten() {
         if current.pid == pid {
             current.cpu_affinity = mask;
             return Ok(());
@@ -887,7 +914,7 @@ pub fn get_cpu_affinity(pid: Pid) -> Option<u64> {
             return Some(entry.cpu_affinity);
         }
     }
-    if let Some(ref current) = sched.current {
+    for current in sched.current_by_cpu.iter().flatten() {
         if current.pid == pid {
             return Some(current.cpu_affinity);
         }
@@ -898,6 +925,49 @@ pub fn get_cpu_affinity(pid: Pid) -> Option<u64> {
         }
     }
     None
+}
+
+/// Take an unpinned runnable task for `cpu`. Marks `placed_cpu` so BSP CFS skips it.
+pub fn steal_unpinned_for_cpu(cpu: u32) -> Option<Pid> {
+    let bit = 1u64 << cpu.min(63);
+    let mut sched = SCHEDULER.lock();
+    let pos = sched.run_queue.iter().position(|s| {
+        s.pid > crate::context::DESKTOP_PID
+            && !crate::context::is_ap_idle_pid(s.pid)
+            && s.placed_cpu.is_none()
+            && s.cpu_affinity.count_ones() != 1
+            && (s.cpu_affinity & bit) != 0
+    })?;
+    let pid = sched.run_queue[pos].pid;
+    sched.run_queue[pos].placed_cpu = Some(cpu);
+    Some(pid)
+}
+
+/// Record which CPU owns `pid` for SMP dispatch (BSP CFS skips other CPUs).
+pub fn set_placed_cpu(pid: Pid, cpu: u32) {
+    let mut sched = SCHEDULER.lock();
+    let apply = |info: &mut SchedInfo| {
+        if info.pid == pid {
+            info.placed_cpu = Some(cpu);
+            return true;
+        }
+        false
+    };
+    for entry in sched.run_queue.iter_mut() {
+        if apply(entry) {
+            return;
+        }
+    }
+    for current in sched.current_by_cpu.iter_mut().flatten() {
+        if apply(current) {
+            return;
+        }
+    }
+    for entry in sched.wait_queue.iter_mut() {
+        if apply(entry) {
+            return;
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -1193,10 +1193,12 @@ pub const GATE_F2_MARKER: &str = "GATE_F2 shm commit";
 pub const GATE_F3_MARKER: &str = "GATE_F3 terminal isolated";
 pub const GATE_F4_MARKER: &str = "GATE_F4 launcher userspace";
 pub const GATE_F5_MARKER: &str = "GATE_F5 wayland unix";
+pub const GATE_F6_MARKER: &str = "GATE_F6 calculator userspace";
 pub const WAYLAND_SOCKET_PATH: &str = "/run/wayland-0";
 const GATE_F_MAGIC: [u8; 4] = [0xEE, 0xFF, 0xC0, 0xFF];
 const GATE_F3_MAGIC: [u8; 4] = [0x1A, 0x1A, 0x1A, 0xFF];
 const GATE_F4_MAGIC: [u8; 4] = [0xCC, 0x66, 0x33, 0xFF];
+const GATE_F6_MAGIC: [u8; 4] = [0x97, 0xC9, 0x20, 0xFF];
 
 /// Present a Ring 3 SHM buffer as a compositor surface + desktop window.
 ///
@@ -1233,6 +1235,8 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
         "Terminal"
     } else if pixels.len() >= 4 && pixels[0..4] == GATE_F4_MAGIC {
         "Paint"
+    } else if pixels.len() >= 4 && pixels[0..4] == GATE_F6_MAGIC {
+        "Calculator"
     } else {
         "Client"
     };
@@ -1258,7 +1262,12 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
 
     let head = pixels.get(0..4);
     let magic_ok = match head {
-        Some(p) if *p == GATE_F_MAGIC || *p == GATE_F3_MAGIC || *p == GATE_F4_MAGIC => {
+        Some(p)
+            if *p == GATE_F_MAGIC
+                || *p == GATE_F3_MAGIC
+                || *p == GATE_F4_MAGIC
+                || *p == GATE_F6_MAGIC =>
+        {
             roundtrip.as_deref() == Some(p)
         }
         _ => false,
@@ -1283,6 +1292,13 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
             serial_println!(
                 "[WL] {} (window={} content=Empty SHM, not launcher stub)",
                 GATE_F4_MARKER,
+                wid
+            );
+        }
+        if pixels[0..4] == GATE_F6_MAGIC {
+            serial_println!(
+                "[WL] {} (window={} content=Empty SHM, not WindowContentType::Calculator)",
+                GATE_F6_MARKER,
                 wid
             );
         }

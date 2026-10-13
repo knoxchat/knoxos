@@ -454,3 +454,65 @@ pub(super) fn run_gate_i3() {
         }
     }
 }
+
+pub(super) fn run_gate_i4() {
+    serial_println!("[user_task] Gate I4: SMP load balance onto idle AP");
+    if crate::smp::online_cpus() < 2 {
+        serial_println!("[user_task] Gate I4 skipped: only one CPU online");
+        return;
+    }
+
+    crate::smp::clear_last_user_cpu();
+    let elf = crate::init::ap_ring3_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "smp-balance") else {
+        return;
+    };
+    crate::scheduler::set_placed_cpu(pid, 1);
+    crate::smp::enqueue_on_cpu(1, pid);
+
+    let start = crate::apic_timer::total_ticks();
+    loop {
+        let cpu = crate::smp::last_user_cpu();
+        let idle = crate::smp::ap_in_idle(1);
+        let zombie = crate::process::PROCESS_TABLE
+            .lock()
+            .get_process(pid)
+            .is_none_or(|p| p.state == crate::process::ProcessState::Zombie);
+        if cpu == 1 && idle && zombie {
+            break;
+        }
+        if crate::apic_timer::total_ticks().saturating_sub(start) > 2000 {
+            serial_println!(
+                "[user_task] Gate I4 timeout: last_cpu={} idle={} zombie={}",
+                cpu,
+                idle,
+                zombie
+            );
+            break;
+        }
+        core::hint::spin_loop();
+    }
+
+    let cpu = crate::smp::last_user_cpu();
+    let reaped = reap_child(pid);
+    if cpu == 1 && reaped {
+        serial_println!(
+            "[user_task] {} (pid={} cpu={} last_pid={})",
+            GATE_I4_MARKER,
+            pid,
+            cpu,
+            crate::smp::last_user_pid()
+        );
+    } else {
+        serial_println!(
+            "[user_task] Gate I4 FAILED: pid={} reaped={} cpu={} (want 1)",
+            pid,
+            reaped,
+            cpu
+        );
+        if crate::context::has_runnable_context(pid) {
+            terminate(pid, -(crate::signals::Signal::SIGKILL as i32));
+            let _ = reap_child(pid);
+        }
+    }
+}

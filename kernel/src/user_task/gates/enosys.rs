@@ -691,6 +691,19 @@ pub(super) fn run_gate_bk4() {
     serial_println!("[user_task] Gate BK4 parent pid={} reaped={}", pid, reaped);
 }
 
+pub(super) fn run_gate_g4() {
+    serial_println!("[user_task] Gate G4: adjtimex returns ENOSYS");
+    let elf = crate::init::adjtimex_enosys_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "adjtimex-enosys") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate G4 parent pid={} reaped={}", pid, reaped);
+}
+
 pub(super) fn run_gate_bl4() {
     serial_println!("[user_task] Gate BL4: delete_module returns ENOSYS");
     let elf = crate::init::delete_module_enosys_elf_data();

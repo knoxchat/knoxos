@@ -2,7 +2,7 @@
 
 ← [Status index](README.md)
 
-Gates **A–F, H–I**, syscall gates **J–BL**, **BM1–BM4** (userspace `ld.so` + musl static/dynamic), **F5** (Wayland AF_UNIX), and **C7** (`/bin` persist) are done on QEMU (`./tests/run_integration.sh` **272/272**). Adding another `GATE_xx` ENOSYS is **not** the critical path.
+Gates **A–F, H–I**, syscall gates **J–BL**, **BM1–BM4** (userspace `ld.so` + musl static/dynamic), **F5** (Wayland AF_UNIX), **C7** (`/bin` persist), **G3** (feature flags), **F6** (Ring 3 calculator), and **I4** (SMP balance onto an idle AP) are done on QEMU. Adding another `GATE_xx` ENOSYS is **not** the critical path.
 
 Work top to bottom. Skip anything marked later.
 
@@ -14,9 +14,9 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 | ID | Do | Done when | Details |
 |----|----|-----------|---------|
-| G3 | Feature flags `gui`, `net`, `fs-ext4`, `stub-drivers` | Default kernel compiles **Live** code only | [gates/quality.md](gates/quality.md) |
-| G4 | Finish the syscall audit | Remaining silent `Ok(0)` become ENOSYS or real | same |
-| G5 | `unsafe` SAFETY comments + size budget | Clippy gate holds | same |
+| G3 | Feature flags `gui`, `net`, `fs-ext4`, `stub-drivers` | **Done** — default is `gui`+`net`; `stub-drivers` and `fs-ext4` stay off (`GATE_G3 features live`) | [gates/quality.md](gates/quality.md) |
+| G4 | Finish the syscall audit | **Partial** — `adjtimex`/`settimeofday`/`clock_settime`/`mq_notify` return ENOSYS (`GATE_G4 enosys`); `sched_setaffinity`/`sched_getaffinity` are real. Documented no-ops remain (`madvise`, `mlock*`, `readahead`, `fadvise64`, `set_robust_list`) | same |
+| G5 | `unsafe` SAFETY comments + size budget | **Partial** — 16 MB size gate holds; SAFETY comments on boot PIC/memory + SMP idle + affinity. Crate-level `undocumented_unsafe_blocks = warn` is **not** enabled: `scripts/pre-commit.sh` runs clippy `-D warnings` and would fail ~1100 existing `unsafe` blocks. Deny-all still open | same |
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
@@ -27,8 +27,8 @@ Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered 
 These are the unfinished rows in [blockers.md](blockers.md). Do them with Gate G, not instead of it.
 
 1. **Persist `/bin`** — **Done** (C7). Virtual FS (`/dev` `/proc` `/sys` `/run`) is still rebuilt at boot. [04-filesystem.md](subsystems/04-filesystem.md)
-2. **Move desktop apps to Ring 3** — freeze new in-kernel apps; each new app is a userspace binary. Interactive terminal is still in-kernel for PTY I/O. [07-gui.md](subsystems/07-gui.md)
-3. **SMP load balance** — AP can run a pinned Ring 3 task (I3). Further APs still share one CFS `current` for the BSP desktop. [01-kernel-core.md](subsystems/01-kernel-core.md)
+2. **Move desktop apps to Ring 3** — Calculator is a Ring 3 SHM client (F6). Calendar/Image Viewer/Logs/Disks/Bluetooth/Updater/Software Center/Setup Wizard/Archive route to userspace SHM, not new `WindowContentType`. Interactive terminal, Files, Browser, Editor, Settings, Task Manager, and AI Assistant remain in-kernel. [07-gui.md](subsystems/07-gui.md)
+3. **SMP load balance** — **Done** (I4): per-CPU CFS `current`; APs do not steal the BSP desktop; an unpinned Ring 3 task runs on an idle AP (`GATE_I4 smp balance`). [01-kernel-core.md](subsystems/01-kernel-core.md)
 4. **Wayland over a Unix socket** — **Done** (F5): compositor `bind`+`listen`s `/run/wayland-0`; a Ring 3 client `connect`s and `sendto`s a SHM vaddr (`GATE_F5 wayland unix`). Not a `wl_display` protocol server. [07-gui.md](subsystems/07-gui.md)
 
 ---
@@ -41,7 +41,7 @@ A dynamically linked musl binary runs (BM4). These are still open:
 - ext4 as default root (persist WAL is live; JBD2 is not).
 - USB HID URB completion (PS/2 is the live input path).
 - Architecture guides + `cargo doc` ([17-docs.md](subsystems/17-docs.md)).
-- `flake.nix`, signed ISO, cross-arch QEMU in CI ([15-build.md](subsystems/15-build.md), [18-ci.md](subsystems/18-ci.md)).
+- Signed ISO, cross-arch QEMU in CI. `flake.nix` is present (devShell + QEMU/Make; kernel still rustup nightly) ([15-build.md](subsystems/15-build.md), [18-ci.md](subsystems/18-ci.md)).
 
 ---
 

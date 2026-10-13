@@ -154,7 +154,8 @@ pub fn sys_mq_timedsend(
 
 pub fn sys_mq_notify(mqd: i32, sevp: u64) -> SyscallResult {
     let _ = (mqd, sevp);
-    Ok(0)
+    crate::serial_println!("[KnoxOS] mq_notify denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_mq_getsetattr(mqd: i32, newattr: u64, oldattr: u64) -> SyscallResult {

@@ -5,8 +5,8 @@ use crate::syscall::{SyscallError, SyscallResult};
 
 pub fn sys_clock_settime(clock_id: u32, tp_ptr: u64) -> SyscallResult {
     let _ = (clock_id, tp_ptr);
-    // Setting the clock requires CAP_SYS_TIME; accept as no-op for now
-    Ok(0)
+    crate::serial_println!("[KnoxOS] clock_settime denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_clock_getres(clock_id: u32, res_ptr: u64) -> SyscallResult {
@@ -212,10 +212,12 @@ pub fn sys_timer_delete_linux(timerid: u32) -> SyscallResult {
 
 pub fn sys_adjtimex(buf: u64) -> SyscallResult {
     let _ = buf;
-    Ok(0) // TIME_OK
+    crate::serial_println!("[KnoxOS] adjtimex denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }
 
 pub fn sys_settimeofday(tv: u64, tz: u64) -> SyscallResult {
     let _ = (tv, tz);
-    Ok(0)
+    crate::serial_println!("[KnoxOS] settimeofday denied (ENOSYS)");
+    Err(SyscallError::NotImplemented)
 }

@@ -36,17 +36,24 @@ lazy_static::lazy_static! {
     };
 }
 
-/// Enqueue a process on the least-loaded CPU
+/// Enqueue a process for SMP dispatch.
+///
+/// Unpinned tasks stay on BSP CFS so boot `run_until_desktop` still works.
+/// Single-CPU affinity is honoured (Gate I3). Idle APs take unpinned work
+/// from [`balance_load`] or an explicit [`enqueue_on_cpu`] (Gate I4).
 pub fn enqueue_balanced(pid: u32) {
-    // Default new tasks stay on the BSP. APs only run tasks that were
-    // explicitly pinned with [`enqueue_on_cpu`] (Gate I3).
-    enqueue_on_cpu(0, pid);
+    let affinity = crate::scheduler::get_cpu_affinity(pid).unwrap_or(u64::MAX);
+    if affinity.count_ones() == 1 {
+        let cpu = affinity.trailing_zeros() as usize;
+        enqueue_on_cpu(cpu, pid);
+        crate::scheduler::set_placed_cpu(pid, cpu as u32);
+    }
 }
 
 /// Enqueue a process on a specific CPU
 pub fn enqueue_on_cpu(cpu: usize, pid: u32) {
     let mut queues = PER_CPU_RUNQUEUES.lock();
-    if cpu < queues.len() {
+    if cpu < queues.len() && !queues[cpu].queue.contains(&pid) {
         queues[cpu].queue.push_back(pid);
         queues[cpu].load += 1;
     }
@@ -73,11 +80,24 @@ pub fn remove_from_runqueues(pid: u32) {
     }
 }
 
-/// CPU load balancing — steal work from overloaded CPUs
-/// Called periodically (e.g., every 100ms) from BSP timer
+/// CPU load balancing — place unpinned runnable work on idle APs.
+/// Never steals a single-CPU-pinned task (Gate I3).
 pub fn balance_load() {
-    // Per-CPU queues are the AP dispatch source. Stealing would pull a
-    // CPU-1-pinned Ring 3 task onto the BSP and fail Gate I3.
+    let online = CPUS_STARTED.load(Ordering::Relaxed) as usize;
+    if online < 2 {
+        return;
+    }
+    for cpu in 1..online.min(MAX_CPUS) {
+        if !crate::smp::ap_in_idle(cpu as u32) {
+            continue;
+        }
+        let Some(pid) = crate::scheduler::steal_unpinned_for_cpu(cpu as u32) else {
+            continue;
+        };
+        enqueue_on_cpu(cpu, pid);
+        crate::scheduler::set_placed_cpu(pid, cpu as u32);
+        return;
+    }
 }
 
 /// Get per-CPU load statistics

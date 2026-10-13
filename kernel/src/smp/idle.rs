@@ -68,6 +68,7 @@ fn maybe_start_ap_timer(cpu: u32) {
     crate::apic_timer::start_periodic(10_000);
     AP_TIMER_STARTED.fetch_or(bit, Ordering::Release);
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: enabling interrupts on this AP after its LAPIC timer is armed.
     unsafe {
         core::arch::asm!("sti", options(nomem, nostack));
     }
@@ -76,6 +77,13 @@ fn maybe_start_ap_timer(cpu: u32) {
 fn try_enter_ap_task(cpu: u32) {
     while let Some(pid) = dequeue_from_cpu(cpu as usize) {
         if pid <= crate::context::DESKTOP_PID || crate::context::is_ap_idle_pid(pid) {
+            continue;
+        }
+        let gone = crate::process::PROCESS_TABLE
+            .lock()
+            .get_process(pid)
+            .is_none_or(|p| p.state == crate::process::ProcessState::Zombie);
+        if gone {
             continue;
         }
         if !crate::context::has_runnable_context(pid) {
@@ -91,6 +99,8 @@ fn try_enter_ap_task(cpu: u32) {
             }
         }
         set_ap_idle_flag(cpu, false);
+        // SAFETY: `pid` has a runnable context; this CPU does not hold
+        // PROCESS_CONTEXTS; enter_task_local does not claim BSP CFS current.
         unsafe {
             crate::context::enter_task_local(pid);
         }
@@ -106,6 +116,7 @@ pub fn ap_after_user_exit() {
     crate::context::set_current_pid(idle);
     if crate::context::has_runnable_context(idle) {
         set_ap_idle_flag(cpu, true);
+        // SAFETY: AP idle context exists and this CPU is leaving a user task.
         unsafe {
             crate::context::enter_task_local(idle);
         }

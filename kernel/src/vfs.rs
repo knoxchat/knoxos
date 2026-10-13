@@ -1051,7 +1051,7 @@ fn overlay_path(path: &str, for_write: bool) -> alloc::string::String {
 pub fn read_file_dispatch(path: &str) -> Option<Vec<u8>> {
     let path = overlay_path(path, false);
     let path = path.as_str();
-    // Check if this path is under an ext4 mount point
+    #[cfg(feature = "fs-ext4")]
     if let Some((fs_idx, rel_path)) = crate::mount::find_ext4_fs_for_path(path) {
         match crate::ext4::read_file(fs_idx, &rel_path) {
             Ok(data) => return Some(data),
@@ -1071,6 +1071,7 @@ pub fn list_dir_dispatch(path: &str) -> Option<Vec<String>> {
     if let Some(merged) = crate::overlayfs::list_merged(pid, path) {
         return Some(merged);
     }
+    #[cfg(feature = "fs-ext4")]
     if let Some((fs_idx, rel_path)) = crate::mount::find_ext4_fs_for_path(path) {
         if let Ok(entries) = crate::ext4::list_dir(fs_idx, &rel_path) {
             return Some(entries.into_iter().map(|e| e.name).collect());
@@ -1082,6 +1083,7 @@ pub fn list_dir_dispatch(path: &str) -> Option<Vec<String>> {
 
 /// Stat a file, dispatching to ext4 if under ext4 mount
 pub fn stat_dispatch(path: &str) -> Result<VfsStat, i32> {
+    #[cfg(feature = "fs-ext4")]
     if let Some((fs_idx, rel_path)) = crate::mount::find_ext4_fs_for_path(path) {
         if let Ok(info) = crate::ext4::stat_file(fs_idx, &rel_path) {
             let file_type = if info.mode & 0xF000 == 0x4000 {
@@ -1122,6 +1124,7 @@ pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
     ) {
         return false;
     }
+    #[cfg(feature = "fs-ext4")]
     if let Some((fs_idx, rel_path)) = crate::mount::find_ext4_fs_for_path(path) {
         match crate::ext4::write_file(fs_idx, &rel_path, data) {
             Ok(()) => return true,

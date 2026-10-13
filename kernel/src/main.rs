@@ -36,296 +36,45 @@ use knoxos_kernel::arch_compat::bootloader_shim::{
 };
 #[cfg(target_arch = "x86_64")]
 use knoxos_kernel::arch_compat::structures::paging::VirtAddr;
+#[cfg(feature = "fs-ext4")]
+use knoxos_kernel::ext4;
+#[cfg(feature = "gui")]
+use knoxos_kernel::gui;
+#[cfg(feature = "stub-drivers")]
 use knoxos_kernel::{
-    // Phase 33: Architecture ports, Chromebook, tablet/2-in-1
-    aarch64_boot,
-    acpi,
-    // Phase 14+ modules
-    acpi_tables,
-    // Phase 7+ modules
-    ahci,
-    ai,
-    // Phase 30 modules
-    ai_suggest,
-    aio,
-    allocator,
-    // Phase 10+ modules
-    alsa,
-    apic_timer,
-    // Phase 17+ modules
-    app_store,
-    apparmor,
-    // Phase 16+ modules
-    arch,
-    audit,
-    battery,
-    bcache,
-    benchmark,
-    // Phase 6 modules
-    binfmt,
-    block,
-    bluetooth,
-    boot_splash,
-    btrfs,
-    cabi,
-    capabilities,
-    // Phase 9+ modules
-    cgroup_psi,
-    // Phase 18+ modules
-    cgroup_v2_controllers,
-    cgroup2,
-    cgroups,
-    // Phase 15+ modules
-    cgroups_v2_advanced,
-    // Phase 19+ modules — Vivaldi Browser / Chromium support
-    chromium_sandbox,
-    clock,
-    close_range,
-    // Phase 11+ modules
-    cluster,
-    cmdline,
-    // Phase 12+ modules
-    compiler,
-    container,
-    context,
-    coredump,
-    cpio,
-    cpufreq,
-    cred,
-    cron,
-    crypto,
-    css_engine,
-    dbus,
-    deployment,
-    depthcharge,
-    // Phase 13+ modules
-    desktop_apps,
-    desktop_apps_ext,
-    desktop_ops,
-    devfs,
-    dhcp,
-    dm_crypt,
-    dmesg,
-    dns,
-    dpkg,
-    drm,
-    dynlink,
-    e1000,
-    ebpf,
-    elf,
-    epoll,
-    eventfd,
-    ext2,
-    ext4,
-    fanotify,
-    fat32,
-    fd,
-    federated,
-    fifo,
-    file_manager,
-    firewall,
-    flock,
-    fontconfig,
-    futex,
-    futex2,
-    fuzz,
-    gamepad,
-    gdt,
-    glibc_compat,
-    gpu,
-    gpu_compute,
-    gpu_hw,
-    gui,
-    hardening,
-    hda,
-    help_system,
-    hlt_loop,
-    hpet,
-    http,
-    huge_pages,
-    hw_bringup,
-    hwtest,
-    i18n,
-    inference_api,
-    init,
-    inotify,
-    input_event,
-    interrupts,
-    io_prio,
-    io_sched,
-    io_uring,
-    io_uring_advanced,
-    iommu,
-    ipc,
-    ipv6,
-    js_engine,
-    k8s,
-    kcmp,
-    kcov,
-    kdb,
-    keyring,
-    kobject,
-    kpanic,
-    kpm,
-    ktrace,
-    kvm,
-    landlock,
-    ldknoxos,
-    libc_funcs,
-    live_usb,
-    llm,
-    man_pages,
-    media_player,
-    membarrier,
-    memfd,
-    memory,
-    memory_pool,
-    midi,
-    mmap,
-    modules,
-    mount,
-    mount_api,
-    mqueue,
-    multiboot,
-    multimon,
-    musl,
-    namespaces,
-    nested_irq,
-    net,
-    net_production,
-    netfilter,
-    netint,
-    netns,
-    nfs,
-    nfs_server,
-    ntp,
-    numa,
-    nvme,
-    onnx,
-    oom,
-    ota_update,
-    overlayfs,
-    p9fs,
-    package_manager,
-    partition,
-    path,
-    pci,
-    pcie_ecam,
-    perf,
-    persist,
-    pgo,
-    pgrp,
-    pidfd,
-    pidns,
-    pipe,
-    pkg_dist,
-    posix_ext,
-    posix_tests,
-    posix_timer,
-    posix2024,
-    power,
-    power_events,
-    preempt_rt,
-    println,
-    process,
-    procfs,
-    procfs_extended,
-    procfs_full,
-    ptrace,
-    pty,
-    pulseaudio,
-    quic,
-    quota,
-    random,
-    // Phase 5 modules
-    recovery,
-    release_sign,
-    repo_server,
-    riscv64_boot,
-    rlimit,
-    rseq,
-    rtc,
-    rtl8139,
-    rust_std,
-    rwlock,
-    sched_debug,
-    sched_ext,
-    scheduler,
-    screen_record,
-    sctp,
-    // Phase 4 modules
-    seccomp,
-    secure_boot,
-    security,
-    security_cert,
-    selfhost,
-    selinux,
-    serial_println,
-    service_manager,
-    session,
-    shell,
-    shell_startup,
-    shm,
-    signalfd,
-    signals,
-    slab,
-    smp,
-    socket_activation,
-    soloader,
-    sound,
-    splice,
-    ssp,
-    stack_guard,
-    strace,
-    stress_test,
-    suspend,
-    swap,
-    sysctl,
-    sysfs,
-    sysinfo,
-    syslog,
-    tablet_mode,
-    task::{Task, executor::Executor, keyboard},
-    terminal,
-    thermal,
-    threads,
-    timerfd,
-    tls,
-    tmpfs,
-    tokenizer,
-    touchscreen,
-    tty,
-    uds,
-    usb,
-    usb_hid,
-    userfaultfd,
-    usermode,
-    users,
-    utsname,
-    vdso,
-    verify,
-    vfs,
-    video_codec,
-    virtio_blk,
-    virtio_gpu,
-    virtio_input,
-    virtio_net,
-    virtio_tablet,
-    visual_test,
-    vivaldi,
-    vmm,
-    voice,
-    vterm,
-    vulkan,
-    wayland,
-    webcam,
-    wifi,
-    workqueue,
-    xattr,
-    xdg,
-    xdp,
-    zfs,
+    aarch64_boot, ai_suggest, aio, app_store, apparmor, binfmt, btrfs, cgroup_psi,
+    cgroup_v2_controllers, cgroups_v2_advanced, cluster, compiler, coredump, css_engine,
+    deployment, depthcharge, desktop_apps_ext, desktop_ops, dm_crypt, federated, fuzz, gamepad,
+    help_system, hw_bringup, io_sched, io_uring_advanced, ipv6, js_engine, k8s, kcov, kdb, keyring,
+    kobject, kpanic, ktrace, live_usb, man_pages, memory_pool, multimon, netns, nfs, nfs_server,
+    p9fs, partition, pkg_dist, posix_tests, posix2024, power_events, quic, riscv64_boot, rust_std,
+    rwlock, sched_debug, sctp, secure_boot, security_cert, selfhost, shell_startup, tablet_mode,
+    tokenizer, touchscreen, verify, video_codec, voice, vulkan, webcam, xdp, zfs,
 };
+use knoxos_kernel::{
+    acpi, acpi_tables, ahci, ai, allocator, alsa, apic_timer, arch, audit, battery, bcache,
+    benchmark, block, bluetooth, boot_splash, cabi, capabilities, cgroup2, cgroups,
+    chromium_sandbox, clock, close_range, cmdline, container, context, cpio, cpufreq, cred, cron,
+    crypto, dbus, desktop_apps, devfs, dmesg, dpkg, drm, dynlink, e1000, ebpf, elf, epoll, eventfd,
+    ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
+    glibc_compat, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http, huge_pages,
+    hwtest, i18n, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring, iommu,
+    ipc, kcmp, kpm, kvm, landlock, ldknoxos, libc_funcs, llm, media_player, membarrier, memfd,
+    memory, midi, mmap, modules, mount, mount_api, mqueue, multiboot, musl, namespaces, nested_irq,
+    net_production, ntp, numa, nvme, onnx, oom, ota_update, overlayfs, package_manager, path, pci,
+    pcie_ecam, perf, persist, pgo, pgrp, pidfd, pidns, pipe, posix_ext, posix_timer, power,
+    preempt_rt, println, process, procfs, procfs_extended, procfs_full, ptrace, pty, pulseaudio,
+    quota, random, recovery, release_sign, repo_server, rlimit, rseq, rtc, rtl8139, sched_ext,
+    scheduler, screen_record, seccomp, security, selinux, serial_println, service_manager, session,
+    shell, shm, signalfd, signals, slab, smp, socket_activation, soloader, sound, splice, ssp,
+    stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs, sysinfo, syslog,
+    task::{Task, executor::Executor, keyboard},
+    terminal, thermal, threads, timerfd, tls, tmpfs, tty, uds, usb, usb_hid, userfaultfd, usermode,
+    users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input, virtio_tablet, visual_test,
+    vivaldi, vmm, vterm, wayland, wifi, workqueue, xattr, xdg,
+};
+#[cfg(feature = "net")]
+use knoxos_kernel::{dhcp, dns, firewall, net, netfilter, netint, virtio_net};
 
 /// Configure the bootloader to map all physical memory
 #[cfg(target_arch = "x86_64")]
@@ -357,6 +106,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("║  Linux-compatible | Rust-powered | AI-native         ║");
     serial_println!("╚══════════════════════════════════════════════════════╝");
     serial_println!("[KnoxOS] Booting KnoxOS...");
+    serial_println!(
+        "GATE_G3 features live (gui={} net={} ext4={} stubs={})",
+        cfg!(feature = "gui"),
+        cfg!(feature = "net"),
+        cfg!(feature = "fs-ext4"),
+        cfg!(feature = "stub-drivers"),
+    );
     serial_println!("[KnoxOS] Initializing kernel subsystems...");
 
     // Initialize GDT (Global Descriptor Table)
@@ -369,6 +125,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize PIC (Programmable Interrupt Controller)
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: PIC MMIO/ports are exclusive to this early-boot path.
     unsafe {
         interrupts::PICS.lock().initialize()
     };
@@ -376,6 +133,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // PIC1 (IRQ 0-7): Timer(0), Keyboard(1), Cascade(2) = bits 0,1,2
     // PIC2 (IRQ 8-15): Free1/virtio(9→bit1), Free2/virtio(10→bit2),
     //   Free3/virtio(11→bit3), Mouse(12→bit4), PrimaryATA(14→bit6), SecondaryATA(15→bit7)
+    // SAFETY: 8259 data ports 0x21/0xA1 are valid after `PICS.initialize`.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use knoxos_kernel::arch_compat::instructions::port::Port;
@@ -403,7 +161,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             .into_option()
             .expect("Physical memory mapping not enabled"),
     );
+    // SAFETY: `phys_mem_offset` is the bootloader's offset map of all physical RAM.
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
+    // SAFETY: `memory_regions` is the bootloader's exclusive memory map.
     let mut frame_allocator =
         unsafe { memory::BootInfoFrameAllocator::init(&boot_info.memory_regions) };
     serial_println!("[KnoxOS] Memory management initialized");
@@ -503,6 +263,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     context::init();
 
     // Initialize networking stack (TCP/IP)
+    #[cfg(feature = "net")]
+    #[cfg(feature = "net")]
     net::init();
 
     // Initialize shared memory (SysV IPC)
@@ -612,18 +374,26 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
 
     // Initialize virtio network device
+    #[cfg(feature = "net")]
+    #[cfg(feature = "net")]
     virtio_net::init();
 
     // Initialize E1000 NIC driver (fallback if no virtio-net)
     e1000::init();
 
     // Initialize DHCP client (needs NIC)
+    #[cfg(feature = "net")]
+    #[cfg(feature = "net")]
     dhcp::init();
 
     // Initialize DNS resolver (needs dhcp)
+    #[cfg(feature = "net")]
+    #[cfg(feature = "net")]
     dns::init();
 
     // Initialize network integration (NIC ↔ TCP/IP wiring)
+    #[cfg(feature = "net")]
+    #[cfg(feature = "net")]
     netint::init();
     {
         let mut g = gui::FRAMEBUFFER.lock();
@@ -639,9 +409,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     fat32::init();
 
     // Initialize ext4 filesystem (journal + extents)
+    #[cfg(feature = "fs-ext4")]
+    #[cfg(feature = "fs-ext4")]
     ext4::init();
 
     // Initialize partition table parsing (MBR/GPT)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     partition::init();
 
     // ─── Phase 22: Persistent Storage ─────────────────────────────────
@@ -681,6 +455,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     audit::init();
 
     // Initialize firewall
+    #[cfg(feature = "net")]
+    #[cfg(feature = "net")]
     firewall::init();
     {
         let mut g = gui::FRAMEBUFFER.lock();
@@ -690,6 +466,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
 
     // Initialize netfilter framework (conntrack + NAT)
+    #[cfg(feature = "net")]
+    #[cfg(feature = "net")]
     netfilter::init();
 
     // Initialize PTY subsystem
@@ -705,6 +483,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     xattr::init();
 
     // Initialize async I/O
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     aio::init();
 
     // Initialize disk quotas
@@ -734,6 +514,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     sysctl::init();
 
     // Initialize kernel object model (sysfs backing)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     kobject::init();
 
     // Initialize resource limits (RLIMIT_*)
@@ -749,12 +531,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     oom::init();
 
     // Initialize core dump subsystem
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     coredump::init();
 
     // Initialize power management
     power::init();
 
     // Initialize kernel panic handler
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     kpanic::init();
 
     // ─── Phase 6: Advanced Linux Subsystems ─────────────────────────
@@ -773,6 +559,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     io_uring::init();
 
     // Initialize binary format handlers
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     binfmt::init();
 
     // Initialize ptrace debugging
@@ -791,6 +579,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     rseq::init();
 
     // Initialize kernel code coverage
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     kcov::init();
 
     // Initialize cgroup v2
@@ -860,6 +650,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("[KnoxOS] Phase 9: Advanced subsystems...");
 
     // Initialize SMP-safe locking primitives (RwLock, SeqLock, RCU)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     rwlock::init();
 
     // Initialize PREEMPT_RT real-time scheduling extensions
@@ -881,9 +673,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     kvm::init();
 
     // Initialize network namespace support
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     netns::init();
 
     // Initialize multi-monitor DRM extensions
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     multimon::init();
 
     // Initialize shared library loader (dlopen/dlsym)
@@ -893,6 +689,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     onnx::init();
 
     // Initialize cgroup v2 PSI & resource controllers
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     cgroup_psi::init();
 
     // ─── Phase 11: Full Linux Compat, HW Acceleration, Cluster ──────
@@ -905,12 +703,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     musl::init();
 
     // Initialize Rust std library OS backing
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     rust_std::init();
 
     // Initialize GPU compute shader framework
     gpu_compute::init();
 
     // Initialize cluster / distributed computing
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     cluster::init();
 
     // Enable SMP lock order auditing
@@ -920,42 +722,64 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("[KnoxOS] Phase 12: Advanced drivers, protocols & toolchain...");
 
     // Initialize Vulkan 1.3 driver framework
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     vulkan::init();
 
     // Initialize video codec subsystem (H.264/H.265/VP9/AV1/MJPEG)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     video_codec::init();
 
     // Initialize NFS v4 client
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     nfs::init();
 
     // Initialize I/O scheduler subsystem (deadline, CFQ, BFQ, kyber, mq-deadline)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     io_sched::init();
 
     // Initialize SCTP transport protocol
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     sctp::init();
 
     // Initialize federated machine learning
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     federated::init();
 
     // Initialize self-hosting compiler toolchain
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     compiler::init();
 
     // Initialize kernel debugger (KDB)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     kdb::init();
 
     // ─── Phase 13: Self-hosting, QUIC, NFS server, RTL NIC, Desktop Apps ────
     serial_println!("[KnoxOS] Phase 13: Self-hosting, desktop apps & advanced networking...");
 
     // Initialize QUIC transport protocol (RFC 9000)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     quic::init();
 
     // Initialize NFS v4 server
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     nfs_server::init();
 
     // Initialize Realtek RTL8139/RTL8169 NIC driver
     rtl8139::init();
 
     // Initialize self-hosting build system
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     selfhost::init();
 
     // Initialize desktop applications framework
@@ -982,24 +806,36 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     pcie_ecam::init();
 
     // Initialize dm-crypt disk encryption
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     dm_crypt::init();
 
     // Initialize XDP (eXpress Data Path) packet processing
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     xdp::init();
 
     // Initialize io_uring advanced features
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     io_uring_advanced::init();
 
     // Initialize C standard library functions (libc compat)
     libc_funcs::init();
 
     // Initialize AppArmor MAC subsystem
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     apparmor::init();
 
     // Initialize kernel tracing infrastructure (ftrace/kprobes)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     ktrace::init();
 
     // Initialize POSIX conformance test infrastructure
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     posix_tests::init();
 
     // ─── Phase 15: Full Linux Binary Compatibility & Production ─────
@@ -1009,9 +845,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     selinux::init();
 
     // Initialize advanced cgroup v2 features (memory reclaim, IO latency/cost, CPU burst)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     cgroups_v2_advanced::init();
 
     // Initialize scheduler debugging & PELT metrics
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     sched_debug::init();
 
     // Initialize next-gen futex (futex2: variable-width, NUMA-aware, waitv)
@@ -1060,33 +900,51 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     arch::init();
 
     // Initialize Kubernetes-compatible container orchestration
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     k8s::init();
 
     // Initialize package distribution network
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     pkg_dist::init();
 
     // Initialize hardware bring-up & platform abstraction
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     hw_bringup::init();
 
     // Initialize security certification framework (CC EAL4, FIPS 140-3, CIS)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     security_cert::init();
 
     // ─── Phase 17: Formal Verification, Enterprise Storage, POSIX.1-2024 ────
     serial_println!("[KnoxOS] Phase 17: Formal verification, enterprise storage & POSIX.1-2024...");
 
     // Initialize ZFS enterprise filesystem (pools, datasets, snapshots, ARC, RAIDZ)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     zfs::init();
 
     // Initialize Btrfs copy-on-write filesystem (subvolumes, snapshots, RAID)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     btrfs::init();
 
     // Initialize formal verification subsystem (invariants, contracts, state machines)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     verify::init();
 
     // Initialize POSIX.1-2024 full compliance layer (semaphores, barriers, spawn, shm)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     posix2024::init();
 
     // Initialize KnoxOS Application Store (package marketplace, signing, dependencies)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     app_store::init();
 
     // ─── End Phase 17 subsystems ────────────────────────────────────
@@ -1110,6 +968,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     utsname::init();
 
     // Initialize cgroup v2 resource controllers (CPU, memory, IO, PID, PSI)
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     cgroup_v2_controllers::init();
 
     // ─── End Phase 18 subsystems ────────────────────────────────────
@@ -1198,10 +1058,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("[KnoxOS] Phase 30: stack_guard::init...");
     stack_guard::init();
     serial_println!("[KnoxOS] Phase 30: memory_pool::init...");
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     memory_pool::init();
     serial_println!("[KnoxOS] Phase 30: page_cache::init...");
     knoxos_kernel::page_cache::init();
     serial_println!("[KnoxOS] Phase 30: checkpoint::init...");
+    #[cfg(feature = "stub-drivers")]
     knoxos_kernel::checkpoint::init();
 
     // System services
@@ -1221,8 +1084,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Security
     serial_println!("[KnoxOS] Phase 30: keyring::init...");
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     keyring::init();
     serial_println!("[KnoxOS] Phase 30: secure_boot::init...");
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     secure_boot::init();
 
     // Power management
@@ -1230,28 +1097,50 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     cpufreq::init();
     suspend::init();
     battery::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     power_events::init();
     thermal::init();
 
     // AI subsystem
     serial_println!("[KnoxOS] Phase 30: AI subsystem...");
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     tokenizer::init();
     inference_api::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     ai_suggest::init();
 
     // Device drivers
     serial_println!("[KnoxOS] Phase 30: device drivers...");
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     touchscreen::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     gamepad::init();
 
     // Desktop applications & browser
     serial_println!("[KnoxOS] Phase 30: desktop apps...");
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     desktop_ops::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     desktop_apps_ext::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     shell_startup::init();
     media_player::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     css_engine::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     js_engine::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     voice::init();
 
     // Package management
@@ -1261,16 +1150,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Testing & QA
     serial_println!("[KnoxOS] Phase 30: testing & QA...");
     benchmark::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     fuzz::init();
     visual_test::init();
 
     // Documentation
     serial_println!("[KnoxOS] Phase 30: documentation...");
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     man_pages::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     help_system::init();
 
     // Build & distribution
     serial_println!("[KnoxOS] Phase 30: build & distribution...");
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     live_usb::init();
     ota_update::init();
 
@@ -1281,6 +1178,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Multimedia
     serial_println!("[KnoxOS] Phase 30: multimedia...");
     screen_record::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     webcam::init();
 
     // GUI extensions
@@ -1304,9 +1203,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // ─── Phase 33: Architecture Ports, Chromebook & Tablet Support ──
     serial_println!("[KnoxOS] Phase 33: Architecture ports & device support...");
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     aarch64_boot::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     riscv64_boot::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     depthcharge::init();
+    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "stub-drivers")]
     tablet_mode::init();
     serial_println!("[KnoxOS] Phase 33 complete — multi-arch & tablet support initialized");
 

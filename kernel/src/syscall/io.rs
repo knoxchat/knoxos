@@ -426,6 +426,41 @@ pub fn sys_vmsplice(fd: i32, iov_ptr: u64, nr_segs: usize, flags: u32) -> Syscal
 
 // ── Scheduler ───────────────────────────────────────────────────────
 
+pub fn sys_sched_setaffinity(pid: u32, cpusetsize: u64, mask_ptr: u64) -> SyscallResult {
+    if mask_ptr == 0 || cpusetsize == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let n = core::cmp::min(cpusetsize, 8) as usize;
+    let mut buf = [0u8; 8];
+    // SAFETY: `mask_ptr` is the user cpuset of `n` bytes for this syscall.
+    unsafe {
+        core::ptr::copy_nonoverlapping(mask_ptr as *const u8, buf.as_mut_ptr(), n);
+    }
+    let caller = crate::scheduler::current_pid().unwrap_or(1);
+    let mask = u64::from_ne_bytes(buf);
+    if mask == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let target = if pid == 0 { caller } else { pid };
+    crate::scheduler::set_cpu_affinity(target, mask)
+        .map(|_| 0u64)
+        .map_err(|_| SyscallError::NoSuchProcess)
+}
+
+pub fn sys_sched_getaffinity(pid: u32, cpusetsize: u64, mask_ptr: u64) -> SyscallResult {
+    if cpusetsize == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let caller = crate::scheduler::current_pid().unwrap_or(1);
+    let target = if pid == 0 { caller } else { pid };
+    let mask = crate::scheduler::get_cpu_affinity(target).unwrap_or(1);
+    let n = core::cmp::min(cpusetsize, 8) as usize;
+    if mask_ptr != 0 {
+        crate::vmm::write_user_memory(caller, mask_ptr, &mask.to_ne_bytes()[..n]);
+    }
+    Ok(n as u64)
+}
+
 pub fn sys_sched_getscheduler(pid: u32) -> SyscallResult {
     crate::sched_ext::sched_getscheduler(pid)
         .map(|p| p as u64)

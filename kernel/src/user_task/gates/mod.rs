@@ -281,10 +281,19 @@ extern "C" fn gate_boot_body() {
     run_gate_bm2();
     run_gate_bm3();
     run_gate_bm4();
+    run_gate_g4();
+    run_gate_f6();
+    run_gate_i4();
 }
 
 /// Spawn a Ring 3 SHM launcher without waiting (start-menu clicks).
 pub fn spawn_launcher_app(name: &str) {
     let elf = crate::init::launcher_client_elf_data();
     let _ = spawn_or_log(&elf, name);
+}
+
+/// Spawn a Ring 3 calculator SHM client (not `WindowContentType::Calculator`).
+pub fn spawn_calculator_app() {
+    let elf = crate::init::calculator_client_elf_data();
+    let _ = spawn_or_log(&elf, "Calculator");
 }

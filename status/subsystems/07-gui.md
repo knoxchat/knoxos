@@ -2,7 +2,7 @@
 
 # 7. GUI & Desktop Environment
 
-**Grade: Live (86%)** · `gui/` 162 files, ~91,700 lines
+**Grade: Live (88%)** · `gui/` 162 files, ~91,700 lines
 
 The compositor is the most complete **product** in the tree. It is not a Unix display server.
 
@@ -14,7 +14,7 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 - [x] Mouse (click/drag/resize), keyboard focus, shortcuts, theme (dark/light), notifications
 - [x] Lock/login screens, screenshot, in-process DnD, blur, night light, on-screen keyboard
 - [x] Clipboard used by terminal/explorer/input (`clipboard.rs`)
-- [x] **17 real in-process apps**: Terminal, Files, Browser (tag HTML), AI Assistant, Editor, Settings, Task Manager, Calculator, Image Viewer, Log Viewer, Calendar, Disk Utility, Bluetooth manager, Software Updater, Software Center, Archive Manager, Setup Wizard
+- [x] **In-kernel apps remaining**: Terminal, Files, Browser (tag HTML), AI Assistant, Editor, Settings, Task Manager. Calculator is Ring 3 SHM (F6); Image Viewer/Logs/Calendar/Disks/Bluetooth/Updater/Software Center/Setup Wizard/Archive launch userspace SHM.
 - [x] **Widget hover/press** — calculator keys and settings tabs highlight under the pointer; retained widgets (`Button`/`Checkbox`/`Toggle`/`TextInput`) have `update_pointer`
 - [x] **Frame input latch** — `gui::input::frame_input()` feeds KnoxUI / `Ui::button_at` with press/release edges
 - [x] **Window-local damage** — content clicks, chrome hover, and clock ticks composite the window/taskbar instead of 1920×1080
@@ -23,14 +23,14 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 ### Unused / stub
 - [ ] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2) plus AF_UNIX `/run/wayland-0` present (F5); not a `wl_display` object-protocol server
 - [ ] **GPU compositor** — `gpu_compositor.rs` never invoked; desktop software-blits
-- [x] **Client isolation (demo)** — Gate F Ring 3 clients paint SHM (F1–F5); remaining in-kernel apps still `WindowContentType`
+- [x] **Client isolation (demo)** — Gate F Ring 3 clients paint SHM (F1–F6); Calculator is Empty+SHM (`GATE_F6 calculator userspace`); Calendar/Logs/Disks/etc. launch userspace SHM. Terminal/Files/Browser/Editor/Settings/Task Manager/AI remain `WindowContentType`
 - [ ] Hardware cursor probed (`hw_cursor::init`); desktop still draws a software cursor
 - [ ] VSync module unused; pacing is TSC ~60 FPS
 - [x] Start-menu **Paint / Video Player / Webamp / Doom / ClassiCube / Quake III** removed; Paint is a Ring 3 SHM client (F4)
 - [ ] HDR, VRR, TrueType bytecode hinting, full IME framework
 
 ### Perfect-OS next steps
-1. Freeze new in-kernel apps. Every new app should be a Ring 3 binary.
+1. Freeze new in-kernel apps. Calculator is Ring 3 (F6). Every new app should be a userspace binary. Interactive terminal stays in-kernel for PTY I/O.
 2. ~~Wayland over Unix sockets~~ F5 `connect`/`sendto` present is live. Next: `wl_display` object protocol, then VirtIO-GPU scanout + hardware cursor.
 
 ---

@@ -230,29 +230,37 @@ pub fn mount(
     let (fs_index, block_dev_index) = match &fstype {
         FilesystemType::Ext4 => {
             let dev_idx = resolve_device_name(source);
-            if let Some(idx) = dev_idx {
-                // Drop table lock before calling ext4::mount (it acquires its own locks)
-                drop(table);
-                match crate::ext4::mount(idx) {
-                    Ok(fs_idx) => {
-                        serial_println!(
-                            "[mount] ext4: device {} mounted as fs_index={}",
-                            source,
-                            fs_idx
-                        );
-                        // Re-acquire table lock
-                        table = MOUNT_TABLE.lock();
-                        (Some(fs_idx), Some(idx))
+            #[cfg(feature = "fs-ext4")]
+            {
+                if let Some(idx) = dev_idx {
+                    // Drop table lock before calling ext4::mount (it acquires its own locks)
+                    drop(table);
+                    match crate::ext4::mount(idx) {
+                        Ok(fs_idx) => {
+                            serial_println!(
+                                "[mount] ext4: device {} mounted as fs_index={}",
+                                source,
+                                fs_idx
+                            );
+                            table = MOUNT_TABLE.lock();
+                            (Some(fs_idx), Some(idx))
+                        }
+                        Err(e) => {
+                            serial_println!("[mount] ext4 mount failed for {}: {:?}", source, e);
+                            table = MOUNT_TABLE.lock();
+                            (None, Some(idx))
+                        }
                     }
-                    Err(e) => {
-                        serial_println!("[mount] ext4 mount failed for {}: {:?}", source, e);
-                        table = MOUNT_TABLE.lock();
-                        (None, Some(idx))
-                    }
+                } else {
+                    serial_println!("[mount] device not found: {}", source);
+                    (None, None)
                 }
-            } else {
-                serial_println!("[mount] device not found: {}", source);
-                (None, None)
+            }
+            #[cfg(not(feature = "fs-ext4"))]
+            {
+                let _ = &mut table;
+                serial_println!("[mount] ext4 skipped (enable fs-ext4)");
+                (None, dev_idx)
             }
         }
         FilesystemType::Ext2 => {
@@ -543,12 +551,21 @@ pub fn find_ext4_fs_for_path(path: &str) -> Option<(usize, String)> {
 
 /// Try to mount the root ext4 filesystem from the first available virtio-blk device
 pub fn try_mount_ext4_root() {
+    #[cfg(not(feature = "fs-ext4"))]
+    {
+        serial_println!("[mount] ext4 skipped (enable fs-ext4)");
+    }
+    #[cfg(feature = "fs-ext4")]
+    try_mount_ext4_root_inner();
+}
+
+#[cfg(feature = "fs-ext4")]
+fn try_mount_ext4_root_inner() {
     if !crate::virtio_blk::is_available() {
         serial_println!("[mount] No virtio-blk device available for ext4 root");
         return;
     }
 
-    // Find the virtio block device index
     let devices = crate::block::list_devices();
     let mut virtio_dev_idx = None;
     for (i, dev) in devices.iter().enumerate() {
@@ -569,13 +586,12 @@ pub fn try_mount_ext4_root() {
                     "[mount] ext4 rootfs mounted successfully (fs_index={})",
                     fs_idx
                 );
-                // Register in mount table
                 let mut table = MOUNT_TABLE.lock();
                 let id = table.next_id;
                 table.next_id += 1;
                 table.mounts.push(MountEntry {
                     mount_id: id,
-                    parent_id: 1, // under rootfs
+                    parent_id: 1,
                     source: String::from("/dev/vda"),
                     target: String::from("/mnt/ext4"),
                     fs_type: FilesystemType::Ext4,
@@ -586,7 +602,6 @@ pub fn try_mount_ext4_root() {
                     fs_index: Some(fs_idx),
                     block_device_index: Some(dev_idx),
                 });
-                // Create mount point in VFS
                 drop(table);
                 let mut vfs = crate::vfs::VFS.lock();
                 let _ = vfs.mkdir("/mnt/ext4", 0o755);

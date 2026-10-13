@@ -41,7 +41,7 @@ A perfect KnoxOS is not “more modules.” It is an OS that satisfies these **g
 6. **Compose** — GUI clients in separate address spaces (Wayland or equivalent), not in-kernel `WindowContentType`.
 7. **Prove** — Tests that can fail, CI on every push, README/LICENSE, and a threat model.
 
-Until gates 2–4 pass, extra drivers, AI, KVM, and package managers are theater. Gates A–F, H–I, syscall gates J–BL, BM1–BM4 (`ld.so` + musl), F5 (Wayland AF_UNIX), and C7 (`/bin` persist) are **done** on QEMU (`272/272`). The remaining work is in [next.md](next.md).
+Until gates 2–4 pass, extra drivers, AI, KVM, and package managers are theater. Gates A–F, H–I, syscall gates J–BL, BM1–BM4 (`ld.so` + musl), F5 (Wayland AF_UNIX), C7 (`/bin` persist), G3 (feature flags), F6 (calculator userspace), and I4 (SMP balance) are **done** on QEMU. The remaining work is in [next.md](next.md).
 
 Stop adding Phase 34 modules. **Wire, delete, or feature-gate.**
 

@@ -818,6 +818,10 @@ pub fn invalidate_rip(pid: Pid) {
 
 /// Called from timer interrupt to potentially switch processes
 pub fn schedule_tick() {
+    // APs dispatch from their per-CPU queue; do not touch BSP CFS current.
+    if crate::usermode::current_cpu_index() != 0 {
+        return;
+    }
     let mut scheduler = crate::scheduler::SCHEDULER.lock();
     if scheduler.tick() {
         if let Some(next_pid) = scheduler.schedule() {

@@ -64,10 +64,12 @@ pub mod arch_compat;
 
 pub mod acpi;
 pub mod ai;
+#[cfg(feature = "stub-drivers")]
 pub mod aio;
 pub mod allocator;
 pub mod audit;
 pub mod bcache;
+#[cfg(feature = "stub-drivers")]
 pub mod binfmt;
 pub mod block;
 pub mod boot_splash;
@@ -78,11 +80,14 @@ pub mod cgroups;
 pub mod clipboard;
 pub mod clock;
 pub mod context;
+#[cfg(feature = "stub-drivers")]
 pub mod coredump;
 pub mod crash_reporter;
 pub mod cred;
 pub mod devfs;
+#[cfg(feature = "net")]
 pub mod dhcp;
+#[cfg(feature = "net")]
 pub mod dns;
 pub mod dynlink;
 pub mod e1000;
@@ -91,12 +96,15 @@ pub mod elf;
 pub mod epoll;
 pub mod eventfd;
 pub mod ext2;
+#[cfg(feature = "fs-ext4")]
 pub mod ext4;
 pub mod fat32;
 pub mod fd;
 pub mod fifo;
 pub mod file_manager;
+#[cfg(feature = "net")]
 pub mod firewall;
+#[cfg(feature = "stub-drivers")]
 pub mod flatpak;
 pub mod flock;
 pub mod fsck;
@@ -104,6 +112,7 @@ pub mod futex;
 pub mod gdt;
 pub mod gguf;
 pub mod gpu;
+#[cfg(feature = "gui")]
 pub mod gui;
 pub mod http;
 pub mod i915;
@@ -112,8 +121,11 @@ pub mod inotify;
 pub mod interrupts;
 pub mod io_uring;
 pub mod ipc;
+#[cfg(feature = "stub-drivers")]
 pub mod kcov;
+#[cfg(feature = "stub-drivers")]
 pub mod kobject;
+#[cfg(feature = "stub-drivers")]
 pub mod kpanic;
 pub mod kpm;
 pub mod landlock;
@@ -127,11 +139,15 @@ pub mod modules;
 pub mod mount;
 pub mod mqueue;
 pub mod namespaces;
+#[cfg(feature = "net")]
 pub mod net;
+#[cfg(feature = "net")]
 pub mod netfilter;
+#[cfg(feature = "net")]
 pub mod netint;
 pub mod numa;
 pub mod oom;
+#[cfg(feature = "stub-drivers")]
 pub mod partition;
 pub mod path;
 pub mod pci;
@@ -187,6 +203,7 @@ pub mod vfs;
 pub mod vga_buffer;
 pub mod virtio_blk;
 pub mod virtio_input;
+#[cfg(feature = "net")]
 pub mod virtio_net;
 pub mod virtio_tablet;
 pub mod vmm;
@@ -213,14 +230,18 @@ pub mod wayland;
 pub mod wpa3_sae;
 
 // Phase 9+ modules — Advanced subsystems
+#[cfg(feature = "stub-drivers")]
 pub mod cgroup_psi;
 pub mod hda;
 pub mod kvm;
+#[cfg(feature = "stub-drivers")]
 pub mod multimon;
+#[cfg(feature = "stub-drivers")]
 pub mod netns;
 pub mod onnx;
 pub mod posix_timer;
 pub mod preempt_rt;
+#[cfg(feature = "stub-drivers")]
 pub mod rwlock;
 pub mod soloader;
 pub mod usb_hid;
@@ -229,51 +250,74 @@ pub mod usb_hid;
 pub mod alsa;
 pub mod bluetooth;
 pub mod container;
+#[cfg(feature = "stub-drivers")]
 pub mod deployment;
+#[cfg(feature = "stub-drivers")]
 pub mod ipv6;
 pub mod llm;
 pub mod overlayfs;
+#[cfg(feature = "stub-drivers")]
 pub mod p9fs;
 pub mod virtio_gpu;
 pub mod wifi;
 
 // Phase 11+ modules — Full Linux binary compat, HW acceleration, cluster
+#[cfg(feature = "stub-drivers")]
 pub mod cluster;
 pub mod gpu_compute;
 pub mod musl;
+#[cfg(feature = "stub-drivers")]
 pub mod rust_std;
 
 // Phase 12+ modules — Vulkan, video codec, NFS, I/O scheduler, SCTP, federated ML, compiler, KDB
+#[cfg(feature = "stub-drivers")]
 pub mod compiler;
+#[cfg(feature = "stub-drivers")]
 pub mod federated;
+#[cfg(feature = "stub-drivers")]
 pub mod io_sched;
+#[cfg(feature = "stub-drivers")]
 pub mod kdb;
+#[cfg(feature = "stub-drivers")]
 pub mod nfs;
+#[cfg(feature = "stub-drivers")]
 pub mod sctp;
+#[cfg(feature = "stub-drivers")]
 pub mod video_codec;
+#[cfg(feature = "stub-drivers")]
 pub mod vulkan;
 
 // Phase 13+ modules — Self-hosting, QUIC, NFS server, RTL NIC, desktop apps, POSIX compliance
 pub mod desktop_apps;
+#[cfg(feature = "stub-drivers")]
 pub mod nfs_server;
 pub mod posix_ext;
+#[cfg(feature = "stub-drivers")]
 pub mod quic;
 pub mod rtl8139;
+#[cfg(feature = "stub-drivers")]
 pub mod selfhost;
 
 // Phase 14+ modules — Full Linux binary compat, production features, conformance
 pub mod acpi_tables;
+#[cfg(feature = "stub-drivers")]
 pub mod apparmor;
+#[cfg(feature = "stub-drivers")]
 pub mod dm_crypt;
 pub mod hpet;
+#[cfg(feature = "stub-drivers")]
 pub mod io_uring_advanced;
+#[cfg(feature = "stub-drivers")]
 pub mod ktrace;
 pub mod libc_funcs;
 pub mod pcie_ecam;
+#[cfg(feature = "stub-drivers")]
 pub mod posix_tests;
+#[cfg(feature = "stub-drivers")]
 pub mod xdp;
 
 // Phase 15+ modules — Full Linux binary compatibility, production networking, GPU HW
+#[cfg(feature = "stub-drivers")]
 pub mod cgroups_v2_advanced;
 pub mod close_range;
 pub mod fanotify;
@@ -289,24 +333,35 @@ pub mod mount_api;
 pub mod net_production;
 pub mod pidns;
 pub mod procfs_extended;
+#[cfg(feature = "stub-drivers")]
 pub mod sched_debug;
 pub mod selinux;
 
 // Phase 16+ modules — Multi-arch, container orchestration, package distribution, certification
 pub mod arch;
+#[cfg(feature = "stub-drivers")]
 pub mod hw_bringup;
+#[cfg(feature = "stub-drivers")]
 pub mod k8s;
+#[cfg(feature = "stub-drivers")]
 pub mod pkg_dist;
+#[cfg(feature = "stub-drivers")]
 pub mod security_cert;
 
 // Phase 17+ modules — Formal verification, POSIX.1-2024, enterprise storage, app store
+#[cfg(feature = "stub-drivers")]
 pub mod app_store;
+#[cfg(feature = "stub-drivers")]
 pub mod btrfs;
+#[cfg(feature = "stub-drivers")]
 pub mod posix2024;
+#[cfg(feature = "stub-drivers")]
 pub mod verify;
+#[cfg(feature = "stub-drivers")]
 pub mod zfs;
 
 // Phase 18+ modules — Full Linux /proc, strace, dmesg, sysinfo, UTS
+#[cfg(feature = "stub-drivers")]
 pub mod cgroup_v2_controllers;
 pub mod dmesg;
 pub mod procfs_full;
@@ -325,9 +380,12 @@ pub mod vivaldi;
 pub mod xdg;
 
 // Phase 24+ modules — Full POSIX libc, Debian package management, initramfs
+#[cfg(feature = "stub-drivers")]
 pub mod apt;
 pub mod dpkg_scripts;
+#[cfg(feature = "stub-drivers")]
 pub mod initramfs_boot;
+#[cfg(feature = "stub-drivers")]
 pub mod posix_libc;
 
 // Phase 28+ modules — Production hardening, stress testing
@@ -337,10 +395,13 @@ pub mod stress_test;
 // Phase 29+ modules — Distribution & ISO image builder
 pub mod arch_port;
 pub mod bt_hci_usb;
+#[cfg(feature = "stub-drivers")]
 pub mod formal_verify;
+#[cfg(feature = "stub-drivers")]
 pub mod iso9660;
 pub mod timezone;
 pub mod virtio_wifi;
+#[cfg(feature = "stub-drivers")]
 pub mod vmx;
 
 // Phase 30+ modules — Remaining ❌ items from status.md
@@ -351,9 +412,11 @@ pub mod livepatch;
 pub mod multiboot;
 pub mod nested_irq;
 // Memory management
+#[cfg(feature = "stub-drivers")]
 pub mod checkpoint;
 pub mod huge_pages;
 pub mod ksm;
+#[cfg(feature = "stub-drivers")]
 pub mod memory_pool;
 pub mod page_cache;
 pub mod slab;
@@ -364,176 +427,298 @@ pub mod cron;
 pub mod ntp;
 pub mod service_manager;
 pub mod session;
+#[cfg(feature = "stub-drivers")]
 pub mod session_restore;
 pub mod socket_activation;
 // Security
+#[cfg(feature = "stub-drivers")]
 pub mod keyring;
+#[cfg(feature = "stub-drivers")]
 pub mod secure_boot;
 // Power management
 pub mod battery;
 pub mod cpufreq;
+#[cfg(feature = "stub-drivers")]
 pub mod power_events;
 pub mod suspend;
 pub mod thermal;
 // AI subsystem
+#[cfg(feature = "stub-drivers")]
 pub mod ai_suggest;
 pub mod inference_api;
+#[cfg(feature = "stub-drivers")]
 pub mod tokenizer;
 // Device drivers
+#[cfg(feature = "stub-drivers")]
 pub mod gamepad;
+#[cfg(feature = "stub-drivers")]
 pub mod sdmmc;
+#[cfg(feature = "stub-drivers")]
 pub mod touchscreen;
+#[cfg(feature = "stub-drivers")]
 pub mod usb_audio;
 // Desktop applications
+#[cfg(feature = "stub-drivers")]
 pub mod clock_app;
+#[cfg(feature = "stub-drivers")]
 pub mod color_blindness;
+#[cfg(feature = "stub-drivers")]
 pub mod color_picker;
+#[cfg(feature = "stub-drivers")]
 pub mod contacts;
+#[cfg(feature = "stub-drivers")]
 pub mod css_engine;
+#[cfg(feature = "stub-drivers")]
 pub mod desktop_apps_ext;
+#[cfg(feature = "stub-drivers")]
 pub mod desktop_ops;
+#[cfg(feature = "stub-drivers")]
 pub mod email;
+#[cfg(feature = "stub-drivers")]
 pub mod font_viewer;
+#[cfg(feature = "stub-drivers")]
 pub mod js_engine;
 pub mod media_player;
+#[cfg(feature = "stub-drivers")]
 pub mod shell_startup;
+#[cfg(feature = "stub-drivers")]
 pub mod task_manager;
+#[cfg(feature = "stub-drivers")]
 pub mod video_player;
+#[cfg(feature = "stub-drivers")]
 pub mod voice;
 // Package management
 pub mod package_manager;
 pub mod pam;
 // Testing & QA
 pub mod benchmark;
+#[cfg(feature = "stub-drivers")]
 pub mod fuzz;
 pub mod visual_test;
 // Documentation
+#[cfg(feature = "stub-drivers")]
 pub mod help_system;
+#[cfg(feature = "stub-drivers")]
 pub mod man_pages;
 // Build & distribution
+#[cfg(feature = "stub-drivers")]
 pub mod live_usb;
 pub mod ota_update;
 // Performance
 pub mod pgo;
 // Screen recording / webcam
 pub mod screen_record;
+#[cfg(feature = "stub-drivers")]
 pub mod webcam;
 
 // Phase 31+ modules — Final ❌ items and production hardening
+#[cfg(feature = "stub-drivers")]
 pub mod bare_metal_test;
+#[cfg(feature = "stub-drivers")]
 pub mod bonding;
+#[cfg(feature = "stub-drivers")]
 pub mod bridge;
+#[cfg(feature = "stub-drivers")]
 pub mod browser_launch;
+#[cfg(feature = "stub-drivers")]
 pub mod cifs;
+#[cfg(feature = "stub-drivers")]
 pub mod device_mapper;
+#[cfg(feature = "stub-drivers")]
 pub mod disk_install;
+#[cfg(feature = "stub-drivers")]
 pub mod exfat;
+#[cfg(feature = "stub-drivers")]
 pub mod fuse;
+#[cfg(feature = "stub-drivers")]
 pub mod gpu_compositor;
 pub mod hw_nic;
 pub mod linux_compat;
+#[cfg(feature = "stub-drivers")]
 pub mod lvm;
+#[cfg(feature = "stub-drivers")]
 pub mod md_raid;
+#[cfg(feature = "stub-drivers")]
 pub mod mdns;
+#[cfg(feature = "stub-drivers")]
 pub mod network_manager;
+#[cfg(feature = "stub-drivers")]
 pub mod ntfs;
+#[cfg(feature = "stub-drivers")]
 pub mod test_images;
+#[cfg(feature = "stub-drivers")]
 pub mod traffic_shaping;
+#[cfg(feature = "stub-drivers")]
 pub mod vlan;
+#[cfg(feature = "stub-drivers")]
 pub mod vpn;
+#[cfg(feature = "stub-drivers")]
 pub mod xfs;
 
 // Phase 32+ modules — Production completeness (device drivers, desktop, security, AI, services)
 // Device drivers (additional)
+#[cfg(feature = "stub-drivers")]
 pub mod amdgpu;
+#[cfg(feature = "stub-drivers")]
 pub mod ax211;
+#[cfg(feature = "stub-drivers")]
 pub mod broadcom_wifi;
+#[cfg(feature = "stub-drivers")]
 pub mod bt_audio;
+#[cfg(feature = "stub-drivers")]
 pub mod dp_mst;
+#[cfg(feature = "stub-drivers")]
 pub mod floppy;
+#[cfg(feature = "stub-drivers")]
 pub mod gpio;
+#[cfg(feature = "stub-drivers")]
 pub mod hdmi_cec;
+#[cfg(feature = "stub-drivers")]
 pub mod i2c;
+#[cfg(feature = "stub-drivers")]
 pub mod nouveau;
+#[cfg(feature = "stub-drivers")]
 pub mod pcie_hotplug;
+#[cfg(feature = "stub-drivers")]
 pub mod rtl8125;
+#[cfg(feature = "stub-drivers")]
 pub mod thunderbolt;
 pub mod tpm2;
+#[cfg(feature = "stub-drivers")]
 pub mod trackpad;
+#[cfg(feature = "stub-drivers")]
 pub mod usb_ethernet;
+#[cfg(feature = "stub-drivers")]
 pub mod usb_pd;
+#[cfg(feature = "stub-drivers")]
 pub mod usb_serial;
+#[cfg(feature = "stub-drivers")]
 pub mod uvc;
+#[cfg(feature = "stub-drivers")]
 pub mod wacom;
 // Compositor & rendering
+#[cfg(feature = "stub-drivers")]
 pub mod damage_tracking;
+#[cfg(feature = "stub-drivers")]
 pub mod lazy_render;
+#[cfg(feature = "stub-drivers")]
 pub mod subpixel_font;
+#[cfg(feature = "stub-drivers")]
 pub mod vulkan_compositor;
 // Accessibility
 pub mod atspi;
 // Input
+#[cfg(feature = "stub-drivers")]
 pub mod handwriting;
+#[cfg(feature = "stub-drivers")]
 pub mod ime;
+#[cfg(feature = "stub-drivers")]
 pub mod keyboard_layout;
 // Security (additional)
+#[cfg(feature = "stub-drivers")]
 pub mod dm_verity;
+#[cfg(feature = "stub-drivers")]
 pub mod firejail;
+#[cfg(feature = "stub-drivers")]
 pub mod home_encryption;
+#[cfg(feature = "stub-drivers")]
 pub mod ima;
+#[cfg(feature = "stub-drivers")]
 pub mod sandbox_data;
 // Multimedia codecs
+#[cfg(feature = "stub-drivers")]
 pub mod aac;
+#[cfg(feature = "stub-drivers")]
 pub mod flac;
+#[cfg(feature = "stub-drivers")]
 pub mod gif;
+#[cfg(feature = "stub-drivers")]
 pub mod low_latency_audio;
+#[cfg(feature = "stub-drivers")]
 pub mod mp3;
+#[cfg(feature = "stub-drivers")]
 pub mod mp4_container;
+#[cfg(feature = "stub-drivers")]
 pub mod ogg;
+#[cfg(feature = "stub-drivers")]
 pub mod svg;
+#[cfg(feature = "stub-drivers")]
 pub mod webp;
 // AI subsystem (additional)
+#[cfg(feature = "stub-drivers")]
 pub mod ai_model_cache;
+#[cfg(feature = "stub-drivers")]
 pub mod gpu_matmul;
+#[cfg(feature = "stub-drivers")]
 pub mod image_gen;
+#[cfg(feature = "stub-drivers")]
 pub mod onnx_ops;
 // Internationalization
+#[cfg(feature = "stub-drivers")]
 pub mod date_format;
+#[cfg(feature = "stub-drivers")]
 pub mod gettext;
+#[cfg(feature = "stub-drivers")]
 pub mod spell_check;
 // Service management (additional)
+#[cfg(feature = "stub-drivers")]
 pub mod runlevel;
+#[cfg(feature = "stub-drivers")]
 pub mod service_advanced;
 // Package management (additional)
+#[cfg(feature = "stub-drivers")]
 pub mod local_pkg_cache;
+#[cfg(feature = "stub-drivers")]
 pub mod pkg_advanced;
+#[cfg(feature = "stub-drivers")]
 pub mod unattended_upgrades;
 // User services
+#[cfg(feature = "stub-drivers")]
 pub mod online_accounts;
+#[cfg(feature = "stub-drivers")]
 pub mod parental_controls;
 // System reliability
+#[cfg(feature = "stub-drivers")]
 pub mod boot_time;
+#[cfg(feature = "stub-drivers")]
 pub mod connection_pool;
+#[cfg(feature = "stub-drivers")]
 pub mod crash_dump;
+#[cfg(feature = "stub-drivers")]
 pub mod health_check;
+#[cfg(feature = "stub-drivers")]
 pub mod journal_replay;
+#[cfg(feature = "stub-drivers")]
 pub mod live_patch;
+#[cfg(feature = "stub-drivers")]
 pub mod perf_monitor;
+#[cfg(feature = "stub-drivers")]
 pub mod power_saving;
+#[cfg(feature = "stub-drivers")]
 pub mod safe_mode;
+#[cfg(feature = "stub-drivers")]
 pub mod system_restore;
 // Deployment
+#[cfg(feature = "stub-drivers")]
 pub mod container_runtime;
+#[cfg(feature = "stub-drivers")]
 pub mod firmware_update;
+#[cfg(feature = "stub-drivers")]
 pub mod pxe;
+#[cfg(feature = "stub-drivers")]
 pub mod usb_installer;
 // Test framework
+#[cfg(feature = "stub-drivers")]
 pub mod test_framework;
 
 // Phase 33+ modules — Architecture ports, Chromebook, tablet/2-in-1 support
+#[cfg(feature = "stub-drivers")]
 pub mod aarch64_boot;
+#[cfg(feature = "stub-drivers")]
 pub mod depthcharge;
+#[cfg(feature = "stub-drivers")]
 pub mod riscv64_boot;
+#[cfg(feature = "stub-drivers")]
 pub mod tablet_mode;
 
 use core::panic::PanicInfo;
@@ -558,10 +743,12 @@ pub fn hlt_loop() -> ! {
         #[cfg(target_arch = "x86_64")]
         crate::arch_compat::instructions::interrupts::hlt();
         #[cfg(target_arch = "aarch64")]
+        // SAFETY: WFE is the architecture idle instruction; no memory is accessed.
         unsafe {
             core::arch::asm!("wfe")
         };
         #[cfg(target_arch = "riscv64")]
+        // SAFETY: WFI is the architecture idle instruction; no memory is accessed.
         unsafe {
             core::arch::asm!("wfi")
         };
@@ -631,6 +818,7 @@ pub fn exit_qemu(exit_code: QemuExitCode) {
         use crate::arch_compat::instructions::port::Port;
         #[cfg(not(target_arch = "x86_64"))]
         use crate::arch_compat::instructions::port::Port;
+        // SAFETY: QEMU isa-debug-exit at 0xf4 is mapped for this guest.
         unsafe {
             let mut port = Port::new(0xf4);
             port.write(exit_code as u32);

@@ -53,6 +53,23 @@ pub(super) fn run_gate_f4() {
     );
 }
 
+pub(super) fn run_gate_f6() {
+    serial_println!("[user_task] Gate F6: Ring 3 calculator SHM client");
+    let elf = crate::init::calculator_client_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "calc") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate F6 pid={} reaped={} (marker from userspace)",
+        pid,
+        reaped
+    );
+}
+
 pub(super) fn run_gate_f5() {
     serial_println!("[user_task] Gate F5: Wayland AF_UNIX present");
     let elf = crate::init::wayland_unix_client_elf_data();

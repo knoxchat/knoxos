@@ -26,7 +26,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] **Scheduled Ring 3** — `user_task::spawn_elf` builds a CFS task with its own CR3; boot path `execve`s `/bin/hello`, then `/bin/sh` on a PTY
 - [x] **Preemption of userspace** — naked APIC-timer stub saves GPRs + FXSAVE; spinner `rbx` magic survives (`GATE_I2 irq gprs`)
 - [x] **`wait4` blocking** — parks a Ring 3 parent until the child exits
-- [x] **SMP load balance / affinity** — `set_cpu_affinity` is honoured by CFS; APs run tasks pinned with `enqueue_on_cpu` (`GATE_I3 ap ring3`). Global CFS `current` remains BSP-shaped for the desktop.
+- [x] **SMP load balance / affinity** — `set_cpu_affinity` is honoured by CFS; per-CPU CFS `current`; APs run pinned (I3) and unpinned (I4) Ring 3; `sched_setaffinity`/`sched_getaffinity` syscalls write a real mask. BSP desktop stays in CPU 0's current slot.
 - [x] **Threads / `clone(CLONE_VM)`** — child shares the parent's CR3 and runs; parent `wait4`s (`GATE_J1 thread clone`). `CLONE_THREAD` + `thread_join` live (K1). `CLONE_SETTLS` / `arch_prctl(ARCH_SET_FS)` restore `%fs` (L1).
 - [x] **UTS namespaces** — `unshare(CLONE_NEWUTS)` isolates `sethostname` from the parent (`GATE_L2 uts ns`).
 - [x] **PID namespaces** — `unshare(CLONE_NEWPID)` then fork: child `getpid` is 1; parent unchanged (`GATE_M1 pid ns`).
