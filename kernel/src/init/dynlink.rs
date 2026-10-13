@@ -1,4 +1,4 @@
-//! Userspace dynamic linker fixtures (Gate BM1).
+//! Userspace dynamic linker fixtures (Gate BM1–BM4).
 //!
 //! Builds Ring 3 ELFs that the kernel maps on `execve`/`spawn`:
 //!   * `/lib/ld-knoxos.so` — a real userspace linker (auxv, DT_NEEDED, lazy PLT, RELRO)
@@ -6,17 +6,21 @@
 //!   * a `DT_NEEDED` executable that calls `gate_hello@plt` (Gate BM1)
 //!   * a static `dlopen` program that `mmap`s the `.so` through the VMM (Gate BM2)
 //!   * a static musl-CRT binary (`_start` → `__libc_start_main` → `main`) (Gate BM3)
+//!   * `/lib/libc.so` + a dynamically linked musl crt1 binary (Gate BM4)
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 pub const LDSO_PATH: &str = "/lib/ld-knoxos.so";
 pub const LIBGATE_PATH: &str = "/lib/libgate_bm.so";
+pub const LIBC_PATH: &str = "/lib/libc.so";
 pub const DYNBIN_PATH: &str = "/bin/gate_dyn";
 pub const DLOPEN_BIN_PATH: &str = "/bin/gate_dlopen";
 pub const MUSL_BIN_PATH: &str = "/bin/gate_musl";
+pub const MUSL_DYN_BIN_PATH: &str = "/bin/gate_musl_dyn";
 pub const GATE_BM1_MARKER: &str = "GATE_BM1 dynlink complete";
 pub const GATE_BM2_MARKER: &str = "GATE_BM2 dlopen complete";
 pub const GATE_BM3_MARKER: &str = "GATE_BM3 musl abi";
+pub const GATE_BM4_MARKER: &str = "GATE_BM4 musl dynlink";
 
 const MAIN_BASE: u64 = 0x0000_0080_0000_0000;
 const INTERP_BASE: u64 = 0x0000_0090_0000_0000;
@@ -735,8 +739,15 @@ fn emit_ldso_text() -> Vec<u8> {
     a.emit(&[0xFF, 0xE0]);
 
     a.label("resolver");
-    a.emit(&[0x58]);
-    a.emit(&[0x5B]);
+    // Preserve SysV argument registers across lazy bind so musl crt1's
+    // `__libc_start_main(main, argc, argv, …)` arrives intact (BM4).
+    a.emit(&[0x57]); // push rdi
+    a.emit(&[0x56]); // push rsi
+    a.emit(&[0x52]); // push rdx
+    a.emit(&[0x51]); // push rcx
+    a.emit(&[0x41, 0x50]); // push r8
+    a.emit(&[0x41, 0x51]); // push r9
+    a.emit(&[0x48, 0x8B, 0x5C, 0x24, 0x38]); // mov rbx, [rsp+56] reloc index
     mov_from_r15(&mut a, 0, S_JMPREL);
     a.emit(&[0x48, 0x6B, 0xCB, 0x18]);
     a.emit(&[0x48, 0x01, 0xC8]);
@@ -779,6 +790,13 @@ fn emit_ldso_text() -> Vec<u8> {
     a.emit(&[0x49, 0x03, 0x47, S_LIBBASE as u8]);
     mov_from_r15(&mut a, 7, S_GOTSLOT);
     a.emit(&[0x48, 0x89, 0x07]);
+    a.emit(&[0x41, 0x59]); // pop r9
+    a.emit(&[0x41, 0x58]); // pop r8
+    a.emit(&[0x59]); // pop rcx
+    a.emit(&[0x5A]); // pop rdx
+    a.emit(&[0x5E]); // pop rsi
+    a.emit(&[0x5F]); // pop rdi
+    a.emit(&[0x48, 0x83, 0xC4, 0x10]); // add rsp, 16  (GOT[1] + reloc index)
     a.emit(&[0xFF, 0xE0]);
 
     a.label("fail");
@@ -805,9 +823,11 @@ pub fn install_dynlink_files() {
     let mut vfs = crate::vfs::VFS.lock();
     vfs.write_file(LDSO_PATH, &ldso_elf_data());
     vfs.write_file(LIBGATE_PATH, &libgate_elf_data());
+    vfs.write_file(LIBC_PATH, &libc_musl_elf_data());
     vfs.write_file(DYNBIN_PATH, &dyn_user_elf_data());
     vfs.write_file(DLOPEN_BIN_PATH, &dlopen_user_elf_data());
     vfs.write_file(MUSL_BIN_PATH, &musl_static_user_elf_data());
+    vfs.write_file(MUSL_DYN_BIN_PATH, &musl_dyn_user_elf_data());
 }
 
 /// Userspace `/lib/ld-knoxos.so` — Ring 3 ELF interpreter.
@@ -1077,4 +1097,243 @@ pub fn musl_static_user_elf_data() -> Vec<u8> {
     let text = emit_musl_text();
     assert!(text.len() < 0x1000, "musl text overflow {}", text.len());
     super::elf::build_static_user_elf(&text)
+}
+
+// ─── Dynamically linked musl (Gate BM4) ─────────────────────────────────
+
+/// musl-style `/lib/libc.so` exporting `__libc_start_main`.
+///
+/// Signature matches musl crt1: `__libc_start_main(main, argc, argv, init, fini, ldso_fini)`.
+/// Calls `main(argc, argv, envp)` then `exit(status)`.
+pub fn libc_musl_elf_data() -> Vec<u8> {
+    let func = emit_libc_start_main();
+    assert!(
+        func.len() < 0x80,
+        "libc __libc_start_main overflow {}",
+        func.len()
+    );
+
+    let mut elf = Vec::new();
+    push_ehdr(&mut elf, 3, 0, 0x40, 2);
+    push_phdr(&mut elf, PT_LOAD, PF_R | PF_X, 0, 0, 0x2000, 0x2000, 0x1000);
+    push_phdr(
+        &mut elf,
+        PT_DYNAMIC,
+        PF_R,
+        0x1200,
+        0x1200,
+        6 * 16,
+        6 * 16,
+        8,
+    );
+
+    elf.resize(0x1000, 0);
+    elf.extend_from_slice(&func);
+
+    elf.resize(0x1080, 0);
+    let dynsym = 0x1080u64;
+    push_sym(&mut elf, 0, 0, 0, 0, 0);
+    push_sym(&mut elf, 9, 0x12, 1, 0x1000, func.len() as u64);
+
+    let dynstr = 0x10B0u64;
+    elf.resize(dynstr as usize, 0);
+    elf.push(0);
+    elf.extend_from_slice(b"libc.so\0");
+    elf.extend_from_slice(b"__libc_start_main\0");
+
+    elf.resize(0x1200, 0);
+    push_dyn(&mut elf, DT_SONAME, 1);
+    push_dyn(&mut elf, DT_SYMTAB, dynsym);
+    push_dyn(&mut elf, DT_STRTAB, dynstr);
+    push_dyn(&mut elf, DT_STRSZ, 27);
+    push_dyn(&mut elf, DT_SYMENT, 24);
+    push_dyn(&mut elf, DT_NULL, 0);
+
+    elf.resize(0x2000, 0);
+    elf
+}
+
+fn emit_libc_start_main() -> Vec<u8> {
+    let mut a = Asm::new();
+    a.emit(&[0x57]); // push rdi (main)
+    a.emit(&[0x48, 0x89, 0xF0]); // mov rax, rsi (argc)
+    a.emit(&[0x48, 0xFF, 0xC0]); // inc rax
+    a.emit(&[0x48, 0x8D, 0x0C, 0xC2]); // lea rcx, [rdx+rax*8] envp
+    a.emit(&[0x48, 0x89, 0xF7]); // mov rdi, rsi (argc)
+    a.emit(&[0x48, 0x89, 0xD6]); // mov rsi, rdx (argv)
+    a.emit(&[0x48, 0x89, 0xCA]); // mov rdx, rcx (envp)
+    a.emit(&[0x58]); // pop rax (main)
+    a.emit(&[0xFF, 0xD0]); // call main
+    a.emit(&[0x48, 0x89, 0xC7]); // mov rdi, rax
+    rex_mov_imm(&mut a, 0, 60);
+    syscall(&mut a);
+    a.finish()
+}
+
+/// musl crt1 `_start` + `main`, placed at file offset 0x1090.
+/// Calls `__libc_start_main@plt` (PLT1 at 0x1080).
+fn emit_musl_dyn_text() -> Vec<u8> {
+    let mut a = Asm::new();
+
+    a.emit(&[0x31, 0xED]); // xor ebp, ebp
+    a.emit(&[0x48, 0x8D, 0x3D]);
+    a.rel32("main");
+    a.emit(&[0x48, 0x8B, 0x34, 0x24]); // mov rsi, [rsp] argc
+    a.emit(&[0x48, 0x8D, 0x54, 0x24, 0x08]); // lea rdx, [rsp+8] argv
+    a.emit(&[0x31, 0xC9]); // xor ecx, ecx  init
+    a.emit(&[0x4D, 0x31, 0xC0]); // xor r8, r8  fini
+    a.emit(&[0x4D, 0x31, 0xC9]); // xor r9, r9  ldso_fini
+    a.emit(&[0x48, 0x83, 0xE4, 0xF0]); // and rsp, -16
+    let call_off = a.buf.len();
+    a.emit(&[0xE8, 0, 0, 0, 0]); // call __libc_start_main@plt
+    a.emit(&[0xF4]); // hlt if it returns
+
+    a.label("main");
+    rex_mov_imm(&mut a, 0, 1);
+    rex_mov_imm(&mut a, 7, 1);
+    a.emit(&[0x48, 0x8D, 0x35]);
+    a.rel32("marker");
+    rex_mov_imm(&mut a, 2, GATE_BM4_MARKER.len() as u64 + 1);
+    syscall(&mut a);
+    a.emit(&[0x31, 0xC0]); // xor eax, eax
+    a.emit(&[0xC3]);
+    a.label("marker");
+    a.emit(GATE_BM4_MARKER.as_bytes());
+    a.emit(b"\n");
+
+    let mut text = a.finish();
+    let next = 0x1090i32 + call_off as i32 + 5;
+    let disp = 0x1080i32 - next;
+    text[call_off + 1..call_off + 5].copy_from_slice(&disp.to_le_bytes());
+    text
+}
+
+/// ET_EXEC with PT_INTERP, DT_NEEDED `libc.so`, musl crt1, lazy PLT.
+pub fn musl_dyn_user_elf_data() -> Vec<u8> {
+    let interp = b"/lib/ld-knoxos.so\0";
+    let text = emit_musl_dyn_text();
+    assert!(text.len() < 0xF70, "musl dyn text overflow {}", text.len());
+
+    let mut elf = Vec::new();
+    let entry = MAIN_BASE + 0x1090;
+    push_ehdr(&mut elf, 2, entry, 0x40, 6);
+
+    push_phdr(
+        &mut elf,
+        PT_PHDR,
+        PF_R,
+        0x40,
+        MAIN_BASE + 0x40,
+        6 * 56,
+        6 * 56,
+        8,
+    );
+    push_phdr(
+        &mut elf,
+        PT_INTERP,
+        PF_R,
+        0x190,
+        MAIN_BASE + 0x190,
+        interp.len() as u64,
+        interp.len() as u64,
+        1,
+    );
+    push_phdr(
+        &mut elf,
+        PT_LOAD,
+        PF_R | PF_X,
+        0,
+        MAIN_BASE,
+        0x2000,
+        0x2000,
+        0x1000,
+    );
+    push_phdr(
+        &mut elf,
+        PT_LOAD,
+        PF_R | PF_W,
+        0x2000,
+        MAIN_BASE + 0x2000,
+        0x2000,
+        0x2000,
+        0x1000,
+    );
+    push_phdr(
+        &mut elf,
+        PT_DYNAMIC,
+        PF_R | PF_W,
+        0x2000,
+        MAIN_BASE + 0x2000,
+        10 * 16,
+        10 * 16,
+        8,
+    );
+    push_phdr(
+        &mut elf,
+        PT_GNU_RELRO,
+        PF_R,
+        0x2000,
+        MAIN_BASE + 0x2000,
+        0x1000,
+        0x1000,
+        1,
+    );
+
+    elf.resize(0x190, 0);
+    elf.extend_from_slice(interp);
+
+    elf.resize(0x1000, 0);
+    push_sym(&mut elf, 0, 0, 0, 0, 0);
+    push_sym(&mut elf, 9, 0x12, 0, 0, 0); // undef __libc_start_main
+
+    elf.resize(0x1030, 0);
+    elf.push(0);
+    elf.extend_from_slice(b"libc.so\0");
+    elf.extend_from_slice(b"__libc_start_main\0");
+
+    elf.resize(0x1050, 0);
+    elf.extend_from_slice(&(MAIN_BASE + 0x3018).to_le_bytes());
+    elf.extend_from_slice(&((1u64 << 32) | R_X86_64_JUMP_SLOT).to_le_bytes());
+    elf.extend_from_slice(&0i64.to_le_bytes());
+
+    elf.resize(0x1070, 0);
+    let disp_got1 = (MAIN_BASE + 0x3008) as i32 - (MAIN_BASE as i32 + 0x1076);
+    elf.extend_from_slice(&[0xFF, 0x35]);
+    elf.extend_from_slice(&disp_got1.to_le_bytes());
+    let disp_got2 = (MAIN_BASE + 0x3010) as i32 - (MAIN_BASE as i32 + 0x107C);
+    elf.extend_from_slice(&[0xFF, 0x25]);
+    elf.extend_from_slice(&disp_got2.to_le_bytes());
+
+    elf.resize(0x1080, 0);
+    let disp_got3 = (MAIN_BASE + 0x3018) as i32 - (MAIN_BASE as i32 + 0x1086);
+    elf.extend_from_slice(&[0xFF, 0x25]);
+    elf.extend_from_slice(&disp_got3.to_le_bytes());
+    elf.extend_from_slice(&[0x68, 0, 0, 0, 0]);
+    let rel_plt0 = 0x1070i32 - 0x1090;
+    elf.push(0xE9);
+    elf.extend_from_slice(&rel_plt0.to_le_bytes());
+
+    elf.resize(0x1090, 0);
+    elf.extend_from_slice(&text);
+
+    elf.resize(0x2000, 0);
+    push_dyn(&mut elf, DT_NEEDED, 1);
+    push_dyn(&mut elf, DT_STRTAB, MAIN_BASE + 0x1030);
+    push_dyn(&mut elf, DT_SYMTAB, MAIN_BASE + 0x1000);
+    push_dyn(&mut elf, DT_STRSZ, 27);
+    push_dyn(&mut elf, DT_SYMENT, 24);
+    push_dyn(&mut elf, DT_JMPREL, MAIN_BASE + 0x1050);
+    push_dyn(&mut elf, DT_PLTRELSZ, 24);
+    push_dyn(&mut elf, DT_PLTREL, DT_RELA as u64);
+    push_dyn(&mut elf, DT_PLTGOT, MAIN_BASE + 0x3000);
+    push_dyn(&mut elf, DT_NULL, 0);
+
+    elf.resize(0x3000, 0);
+    elf.extend_from_slice(&(MAIN_BASE + 0x2000).to_le_bytes());
+    elf.extend_from_slice(&0u64.to_le_bytes());
+    elf.extend_from_slice(&0u64.to_le_bytes());
+    elf.extend_from_slice(&(MAIN_BASE + 0x1086).to_le_bytes());
+
+    elf.resize(0x4000, 0);
+    elf
 }

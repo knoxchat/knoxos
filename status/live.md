@@ -23,7 +23,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 15. **Gate E1–E4 enforcement** — W^X/`mprotect` RWX denied + ASLR; ChaCha20 `getrandom`; seccomp EPERM; unprivileged bind `<1024` fails.
 16. **Gate B7 sigreturn** — Ring 3 `rt_sigaction(SIGINT)` handler `ret`s into a trampoline; `rt_sigreturn` restores `pause` (`GATE_B7 sigreturn complete`).
 17. **Gate B8 timer preempt** — a Ring 3 `jmp $` spinner is switched out by the APIC timer without a syscall; a peer writer runs (`GATE_B8 timer preempt complete`).
-18. **Gate F1–F4 isolated clients** — Ring 3 program mmaps a 64×64 BGRA buffer, `ioctl(/dev/wl0)` presents it; compositor SHM round-trips the pixels (`GATE_F1 client isolated`, `GATE_F2 shm commit`). A Ring 3 terminal client presents as Empty+SHM, not `WindowContentType::Terminal` (`GATE_F3 terminal isolated`). Empty launcher stubs are gone; Paint is a Ring 3 SHM client (`GATE_F4 launcher userspace`).
+18. **Gate F1–F5 isolated clients** — Ring 3 program mmaps a 64×64 BGRA buffer, `ioctl(/dev/wl0)` presents it; compositor SHM round-trips the pixels (`GATE_F1 client isolated`, `GATE_F2 shm commit`). A Ring 3 terminal client presents as Empty+SHM, not `WindowContentType::Terminal` (`GATE_F3 terminal isolated`). Empty launcher stubs are gone; Paint is a Ring 3 SHM client (`GATE_F4 launcher userspace`). Compositor `bind`+`listen`s `/run/wayland-0`; a Ring 3 client `connect`s and `sendto`s the SHM vaddr (`GATE_F5 wayland unix`).
 19. **Gate H1–H4** — CoW write-fault copies (H1); file-backed mmap faults one page (H2); inotify sees VFS write/unlink (H3); guarded kernel stack + OOM from empty buddy pool (H4).
 20. Async executor loop: keyboard, mouse, ~60 FPS redraw. Idle kernel thread `HLT`s when the desktop has no work.
 21. **Gate I1 SMP online** — per-CPU TSS + GS-relative `CpuLocal`; AP INIT/SIPI reaches 64-bit and loads its own TSS (`GATE_I1 smp online`).
@@ -31,9 +31,10 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 23. **Gate I3 AP Ring 3** — a `getcpu` ELF affinity-pinned to CPU 1 `iretq`s on the AP, syscalls, and exits (`GATE_I3 ap ring3`).
 24. **Gate BM1 userspace `ld.so`** — a Ring 3 ELF with `PT_INTERP` `/lib/ld-knoxos.so` and `DT_NEEDED libgate_bm.so` runs: the interpreter maps the `.so`, applies GNU_RELRO, and the first PLT call resolves `gate_hello` (`GATE_BM1 dynlink complete`).
 25. **Gate BM2 real `dlopen`** — a static Ring 3 program `open`s `/lib/libgate_bm.so`, `mmap`s it through the VMM, walks dynsym for `gate_hello`, calls it (`0x42`), and writes the marker (`GATE_BM2 dlopen complete`).
-26. **Gate BM3 static musl CRT** — a Ring 3 binary that is not the hello fixture: musl `crt1` `_start` calls `__libc_start_main`, which calls `main` (`GATE_BM3 musl abi`). Not a toolchain-built musl binary; dynamically linked musl is still open.
-27. **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual.
+26. **Gate BM3 static musl CRT** — a Ring 3 binary that is not the hello fixture: musl `crt1` `_start` calls `__libc_start_main`, which calls `main` (`GATE_BM3 musl abi`).
+27. **Gate BM4 dynamically linked musl** — PT_INTERP `/lib/ld-knoxos.so`, DT_NEEDED `/lib/libc.so`; crt1 `_start` calls `__libc_start_main@plt`, which calls `main` (`GATE_BM4 musl dynlink`). Generated in-kernel (same class as BM1–BM3), not a host musl-gcc binary.
+28. **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual.
 
 Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are proven on the same boot path. They are archived under [gates/syscalls.md](gates/syscalls.md), not repeated here.
 
-Integration: `./tests/run_integration.sh` **270/270** on QEMU (2026-10-13).
+Integration: `./tests/run_integration.sh` **272/272** on QEMU (2026-10-13).

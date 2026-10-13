@@ -1313,7 +1313,7 @@ fn install_builtin_binaries() {
     crate::init::install_dynlink_files();
 
     crate::serial_println!(
-        "[VFS] Installed built-in binaries: /bin/sh, /bin/bash, /bin/ash, /sbin/init, /bin/hello, /bin/paint, /bin/term, /lib/ld-knoxos.so, /bin/gate_dlopen, /bin/gate_musl"
+        "[VFS] Installed built-in binaries: /bin/sh, /bin/bash, /bin/ash, /sbin/init, /bin/hello, /bin/paint, /bin/term, /lib/ld-knoxos.so, /lib/libc.so, /bin/gate_dlopen, /bin/gate_musl, /bin/gate_musl_dyn"
     );
 }
 

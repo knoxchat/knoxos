@@ -30,19 +30,19 @@ Percentages are **production usefulness**, not lines of code.
 | 4 | [Filesystem](subsystems/04-filesystem.md) | Wired | 99% | **Critical** | VirtIO-blk persist C1–C7 (`/bin` included); AHCI/NVMe DMA; VFS syscalls through BL. Virtual FS still rebuilt. |
 | 5 | [Networking](subsystems/05-networking.md) | Wired | 72% | **Critical** | Loopback + VirtIO-net DHCP/DNS/TCP CUBIC (D1–D5). IPv6/TLS/Wi-Fi later. |
 | 6 | [Drivers](subsystems/06-drivers.md) | Wired | 40% | **Critical** | PCI, PS/2, UART, VirtIO-blk, AHCI/NVMe DMA live; USB/GPU mostly stub. |
-| 7 | [GUI](subsystems/07-gui.md) | Live | 84% | Medium | Software compositor + Ring 3 SHM clients (F1–F4). Most apps still in-kernel. |
+| 7 | [GUI](subsystems/07-gui.md) | Live | 86% | Medium | Software compositor + Ring 3 SHM clients (F1–F5, Wayland AF_UNIX). Most apps still in-kernel. |
 | 8 | [Shell](subsystems/08-shell.md) | Live | 82% | Medium | Real parser/PTY; Ring 3 `/bin/sh`; desktop terminal still in-kernel. |
 | 9 | [Security](subsystems/09-security.md) | Wired | 80% | **Critical** | W^X, ChaCha20, seccomp, caps (E1–E4); Landlock. Unimplemented syscalls return ENOSYS. |
 | 10 | [Services](subsystems/10-services.md) | Wired | 42% | High | Ring 3 `/sbin/init` (K3); AF_UNIX D-Bus. No crash restart. |
 | 11 | [Virt](subsystems/11-virt.md) | Stub | 30% | Low | Namespaces live; KVM `vmlaunch` unused. **Later.** |
 | 12 | [AI/ML](subsystems/12-ai.md) | Wired | 22% | Low | GGUF parse + naive CPU. **Later.** |
-| 13 | [Binary compat](subsystems/13-binary-compat.md) | Wired | 99% | **Do first** | Static ELF + 200+ Ring 3 syscalls + `ld.so` (BM1) + VMM `dlopen` (BM2) + static musl CRT (BM3). Next: dynamically linked musl. |
+| 13 | [Binary compat](subsystems/13-binary-compat.md) | Wired | 99% | High | Static ELF + 200+ Ring 3 syscalls + `ld.so` (BM1) + VMM `dlopen` (BM2) + static musl CRT (BM3) + dynamically linked musl (BM4). Next: Ring 3 desktop apps. |
 | 14 | [i18n](subsystems/14-i18n.md) | Live | 68% | Low | TTF, CJK, RTL on the compositor; locale loading partial. |
 | 15 | [Build](subsystems/15-build.md) | Live | 75% | Medium | Make/QEMU work; `flake.nix` missing. |
-| 16 | [Testing](subsystems/16-testing.md) | Wired | 82% | **Critical** | `270/270` QEMU markers; `assert!(true)` gone. |
+| 16 | [Testing](subsystems/16-testing.md) | Wired | 83% | **Critical** | `272/272` QEMU markers; `assert!(true)` gone. |
 | 17 | [Docs](subsystems/17-docs.md) | Wired | 42% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + `status/`. Architecture guides missing. |
 | 18 | [CI/CD](subsystems/18-ci.md) | Wired | 30% | High | GitHub Actions fmt/clippy/size/QEMU boot; no signed releases. |
 
-**QEMU desktop demo: ~99%.** **Production OS: ~98%.** Gates A–F, H–I, J–BL, BM1–BM3, and C7 are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **270/270** on QEMU (2026-10-13). What to do next: [next.md](next.md).
+**QEMU desktop demo: ~99%.** **Production OS: ~98%.** Gates A–F, H–I, J–BL, BM1–BM4, F5, and C7 are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **272/272** on QEMU (2026-10-13). What to do next: [next.md](next.md).
 
 ---

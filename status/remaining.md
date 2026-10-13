@@ -76,7 +76,7 @@ Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 
 Details: [subsystems/07-gui.md](subsystems/07-gui.md)
 
-- [ ] **Wayland** — object model plus a live `/dev/wl0` present ioctl; one Ring 3 SHM client (F1–F2); no bind/listen Unix socket
+- [ ] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2) plus AF_UNIX `/run/wayland-0` present (F5); not a `wl_display` object-protocol server
 - [ ] **GPU compositor** — `gpu_compositor.rs` never invoked; desktop software-blits
 - [ ] Hardware cursor probed (`hw_cursor::init`); desktop still draws a software cursor
 - [ ] VSync module unused; pacing is TSC ~60 FPS
@@ -132,7 +132,7 @@ Details: [subsystems/13-binary-compat.md](subsystems/13-binary-compat.md)
 - [x] Dynamic linker as a userspace `ld.so` (DT_NEEDED, lazy PLT, RELRO) — **Gate BM1**
 - [x] `dlopen` that maps `.so` via VMM (`open` + file-backed `mmap`, not `ldknoxos.rs` fake base) — **Gate BM2**
 - [x] Static musl CRT ABI (`_start` → `__libc_start_main` → `main`) — **Gate BM3**
-- [ ] Dynamically linked musl/glibc binary for Ring 3
+- [x] Dynamically linked musl binary for Ring 3 (`PT_INTERP` + `DT_NEEDED libc.so` + `__libc_start_main@plt`) — **Gate BM4**
 
 ## 14. Internationalization & Fonts
 

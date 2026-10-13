@@ -2,29 +2,15 @@
 
 ← [Status index](README.md)
 
-Gates **A–F, H–I**, syscall gates **J–BL**, **BM1** (userspace `ld.so`), **BM2** (real `dlopen`), **BM3** (static musl CRT), and **C7** (`/bin` persist) are done on QEMU (`./tests/run_integration.sh` **270/270**). Adding another `GATE_xx` ENOSYS is **not** the critical path.
+Gates **A–F, H–I**, syscall gates **J–BL**, **BM1–BM4** (userspace `ld.so` + musl static/dynamic), **F5** (Wayland AF_UNIX), and **C7** (`/bin` persist) are done on QEMU (`./tests/run_integration.sh` **272/272**). Adding another `GATE_xx` ENOSYS is **not** the critical path.
 
 Work top to bottom. Skip anything marked later.
 
 ---
 
-## 1. Dynamic linker — the critical path
+## 1. Quality bar (Gate G)
 
-Static Ring 3 works (`execve`, `fork`, `clone`/`clone3`, `/bin/sh`, `/sbin/init`). Nothing that needs `libc.so` does.
-
-| Do | Done when | Details |
-|----|-----------|---------|
-| Userspace `ld.so` | **Done** — Ring 3 ELF with `DT_NEEDED` runs via `/lib/ld-knoxos.so` (lazy PLT, GNU_RELRO) (`GATE_BM1 dynlink complete`) | [13-binary-compat.md](subsystems/13-binary-compat.md) |
-| Real `dlopen` | **Done** — Ring 3 `open` + VMM `mmap` of `libgate_bm.so`, dynsym `gate_hello`, call returns `0x42` (`GATE_BM2 dlopen complete`) | same |
-| musl or glibc ABI | **Partial** — static musl CRT (`_start` → `__libc_start_main` → `main`) is live (`GATE_BM3 musl abi`). A dynamically linked musl binary is still open. | same |
-
-`ld.so` (BM1), runtime `dlopen` (BM2), and static musl CRT (BM3) are live. Remaining desktop apps still stay in-kernel `WindowContentType` until a dynamically linked musl/glibc binary runs; “binary compat 99%” is still mostly syscall coverage.
-
----
-
-## 2. Quality bar (Gate G, parallel)
-
-Do these beside the linker. They shrink the lie in the tree.
+The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). These shrink the lie in the tree.
 
 | ID | Do | Done when | Details |
 |----|----|-----------|---------|
@@ -36,20 +22,20 @@ Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered 
 
 ---
 
-## 3. Live-path gaps that still block a perfect OS
+## 2. Live-path gaps that still block a perfect OS
 
-These are the unfinished rows in [blockers.md](blockers.md). Do them after (or with) the linker, not instead of it.
+These are the unfinished rows in [blockers.md](blockers.md). Do them with Gate G, not instead of it.
 
 1. **Persist `/bin`** — **Done** (C7). Virtual FS (`/dev` `/proc` `/sys` `/run`) is still rebuilt at boot. [04-filesystem.md](subsystems/04-filesystem.md)
 2. **Move desktop apps to Ring 3** — freeze new in-kernel apps; each new app is a userspace binary. Interactive terminal is still in-kernel for PTY I/O. [07-gui.md](subsystems/07-gui.md)
 3. **SMP load balance** — AP can run a pinned Ring 3 task (I3). Further APs still share one CFS `current` for the BSP desktop. [01-kernel-core.md](subsystems/01-kernel-core.md)
-4. **Wayland over a Unix socket** — `/dev/wl0` present ioctl + one SHM client (F1–F2) is not a display server. [07-gui.md](subsystems/07-gui.md)
+4. **Wayland over a Unix socket** — **Done** (F5): compositor `bind`+`listen`s `/run/wayland-0`; a Ring 3 client `connect`s and `sendto`s a SHM vaddr (`GATE_F5 wayland unix`). Not a `wl_display` protocol server. [07-gui.md](subsystems/07-gui.md)
 
 ---
 
-## 4. After the linker (still production)
+## 3. After the linker (still production)
 
-Only when a dynamically linked binary can run:
+A dynamically linked musl binary runs (BM4). These are still open:
 
 - Hardware cursor + VirtIO-GPU scanout (desktop still software-blits).
 - ext4 as default root (persist WAL is live; JBD2 is not).

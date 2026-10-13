@@ -52,3 +52,20 @@ pub(super) fn run_gate_f4() {
         reaped
     );
 }
+
+pub(super) fn run_gate_f5() {
+    serial_println!("[user_task] Gate F5: Wayland AF_UNIX present");
+    let elf = crate::init::wayland_unix_client_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "wl-unix") else {
+        return;
+    };
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate F5 pid={} reaped={} (marker from userspace)",
+        pid,
+        reaped
+    );
+}

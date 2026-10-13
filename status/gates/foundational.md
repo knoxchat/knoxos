@@ -68,6 +68,7 @@ This **is** becoming an OS.
 | F2 | SHM / DMA-BUF to compositor | **Done** — client mmap copied into a kernel SHM pool; compositor round-trips magic pixels (`GATE_F2 shm commit`) |
 | F3 | VirtIO-GPU scanout or keep FB but clients isolated | **Done** — FB scanout of SHM; Ring 3 terminal is Empty+SHM, not `WindowContentType::Terminal` (`GATE_F3 terminal isolated`). Interactive desktop terminal still in-kernel for PTY I/O. |
 | F4 | Remove Empty launcher stubs or implement them as userspace | **Done** — Doom/Quake/Webamp stubs removed; Paint is a Ring 3 SHM client (`GATE_F4 launcher userspace`) |
+| F5 | Wayland over a Unix socket | **Done** — compositor `listen`s `/run/wayland-0`; Ring 3 `connect`+`sendto` presents SHM (`GATE_F5 wayland unix`) |
 
 ### Gate H — Memory, VFS, core leftovers (after A–F)
 
@@ -93,3 +94,4 @@ This **is** becoming an OS.
 | BM1 | Userspace `ld.so` + `DT_NEEDED` | **Done** — `/lib/ld-knoxos.so` maps `libgate_bm.so`, lazy PLT resolves `gate_hello`, GNU_RELRO (`GATE_BM1 dynlink complete`) |
 | BM2 | Real `dlopen` via VMM | **Done** — Ring 3 `open` + file-backed `mmap` of `libgate_bm.so`, dynsym `gate_hello` call returns `0x42` (`GATE_BM2 dlopen complete`) |
 | BM3 | Static musl CRT ABI | **Done** — `_start` → `__libc_start_main` → `main` (not the hello fixture) (`GATE_BM3 musl abi`) |
+| BM4 | Dynamically linked musl | **Done** — PT_INTERP `ld-knoxos.so`, DT_NEEDED `/lib/libc.so`, crt1 `_start` → `__libc_start_main@plt` → `main` (`GATE_BM4 musl dynlink`) |

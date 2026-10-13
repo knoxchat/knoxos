@@ -21,6 +21,8 @@ pub const GATE_I2_MARKER: &str = "GATE_I2 irq gprs";
 pub const GATE_I3_MARKER: &str = "GATE_I3 ap ring3";
 /// Ring 3 client presented a buffer; not an in-kernel WindowContentType app.
 pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
+/// Ring 3 client presented via AF_UNIX `/run/wayland-0`, not ioctl(`/dev/wl0`).
+pub const GATE_F5_MARKER: &str = "GATE_F5 wayland unix";
 
 pub const GATE_K1_MARKER: &str = "GATE_K1 thread join";
 pub const GATE_K3_MARKER: &str = "GATE_K3 init userspace";
@@ -246,3 +248,4 @@ pub const GATE_BL4_MARKER: &str = "GATE_BL4 enosys";
 pub const GATE_BM1_MARKER: &str = "GATE_BM1 dynlink complete";
 pub const GATE_BM2_MARKER: &str = "GATE_BM2 dlopen complete";
 pub const GATE_BM3_MARKER: &str = "GATE_BM3 musl abi";
+pub const GATE_BM4_MARKER: &str = "GATE_BM4 musl dynlink";

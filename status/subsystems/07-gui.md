@@ -2,7 +2,7 @@
 
 # 7. GUI & Desktop Environment
 
-**Grade: Live (84%)** · `gui/` 162 files, ~91,700 lines
+**Grade: Live (86%)** · `gui/` 162 files, ~91,700 lines
 
 The compositor is the most complete **product** in the tree. It is not a Unix display server.
 
@@ -21,9 +21,9 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 - [x] **Faster software blit** — opaque `fill_rect` stamps packed BGRA; `fill_rounded_rect_aa` fills the body as rects and AA-only the corners
 
 ### Unused / stub
-- [ ] **Wayland** — object model plus a live `/dev/wl0` present ioctl; one Ring 3 SHM client (F1–F2); no bind/listen Unix socket
+- [ ] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2) plus AF_UNIX `/run/wayland-0` present (F5); not a `wl_display` object-protocol server
 - [ ] **GPU compositor** — `gpu_compositor.rs` never invoked; desktop software-blits
-- [x] **Client isolation (demo)** — Gate F Ring 3 clients paint SHM (F1–F4); remaining in-kernel apps still `WindowContentType`
+- [x] **Client isolation (demo)** — Gate F Ring 3 clients paint SHM (F1–F5); remaining in-kernel apps still `WindowContentType`
 - [ ] Hardware cursor probed (`hw_cursor::init`); desktop still draws a software cursor
 - [ ] VSync module unused; pacing is TSC ~60 FPS
 - [x] Start-menu **Paint / Video Player / Webamp / Doom / ClassiCube / Quake III** removed; Paint is a Ring 3 SHM client (F4)
@@ -31,7 +31,6 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 
 ### Perfect-OS next steps
 1. Freeze new in-kernel apps. Every new app should be a Ring 3 binary.
-2. After `execve` works: Wayland (or a tiny custom protocol) over Unix sockets, SHM buffers, kernel compositor scanout.
-3. Then VirtIO-GPU scanout + hardware cursor. Not before userspace exists.
+2. ~~Wayland over Unix sockets~~ F5 `connect`/`sendto` present is live. Next: `wl_display` object protocol, then VirtIO-GPU scanout + hardware cursor.
 
 ---

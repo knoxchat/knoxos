@@ -143,6 +143,102 @@ fn loopback_connect(
     Ok(())
 }
 
+fn unix_connect(
+    sockets: &mut BTreeMap<u32, Socket>,
+    sockfd: u32,
+    addr: SocketAddress,
+) -> Result<(), i32> {
+    let path = match &addr {
+        SocketAddress::Unix(p) => p.clone(),
+        _ => return Err(-97),
+    };
+    let client_type = sockets.get(&sockfd).ok_or(-9i32)?.sock_type;
+    if client_type != SocketType::Stream {
+        let client = sockets.get_mut(&sockfd).ok_or(-9i32)?;
+        client.remote_addr = Some(addr);
+        client.state = SocketState::Connected;
+        return Ok(());
+    }
+
+    let listener_id = sockets.iter().find_map(|(id, s)| {
+        if s.sock_type != SocketType::Stream || s.state != SocketState::Listening {
+            return None;
+        }
+        match &s.local_addr {
+            Some(SocketAddress::Unix(p)) if *p == path => Some(*id),
+            _ => None,
+        }
+    });
+    let listener_id = listener_id.ok_or(-111i32)?;
+    {
+        let listener = sockets.get(&listener_id).ok_or(-111i32)?;
+        if listener.backlog.len() >= listener.max_backlog {
+            return Err(-11);
+        }
+    }
+    let listener_local = sockets.get(&listener_id).and_then(|l| l.local_addr.clone());
+
+    let mut accepted = Socket::new(AddressFamily::Unix, SocketType::Stream, 0);
+    accepted.state = SocketState::Connected;
+    accepted.local_addr = listener_local;
+    accepted.remote_addr = Some(addr.clone());
+    accepted.peer_id = Some(sockfd);
+    let accepted_id = accepted.id;
+
+    {
+        let client = sockets.get_mut(&sockfd).ok_or(-9i32)?;
+        client.remote_addr = Some(addr);
+        client.peer_id = Some(accepted_id);
+        client.state = SocketState::Connected;
+    }
+
+    sockets.insert(accepted_id, accepted);
+    sockets
+        .get_mut(&listener_id)
+        .ok_or(-111i32)?
+        .backlog
+        .push(accepted_id);
+    Ok(())
+}
+
+fn unix_send(
+    sockets: &mut BTreeMap<u32, Socket>,
+    sockfd: u32,
+    buf: &[u8],
+) -> Result<(usize, Option<(u32, u64)>), i32> {
+    let sock = sockets.get(&sockfd).ok_or(-9i32)?;
+    if sock.sock_type == SocketType::Stream && sock.state != SocketState::Connected {
+        return Err(-107);
+    }
+    let peer = sock.peer_id.ok_or(-32i32)?;
+    let wayland = sockets
+        .get(&peer)
+        .and_then(|p| p.local_addr.as_ref())
+        .is_some_and(
+            |addr| matches!(addr, SocketAddress::Unix(p) if p == crate::wayland::WAYLAND_SOCKET_PATH),
+        );
+    let peer_sock = sockets.get_mut(&peer).ok_or(-32i32)?;
+    peer_sock.recv_buf.extend_from_slice(buf);
+    let present = if wayland && buf.len() >= 8 {
+        let mut vaddr = [0u8; 8];
+        vaddr.copy_from_slice(&buf[..8]);
+        Some((crate::context::current_pid(), u64::from_le_bytes(vaddr)))
+    } else {
+        None
+    };
+    Ok((buf.len(), present))
+}
+
+/// Bind + listen a Unix stream socket (kernel compositor / services).
+pub fn listen_unix_path(path: &str) -> Result<u32, i32> {
+    let mut sock = Socket::new(AddressFamily::Unix, SocketType::Stream, 0);
+    sock.bind(SocketAddress::Unix(String::from(path)))?;
+    sock.listen(16)?;
+    let id = sock.id;
+    SOCKETS.lock().insert(id, sock);
+    Ok(id)
+}
+
 fn loopback_send(
     sockets: &mut BTreeMap<u32, Socket>,
     sockfd: u32,
@@ -359,6 +455,9 @@ pub fn sys_connect(sockfd: u32, addr_ptr: u64) -> Result<(), i32> {
             return loopback_connect(&mut sockets, sockfd, addr);
         }
     }
+    if let SocketAddress::Unix(_) = &addr {
+        return unix_connect(&mut sockets, sockfd, addr);
+    }
     let socket = sockets.get_mut(&sockfd).ok_or(-9i32)?;
     socket.connect(addr)
 }
@@ -385,7 +484,29 @@ pub fn sys_sendto(sockfd: u32, buf: &[u8], addr_ptr: u64) -> Result<usize, i32> 
                     return loopback_send(&mut sockets, sockfd, buf, dest);
                 }
             }
+            if matches!(&sock.remote_addr, Some(SocketAddress::Unix(_))) {
+                drop(sockets);
+                let mut sockets = SOCKETS.lock();
+                let (n, present) = unix_send(&mut sockets, sockfd, buf)?;
+                drop(sockets);
+                if let Some((pid, vaddr)) = present {
+                    if !crate::wayland::present_unix_buffer(pid, vaddr) {
+                        return Err(-5);
+                    }
+                }
+                return Ok(n);
+            }
         }
+    } else if matches!(&dest, Some(SocketAddress::Unix(_))) {
+        let mut sockets = SOCKETS.lock();
+        let (n, present) = unix_send(&mut sockets, sockfd, buf)?;
+        drop(sockets);
+        if let Some((pid, vaddr)) = present {
+            if !crate::wayland::present_unix_buffer(pid, vaddr) {
+                return Err(-5);
+            }
+        }
+        return Ok(n);
     }
     nic_send(sockfd, buf, dest)
 }

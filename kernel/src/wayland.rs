@@ -1192,6 +1192,8 @@ pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
 pub const GATE_F2_MARKER: &str = "GATE_F2 shm commit";
 pub const GATE_F3_MARKER: &str = "GATE_F3 terminal isolated";
 pub const GATE_F4_MARKER: &str = "GATE_F4 launcher userspace";
+pub const GATE_F5_MARKER: &str = "GATE_F5 wayland unix";
+pub const WAYLAND_SOCKET_PATH: &str = "/run/wayland-0";
 const GATE_F_MAGIC: [u8; 4] = [0xEE, 0xFF, 0xC0, 0xFF];
 const GATE_F3_MAGIC: [u8; 4] = [0x1A, 0x1A, 0x1A, 0xFF];
 const GATE_F4_MAGIC: [u8; 4] = [0xCC, 0x66, 0x33, 0xFF];
@@ -1294,6 +1296,25 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     magic_ok
 }
 
+/// Present via the compositor's AF_UNIX listen socket (Gate F5).
+pub fn present_unix_buffer(pid: u32, vaddr: u64) -> bool {
+    if !present_user_buffer(pid, vaddr) {
+        serial_println!(
+            "[WL] Gate F5 FAILED: unix present pid={} vaddr={:#x}",
+            pid,
+            vaddr
+        );
+        return false;
+    }
+    serial_println!(
+        "[WL] {} (pid={} path={})",
+        GATE_F5_MARKER,
+        pid,
+        WAYLAND_SOCKET_PATH
+    );
+    true
+}
+
 /// SHM pixels for a desktop window that was created from a Ring 3 present.
 pub fn window_shm_pixels(window_id: u32) -> Option<(Vec<u8>, u32, u32)> {
     WINDOW_PIXELS.lock().get(&window_id).cloned()
@@ -1342,6 +1363,11 @@ pub fn init() {
     drop(comp);
 
     WAYLAND_ENABLED.store(true, Ordering::Relaxed);
+    crate::vfs::ensure_directory("/run");
+    match crate::net::listen_unix_path(WAYLAND_SOCKET_PATH) {
+        Ok(id) => serial_println!("[WL] listening on {} (socket {})", WAYLAND_SOCKET_PATH, id),
+        Err(e) => serial_println!("[WL] listen {} failed: {}", WAYLAND_SOCKET_PATH, e),
+    }
     serial_println!(
         "[WL] Wayland compositor initialized: {}x{} output, real SHM buffer exchange, damage-driven compositing",
         out_w,
