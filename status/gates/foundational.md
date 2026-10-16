@@ -40,6 +40,7 @@ This **is** becoming an OS.
 | C5 | NVMe PRP DMA | **Done** — admin + I/O queues; PRP bounce write/read (`GATE_C5 nvme dma complete`) |
 | C6 | RAM VFS root snapshot | **Done** — `/etc` and the rest of the namespace (except virtual FS) persist (`GATE_C6 vfs persist`) |
 | C7 | Persist `/bin` | **Done** — `/bin/gate_c7` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual. |
+| C8 | JBD2 journal replay | **Done** — descriptor + data + commit on the ramdisk; committed block applied, torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount uses the same walker when `fs-ext4` is on. |
 
 ### Gate D — Packets (4–8 weeks)
 
@@ -69,6 +70,9 @@ This **is** becoming an OS.
 | F3 | VirtIO-GPU scanout or keep FB but clients isolated | **Done** — FB scanout of SHM; Ring 3 terminal is Empty+SHM, not `WindowContentType::Terminal` (`GATE_F3 terminal isolated`). Interactive desktop terminal still in-kernel for PTY I/O. |
 | F4 | Remove Empty launcher stubs or implement them as userspace | **Done** — Doom/Quake/Webamp stubs removed; Paint is a Ring 3 SHM client (`GATE_F4 launcher userspace`) |
 | F5 | Wayland over a Unix socket | **Done** — compositor `listen`s `/run/wayland-0`; Ring 3 `connect`+`sendto` presents SHM (`GATE_F5 wayland unix`) |
+| F6 | Calculator userspace | **Done** — Ring 3 SHM, not `WindowContentType::Calculator` (`GATE_F6 calculator userspace`) |
+| F7 | Files userspace | **Done** — Ring 3 SHM, not `WindowContentType::FileExplorer` (`GATE_F7 files userspace`) |
+| F8 | VirtIO-GPU scanout + hardware cursor | **Done** — controlq 2D resource + SET_SCANOUT + FLUSH (`GATE_F8 virtio-gpu scanout`); cursorq UPDATE_CURSOR (`GATE_F8 hw cursor`). Desktop software-blits to VGA; host GPU also scanouts a 64×64 resource. |
 
 ### Gate H — Memory, VFS, core leftovers (after A–F)
 

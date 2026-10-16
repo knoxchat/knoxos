@@ -46,20 +46,43 @@ cp "$BIOS_IMG" "$ITEST_BIOS"
 BIOS_IMG="$ITEST_BIOS"
 
 PERSIST_DISK="$PROJECT_ROOT/tests/c1-persist.img"
+EXT4_DISK="$PROJECT_ROOT/tests/c9-ext4.img"
 AHCI_DISK="$PROJECT_ROOT/tests/c4-ahci.img"
 NVME_DISK="$PROJECT_ROOT/tests/c5-nvme.img"
-rm -f "$PERSIST_DISK" "$AHCI_DISK" "$NVME_DISK"
+rm -f "$PERSIST_DISK" "$EXT4_DISK" "$AHCI_DISK" "$NVME_DISK"
 if command -v qemu-img >/dev/null 2>&1; then
     qemu-img create -f raw "$PERSIST_DISK" 64M >/dev/null
+    qemu-img create -f raw "$EXT4_DISK" 64M >/dev/null
     qemu-img create -f raw "$AHCI_DISK" 64M >/dev/null
     qemu-img create -f raw "$NVME_DISK" 64M >/dev/null
 else
     dd if=/dev/zero of="$PERSIST_DISK" bs=1m count=64 status=none 2>/dev/null \
         || dd if=/dev/zero of="$PERSIST_DISK" bs=1m count=64
+    dd if=/dev/zero of="$EXT4_DISK" bs=1m count=64 status=none 2>/dev/null \
+        || dd if=/dev/zero of="$EXT4_DISK" bs=1m count=64
     dd if=/dev/zero of="$AHCI_DISK" bs=1m count=64 status=none 2>/dev/null \
         || dd if=/dev/zero of="$AHCI_DISK" bs=1m count=64
     dd if=/dev/zero of="$NVME_DISK" bs=1m count=64 status=none 2>/dev/null \
         || dd if=/dev/zero of="$NVME_DISK" bs=1m count=64
+fi
+MKFS_EXT4=""
+for c in mkfs.ext4 /opt/homebrew/opt/e2fsprogs/sbin/mkfs.ext4 \
+    /usr/local/opt/e2fsprogs/sbin/mkfs.ext4 mke2fs; do
+    if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then
+        MKFS_EXT4="$c"
+        break
+    fi
+done
+if [ -n "$MKFS_EXT4" ]; then
+    if [ "$(basename "$MKFS_EXT4")" = "mke2fs" ]; then
+        "$MKFS_EXT4" -t ext4 -F -q -L knoxos-root "$EXT4_DISK" >/dev/null
+    else
+        "$MKFS_EXT4" -q -F -L knoxos-root "$EXT4_DISK" >/dev/null
+    fi
+    echo "       ext4 root disk formatted"
+else
+    python3 "$PROJECT_ROOT/scripts/mkfs-ext4-min.py" "$EXT4_DISK"
+    echo "       ext4 root disk formatted (scripts/mkfs-ext4-min.py)"
 fi
 chmod +x "$PROJECT_ROOT/tests/d4_http.sh"
 echo "       Build OK"
@@ -75,6 +98,7 @@ rm -f "$QEMU_ERR"
 QEMU_CMD=(qemu-system-x86_64
     -drive format=raw,file="$BIOS_IMG"
     -drive if=virtio,format=raw,file="$PERSIST_DISK"
+    -drive if=virtio,format=raw,file="$EXT4_DISK"
     -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK"
     -device ahci,id=ahci0
     -device ide-hd,drive=ahcidisk,bus=ahci0.0
@@ -82,6 +106,10 @@ QEMU_CMD=(qemu-system-x86_64
     -device nvme,serial=knoxos,drive=nvme0
     -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$PROJECT_ROOT/tests/d4_http.sh"
     -device virtio-net-pci,netdev=net1,disable-modern=on
+    -device virtio-gpu-pci
+    -device qemu-xhci,id=xhci
+    -device usb-kbd,bus=xhci.0
+    -device usb-tablet,bus=xhci.0
     -serial file:"$SERIAL_LOG"
     -display none
     -device isa-debug-exit,iobase=0xf4,iosize=0x04
@@ -422,8 +450,18 @@ check_marker "GATE_BM3 musl abi"
 check_marker "GATE_BM4 musl dynlink"
 check_marker "GATE_G3 features live"
 check_marker "GATE_G4 enosys"
+check_marker "GATE_G4 audit live"
 check_marker "GATE_F6 calculator userspace"
+check_marker "GATE_F7 files userspace"
 check_marker "GATE_I4 smp balance"
+check_marker "GATE_F8 virtio-gpu scanout"
+check_marker "GATE_F8 hw cursor"
+check_marker "GATE_C8 jbd2 replay"
+check_marker "GATE_USB hid urb"
+check_marker "GATE_USB xhci mmio"
+check_marker "GATE_G5 safety comments"
+check_marker "GATE_C9 ext4 root"
+check_marker "GATE_USB no ps2 cursor"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

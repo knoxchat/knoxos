@@ -85,14 +85,15 @@
 - [x] **AHCI** — HBA reset, port start, command-list + PRDT DMA read/write (C4); IDENTIFY parsed
 - [x] **NVMe** — controller enable, admin/I/O queues, PRP bounce DMA read/write (C5)
 - [ ] Btrfs / ZFS / XFS / exFAT / CIFS — in-memory or AHCI/NVMe fallback
-- [ ] JBD2 journal replay — `replayed = 0` (persist WAL is live; ext4 JBD2 is not)
+- [x] JBD2 journal replay — descriptor + data + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount calls the same walker.
+- [x] ext4 default root — second virtio-blk (`mkfs.ext4`) mounted at `/` (`GATE_C9 ext4 root`). `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual.
 - [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE / NFS still not registered.
 - [x] inotify — `emit_event` from VFS write/unlink and `open(O_CREAT)`; watch can read (**Gate H3**). Ring 3 `inotify_init1`/`add_watch`/`read` is live (Q3). `fanotify_init` returns ENOSYS (P4).
 - [ ] Quotas — counters, not enforced
 
 ### Perfect-OS next steps
-1. Make ext4 (or a single production FS) the root on VirtIO-blk by default, not RAM. Persist snapshot covers `/etc` (C6) and `/bin` (C7); virtual FS still rebuilt at boot.
-2. ~~Journal commit + crash recovery that is tested by killing QEMU mid-write.~~ **Done** for the persist blob WAL (in-boot: commit journal, skip checkpoint, restore replays). JBD2 still missing.
+1. ~~Make ext4 the root on VirtIO-blk by default.~~ **Done** (`GATE_C9 ext4 root`). Second virtio-blk is `mkfs.ext4` and mounted at `/`. `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual. Persist blob stays on vda (C1–C7).
+2. ~~Journal commit + crash recovery that is tested by killing QEMU mid-write.~~ **Done** for the persist blob WAL (C2) and JBD2 (C8: committed transaction applied, torn descriptor discarded).
 3. ~~Complete VirtIO-blk DMA (guest-physical, not heap pointers).~~ **Done** — contiguous buddy frames + bounce buffer. ~~AHCI DMA still missing.~~ **C4 done.** ~~NVMe DMA still missing.~~ **C5 done.**
 4. ~~Hook inotify on VFS mutate.~~ **Done** (H3). Page-cache writeback (C3) overlays dirty pages.
 

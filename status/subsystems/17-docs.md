@@ -2,22 +2,22 @@
 
 # 17. Documentation
 
-**Grade: Wired (42%)**
+**Grade: Wired (70%)**
 
 | Artifact | Status |
 |----------|--------|
-| `status/` | Split status tree (updated 2026-10-13). Start at [next.md](../next.md). |
+| `status/` | Split status tree (updated 2026-10-16). Start at [next.md](../next.md). |
 | `README.md` | Present — honesty paragraph, `./run.sh`, architecture sketch |
 | `LICENSE` | MIT |
 | `BUILDING.md` / `CONTRIBUTING.md` | Present |
-| Architecture / syscall / driver / GUI guides | Missing |
-| `cargo doc` published | Missing |
-| Changelog | Missing |
+| Architecture / syscall / driver / GUI guides | Present — `docs/` |
+| `cargo doc` published | CI rustdoc artifact (`.github/workflows/ci.yml` `rustdoc` job) |
+| Changelog | Present — `CHANGELOG.md` |
 
 ### Missing
-- [ ] Architecture / syscall / driver / GUI guides
-- [ ] `cargo doc` published
-- [ ] Changelog
+- [x] Architecture / syscall / driver / GUI guides (`docs/architecture.md`, `docs/syscalls.md`, `docs/drivers.md`, `docs/gui.md`)
+- [x] `cargo doc` published (CI rustdoc artifact)
+- [x] Changelog
 
 ### Perfect-OS next steps (cheap, high leverage)
 1. MIT `LICENSE`.

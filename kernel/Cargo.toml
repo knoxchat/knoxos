@@ -8,7 +8,7 @@ authors = ["KnoxOS Contributors"]
 license = "MIT"
 
 [features]
-default = ["gui", "net"]
+default = ["gui", "net", "fs-ext4"]
 gui = []
 net = []
 fs-ext4 = []
@@ -54,6 +54,7 @@ let_and_return = "allow"
 manual_range_patterns = "allow"
 manual_slice_fill = "allow"
 missing_safety_doc = "allow"
+undocumented_unsafe_blocks = "deny"
 needless_return = "allow"
 question_mark = "allow"
 redundant_closure = "allow"

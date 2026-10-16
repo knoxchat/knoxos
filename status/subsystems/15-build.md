@@ -2,7 +2,7 @@
 
 # 15. Build System & Tooling
 
-**Grade: Live (72%)** · `Makefile`, `kernel/Makefile`, `run.sh`
+**Grade: Live (80%)** · `Makefile`, `kernel/Makefile`, `run.sh`
 
 ### Live
 - [x] `./run.sh` / `make kernel` / BIOS & UEFI images
@@ -16,6 +16,6 @@
 - [x] **`flake.nix`** — present (devShell + QEMU/Make; kernel still rustup nightly)
 - [ ] Cargo workspace unifying `kernel` + `boot` + `tools`
 - [x] Feature flags so Unused modules do not compile into the demo kernel (`gui`/`net` default)
-- [ ] Signed ISO / Secure Boot artifacts
+- [x] ISO + SHA256SUMS + optional GPG (`scripts/make-iso.sh`, `scripts/release-checksums.sh`). PK/KEK/db + OVMF Secure Boot QEMU boot (`scripts/qemu-secure-boot.sh`).
 
 ---

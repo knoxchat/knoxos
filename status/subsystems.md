@@ -29,8 +29,8 @@ Percentages are **production usefulness**, not lines of code.
 | 3 | [Process](subsystems/03-process.md) | Wired | 99% | **Critical** | Scheduled Ring 3 (B2–B8); clone/clone3; namespaces. SMP load balance still BSP-shaped. |
 | 4 | [Filesystem](subsystems/04-filesystem.md) | Wired | 99% | **Critical** | VirtIO-blk persist C1–C7 (`/bin` included); AHCI/NVMe DMA; VFS syscalls through BL. Virtual FS still rebuilt. |
 | 5 | [Networking](subsystems/05-networking.md) | Wired | 72% | **Critical** | Loopback + VirtIO-net DHCP/DNS/TCP CUBIC (D1–D5). IPv6/TLS/Wi-Fi later. |
-| 6 | [Drivers](subsystems/06-drivers.md) | Wired | 40% | **Critical** | PCI, PS/2, UART, VirtIO-blk, AHCI/NVMe DMA live; USB/GPU mostly stub. |
-| 7 | [GUI](subsystems/07-gui.md) | Live | 88% | Medium | Software compositor + Ring 3 SHM (F1–F6). Calculator is userspace; terminal/files/browser/editor/settings/taskmgr/AI still in-kernel. |
+| 6 | [Drivers](subsystems/06-drivers.md) | Wired | 58% | **Critical** | PCI, PS/2, UART, VirtIO-blk, VirtIO-GPU scanout+cursor (F8), AHCI/NVMe DMA, USB HID URB + XHCI MMIO live; PS/2 remains fallback. |
+| 7 | [GUI](subsystems/07-gui.md) | Live | 95% | Medium | Software compositor + Ring 3 SHM (F1–F8) + VirtIO-GPU cursor plane. Interactive terminal still in-kernel for PTY. |
 | 8 | [Shell](subsystems/08-shell.md) | Live | 82% | Medium | Real parser/PTY; Ring 3 `/bin/sh`; desktop terminal still in-kernel. |
 | 9 | [Security](subsystems/09-security.md) | Wired | 80% | **Critical** | W^X, ChaCha20, seccomp, caps (E1–E4); Landlock. Unimplemented syscalls return ENOSYS. |
 | 10 | [Services](subsystems/10-services.md) | Wired | 42% | High | Ring 3 `/sbin/init` (K3); AF_UNIX D-Bus. No crash restart. |
@@ -39,10 +39,10 @@ Percentages are **production usefulness**, not lines of code.
 | 13 | [Binary compat](subsystems/13-binary-compat.md) | Wired | 99% | High | Static ELF + 200+ Ring 3 syscalls + `ld.so` (BM1) + VMM `dlopen` (BM2) + static musl CRT (BM3) + dynamically linked musl (BM4). Next: Ring 3 desktop apps. |
 | 14 | [i18n](subsystems/14-i18n.md) | Live | 68% | Low | TTF, CJK, RTL on the compositor; locale loading partial. |
 | 15 | [Build](subsystems/15-build.md) | Live | 80% | Medium | Make/QEMU work; feature flags G3; `flake.nix` present. |
-| 16 | [Testing](subsystems/16-testing.md) | Wired | 84% | **Critical** | 276 QEMU markers (G3/G4/F6/I4); `assert!(true)` gone. |
-| 17 | [Docs](subsystems/17-docs.md) | Wired | 42% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + `status/`. Architecture guides missing. |
-| 18 | [CI/CD](subsystems/18-ci.md) | Wired | 30% | High | GitHub Actions fmt/clippy/size/QEMU boot; no signed releases. |
+| 16 | [Testing](subsystems/16-testing.md) | Wired | 88% | **Critical** | 283 QEMU markers (C8 JBD2 + USB HID URB + XHCI MMIO); `assert!(true)` gone. |
+| 17 | [Docs](subsystems/17-docs.md) | Wired | 70% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + `status/` + `docs/` + CHANGELOG + rustdoc artifact. |
+| 18 | [CI/CD](subsystems/18-ci.md) | Wired | 55% | High | GitHub Actions fmt/clippy/size/QEMU boot + aarch64/riscv64 compile + rustdoc + audit + nightly images. |
 
-**QEMU desktop demo: ~99%.** **Production OS: ~98%.** Gates A–F, H–I, J–BL, BM1–BM4, F5, C7, G3, F6, and I4 are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **276/276** on QEMU (2026-10-13). What to do next: [next.md](next.md).
+**QEMU desktop demo: ~99%.** **Production OS: ~98%.** Gates A–F, H–I, J–BL, BM1–BM4, F5–F8, C7–C8, G3–G4, I4, USB HID URB, and XHCI MMIO are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **283/283** on QEMU (2026-10-16). What to do next: [next.md](next.md).
 
 ---

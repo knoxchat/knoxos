@@ -20,9 +20,16 @@ jobs:
         run: |
           test -f README.md
           test -f LICENSE
+          test -f CHANGELOG.md
           test -f status.md
           test -f status/README.md
           test -f status/next.md
+          test -f docs/architecture.md
+          test -f docs/syscalls.md
+          test -f docs/drivers.md
+          test -f docs/gui.md
+      - name: License / SPDX
+        run: ./scripts/license-check.sh
 
   fmt:
     name: rustfmt
@@ -54,7 +61,6 @@ jobs:
             --allow-downgrade
       - name: Clippy
         working-directory: kernel
-        # Compile + lint. Do not fail the tree on every Clippy warning yet.
         run: cargo clippy --release
       - name: Release size gate
         working-directory: kernel
@@ -86,6 +92,10 @@ jobs:
           test -f "$BIOS_IMG"
           qemu-system-x86_64 \
             -drive format=raw,file="$BIOS_IMG" \
+            -device virtio-gpu-pci \
+            -device qemu-xhci,id=xhci \
+            -device usb-kbd,bus=xhci.0 \
+            -device usb-tablet,bus=xhci.0 \
             -serial file:serial.log \
             -display none \
             -m 2G \
@@ -117,3 +127,111 @@ jobs:
           tail -80 serial.log || true
           kill "$QEMU_PID" 2>/dev/null || true
           exit 1
+
+  cross:
+    name: Cross-compile aarch64/riscv64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly + cross targets
+        working-directory: kernel
+        run: |
+          rustup toolchain install nightly --profile minimal \
+            --component rust-src,llvm-tools-preview \
+            --target aarch64-unknown-none,riscv64gc-unknown-none-elf \
+            --allow-downgrade
+      - name: aarch64 check
+        working-directory: kernel
+        run: cargo check --release --target aarch64-unknown-none
+      - name: riscv64 check
+        working-directory: kernel
+        run: cargo check --release --target riscv64gc-unknown-none-elf
+
+  cross-boot:
+    name: aarch64/riscv64 QEMU boot
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-arm qemu-system-misc
+      - name: Install nightly
+        working-directory: kernel
+        run: |
+          rustup toolchain install nightly --profile minimal \
+            --component rust-src,llvm-tools-preview \
+            --allow-downgrade
+      - name: Build aarch64 + riscv64 kernels
+        working-directory: kernel
+        run: |
+          cargo build --release --target aarch64-knoxos.json -Zjson-target-spec
+          cargo build --release --target riscv64-knoxos.json -Zjson-target-spec
+      - name: QEMU serial boot
+        run: |
+          chmod +x scripts/qemu-cross-boot.sh
+          ./scripts/qemu-cross-boot.sh
+
+  secure-boot:
+    name: OVMF Secure Boot
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU + OVMF + sb tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            qemu-system-x86 ovmf python3-virt-firmware sbsigntool mtools
+      - name: Install nightly
+        working-directory: kernel
+        run: |
+          rustup toolchain install nightly --profile minimal \
+            --component rust-src,llvm-tools-preview \
+            --target x86_64-unknown-none \
+            --allow-downgrade
+      - name: Build kernel + UEFI image
+        working-directory: kernel
+        run: |
+          cargo build --release
+          cd ../boot && cargo run --release -- ../kernel/target/x86_64-unknown-none/release/knoxos-kernel
+      - name: Enroll PK and boot
+        run: |
+          chmod +x scripts/secure-boot-enroll.sh scripts/qemu-secure-boot.sh
+          ./scripts/qemu-secure-boot.sh
+
+  rustdoc:
+    name: cargo doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly
+        working-directory: kernel
+        run: |
+          rustup toolchain install nightly --profile minimal \
+            --component rust-src \
+            --target x86_64-unknown-none \
+            --allow-downgrade
+      - name: rustdoc
+        working-directory: kernel
+        env:
+          RUSTDOCFLAGS: "--cfg docsrs"
+        run: cargo doc --release --no-deps --document-private-items
+      - name: Upload rustdoc
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdoc
+          path: kernel/target/x86_64-unknown-none/doc
+          if-no-files-found: error
+
+  audit:
+    name: cargo-audit + license
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: License / SPDX
+        run: ./scripts/license-check.sh
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit kernel lockfile
+        working-directory: kernel
+        run: cargo audit
+        continue-on-error: true

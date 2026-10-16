@@ -28,9 +28,12 @@ QEMU="qemu-system-x86_64"
 QEMU_MEMORY="2G"
 QEMU_CPUS="2"
 
-# Persistent storage disk image (survives reboots)
+# Persistent storage disk image (survives reboots) — KNOXPERSIST blob on vda
 PERSISTENT_DISK="$SCRIPT_DIR/knoxos-storage.img"
 PERSISTENT_DISK_SIZE="20G"
+# Separate virtio-blk formatted ext4 — default root on vdb
+EXT4_ROOT_DISK="$SCRIPT_DIR/knoxos-root.img"
+EXT4_ROOT_DISK_SIZE="1G"
 AHCI_DISK="$SCRIPT_DIR/knoxos-ahci.img"
 AHCI_DISK_SIZE="64M"
 NVME_DISK="$SCRIPT_DIR/knoxos-nvme.img"
@@ -151,15 +154,34 @@ ensure_persistent_disk() {
         log_step "Creating persistent storage disk ($PERSISTENT_DISK_SIZE)..."
         # Create a raw disk image
         qemu-img create -f raw "$PERSISTENT_DISK" "$PERSISTENT_DISK_SIZE" > /dev/null 2>&1
-        # Format it with ext4 if mkfs.ext4 is available
-        if command -v mkfs.ext4 &> /dev/null; then
-            mkfs.ext4 -q -F -L knoxos-data "$PERSISTENT_DISK" > /dev/null 2>&1
-            log_success "Persistent disk created and formatted (ext4)"
-        else
-            log_success "Persistent disk created (raw, will be formatted by kernel)"
-        fi
+        log_success "Persistent disk created (raw KNOXPERSIST; kernel formats)"
     else
         log_success "Persistent storage disk found: $PERSISTENT_DISK"
+    fi
+    if [ ! -f "$EXT4_ROOT_DISK" ]; then
+        log_step "Creating ext4 root disk ($EXT4_ROOT_DISK_SIZE)..."
+        qemu-img create -f raw "$EXT4_ROOT_DISK" "$EXT4_ROOT_DISK_SIZE" > /dev/null 2>&1
+        MKFS=""
+        for c in mkfs.ext4 /opt/homebrew/opt/e2fsprogs/sbin/mkfs.ext4 \
+            /usr/local/opt/e2fsprogs/sbin/mkfs.ext4 mke2fs; do
+            if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then
+                MKFS="$c"
+                break
+            fi
+        done
+        if [ -n "$MKFS" ]; then
+            if [ "$(basename "$MKFS")" = "mke2fs" ]; then
+                "$MKFS" -t ext4 -F -q -L knoxos-root "$EXT4_ROOT_DISK" >/dev/null 2>&1 || true
+            else
+                "$MKFS" -q -F -L knoxos-root "$EXT4_ROOT_DISK" >/dev/null 2>&1 || true
+            fi
+            log_success "ext4 root disk created: $EXT4_ROOT_DISK"
+        else
+            python3 "$SCRIPT_DIR/scripts/mkfs-ext4-min.py" "$EXT4_ROOT_DISK"
+            log_success "ext4 root disk created (minimal mkfs): $EXT4_ROOT_DISK"
+        fi
+    else
+        log_success "ext4 root disk found: $EXT4_ROOT_DISK"
     fi
     if [ ! -f "$AHCI_DISK" ]; then
         log_step "Creating AHCI test disk ($AHCI_DISK_SIZE)..."
@@ -290,7 +312,7 @@ run_qemu_bios() {
     log_step "Starting KnoxOS in QEMU (BIOS mode)..."
     echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
     echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
-    echo -e "  ${CYAN}Input:${NC}   PS/2 keyboard + mouse"
+    echo -e "  ${CYAN}Input:${NC}   XHCI USB tablet/keyboard (no PS/2)"
     echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
     echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
     echo -e "  ${CYAN}Storage:${NC}  $PERSISTENT_DISK ($PERSISTENT_DISK_SIZE persistent)"
@@ -304,6 +326,7 @@ run_qemu_bios() {
     $QEMU \
         -drive format=raw,file="$bios_img" \
         -drive if=virtio,format=raw,file="$PERSISTENT_DISK" \
+        -drive if=virtio,format=raw,file="$EXT4_ROOT_DISK" \
         -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
         -device ahci,id=ahci0 \
         -device ide-hd,drive=ahcidisk,bus=ahci0.0 \
@@ -311,6 +334,7 @@ run_qemu_bios() {
         -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
+        -device virtio-gpu-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \
@@ -321,7 +345,9 @@ run_qemu_bios() {
         -global VGA.xres=1920 \
         -global VGA.yres=1080 \
         -display $QEMU_DISPLAY \
-        -usb -device usb-tablet \
+        -device qemu-xhci,id=xhci \
+        -device usb-kbd,bus=xhci.0 \
+        -device usb-tablet,bus=xhci.0 \
         -monitor tcp:127.0.0.1:44444,server,nowait \
         -no-reboot \
         -no-shutdown \
@@ -356,7 +382,7 @@ run_qemu_uefi() {
     log_step "Starting KnoxOS in QEMU (UEFI mode)..."
     echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
     echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
-    echo -e "  ${CYAN}Input:${NC}   PS/2 keyboard + mouse"
+    echo -e "  ${CYAN}Input:${NC}   XHCI USB tablet/keyboard (no PS/2)"
     echo -e "  ${CYAN}OVMF:${NC}    $ovmf"
     echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
     echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
@@ -369,6 +395,7 @@ run_qemu_uefi() {
         -bios "$ovmf" \
         -drive format=raw,file="$uefi_img" \
         -drive if=virtio,format=raw,file="$PERSISTENT_DISK" \
+        -drive if=virtio,format=raw,file="$EXT4_ROOT_DISK" \
         -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
         -device ahci,id=ahci0 \
         -device ide-hd,drive=ahcidisk,bus=ahci0.0 \
@@ -376,6 +403,7 @@ run_qemu_uefi() {
         -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
+        -device virtio-gpu-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \
@@ -386,6 +414,9 @@ run_qemu_uefi() {
         -global VGA.xres=1920 \
         -global VGA.yres=1080 \
         -display $QEMU_DISPLAY \
+        -device qemu-xhci,id=xhci \
+        -device usb-kbd,bus=xhci.0 \
+        -device usb-tablet,bus=xhci.0 \
         -no-reboot \
         -no-shutdown
 }
@@ -409,6 +440,7 @@ run_qemu_debug() {
     $QEMU \
         -drive format=raw,file="$bios_img" \
         -drive if=virtio,format=raw,file="$PERSISTENT_DISK" \
+        -drive if=virtio,format=raw,file="$EXT4_ROOT_DISK" \
         -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
         -device ahci,id=ahci0 \
         -device ide-hd,drive=ahcidisk,bus=ahci0.0 \
@@ -416,6 +448,7 @@ run_qemu_debug() {
         -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
+        -device virtio-gpu-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \

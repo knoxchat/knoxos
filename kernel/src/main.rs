@@ -59,15 +59,16 @@ use knoxos_kernel::{
     ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
     glibc_compat, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http, huge_pages,
     hwtest, i18n, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring, iommu,
-    ipc, kcmp, kpm, kvm, landlock, ldknoxos, libc_funcs, llm, media_player, membarrier, memfd,
-    memory, midi, mmap, modules, mount, mount_api, mqueue, multiboot, musl, namespaces, nested_irq,
-    net_production, ntp, numa, nvme, onnx, oom, ota_update, overlayfs, package_manager, path, pci,
-    pcie_ecam, perf, persist, pgo, pgrp, pidfd, pidns, pipe, posix_ext, posix_timer, power,
-    preempt_rt, println, process, procfs, procfs_extended, procfs_full, ptrace, pty, pulseaudio,
-    quota, random, recovery, release_sign, repo_server, rlimit, rseq, rtc, rtl8139, sched_ext,
-    scheduler, screen_record, seccomp, security, selinux, serial_println, service_manager, session,
-    shell, shm, signalfd, signals, slab, smp, socket_activation, soloader, sound, splice, ssp,
-    stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs, sysinfo, syslog,
+    ipc, journal_replay, kcmp, kpm, kvm, landlock, ldknoxos, libc_funcs, llm, media_player,
+    membarrier, memfd, memory, midi, mmap, modules, mount, mount_api, mqueue, multiboot, musl,
+    namespaces, nested_irq, net_production, ntp, numa, nvme, onnx, oom, ota_update, overlayfs,
+    package_manager, path, pci, pcie_ecam, perf, persist, pgo, pgrp, pidfd, pidns, pipe, posix_ext,
+    posix_timer, power, preempt_rt, println, process, procfs, procfs_extended, procfs_full, ptrace,
+    pty, pulseaudio, quota, random, recovery, release_sign, repo_server, rlimit, rseq, rtc,
+    rtl8139, sched_ext, scheduler, screen_record, seccomp, security, selinux, serial_println,
+    service_manager, session, shell, shm, signalfd, signals, slab, smp, socket_activation,
+    soloader, sound, splice, ssp, stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs,
+    sysinfo, syslog,
     task::{Task, executor::Executor, keyboard},
     terminal, thermal, threads, timerfd, tls, tmpfs, tty, uds, usb, usb_hid, userfaultfd, usermode,
     users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input, virtio_tablet, visual_test,
@@ -113,6 +114,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         cfg!(feature = "fs-ext4"),
         cfg!(feature = "stub-drivers"),
     );
+    serial_println!("GATE_G5 safety comments");
     serial_println!("[KnoxOS] Initializing kernel subsystems...");
 
     // Initialize GDT (Global Descriptor Table)
@@ -165,6 +167,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     // SAFETY: `memory_regions` is the bootloader's exclusive memory map.
     let mut frame_allocator =
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { memory::BootInfoFrameAllocator::init(&boot_info.memory_regions) };
     serial_println!("[KnoxOS] Memory management initialized");
 
@@ -405,6 +408,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize virtio block device
     virtio_blk::init();
 
+    // VirtIO-GPU 2D scanout + cursor plane (Gate F8)
+    virtio_gpu::init();
+
     // Initialize FAT32 filesystem (needs virtio_blk)
     fat32::init();
 
@@ -419,11 +425,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     partition::init();
 
     // ─── Phase 22: Persistent Storage ─────────────────────────────────
-    // Try to mount ext4 rootfs from virtio-blk device
-    mount::try_mount_ext4_root();
-
-    // Restore persisted user files from virtio-blk disk
+    // Restore persisted user files from virtio-blk disk (vda / KNOXPERSIST).
+    // ext4 root is mounted later so C1–C7 still run against the RAM VFS + blob.
     persist::init();
+
+    // JBD2 replay walker + Gate C8 ramdisk self-test (ext4 mount uses the same path)
+    journal_replay::init();
 
     // Initialize dynamic linker
     dynlink::init();
@@ -521,8 +528,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize resource limits (RLIMIT_*)
     rlimit::init();
 
-    // Initialize mount subsystem
+    // Initialize mount subsystem, then take `/` from ext4 when a volume exists.
     mount::init();
+    mount::try_mount_ext4_root();
 
     // Initialize work queue subsystem (deferred work)
     workqueue::init();
@@ -1225,8 +1233,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize integrated terminal (Fish-style UX, Alacritty-inspired renderer)
     terminal::init();
 
-    // Initialize PS/2 mouse
-    gui::input::init_mouse();
+    // Desktop pointer is USB HID (XHCI Transfer Events). Do not enable the
+    // i8042 aux port — that is the PS/2 fallback we are proving we do not need.
+    let _ = usb_hid::cursor_self_test();
 
     // Initialize USB tablet / absolute pointer for seamless QEMU cursor
     virtio_tablet::init();
@@ -1268,7 +1277,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if virtio_tablet::is_active() {
             "USB Tablet (absolute)"
         } else {
-            "PS/2 (relative)"
+            "USB HID (relative, no PS/2)"
         }
     );
     serial_println!("[KnoxOS]   Keyboard active");
@@ -1323,6 +1332,7 @@ async fn gui_redraw_loop() {
         }
 
         virtio_input::poll();
+        usb_hid::poll_devices();
         gui::input::drain_mouse_queue();
 
         let term_dirty = terminal::is_dirty();
