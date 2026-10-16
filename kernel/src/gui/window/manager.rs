@@ -2,7 +2,7 @@
 use alloc::vec::Vec;
 use spin::Mutex;
 
-use super::types::{Window, WindowContentType, WindowId};
+use super::types::{Window, WindowId};
 
 /// Auto-tiling layout mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,24 +38,11 @@ lazy_static::lazy_static! {
 }
 
 /// Open a browser window navigated to the given URL
-pub fn open_browser_window(url: &str) {
-    let mut win = Window::new("Browser", 200, 100, 900, 650);
-    win.content_type = WindowContentType::Browser;
-    // Store the URL in the title so the browser renderer can use it
-    win.title = alloc::format!("Browser — {}", url);
-    let mut wm = WINDOW_MANAGER.lock();
-    wm.add_window(win);
-    drop(wm);
-    crate::gui::request_redraw();
+pub fn open_browser_window(_url: &str) {
+    crate::user_task::spawn_browser_app();
 }
 
 /// Open a file explorer window at a given path
-pub fn open_file_explorer_at(path: &str) {
-    let title = alloc::format!("Files — {}", path);
-    let mut win = Window::new(&title, 180, 80, 800, 550);
-    win.content_type = WindowContentType::FileExplorer;
-    let mut wm = WINDOW_MANAGER.lock();
-    wm.add_window(win);
-    drop(wm);
-    crate::gui::request_redraw();
+pub fn open_file_explorer_at(_path: &str) {
+    crate::user_task::spawn_files_app();
 }

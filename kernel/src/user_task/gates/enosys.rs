@@ -8,6 +8,7 @@ pub(super) fn run_gate_j4() {
     let Some(pid) = spawn_or_log(&elf, "enosys-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -21,6 +22,7 @@ pub(super) fn run_gate_l4() {
     let Some(pid) = spawn_or_log(&elf, "quotactl-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -34,6 +36,7 @@ pub(super) fn run_gate_m4() {
     let Some(pid) = spawn_or_log(&elf, "io-uring-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -47,6 +50,7 @@ pub(super) fn run_gate_n4() {
     let Some(pid) = spawn_or_log(&elf, "uffd-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -60,6 +64,7 @@ pub(super) fn run_gate_o4() {
     let Some(pid) = spawn_or_log(&elf, "perf-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -73,6 +78,7 @@ pub(super) fn run_gate_p4() {
     let Some(pid) = spawn_or_log(&elf, "fanotify-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -86,6 +92,7 @@ pub(super) fn run_gate_q4() {
     let Some(pid) = spawn_or_log(&elf, "aio-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -99,6 +106,7 @@ pub(super) fn run_gate_r4() {
     let Some(pid) = spawn_or_log(&elf, "kexec-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -112,6 +120,7 @@ pub(super) fn run_gate_s4() {
     let Some(pid) = spawn_or_log(&elf, "initmod-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -125,6 +134,7 @@ pub(super) fn run_gate_t4() {
     let Some(pid) = spawn_or_log(&elf, "mountattr-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -138,6 +148,7 @@ pub(super) fn run_gate_u4() {
     let Some(pid) = spawn_or_log(&elf, "fsopen-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -151,6 +162,7 @@ pub(super) fn run_gate_v4() {
     let Some(pid) = spawn_or_log(&elf, "keyctl-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -164,6 +176,7 @@ pub(super) fn run_gate_w4() {
     let Some(pid) = spawn_or_log(&elf, "ioperm-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -177,6 +190,7 @@ pub(super) fn run_gate_x4() {
     let Some(pid) = spawn_or_log(&elf, "iopl-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -190,6 +204,7 @@ pub(super) fn run_gate_y4() {
     let Some(pid) = spawn_or_log(&elf, "acct-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -203,6 +218,7 @@ pub(super) fn run_gate_z4() {
     let Some(pid) = spawn_or_log(&elf, "swapon-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -216,6 +232,7 @@ pub(super) fn run_gate_aa4() {
     let Some(pid) = spawn_or_log(&elf, "modify-ldt-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -229,6 +246,7 @@ pub(super) fn run_gate_ab4() {
     let Some(pid) = spawn_or_log(&elf, "sysfs-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -242,6 +260,7 @@ pub(super) fn run_gate_ac4() {
     let Some(pid) = spawn_or_log(&elf, "vhangup-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -255,6 +274,7 @@ pub(super) fn run_gate_ad4() {
     let Some(pid) = spawn_or_log(&elf, "lookup-dcookie-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -268,6 +288,7 @@ pub(super) fn run_gate_ae4() {
     let Some(pid) = spawn_or_log(&elf, "memfd-secret-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -281,6 +302,7 @@ pub(super) fn run_gate_af4() {
     let Some(pid) = spawn_or_log(&elf, "uselib-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -294,6 +316,7 @@ pub(super) fn run_gate_ag4() {
     let Some(pid) = spawn_or_log(&elf, "pkey-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -307,6 +330,7 @@ pub(super) fn run_gate_ah4() {
     let Some(pid) = spawn_or_log(&elf, "pkey-mprotect-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -320,6 +344,7 @@ pub(super) fn run_gate_ai4() {
     let Some(pid) = spawn_or_log(&elf, "pkey-free-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -333,6 +358,7 @@ pub(super) fn run_gate_aj4() {
     let Some(pid) = spawn_or_log(&elf, "process-mrelease-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -346,6 +372,7 @@ pub(super) fn run_gate_ak4() {
     let Some(pid) = spawn_or_log(&elf, "set-mempolicy-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -359,6 +386,7 @@ pub(super) fn run_gate_al4() {
     let Some(pid) = spawn_or_log(&elf, "get-mempolicy-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -372,6 +400,7 @@ pub(super) fn run_gate_am4() {
     let Some(pid) = spawn_or_log(&elf, "mbind-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -385,6 +414,7 @@ pub(super) fn run_gate_an4() {
     let Some(pid) = spawn_or_log(&elf, "sched-setattr-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -398,6 +428,7 @@ pub(super) fn run_gate_ao4() {
     let Some(pid) = spawn_or_log(&elf, "futex-waitv-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -411,6 +442,7 @@ pub(super) fn run_gate_ap4() {
     let Some(pid) = spawn_or_log(&elf, "open-by-handle-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -424,6 +456,7 @@ pub(super) fn run_gate_aq4() {
     let Some(pid) = spawn_or_log(&elf, "name-to-handle-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -437,6 +470,7 @@ pub(super) fn run_gate_ar4() {
     let Some(pid) = spawn_or_log(&elf, "map-shadow-stack-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -450,6 +484,7 @@ pub(super) fn run_gate_as4() {
     let Some(pid) = spawn_or_log(&elf, "ustat-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -463,6 +498,7 @@ pub(super) fn run_gate_at4() {
     let Some(pid) = spawn_or_log(&elf, "migrate-pages-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -476,6 +512,7 @@ pub(super) fn run_gate_au4() {
     let Some(pid) = spawn_or_log(&elf, "swapoff-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -489,6 +526,7 @@ pub(super) fn run_gate_av4() {
     let Some(pid) = spawn_or_log(&elf, "move-pages-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -502,6 +540,7 @@ pub(super) fn run_gate_aw4() {
     let Some(pid) = spawn_or_log(&elf, "remap-pages-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -515,6 +554,7 @@ pub(super) fn run_gate_ax4() {
     let Some(pid) = spawn_or_log(&elf, "sched-getattr-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -528,6 +568,7 @@ pub(super) fn run_gate_ay4() {
     let Some(pid) = spawn_or_log(&elf, "io-destroy-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -541,6 +582,7 @@ pub(super) fn run_gate_az4() {
     let Some(pid) = spawn_or_log(&elf, "set-thread-area-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -554,6 +596,7 @@ pub(super) fn run_gate_ba4() {
     let Some(pid) = spawn_or_log(&elf, "io-cancel-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -567,6 +610,7 @@ pub(super) fn run_gate_bb4() {
     let Some(pid) = spawn_or_log(&elf, "add-key-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -580,6 +624,7 @@ pub(super) fn run_gate_bc4() {
     let Some(pid) = spawn_or_log(&elf, "request-key-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -593,6 +638,7 @@ pub(super) fn run_gate_bd4() {
     let Some(pid) = spawn_or_log(&elf, "io-submit-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -606,6 +652,7 @@ pub(super) fn run_gate_be4() {
     let Some(pid) = spawn_or_log(&elf, "io-getevents-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -619,6 +666,7 @@ pub(super) fn run_gate_bf4() {
     let Some(pid) = spawn_or_log(&elf, "io-pgetevents-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -632,6 +680,7 @@ pub(super) fn run_gate_bg4() {
     let Some(pid) = spawn_or_log(&elf, "fsconfig-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -645,6 +694,7 @@ pub(super) fn run_gate_bh4() {
     let Some(pid) = spawn_or_log(&elf, "fsmount-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -658,6 +708,7 @@ pub(super) fn run_gate_bi4() {
     let Some(pid) = spawn_or_log(&elf, "open-tree-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -671,6 +722,7 @@ pub(super) fn run_gate_bj4() {
     let Some(pid) = spawn_or_log(&elf, "move-mount-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -684,6 +736,7 @@ pub(super) fn run_gate_bk4() {
     let Some(pid) = spawn_or_log(&elf, "fspick-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -697,11 +750,26 @@ pub(super) fn run_gate_g4() {
     let Some(pid) = spawn_or_log(&elf, "adjtimex-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
     let reaped = reap_child(pid);
     serial_println!("[user_task] Gate G4 parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_g4_audit() {
+    serial_println!("[user_task] Gate G4: remaining no-ops store real state");
+    let elf = crate::init::g4_audit_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "g4-audit") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate G4 audit pid={} reaped={}", pid, reaped);
 }
 
 pub(super) fn run_gate_bl4() {
@@ -710,6 +778,7 @@ pub(super) fn run_gate_bl4() {
     let Some(pid) = spawn_or_log(&elf, "delete-module-enosys") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }

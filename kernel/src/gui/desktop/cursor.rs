@@ -419,6 +419,10 @@ pub fn restore_cursor_background(fb: &mut FrameBuffer) {
 /// which calls update_cursor_for_position() on mouse move. We do NOT call it
 /// here to avoid locking WINDOW_MANAGER/DESKTOP during the fast cursor-only path.
 pub fn draw_cursor(fb: &mut FrameBuffer, x: i32, y: i32) {
+    if crate::gui::hw_cursor::is_enabled() {
+        crate::gui::hw_cursor::set_position(x, y);
+        return;
+    }
     let cursor_type = get_cursor_type();
     match cursor_type {
         CursorType::Default => draw_arrow_cursor(fb, x, y),

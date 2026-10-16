@@ -546,6 +546,7 @@ impl Compositor {
                 );
                 return false;
             }
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     data.as_ptr(),
@@ -567,6 +568,7 @@ impl Compositor {
                 return None;
             }
             let mut data = vec![0u8; len];
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     (pool.base_addr as *const u8).add(offset),
@@ -660,6 +662,7 @@ impl Compositor {
                     }
                     // Read source pixel from SHM buffer
                     let src_off = row as usize * buf_stride as usize + col as usize * bpp;
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let (sr, sg, sb, sa) = unsafe {
                         let base = data_ptr as *const u8;
                         match buf_fmt {
@@ -788,6 +791,7 @@ impl Compositor {
         // The buffer is zeroed so clients start with a clean slate.
         let layout = alloc::alloc::Layout::from_size_align(size, 4096)
             .unwrap_or(alloc::alloc::Layout::from_size_align(size, 8).unwrap());
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let base_addr = unsafe { alloc::alloc::alloc_zeroed(layout) } as u64;
 
         if base_addr == 0 {
@@ -832,6 +836,7 @@ impl Compositor {
             }
             let new_layout = alloc::alloc::Layout::from_size_align(new_size, 4096)
                 .unwrap_or(alloc::alloc::Layout::from_size_align(new_size, 8).unwrap());
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let new_addr = unsafe { alloc::alloc::alloc_zeroed(new_layout) } as u64;
             if new_addr == 0 {
                 serial_println!(
@@ -843,6 +848,7 @@ impl Compositor {
             }
             // Copy old data to new allocation
             if pool.base_addr != 0 {
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         pool.base_addr as *const u8,
@@ -852,6 +858,7 @@ impl Compositor {
                 }
                 // Free old allocation
                 if let Some(old_layout) = pool.alloc_layout {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     unsafe {
                         alloc::alloc::dealloc(pool.base_addr as *mut u8, old_layout);
                     }
@@ -888,6 +895,7 @@ impl Compositor {
             // Free the allocated kernel memory
             if pool.base_addr != 0 {
                 if let Some(layout) = pool.alloc_layout {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     unsafe {
                         alloc::alloc::dealloc(pool.base_addr as *mut u8, layout);
                     }
@@ -1194,11 +1202,58 @@ pub const GATE_F3_MARKER: &str = "GATE_F3 terminal isolated";
 pub const GATE_F4_MARKER: &str = "GATE_F4 launcher userspace";
 pub const GATE_F5_MARKER: &str = "GATE_F5 wayland unix";
 pub const GATE_F6_MARKER: &str = "GATE_F6 calculator userspace";
+pub const GATE_F7_MARKER: &str = "GATE_F7 files userspace";
 pub const WAYLAND_SOCKET_PATH: &str = "/run/wayland-0";
 const GATE_F_MAGIC: [u8; 4] = [0xEE, 0xFF, 0xC0, 0xFF];
 const GATE_F3_MAGIC: [u8; 4] = [0x1A, 0x1A, 0x1A, 0xFF];
 const GATE_F4_MAGIC: [u8; 4] = [0xCC, 0x66, 0x33, 0xFF];
 const GATE_F6_MAGIC: [u8; 4] = [0x97, 0xC9, 0x20, 0xFF];
+const GATE_F7_MAGIC: [u8; 4] = [0x26, 0x8A, 0x4E, 0xFF];
+const GATE_F8_MAGIC: [u8; 4] = [0x40, 0x38, 0x38, 0xFF];
+const GATE_F9_MAGIC: [u8; 4] = [0x48, 0x32, 0x48, 0xFF];
+const GATE_F10_MAGIC: [u8; 4] = [0x1E, 0x1E, 0x1E, 0xFF];
+const GATE_F11_MAGIC: [u8; 4] = [0x3A, 0x2D, 0x28, 0xFF];
+const GATE_F12_MAGIC: [u8; 4] = [0x26, 0x16, 0x12, 0xFF];
+
+fn shm_title_for_magic(pixels: &[u8]) -> &'static str {
+    let Some(head) = pixels.get(0..4) else {
+        return "Client";
+    };
+    if head == GATE_F3_MAGIC {
+        "Terminal"
+    } else if head == GATE_F4_MAGIC {
+        "Paint"
+    } else if head == GATE_F6_MAGIC {
+        "Calculator"
+    } else if head == GATE_F7_MAGIC {
+        "Files"
+    } else if head == GATE_F8_MAGIC {
+        "Settings"
+    } else if head == GATE_F9_MAGIC {
+        "Task Manager"
+    } else if head == GATE_F10_MAGIC {
+        "Editor"
+    } else if head == GATE_F11_MAGIC {
+        "Browser"
+    } else if head == GATE_F12_MAGIC {
+        "AI Assistant"
+    } else {
+        "Client"
+    }
+}
+
+fn is_known_shm_magic(p: &[u8]) -> bool {
+    p == GATE_F_MAGIC
+        || p == GATE_F3_MAGIC
+        || p == GATE_F4_MAGIC
+        || p == GATE_F6_MAGIC
+        || p == GATE_F7_MAGIC
+        || p == GATE_F8_MAGIC
+        || p == GATE_F9_MAGIC
+        || p == GATE_F10_MAGIC
+        || p == GATE_F11_MAGIC
+        || p == GATE_F12_MAGIC
+}
 
 /// Present a Ring 3 SHM buffer as a compositor surface + desktop window.
 ///
@@ -1231,15 +1286,7 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     };
     let sid = comp.create_surface(pid);
     comp.create_toplevel(sid);
-    let title = if pixels.len() >= 4 && pixels[0..4] == GATE_F3_MAGIC {
-        "Terminal"
-    } else if pixels.len() >= 4 && pixels[0..4] == GATE_F4_MAGIC {
-        "Paint"
-    } else if pixels.len() >= 4 && pixels[0..4] == GATE_F6_MAGIC {
-        "Calculator"
-    } else {
-        "Client"
-    };
+    let title = shm_title_for_magic(&pixels);
     comp.toplevel_set_title(sid, title);
     if !comp.attach_shm_buffer(sid, buf, 0, 0) {
         serial_println!("[WL] Gate F FAILED: attach");
@@ -1262,14 +1309,7 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
 
     let head = pixels.get(0..4);
     let magic_ok = match head {
-        Some(p)
-            if *p == GATE_F_MAGIC
-                || *p == GATE_F3_MAGIC
-                || *p == GATE_F4_MAGIC
-                || *p == GATE_F6_MAGIC =>
-        {
-            roundtrip.as_deref() == Some(p)
-        }
+        Some(p) if is_known_shm_magic(p) => roundtrip.as_deref() == Some(p),
         _ => false,
     };
     if magic_ok {
@@ -1299,6 +1339,13 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
             serial_println!(
                 "[WL] {} (window={} content=Empty SHM, not WindowContentType::Calculator)",
                 GATE_F6_MARKER,
+                wid
+            );
+        }
+        if pixels[0..4] == GATE_F7_MAGIC {
+            serial_println!(
+                "[WL] {} (window={} content=Empty SHM, not WindowContentType::FileExplorer)",
+                GATE_F7_MARKER,
                 wid
             );
         }

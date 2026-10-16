@@ -8,6 +8,7 @@ pub(super) fn run_gate_f1() {
     let Some(pid) = spawn_or_log(&elf, "wl-client") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -25,6 +26,7 @@ pub(super) fn run_gate_f3() {
     let Some(pid) = spawn_or_log(&elf, "term") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -42,6 +44,7 @@ pub(super) fn run_gate_f4() {
     let Some(pid) = spawn_or_log(&elf, "paint") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -59,6 +62,7 @@ pub(super) fn run_gate_f6() {
     let Some(pid) = spawn_or_log(&elf, "calc") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -70,12 +74,31 @@ pub(super) fn run_gate_f6() {
     );
 }
 
+pub(super) fn run_gate_f7() {
+    serial_println!("[user_task] Gate F7: Ring 3 Files SHM client");
+    let elf = crate::init::files_client_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "files") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate F7 pid={} reaped={} (marker from userspace)",
+        pid,
+        reaped
+    );
+}
+
 pub(super) fn run_gate_f5() {
     serial_println!("[user_task] Gate F5: Wayland AF_UNIX present");
     let elf = crate::init::wayland_unix_client_elf_data();
     let Some(pid) = spawn_or_log(&elf, "wl-unix") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }

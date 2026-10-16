@@ -352,6 +352,11 @@ pub fn is_ready() -> bool {
     INPUT_READY.load(Ordering::Relaxed)
 }
 
+/// Whether `code` is currently down in the global evdev key state.
+pub fn is_key_pressed(code: u16) -> bool {
+    INPUT_MANAGER.lock().is_key_pressed(code)
+}
+
 /// Initialize the input subsystem
 pub fn init() {
     let mut mgr = INPUT_MANAGER.lock();

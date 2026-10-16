@@ -4,8 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::gui::window::{
-    self, ExplorerAction, ExplorerContextMenu, ExplorerCtxItem, ExplorerSort, WindowContentType,
-    WindowId,
+    self, ExplorerAction, ExplorerContextMenu, ExplorerCtxItem, ExplorerSort, WindowId,
 };
 
 use super::entries::{read_entries, sort_entries};
@@ -379,27 +378,6 @@ pub fn rename_backspace(wid: WindowId) {
 
 /// Open a file in the text editor (launches a new editor window)
 pub(super) fn open_file_in_editor(path: &str) {
-    let file_name = path.rsplit('/').next().unwrap_or(path);
-    let title = format!("Editor - {}", file_name);
-
-    // Create a text editor window
-    let (sw, sh) = crate::gui::cached_screen_size();
-    let ww = 700u32.min(sw as u32 - 100);
-    let wh = 500u32.min(sh as u32 - 100);
-    let wx = (sw as u32 - ww) / 2;
-    let wy = (sh as u32 - wh) / 2;
-
-    let mut wm = window::WINDOW_MANAGER.lock();
-    let mut win = window::Window::new(&title, wx as i32, wy as i32, ww, wh);
-    win.content_type = WindowContentType::TextEditor;
-    let wid = win.id;
-    wm.add_window(win);
-    drop(wm);
-
-    // Initialize editor state with the file contents
-    crate::gui::editor::open_file(wid, path);
-
-    crate::gui::taskbar::add_entry(wid, &title);
-
+    crate::user_task::spawn_editor_app();
     crate::serial_println!("[KnoxOS] Opened file in editor: {}", path);
 }

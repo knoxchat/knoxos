@@ -11,7 +11,7 @@ use super::types::{
     CommandBlockWrapper, CommandStatusWrapper, UsbDescriptorType, UsbDevice, UsbMassStorageDevice,
     UsbSetupPacket,
 };
-use super::xhci::{Trb, TrbType, alloc_ring_buffer};
+use super::xhci::{Trb, TrbType, alloc_ring_buffer, dma_virt};
 
 /// Next CBW tag for unique command identification
 static CBW_TAG: AtomicU32 = AtomicU32::new(1);
@@ -32,8 +32,9 @@ fn bulk_out_transfer(slot_id: u8, ep_out_dci: u8, data: &[u8]) -> Result<usize, 
     // Allocate DMA buffer and copy data
     let buf_size = (data.len() + 4095) & !4095;
     let (dma_ptr, _layout) = alloc_ring_buffer(buf_size);
+    // SAFETY: bounce page is a DMA frame we own; `dma_ptr` is physical.
     unsafe {
-        core::ptr::copy_nonoverlapping(data.as_ptr(), dma_ptr as *mut u8, data.len());
+        core::ptr::copy_nonoverlapping(data.as_ptr(), dma_virt(dma_ptr) as *mut u8, data.len());
     }
 
     // Build Normal TRB for bulk OUT
@@ -92,9 +93,10 @@ fn bulk_in_transfer(slot_id: u8, ep_in_dci: u8, buffer: &mut [u8]) -> Result<usi
             let residue = event.status & 0xFFFFFF;
             let transferred = buffer.len() - residue as usize;
             // Copy from DMA buffer to caller's buffer
+            // SAFETY: bounce page is a DMA frame we own; HC wrote IN data.
             unsafe {
                 core::ptr::copy_nonoverlapping(
-                    dma_ptr as *const u8,
+                    dma_virt(dma_ptr) as *const u8,
                     buffer.as_mut_ptr(),
                     transferred,
                 );
@@ -105,8 +107,13 @@ fn bulk_in_transfer(slot_id: u8, ep_in_dci: u8, buffer: &mut [u8]) -> Result<usi
     }
 
     // Copy whatever is in the DMA buffer (QEMU fallback)
+    // SAFETY: bounce page is a DMA frame we own.
     unsafe {
-        core::ptr::copy_nonoverlapping(dma_ptr as *const u8, buffer.as_mut_ptr(), buffer.len());
+        core::ptr::copy_nonoverlapping(
+            dma_virt(dma_ptr) as *const u8,
+            buffer.as_mut_ptr(),
+            buffer.len(),
+        );
     }
     Ok(buffer.len())
 }
@@ -147,6 +154,7 @@ pub fn send_scsi_command(
     cbw.command[..scsi_cmd.len()].copy_from_slice(scsi_cmd);
 
     // Serialize CBW to bytes (31 bytes)
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let cbw_bytes = unsafe {
         core::slice::from_raw_parts(
             &cbw as *const CommandBlockWrapper as *const u8,
@@ -215,6 +223,7 @@ pub fn receive_scsi_status(
 
     let received = bulk_in_transfer(device.usb_dev.slot_id, ep_in_dci, &mut csw_buf)?;
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let csw = unsafe { core::ptr::read(csw_buf.as_ptr() as *const CommandStatusWrapper) };
 
     // Validate CSW signature

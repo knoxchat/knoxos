@@ -8,9 +8,9 @@ This is **not** a production OS yet. The kernel compiles a large tree of modules
 |------------------|---------------|
 | BIOS/UEFI boot in QEMU to a 1920×1080 desktop | Default root is still a RAM VFS (persist snapshot on VirtIO-blk) |
 | PS/2 keyboard and mouse; Ring 3 SHM clients (Gate F) | Most desktop apps still in-kernel `WindowContentType` |
-| VirtIO-blk persist + AHCI/NVMe DMA (C1–C6) | ext4 JBD2; OverlayFS |
+| VirtIO-blk persist + AHCI/NVMe DMA (C1–C8) + JBD2 replay | ext4 as default root (RAM VFS still boots) |
 | Loopback + VirtIO-net DHCP/DNS/TCP CUBIC (D1–D5) | IPv6, TLS 1.3, e1000 as the socket NIC |
-| Scheduled Ring 3: `execve`/`fork`/`wait`, signals, timer preempt + GPR/FPU save | Dynamic linker / glibc; USB HID |
+| Scheduled Ring 3: `execve`/`fork`/`wait`, signals, timer preempt + GPR/FPU save; VirtIO-GPU scanout + hw cursor (F8); USB HID URB + XHCI MMIO | Desktop without PS/2 unproven (PS/2 remains fallback); ext4 is not default root |
 | W^X, ChaCha20 `getrandom`, seccomp, capabilities (E1–E4) | SELinux on the VFS path |
 | Per-CPU TSS + GS; AP online on QEMU `-smp 2` (I1) | SMP load balance of Ring 3 (APs still HLT) |
 
@@ -59,13 +59,14 @@ async executor (~60 FPS)
     → idle thread HLT when the desktop has no work
 ```
 
-See [status/next.md](status/next.md) for remaining work and [status/gates/](status/gates/README.md) for the completed gate list. [CONTRIBUTING.md](CONTRIBUTING.md) explains what “live path” means.
+See [status/next.md](status/next.md) for remaining work, [docs/architecture.md](docs/architecture.md) for the boot/scanout sketch, and [status/gates/](status/gates/README.md) for the completed gate list. [CONTRIBUTING.md](CONTRIBUTING.md) explains what “live path” means.
 
 ## Layout
 
 - `kernel/` — `no_std` kernel (`x86_64-unknown-none`; aarch64/riscv64 compile with shims)
 - `boot/` — disk-image builder (`bootloader` crate, BIOS + UEFI)
 - `status/` — production-readiness score (source of truth); start at [status/next.md](status/next.md)
+- `docs/` — architecture, syscalls, drivers, GUI (live path)
 - `tests/run_integration.sh` — QEMU serial-marker boot check
 
 ## License

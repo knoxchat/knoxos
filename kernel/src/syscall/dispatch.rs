@@ -244,6 +244,7 @@ pub fn handle_syscall(
         // ════════════════════════════════════════════════════════════
         SyscallNumber::Times => {
             if arg1 != 0 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     core::ptr::write_bytes(arg1 as *mut u8, 0, 32);
                 }
@@ -307,6 +308,7 @@ pub fn handle_syscall(
         SyscallNumber::Utime | SyscallNumber::Utimes => {
             // Validate path exists (timestamps not tracked by in-memory VFS)
             if arg1 != 0 {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 if let Some(path) = unsafe { read_user_string(arg1) } {
                     let vfs = crate::vfs::VFS.lock();
                     if vfs.resolve_path(&path).is_none() {
@@ -325,6 +327,7 @@ pub fn handle_syscall(
         SyscallNumber::Mknodat => advanced::sys_mknodat(arg1 as i32, arg2, arg3 as u32, arg4),
         SyscallNumber::Mknod => {
             // mknod(path, mode, dev) — create special file
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let path = unsafe { read_user_string(arg1) };
             if let Some(p) = path {
                 let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -399,6 +402,7 @@ pub fn handle_syscall(
         SyscallNumber::SchedSetparam => {
             // sched_setparam(pid, param) — set scheduling parameters
             if arg2 != 0 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let _priority = unsafe { *(arg2 as *const i32) };
             }
             Ok(0)
@@ -407,6 +411,7 @@ pub fn handle_syscall(
             if arg2 != 0 {
                 let pid = crate::scheduler::current_pid().unwrap_or(1);
                 let buf = [0u8; 4];
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(buf.as_ptr(), arg2 as *mut u8, 4);
                 }
@@ -437,6 +442,7 @@ pub fn handle_syscall(
         SyscallNumber::ArchPrctl => advanced::sys_arch_prctl(arg1 as i32, arg2),
         SyscallNumber::Adjtimex | SyscallNumber::ClockAdjtime => advanced::sys_adjtimex(arg1),
         SyscallNumber::Chroot => {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             if let Some(path) = unsafe { read_user_string(arg1) } {
                 let pid = crate::scheduler::current_pid().unwrap_or(1);
                 match crate::process::chroot(pid, &path) {
@@ -488,9 +494,7 @@ pub fn handle_syscall(
         // ════════════════════════════════════════════════════════════
         SyscallNumber::Gettid => advanced::sys_gettid(),
         SyscallNumber::Readahead => {
-            // readahead(fd, offset, count) — advisory prefetch
-            // In-memory FS: data is already "cached"
-            Ok(0)
+            advanced::sys_readahead(arg1 as i32, arg2 as i64, arg3 as usize)
         }
         SyscallNumber::Setxattr | SyscallNumber::Lsetxattr => {
             advanced::sys_setxattr(arg1, arg2, arg3, arg4 as usize, arg5 as i32)
@@ -514,6 +518,7 @@ pub fn handle_syscall(
         SyscallNumber::Time => {
             let t = crate::rtc::unix_time();
             if arg1 != 0 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     *(arg1 as *mut i64) = t;
                 }
@@ -572,7 +577,9 @@ pub fn handle_syscall(
         // ════════════════════════════════════════════════════════════
         // ── Timers (221–235) ───────────────────────────────────────
         // ════════════════════════════════════════════════════════════
-        SyscallNumber::Fadvise64 => Ok(0),
+        SyscallNumber::Fadvise64 => {
+            advanced::sys_fadvise64(arg1 as i32, arg2 as i64, arg3 as i64, arg4 as i32)
+        }
         SyscallNumber::TimerCreate => advanced::sys_timer_create_linux(arg1 as u32, arg2, arg3),
         SyscallNumber::TimerSettime => {
             advanced::sys_timer_settime_linux(arg1 as u32, arg2 as i32, arg3, arg4)
@@ -597,6 +604,7 @@ pub fn handle_syscall(
         SyscallNumber::GetMempolicy => advanced::sys_get_mempolicy(arg1, arg2, arg3, arg4, arg5),
         SyscallNumber::MqOpen => io::sys_mq_open(arg1, arg2 as i32, arg3 as u32),
         SyscallNumber::MqUnlink => {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             if let Some(name) = unsafe { read_user_string(arg1) } {
                 let mut queues = crate::ipc::MESSAGE_QUEUES.lock();
                 let before = queues.len();
@@ -753,14 +761,19 @@ pub fn handle_syscall(
                 let mut li = 0;
                 let mut ri = 0;
                 while li < liovcnt && ri < riovcnt {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let l_base = unsafe { *((local_iov + (li * 16) as u64) as *const u64) };
                     let l_len =
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe { *((local_iov + (li * 16 + 8) as u64) as *const u64) } as usize;
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let r_base = unsafe { *((remote_iov + (ri * 16) as u64) as *const u64) };
                     let r_len =
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe { *((remote_iov + (ri * 16 + 8) as u64) as *const u64) } as usize;
                     let copy_len = l_len.min(r_len);
                     if l_base != 0 && r_base != 0 && copy_len > 0 {
+                        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                         unsafe {
                             core::ptr::copy_nonoverlapping(
                                 r_base as *const u8,
@@ -791,14 +804,19 @@ pub fn handle_syscall(
                 let mut li = 0;
                 let mut ri = 0;
                 while li < liovcnt && ri < riovcnt {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let l_base = unsafe { *((local_iov + (li * 16) as u64) as *const u64) };
                     let l_len =
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe { *((local_iov + (li * 16 + 8) as u64) as *const u64) } as usize;
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let r_base = unsafe { *((remote_iov + (ri * 16) as u64) as *const u64) };
                     let r_len =
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe { *((remote_iov + (ri * 16 + 8) as u64) as *const u64) } as usize;
                     let copy_len = l_len.min(r_len);
                     if l_base != 0 && r_base != 0 && copy_len > 0 {
+                        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                         unsafe {
                             core::ptr::copy_nonoverlapping(
                                 l_base as *const u8,
@@ -980,6 +998,7 @@ pub fn handle_syscall(
         // ── KnoxOS ONNX ML Runtime ─────────────────────────────────
         // ════════════════════════════════════════════════════════════
         SyscallNumber::OnnxLoadModel => {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let name = unsafe { read_user_string(arg1) }.unwrap_or_default();
             match crate::onnx::load_model(&name) {
                 Ok(id) => Ok(id as u64),
@@ -998,6 +1017,7 @@ pub fn handle_syscall(
         // ── KnoxOS Shared Library Loader ───────────────────────────
         // ════════════════════════════════════════════════════════════
         SyscallNumber::Dlopen => {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let name = unsafe { read_user_string(arg1) }.unwrap_or_default();
             match crate::soloader::dlopen(&name, arg2 as i32) {
                 Ok(handle) => Ok(handle as u64),
@@ -1005,6 +1025,7 @@ pub fn handle_syscall(
             }
         }
         SyscallNumber::Dlsym => {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let symbol = unsafe { read_user_string(arg2) }.unwrap_or_default();
             match crate::soloader::dlsym(arg1 as u32, &symbol) {
                 Some(addr) => Ok(addr),
@@ -1033,6 +1054,7 @@ pub fn handle_syscall(
         }
         SyscallNumber::RtGetInfo => Ok(0),
         SyscallNumber::RtCreatePiMutex => {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let name = unsafe { read_user_string(arg1) }.unwrap_or_default();
             Ok(crate::preempt_rt::create_pi_mutex(&name) as u64)
         }

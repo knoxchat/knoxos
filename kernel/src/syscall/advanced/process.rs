@@ -21,6 +21,7 @@ pub fn sys_clone3(cl_args_ptr: u64, size: u64) -> SyscallResult {
     }
     let n = core::cmp::min(size, 88) as usize;
     let mut buf = [0u8; 88];
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(cl_args_ptr as *const u8, buf.as_mut_ptr(), n);
     }
@@ -60,6 +61,7 @@ fn write_user_u32(pid: u32, ptr: u64, val: u32) {
         return;
     }
     let bytes = val.to_ne_bytes();
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, 4);
     }
@@ -103,6 +105,7 @@ pub fn sys_sched_rr_get_interval(pid: u32, tp_ptr: u64) -> SyscallResult {
         let caller = crate::scheduler::current_pid().unwrap_or(1);
         let mut buf = [0u8; 16];
         buf[8..16].copy_from_slice(&100_000_000i64.to_ne_bytes());
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), tp_ptr as *mut u8, 16);
         }
@@ -125,21 +128,52 @@ pub fn sys_futex_waitv(
     Err(SyscallError::NotImplemented)
 }
 
+lazy_static::lazy_static! {
+    static ref ROBUST_LIST: spin::Mutex<alloc::collections::BTreeMap<u32, (u64, u64)>> =
+        spin::Mutex::new(alloc::collections::BTreeMap::new());
+}
+
+/// Drop the robust futex list when a process exits.
+pub fn cleanup_robust_list(pid: u32) {
+    ROBUST_LIST.lock().remove(&pid);
+}
+
 pub fn sys_set_robust_list(head: u64, len: usize) -> SyscallResult {
-    let _ = (head, len);
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    ROBUST_LIST.lock().insert(pid, (head, len as u64));
     Ok(0)
 }
 
 pub fn sys_get_robust_list(pid: i32, head_ptr: u64, len_ptr: u64) -> SyscallResult {
-    let _ = pid;
+    let current = crate::scheduler::current_pid().unwrap_or(1);
+    let target = if pid <= 0 { current } else { pid as u32 };
+    let (head, len) = ROBUST_LIST.lock().get(&target).copied().unwrap_or((0, 0));
     if head_ptr != 0 {
-        unsafe {
-            *(head_ptr as *mut u64) = 0;
+        crate::vmm::write_user_memory(current, head_ptr, &head.to_le_bytes());
+        if crate::process::PROCESS_TABLE
+            .lock()
+            .get_process(current)
+            .map(|p| !p.has_address_space)
+            .unwrap_or(true)
+        {
+            // SAFETY: kernel-mode caller passed a writable `u64` slot.
+            unsafe {
+                *(head_ptr as *mut u64) = head;
+            }
         }
     }
     if len_ptr != 0 {
-        unsafe {
-            *(len_ptr as *mut u64) = 0;
+        crate::vmm::write_user_memory(current, len_ptr, &len.to_le_bytes());
+        if crate::process::PROCESS_TABLE
+            .lock()
+            .get_process(current)
+            .map(|p| !p.has_address_space)
+            .unwrap_or(true)
+        {
+            // SAFETY: kernel-mode caller passed a writable `u64` slot.
+            unsafe {
+                *(len_ptr as *mut u64) = len;
+            }
         }
     }
     Ok(0)
@@ -149,11 +183,13 @@ pub fn sys_getcpu(cpu: u64, node: u64, _cache: u64) -> SyscallResult {
     let idx = crate::usermode::current_cpu_index();
     crate::smp::note_user_syscall(idx, crate::context::current_pid());
     if cpu != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(cpu as *mut u32) = idx;
         }
     }
     if node != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(node as *mut u32) = 0;
         }

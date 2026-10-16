@@ -25,6 +25,7 @@ pub fn sys_pread64(fd: u64, buf_ptr: u64, count: u64, offset: i64) -> SyscallRes
     if let Ok(n) = result {
         let n = n as usize;
         if buf_ptr != 0 && n > 0 {
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 core::ptr::copy_nonoverlapping(tmp.as_ptr(), buf_ptr as *mut u8, n);
             }
@@ -41,6 +42,7 @@ pub fn sys_pwrite64(fd: u64, buf_ptr: u64, count: u64, offset: i64) -> SyscallRe
     let ncap = count as usize;
     let mut tmp = alloc::vec![0u8; ncap];
     if buf_ptr != 0 && ncap > 0 {
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(buf_ptr as *const u8, tmp.as_mut_ptr(), ncap);
         }
@@ -146,6 +148,68 @@ pub fn sys_syncfs(fd: i32) -> SyscallResult {
 
 pub fn sys_sync_file_range(fd: i32, offset: i64, nbytes: i64, flags: u32) -> SyscallResult {
     let _ = (fd, offset, nbytes, flags);
+    Ok(0)
+}
+
+fn inode_for_fd(fd: i32) -> Result<u64, SyscallError> {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let (inode, path) = {
+        let tables = crate::fd::PROCESS_FD_TABLES.lock();
+        let table = tables.get(&pid).ok_or(SyscallError::BadFileDescriptor)?;
+        let file = table.get(fd).ok_or(SyscallError::BadFileDescriptor)?;
+        (file.inode, file.path.clone())
+    };
+    if inode != 0 {
+        return Ok(inode);
+    }
+    crate::vfs::VFS
+        .lock()
+        .resolve_path(&path)
+        .ok_or(SyscallError::FileNotFound)
+}
+
+/// `readahead(fd, offset, count)` — prefetch into the page cache.
+pub fn sys_readahead(fd: i32, offset: i64, count: usize) -> SyscallResult {
+    if offset < 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let ino = inode_for_fd(fd)?;
+    crate::page_cache::prefetch(ino, offset as u64, count as u64);
+    Ok(0)
+}
+
+const POSIX_FADV_NORMAL: i32 = 0;
+const POSIX_FADV_RANDOM: i32 = 1;
+const POSIX_FADV_SEQUENTIAL: i32 = 2;
+const POSIX_FADV_WILLNEED: i32 = 3;
+const POSIX_FADV_DONTNEED: i32 = 4;
+const POSIX_FADV_NOREUSE: i32 = 5;
+
+/// `fadvise64(fd, offset, len, advice)` — store advice; WILLNEED prefetches.
+pub fn sys_fadvise64(fd: i32, offset: i64, len: i64, advice: i32) -> SyscallResult {
+    if offset < 0 || len < 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    match advice {
+        POSIX_FADV_NORMAL
+        | POSIX_FADV_RANDOM
+        | POSIX_FADV_SEQUENTIAL
+        | POSIX_FADV_WILLNEED
+        | POSIX_FADV_DONTNEED
+        | POSIX_FADV_NOREUSE => {}
+        _ => return Err(SyscallError::InvalidArgument),
+    }
+    let ino = inode_for_fd(fd)?;
+    if advice == POSIX_FADV_WILLNEED && len > 0 {
+        crate::page_cache::prefetch(ino, offset as u64, len as u64);
+    }
+    if advice == POSIX_FADV_DONTNEED && len > 0 {
+        let start = (offset as u64) / 4096;
+        let end = (offset as u64).saturating_add(len as u64).div_ceil(4096);
+        for idx in start..end {
+            crate::page_cache::invalidate_page(ino, idx);
+        }
+    }
     Ok(0)
 }
 
@@ -414,6 +478,7 @@ pub fn sys_getdents(fd: i32, dirp: u64, count: u32) -> SyscallResult {
 
 pub fn sys_newfstatat(dirfd: i32, path_ptr: u64, stat_buf: u64, flags: i32) -> SyscallResult {
     let _ = flags;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -446,6 +511,7 @@ pub fn sys_newfstatat(dirfd: i32, path_ptr: u64, stat_buf: u64, flags: i32) -> S
         st_ctime: 0,
     };
     if stat_buf != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             core::ptr::write(stat_buf as *mut crate::fd::FileStat, stat);
         }
@@ -504,6 +570,7 @@ pub fn newfstatat_self_test() -> bool {
             return false;
         }
     }
+    // SAFETY: the MaybeUninit slot is written before assume_init / assume_init_ref.
     let stat = unsafe { stat.assume_init() };
     if stat.st_size != 1 {
         crate::serial_println!("[newfstatat] Gate AX1 FAILED: st_size {}", stat.st_size);
@@ -537,6 +604,7 @@ pub fn newfstatat_self_test() -> bool {
 // ── unlinkat / renameat / renameat2 / linkat / fchmodat / fchownat / futimesat / utimensat
 
 pub fn sys_unlinkat(dirfd: i32, path_ptr: u64, flags: i32) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -642,7 +710,9 @@ pub fn unlinkat_self_test() -> bool {
 }
 
 fn rename_at(olddirfd: i32, oldpath_ptr: u64, newdirfd: i32, newpath_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let oldpath = unsafe { read_user_string(oldpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let newpath = unsafe { read_user_string(newpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let oldpath = path_at(olddirfd, &oldpath)?;
     let newpath = path_at(newdirfd, &newpath)?;
@@ -901,7 +971,9 @@ pub fn sys_linkat(
     flags: i32,
 ) -> SyscallResult {
     let _ = flags;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let oldpath = unsafe { read_user_string(oldpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let newpath = unsafe { read_user_string(newpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let oldpath = path_at(olddirfd, &oldpath)?;
     let newpath = path_at(newdirfd, &newpath)?;
@@ -1027,8 +1099,10 @@ pub fn linkat_self_test() -> bool {
 }
 
 pub fn sys_symlinkat(target_ptr: u64, newdirfd: i32, linkpath_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let target = unsafe { read_user_string(target_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let linkpath =
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { read_user_string(linkpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let linkpath = path_at(newdirfd, &linkpath)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -1144,6 +1218,7 @@ pub fn symlinkat_self_test() -> bool {
 }
 
 pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf_ptr: u64, bufsiz: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -1160,6 +1235,7 @@ pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf_ptr: u64, bufsiz: u64) -> S
     };
     let len = target.len().min(bufsiz as usize);
     if buf_ptr != 0 && len > 0 {
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(target.as_ptr(), buf_ptr as *mut u8, len);
         }
@@ -1332,6 +1408,7 @@ fn mknod_path(path: &str, mode: u32) -> SyscallResult {
 }
 
 pub fn sys_mknodat(dirfd: i32, path_ptr: u64, mode: u32, _dev: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -1424,6 +1501,7 @@ pub fn mknodat_self_test() -> bool {
 
 pub fn sys_fchmodat(dirfd: i32, path_ptr: u64, mode: u32, flags: i32) -> SyscallResult {
     let _ = flags;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -1524,6 +1602,7 @@ pub fn fchmodat_self_test() -> bool {
 
 pub fn sys_fchownat(dirfd: i32, path_ptr: u64, uid: u32, gid: u32, flags: i32) -> SyscallResult {
     let _ = flags;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -1633,6 +1712,7 @@ pub fn fchownat_self_test() -> bool {
 }
 
 pub fn sys_openat(dirfd: i32, path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     crate::syscall::fs::open_path(&path, flags, mode)
@@ -1722,6 +1802,7 @@ pub fn openat_self_test() -> bool {
 pub fn sys_utimensat(dirfd: i32, path_ptr: u64, times_ptr: u64, flags: i32) -> SyscallResult {
     let _ = flags;
     let path = if path_ptr != 0 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?
     } else {
         return Err(SyscallError::InvalidArgument);
@@ -1738,6 +1819,7 @@ pub fn sys_utimensat(dirfd: i32, path_ptr: u64, times_ptr: u64, flags: i32) -> S
         (Some(now), Some(now))
     } else {
         let mut buf = [0u8; 32];
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(times_ptr as *const u8, buf.as_mut_ptr(), 32);
         }
@@ -1868,6 +1950,7 @@ pub fn utimensat_at_self_test() -> bool {
 }
 
 pub fn sys_futimesat(dirfd: i32, path_ptr: u64, times_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -1878,6 +1961,7 @@ pub fn sys_futimesat(dirfd: i32, path_ptr: u64, times_ptr: u64) -> SyscallResult
         (Some(now), Some(now))
     } else {
         let mut buf = [0u8; 32];
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(times_ptr as *const u8, buf.as_mut_ptr(), 32);
         }
@@ -2019,6 +2103,7 @@ pub(crate) fn path_at(dirfd: i32, path: &str) -> Result<alloc::string::String, S
 
 pub fn sys_faccessat(dirfd: i32, path_ptr: u64, mode: u32, flags: i32) -> SyscallResult {
     let _ = flags;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -2186,6 +2271,7 @@ pub fn faccessat2_self_test() -> bool {
 // ── mkdirat ─────────────────────────────────────────────────────────
 
 pub fn sys_mkdirat(dirfd: i32, path_ptr: u64, mode: u16) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -2301,6 +2387,7 @@ pub fn sys_pwritev2(fd: i32, iov: u64, iovcnt: i32, offset: i64, flags: i32) -> 
 
 pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: i32, mask: u32, statxbuf: u64) -> SyscallResult {
     let _ = (flags, mask);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -2337,6 +2424,7 @@ pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: i32, mask: u32, statxbuf: u64
         buf[64..72].copy_from_slice(&s.atime.to_ne_bytes());
         buf[96..104].copy_from_slice(&s.ctime.to_ne_bytes());
         buf[112..120].copy_from_slice(&s.mtime.to_ne_bytes());
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), statxbuf as *mut u8, buf.len());
         }

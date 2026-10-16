@@ -38,6 +38,9 @@ impl Ext4Fs {
         let mut buf = vec![0u8; self.block_size];
         self.read_block(journal_block, &mut buf)?;
 
+        // SAFETY: `buf` is a freshly read journal block of `self.block_size`
+        // bytes. JournalSuperblock is a packed on-disk layout smaller than a
+        // journal block; we only read it, never write through this pointer.
         let jsb = unsafe { *(buf.as_ptr() as *const JournalSuperblock) };
         let magic = u32::from_be(jsb.s_header.h_magic);
         if magic != JBD2_MAGIC {
@@ -138,28 +141,28 @@ impl Ext4Fs {
 
     /// Replay the journal (recovery after crash)
     pub(crate) fn journal_replay(&mut self) -> Result<u32, Ext4Error> {
-        if self.journal.is_none() {
+        let Some(ref journal) = self.journal else {
             return Ok(0);
-        }
+        };
 
-        // Read journal blocks and replay committed transactions
-        serial_println!("[ext4] Journal replay: checking for uncommitted transactions...");
+        let sectors_per_block = (self.block_size / SECTOR_SIZE).max(1) as u64;
+        let start_lba = journal.start_block * sectors_per_block;
+        let jblock_size = if journal.block_size >= SECTOR_SIZE {
+            journal.block_size
+        } else {
+            self.block_size
+        };
 
-        let replayed = 0u32;
-        // Scan journal descriptor blocks for committed transactions
-        // and replay them to the main filesystem area
-        if let Some(ref journal) = self.journal {
-            let start = journal.first;
-            let max_len = journal.max_len;
-            if max_len > 0 {
-                serial_println!(
-                    "[ext4] Journal: scanning {} blocks from offset {}",
-                    max_len,
-                    start
-                );
-            }
-        }
+        serial_println!(
+            "[ext4] Journal replay: JBD2 walk start_lba={} jblock={} first={} maxlen={}",
+            start_lba,
+            jblock_size,
+            journal.first,
+            journal.max_len
+        );
 
+        let replayed =
+            crate::journal_replay::replay_contiguous(self.device_index, start_lba, jblock_size);
         serial_println!(
             "[ext4] Journal replay complete: {} transactions replayed",
             replayed

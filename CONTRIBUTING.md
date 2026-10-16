@@ -4,7 +4,7 @@ Read [status/next.md](status/next.md) first. A module that compiles is not a fea
 
 ## What to work on
 
-Gates A–F, H–I, and J–BL are done on QEMU. Follow [status/next.md](status/next.md): dynamic linker, then Gate G, then remaining live-path gaps. Do not add KVM, containers, Wi-Fi, TLS 1.3, GPU compute, or AI inference — shipping those first increases the distance to a real OS.
+Gates A–F, H–I, J–BL, BM1–BM4, F8 (VirtIO-GPU), C8 (JBD2), USB HID URB, and XHCI mapped MMIO are done on QEMU. Follow [status/next.md](status/next.md): Gate G5 deny-all, then ext4 as default root / OVMF PK enroll / cross-arch boot. Do not add KVM, containers, Wi-Fi, TLS 1.3, GPU compute, or AI inference — shipping those first increases the distance to a real OS.
 
 1. Wire an existing stub into the live path, **or**
 2. Delete / feature-gate Unused modules, **or**

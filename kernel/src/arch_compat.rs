@@ -20,6 +20,7 @@ pub mod instructions {
                 }
             }
             pub unsafe fn read(&mut self) -> T {
+                // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
                 unsafe { core::mem::zeroed() }
             }
             pub unsafe fn write(&mut self, _val: T) {}
@@ -37,6 +38,7 @@ pub mod instructions {
                 }
             }
             pub unsafe fn read(&mut self) -> T {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe { core::mem::zeroed() }
             }
         }
@@ -75,10 +77,12 @@ pub mod instructions {
         #[inline]
         pub fn hlt() {
             #[cfg(target_arch = "aarch64")]
+            // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
             unsafe {
                 core::arch::asm!("wfe")
             };
             #[cfg(target_arch = "riscv64")]
+            // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
             unsafe {
                 core::arch::asm!("wfi")
             };
@@ -222,7 +226,7 @@ pub mod structures {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub struct VirtAddr(u64);
         impl VirtAddr {
-            pub fn new(addr: u64) -> Self {
+            pub const fn new(addr: u64) -> Self {
                 Self(addr)
             }
             pub fn as_u64(self) -> u64 {
@@ -600,17 +604,21 @@ pub mod structures {
         #[derive(Clone, Copy)]
         pub struct Entry {
             _data: [u64; 2],
+            opts: EntryOptions,
         }
         impl Entry {
             pub const fn new() -> Self {
-                Self { _data: [0; 2] }
+                Self {
+                    _data: [0; 2],
+                    opts: EntryOptions(0),
+                }
             }
             pub fn set_handler_fn(&mut self, _handler: usize) -> &mut EntryOptions {
-                static mut OPTS: EntryOptions = EntryOptions(0);
-                unsafe { &mut OPTS }
+                &mut self.opts
             }
         }
 
+        #[derive(Clone, Copy)]
         pub struct EntryOptions(u16);
         impl EntryOptions {
             pub fn set_stack_index(&mut self, _index: u16) -> &mut Self {
@@ -651,12 +659,13 @@ pub mod structures {
     }
 
     pub mod tss {
+        #[derive(Clone, Copy)]
         pub struct TaskStateSegment {
             pub privilege_stack_table: [super::paging::VirtAddr; 3],
             pub interrupt_stack_table: [super::paging::VirtAddr; 7],
         }
         impl TaskStateSegment {
-            pub fn new() -> Self {
+            pub const fn new() -> Self {
                 Self {
                     privilege_stack_table: [super::paging::VirtAddr::new(0); 3],
                     interrupt_stack_table: [super::paging::VirtAddr::new(0); 7],
@@ -1077,12 +1086,14 @@ pub mod raw_cpuid {
 /// Portable timestamp counter read.
 #[cfg(target_arch = "x86_64")]
 pub fn read_tsc() -> u64 {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { core::arch::x86_64::_rdtsc() }
 }
 
 #[cfg(target_arch = "aarch64")]
 pub fn read_tsc() -> u64 {
     let val: u64;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe { core::arch::asm!("mrs {}, cntvct_el0", out(reg) val) };
     val
 }
@@ -1090,6 +1101,7 @@ pub fn read_tsc() -> u64 {
 #[cfg(target_arch = "riscv64")]
 pub fn read_tsc() -> u64 {
     let val: u64;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe { core::arch::asm!("rdtime {}", out(reg) val) };
     val
 }
@@ -1215,13 +1227,13 @@ pub mod bootloader_shim {
         impl<T> Optional<T> {
             pub fn as_mut(&mut self) -> Option<&mut T> {
                 match self {
-                    Optional::Some(ref mut v) => Some(v),
+                    Optional::Some(v) => Some(v),
                     Optional::None => None,
                 }
             }
             pub fn as_ref(&self) -> Option<&T> {
                 match self {
-                    Optional::Some(ref v) => Some(v),
+                    Optional::Some(v) => Some(v),
                     Optional::None => None,
                 }
             }

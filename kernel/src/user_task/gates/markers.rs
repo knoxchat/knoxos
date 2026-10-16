@@ -23,6 +23,8 @@ pub const GATE_I3_MARKER: &str = "GATE_I3 ap ring3";
 pub const GATE_I4_MARKER: &str = "GATE_I4 smp balance";
 /// Remaining silent clock/time no-ops return ENOSYS.
 pub const GATE_G4_MARKER: &str = "GATE_G4 enosys";
+/// Remaining documented no-ops store real state (robust list / madvise / mlock / readahead).
+pub const GATE_G4_AUDIT_MARKER: &str = "GATE_G4 audit live";
 /// Ring 3 client presented a buffer; not an in-kernel WindowContentType app.
 pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
 /// Ring 3 client presented via AF_UNIX `/run/wayland-0`, not ioctl(`/dev/wl0`).

@@ -15,6 +15,9 @@ tools/**/target/
 serial.log
 nohup.out
 
+# Release / Secure Boot artifacts (private keys must not be committed)
+dist/
+
 # Editor / OS
 .DS_Store
 Thumbs.db

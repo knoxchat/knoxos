@@ -24,7 +24,9 @@ sudo apt install qemu-system-x86 ovmf
 ./run.sh --release    # LTO + size-optimized kernel
 ```
 
-`./run.sh` builds the kernel, writes a BIOS (and optionally UEFI) disk image, and starts QEMU with VirtIO-blk, AHCI, NVMe, and virtio-net.
+`./run.sh` builds the kernel, writes a BIOS (and optionally UEFI) disk image, and starts QEMU with VirtIO-blk, AHCI, NVMe, virtio-net, virtio-gpu, and qemu-xhci.
+
+Secure Boot keys (PK/KEK/db): `./scripts/secure-boot-enroll.sh`. OVMF vars enrollment needs `virt-fw-vars`.
 
 | Command | Purpose |
 |---------|---------|
@@ -38,6 +40,7 @@ sudo apt install qemu-system-x86 ovmf
 - `kernel/` — kernel crate (`src/main.rs` + `src/lib.rs`)
 - `boot/` — disk-image builder (`bootloader` crate)
 - `status/` — production-readiness score (source of truth); start at [status/next.md](status/next.md)
+- `docs/` — architecture, syscalls, drivers, GUI
 - `tests/` — QEMU integration harness
 
 Do not add a new `pub mod` unless it is on the live boot path. See [CONTRIBUTING.md](CONTRIBUTING.md) and [status/next.md](status/next.md).

@@ -1,5 +1,7 @@
 //! Device slot enable, addressing, transfer submission, and enumeration.
 use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 
 use crate::serial_println;
@@ -8,8 +10,20 @@ use super::ports::enumerate_ports;
 use super::types::{UsbDevice, UsbDeviceDescriptor, UsbSpeed};
 use super::xhci::{
     CMD_RING_SIZE, EVENT_RING_SIZE, TRANSFER_RING_SIZE, TRB_SIZE, TransferRing, Trb, TrbType, XHCI,
-    alloc_ring_buffer, xhci_write32,
+    alloc_ring_buffer, dma_virt, xhci_write32,
 };
+use spin::Mutex;
+
+/// Interrupt-IN URB waiting on a Transfer Event.
+struct InterruptUrb {
+    slot_id: u8,
+    endpoint: u8,
+    buf_phys: u64,
+    len: u32,
+    hid_id: u32,
+}
+
+static INTERRUPT_URBS: Mutex<Vec<InterruptUrb>> = Mutex::new(Vec::new());
 
 // ═══════════════════════════════════════════════════════════════════════
 // DEVICE ENUMERATION
@@ -33,8 +47,10 @@ fn enqueue_command(trb: &Trb) -> bool {
         xhci.cmd_ring_enqueue = 0;
         xhci.cmd_ring_cycle = !cycle;
         // The Link TRB's cycle bit was set at init; update it for new cycle
+        // SAFETY: command ring is a DMA page we own; `ring_ptr` is physical.
         unsafe {
-            let link_addr = (ring_ptr + ((CMD_RING_SIZE - 1) * TRB_SIZE) as u64) as *mut Trb;
+            let link_addr =
+                (dma_virt(ring_ptr) + ((CMD_RING_SIZE - 1) * TRB_SIZE) as u64) as *mut Trb;
             let mut link_ctrl = (*link_addr).control & !(1u32); // clear cycle bit
             if !cycle {
                 link_ctrl |= 1;
@@ -45,8 +61,9 @@ fn enqueue_command(trb: &Trb) -> bool {
     }
 
     // Write the TRB (write control word last with correct cycle bit)
+    // SAFETY: slot is within the DMA command ring we allocated.
     unsafe {
-        let trb_addr = (ring_ptr + (idx * TRB_SIZE) as u64) as *mut Trb;
+        let trb_addr = (dma_virt(ring_ptr) + (idx * TRB_SIZE) as u64) as *mut Trb;
         (*trb_addr).param_lo = trb.param_lo;
         (*trb_addr).param_hi = trb.param_hi;
         (*trb_addr).status = trb.status;
@@ -63,11 +80,17 @@ fn enqueue_command(trb: &Trb) -> bool {
     xhci.cmd_ring_enqueue = idx + 1;
 
     // Ring doorbell 0 (Host Controller Command) with target = 0
+    // SAFETY: doorbell BAR is inside the mapped XHCI MMIO window.
     unsafe {
         xhci_write32(db_base, 0x00, 0);
     }
 
     true
+}
+
+/// Poll the event ring for a Command Completion or Transfer Event.
+pub fn poll_transfer_event() -> bool {
+    wait_command_completion().is_some()
 }
 
 /// Wait for a command completion event on the event ring
@@ -81,8 +104,9 @@ pub(super) fn wait_command_completion() -> Option<Trb> {
 
     // Poll the event ring for a CommandCompletion TRB
     for _ in 0..100000 {
+        // SAFETY: event ring is a DMA page we own; `event_ptr` is physical.
         let trb = unsafe {
-            let addr = (event_ptr + (dequeue * TRB_SIZE) as u64) as *const Trb;
+            let addr = (dma_virt(event_ptr) + (dequeue * TRB_SIZE) as u64) as *const Trb;
             core::ptr::read_volatile(addr)
         };
 
@@ -98,6 +122,7 @@ pub(super) fn wait_command_completion() -> Option<Trb> {
             }
             // Update ERDP to acknowledge
             let erdp_val = event_ptr + (dequeue * TRB_SIZE) as u64;
+            // SAFETY: ERDP is interrupter 0 in the mapped runtime block.
             unsafe {
                 // Set EHB (Event Handler Busy) bit 3 to clear it
                 xhci_write32(ir0_base, 0x18, ((erdp_val & 0xFFFFFFFF) as u32) | (1 << 3));
@@ -165,8 +190,10 @@ pub(super) fn allocate_transfer_ring(slot_id: u8, endpoint: u8) -> u64 {
     let (ring_ptr, ring_layout) = alloc_ring_buffer(ring_bytes);
 
     // Place Link TRB at the end
+    // SAFETY: transfer ring is a DMA page we own; Link TRB param is physical.
     unsafe {
-        let link_addr = (ring_ptr + ((TRANSFER_RING_SIZE - 1) * TRB_SIZE) as u64) as *mut Trb;
+        let link_addr =
+            (dma_virt(ring_ptr) + ((TRANSFER_RING_SIZE - 1) * TRB_SIZE) as u64) as *mut Trb;
         (*link_addr).param_lo = (ring_ptr & 0xFFFFFFFF) as u32;
         (*link_addr).param_hi = (ring_ptr >> 32) as u32;
         (*link_addr).status = 0;
@@ -217,8 +244,9 @@ pub fn address_device(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
     {
         let xhci = XHCI.lock();
         if xhci.dcbaa_ptr != 0 {
+            // SAFETY: DCBAA is a DMA page we own; entries store physical context addrs.
             unsafe {
-                let dcbaa_entry = (xhci.dcbaa_ptr + (slot_id as u64) * 8) as *mut u64;
+                let dcbaa_entry = (dma_virt(xhci.dcbaa_ptr) + (slot_id as u64) * 8) as *mut u64;
                 *dcbaa_entry = output_ctx_ptr;
             }
         }
@@ -228,8 +256,9 @@ pub fn address_device(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
     let ep0_ring_ptr = allocate_transfer_ring(slot_id, 1); // EP0 = DCI 1
 
     // Fill Input Control Context: A0=1 (Slot), A1=1 (EP0)
+    // SAFETY: input context is a DMA page we own.
     unsafe {
-        let icc = input_ctx_ptr as *mut u32;
+        let icc = dma_virt(input_ctx_ptr) as *mut u32;
         // Drop context flags at offset 0
         *icc = 0;
         // Add context flags at offset 4: enable Slot (bit 0) and EP0 (bit 1)
@@ -238,8 +267,9 @@ pub fn address_device(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
 
     // Fill Slot Context (at offset 0x20 in input context for 32-byte contexts)
     let slot_ctx_offset = 0x20u64;
+    // SAFETY: slot context sits at a documented offset in the input context.
     unsafe {
-        let slot_ctx = (input_ctx_ptr + slot_ctx_offset) as *mut u32;
+        let slot_ctx = (dma_virt(input_ctx_ptr) + slot_ctx_offset) as *mut u32;
         // DWord 0: Route String=0, Speed, Context Entries=1
         let speed_val = match speed {
             UsbSpeed::Full => 1u32,
@@ -255,8 +285,9 @@ pub fn address_device(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
 
     // Fill Endpoint 0 Context (at offset 0x40)
     let ep0_ctx_offset = 0x40u64;
+    // SAFETY: EP0 context sits at a documented offset in the input context.
     unsafe {
-        let ep0_ctx = (input_ctx_ptr + ep0_ctx_offset) as *mut u32;
+        let ep0_ctx = (dma_virt(input_ctx_ptr) + ep0_ctx_offset) as *mut u32;
         // DWord 0: EP State=0
         *ep0_ctx = 0;
         // DWord 1: CErr=3, EP Type=4 (Control Bidirectional), Max Packet Size
@@ -328,8 +359,9 @@ pub(super) fn submit_transfer(slot_id: u8, endpoint: u8, trbs: &[Trb]) -> bool {
             continue;
         }
 
+        // SAFETY: transfer ring is a DMA page we own; `ring.ptr` is physical.
         unsafe {
-            let trb_addr = (ring.ptr + (idx * TRB_SIZE) as u64) as *mut Trb;
+            let trb_addr = (dma_virt(ring.ptr) + (idx * TRB_SIZE) as u64) as *mut Trb;
             (*trb_addr).param_lo = trb.param_lo;
             (*trb_addr).param_hi = trb.param_hi;
             (*trb_addr).status = trb.status;
@@ -346,11 +378,140 @@ pub(super) fn submit_transfer(slot_id: u8, endpoint: u8, trbs: &[Trb]) -> bool {
 
     // Ring doorbell: slot_id doorbell, target = endpoint DCI
     let doorbell_val = endpoint as u32;
+    // SAFETY: doorbell BAR is inside the mapped XHCI MMIO window.
     unsafe {
         xhci_write32(db_base, (slot_id as u32) * 4, doorbell_val);
     }
 
     true
+}
+
+/// Submit an interrupt-IN URB (Normal TRB + IOC) on `endpoint` for `slot_id`.
+///
+/// `buf_phys` is the guest-physical address of a DMA buffer the host writes
+/// the HID report into. Pass 0 to allocate a bounce page. Completion is a
+/// Transfer Event on the event ring, drained by [`poll_events`].
+pub fn submit_interrupt_urb(slot_id: u8, endpoint: u8, buf_phys: u64, len: u32) -> bool {
+    submit_interrupt_urb_for_hid(slot_id, endpoint, buf_phys, len, 0)
+}
+
+/// Same as [`submit_interrupt_urb`], tagged with a HID device id so
+/// [`poll_events`] can deliver the report through `usb_hid::process_report`.
+pub fn submit_interrupt_urb_for_hid(
+    slot_id: u8,
+    endpoint: u8,
+    buf_phys: u64,
+    len: u32,
+    hid_id: u32,
+) -> bool {
+    let buf_phys = if buf_phys == 0 {
+        let Some(phys) = super::xhci::alloc_dma(4096) else {
+            serial_println!("[XHCI] interrupt URB: no DMA page");
+            return false;
+        };
+        phys
+    } else {
+        buf_phys
+    };
+
+    let mut trb = Trb::new();
+    trb.param_lo = (buf_phys & 0xFFFF_FFFF) as u32;
+    trb.param_hi = (buf_phys >> 32) as u32;
+    trb.status = len; // TRB Transfer Length
+    trb.set_type(TrbType::Normal);
+    trb.control |= 1 << 5; // IOC
+    trb.control |= 1 << 2; // ISP (Interrupt on Short Packet)
+
+    if !submit_transfer(slot_id, endpoint, &[trb]) {
+        serial_println!(
+            "[XHCI] interrupt URB submit failed slot={} ep={}",
+            slot_id,
+            endpoint
+        );
+        return false;
+    }
+
+    INTERRUPT_URBS.lock().push(InterruptUrb {
+        slot_id,
+        endpoint,
+        buf_phys,
+        len,
+        hid_id,
+    });
+    true
+}
+
+/// Non-blocking drain of the event ring. Transfer Events complete HID URBs
+/// through [`crate::usb_hid::process_report`] and re-arm the interrupt-IN TRB.
+pub fn poll_events() {
+    let xhci = XHCI.lock();
+    if !xhci.initialized || xhci.event_ring_ptr == 0 {
+        return;
+    }
+    let event_ptr = xhci.event_ring_ptr;
+    let mut dequeue = xhci.event_ring_dequeue;
+    let mut expected_cycle = xhci.event_ring_cycle;
+    let ir0_base = xhci.rt_base + 0x20;
+    drop(xhci);
+
+    loop {
+        // SAFETY: event ring is a DMA page we own; `event_ptr` is physical.
+        let trb = unsafe {
+            let addr = (dma_virt(event_ptr) + (dequeue * TRB_SIZE) as u64) as *const Trb;
+            core::ptr::read_volatile(addr)
+        };
+        let trb_cycle = trb.control & 1 != 0;
+        if trb_cycle != expected_cycle {
+            break;
+        }
+        dequeue += 1;
+        if dequeue >= EVENT_RING_SIZE {
+            dequeue = 0;
+            expected_cycle = !expected_cycle;
+        }
+        let erdp_val = event_ptr + (dequeue * TRB_SIZE) as u64;
+        // SAFETY: ERDP is interrupter 0 in the mapped runtime block.
+        unsafe {
+            xhci_write32(ir0_base, 0x18, ((erdp_val & 0xFFFFFFFF) as u32) | (1 << 3));
+            xhci_write32(ir0_base, 0x1C, (erdp_val >> 32) as u32);
+        }
+
+        if trb.trb_type() == TrbType::TransferEvent as u8 {
+            handle_transfer_event(&trb);
+        }
+    }
+
+    let mut xhci = XHCI.lock();
+    xhci.event_ring_dequeue = dequeue;
+    xhci.event_ring_cycle = expected_cycle;
+}
+
+fn handle_transfer_event(trb: &Trb) {
+    let slot_id = ((trb.control >> 24) & 0xFF) as u8;
+    let endpoint = ((trb.control >> 16) & 0x1F) as u8;
+    let cc = trb.completion_code();
+    if cc != 1 && cc != 13 {
+        return;
+    }
+
+    let mut urbs = INTERRUPT_URBS.lock();
+    let Some(pos) = urbs
+        .iter()
+        .position(|u| u.slot_id == slot_id && u.endpoint == endpoint)
+    else {
+        return;
+    };
+    let urb = urbs.remove(pos);
+    drop(urbs);
+
+    let n = urb.len.min(64) as usize;
+    let mut report = vec![0u8; n];
+    // SAFETY: bounce page was allocated for this URB; the HC wrote the report.
+    unsafe {
+        core::ptr::copy_nonoverlapping(dma_virt(urb.buf_phys) as *const u8, report.as_mut_ptr(), n);
+    }
+    crate::usb_hid::deliver_hardware_report(urb.hid_id, urb.slot_id, &report);
+    let _ = submit_interrupt_urb_for_hid(slot_id, endpoint, urb.buf_phys, urb.len, urb.hid_id);
 }
 
 /// Get device descriptor via control transfer on the XHCI transfer ring
@@ -396,7 +557,8 @@ pub fn get_device_descriptor(slot_id: u8) -> Option<UsbDeviceDescriptor> {
         if cc == 1 || cc == 13 {
             // Success or Short Packet
             // Read descriptor from DMA buffer
-            let desc = unsafe { core::ptr::read(data_buf as *const UsbDeviceDescriptor) };
+            // SAFETY: GET_DESCRIPTOR DMA page is owned by this transfer.
+            let desc = unsafe { core::ptr::read(dma_virt(data_buf) as *const UsbDeviceDescriptor) };
             let vid = desc.id_vendor;
             let pid = desc.id_product;
             let cls = desc.b_device_class;

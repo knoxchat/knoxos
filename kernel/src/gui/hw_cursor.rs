@@ -59,6 +59,7 @@ const VBE_DISPI_IOPORT_DATA: u16 = 0x01CF;
 /// Write a VBE register (x86_64 only — BGA I/O ports)
 #[cfg(target_arch = "x86_64")]
 fn vbe_write(index: u16, value: u16) {
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -84,6 +85,7 @@ pub fn detect() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
         let bga_id: u16;
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             use crate::arch_compat::instructions::port::Port;
@@ -95,41 +97,23 @@ pub fn detect() -> bool {
             bga_id = data_port.read();
         }
 
-        // BGA ID should be 0xB0C0..0xB0C5 for Bochs VGA
+        // BGA ID should be 0xB0C0..0xB0C5 for Bochs VGA. Those ports are
+        // not a cursor overlay — keep using the software cursor unless
+        // VirtIO-GPU cursorq is live.
         if (0xB0C0..=0xB0CF).contains(&bga_id) {
-            available = true;
-            crate::serial_println!("[hw_cursor] BGA detected: ID=0x{:04X}", bga_id);
+            crate::serial_println!(
+                "[hw_cursor] BGA detected: ID=0x{:04X} (no cursor plane)",
+                bga_id
+            );
         }
     }
 
-    // Method 2: Check for VirtIO GPU cursor plane
-    let pci_devices = crate::pcie_ecam::find_by_class(0x03, 0x00);
-    for dev in &pci_devices {
-        if dev.vendor_id == 0x1AF4 && dev.device_id == 0x1050 {
-            // VirtIO GPU found — it supports hardware cursor via VIRTIO_GPU_CMD_UPDATE_CURSOR
-            available = true;
-            let mut cursor = CURSOR.lock();
-            // Get BAR0 for VirtIO GPU MMIO
-            if dev.bars[0].base != 0 {
-                cursor.mmio_base = Some(dev.bars[0].base);
-                crate::serial_println!(
-                    "[hw_cursor] VirtIO GPU cursor plane at MMIO 0x{:X}",
-                    dev.bars[0].base
-                );
-            }
-            break;
-        }
-    }
-
-    // Method 3: Check for QEMU std VGA (0x1234:0x1111) which supports cursor via BGA
-    if !available {
-        for dev in &pci_devices {
-            if dev.vendor_id == 0x1234 && dev.device_id == 0x1111 {
-                available = true;
-                crate::serial_println!("[hw_cursor] QEMU std VGA cursor via BGA");
-                break;
-            }
-        }
+    // Method 2: live VirtIO-GPU cursorq (Gate F8). BGA I/O ports are not a
+    // cursor plane — only enable hardware cursor when the host consumed
+    // VIRTIO_GPU_CMD_UPDATE_CURSOR.
+    if crate::virtio_gpu::cursor_live() {
+        available = true;
+        crate::serial_println!("[hw_cursor] VirtIO GPU cursor plane live");
     }
 
     HW_CURSOR_AVAILABLE.store(available, Ordering::Relaxed);
@@ -160,8 +144,9 @@ pub fn set_position(x: i32, y: i32) {
     cursor.state.y = y;
 
     if cursor.state.enabled {
-        // Update via BGA registers if available
-        if x >= 0 && y >= 0 {
+        if crate::virtio_gpu::cursor_live() {
+            crate::virtio_gpu::hw_move_cursor(x, y);
+        } else if x >= 0 && y >= 0 {
             vbe_write(VBE_DISPI_INDEX_CURSOR_X, x as u16);
             vbe_write(VBE_DISPI_INDEX_CURSOR_Y, y as u16);
         }
@@ -243,7 +228,8 @@ pub fn move_count() -> u64 {
 pub fn init() {
     let available = detect();
     if available {
-        crate::serial_println!("[hw_cursor] Hardware cursor detected (BGA overlay)");
+        enable();
+        crate::serial_println!("[hw_cursor] Hardware cursor enabled (skip software blit)");
     } else {
         crate::serial_println!("[hw_cursor] No hardware cursor — using software cursor");
     }

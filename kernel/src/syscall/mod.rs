@@ -39,6 +39,7 @@ mod thread;
 mod time;
 mod user;
 
+pub(crate) use advanced::{cleanup_mlock, cleanup_robust_list, is_page_locked};
 pub use advanced::{
     faccessat_self_test, faccessat2_self_test, fchmod_self_test, fchmodat_self_test,
     fchownat_self_test, flistxattr_self_test, fsetxattr_self_test, fstatfs_self_test,

@@ -1,5 +1,107 @@
 /// rseq, membarrier, madvise/msync/mincore, mlock*, mremap, NUMA policy
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
+use spin::Mutex;
+
+use crate::process::Pid;
 use crate::syscall::{SyscallError, SyscallResult};
+
+const PAGE_MASK: u64 = !0xFFFu64;
+const MCL_CURRENT: i32 = 1;
+const MCL_FUTURE: i32 = 2;
+
+#[derive(Clone, Copy)]
+struct LockedRange {
+    start: u64,
+    len: u64,
+}
+
+struct LockState {
+    ranges: Vec<LockedRange>,
+    lock_all: bool,
+}
+
+impl LockState {
+    fn locked_bytes(&self) -> u64 {
+        if self.lock_all {
+            return u64::MAX / 2;
+        }
+        self.ranges.iter().map(|r| r.len).sum()
+    }
+}
+
+lazy_static::lazy_static! {
+    static ref LOCKED: Mutex<BTreeMap<Pid, LockState>> = Mutex::new(BTreeMap::new());
+}
+
+fn page_span(addr: u64, len: u64) -> Option<(u64, u64)> {
+    if len == 0 {
+        return Some((addr & PAGE_MASK, 0));
+    }
+    let start = addr & PAGE_MASK;
+    let end = addr.checked_add(len)?.checked_add(0xFFF)? & PAGE_MASK;
+    Some((start, end.saturating_sub(start)))
+}
+
+fn lock_range(pid: Pid, addr: u64, len: u64) -> SyscallResult {
+    let (start, span) = page_span(addr, len).ok_or(SyscallError::InvalidArgument)?;
+    if span == 0 {
+        return Ok(0);
+    }
+    let mut table = LOCKED.lock();
+    let state = table.entry(pid).or_insert(LockState {
+        ranges: Vec::new(),
+        lock_all: false,
+    });
+    let next = state.locked_bytes().saturating_add(span);
+    if !crate::rlimit::check_memlock(pid, next) {
+        return Err(SyscallError::OutOfMemory);
+    }
+    state.ranges.push(LockedRange { start, len: span });
+    crate::swap::set_range_pinned(pid, start, span, true);
+    Ok(0)
+}
+
+fn unlock_range(pid: Pid, addr: u64, len: u64) -> SyscallResult {
+    let (start, span) = page_span(addr, len).ok_or(SyscallError::InvalidArgument)?;
+    if span == 0 {
+        return Ok(0);
+    }
+    let end = start.saturating_add(span);
+    let mut table = LOCKED.lock();
+    if let Some(state) = table.get_mut(&pid) {
+        state.ranges.retain(|r| {
+            let r_end = r.start.saturating_add(r.len);
+            r_end <= start || r.start >= end
+        });
+        if state.ranges.is_empty() && !state.lock_all {
+            table.remove(&pid);
+        }
+    }
+    crate::swap::set_range_pinned(pid, start, span, false);
+    Ok(0)
+}
+
+/// Drop mlock bookkeeping when a process exits.
+pub fn cleanup_mlock(pid: Pid) {
+    LOCKED.lock().remove(&pid);
+}
+
+/// True when `mlock`/`mlockall` covers this page.
+pub fn is_page_locked(pid: Pid, vaddr: u64) -> bool {
+    let page = vaddr & PAGE_MASK;
+    let table = LOCKED.lock();
+    let Some(state) = table.get(&pid) else {
+        return false;
+    };
+    if state.lock_all {
+        return true;
+    }
+    state.ranges.iter().any(|r| {
+        let end = r.start.saturating_add(r.len);
+        page >= r.start && page < end
+    })
+}
 
 // ── rseq ────────────────────────────────────────────────────────────
 
@@ -22,9 +124,15 @@ pub fn sys_membarrier(cmd: u32, flags: u32) -> SyscallResult {
 // ── madvise / msync / mincore ───────────────────────────────────────
 
 pub fn sys_madvise(addr: u64, len: u64, advice: i32) -> SyscallResult {
-    let _ = (addr, len, advice);
-    // Accept all madvise hints silently
-    Ok(0)
+    if advice < 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    match crate::mmap::sys_madvise(pid, addr, len, advice as u32) {
+        0 => Ok(0),
+        -22 => Err(SyscallError::InvalidArgument),
+        _ => Err(SyscallError::InvalidArgument),
+    }
 }
 
 pub fn sys_msync(addr: u64, len: u64, flags: i32) -> SyscallResult {
@@ -34,12 +142,20 @@ pub fn sys_msync(addr: u64, len: u64, flags: i32) -> SyscallResult {
 }
 
 pub fn sys_mincore(addr: u64, len: u64, vec_ptr: u64) -> SyscallResult {
-    // Report all pages as resident
     let pages = len.div_ceil(4096) as usize;
-    if vec_ptr != 0 {
-        let vec = unsafe { core::slice::from_raw_parts_mut(vec_ptr as *mut u8, pages) };
-        for b in vec.iter_mut() {
-            *b = 1; // Page is in core
+    if vec_ptr != 0 && pages > 0 {
+        let pid = crate::scheduler::current_pid().unwrap_or(1);
+        let vec = alloc::vec![1u8; pages];
+        crate::vmm::write_user_memory(pid, vec_ptr, &vec);
+        if crate::process::PROCESS_TABLE
+            .lock()
+            .get_process(pid)
+            .map(|p| !p.has_address_space)
+            .unwrap_or(true)
+        {
+            // SAFETY: kernel-mode caller supplied a writable `vec` of `pages` bytes.
+            let dest = unsafe { core::slice::from_raw_parts_mut(vec_ptr as *mut u8, pages) };
+            dest.fill(1);
         }
     }
     let _ = addr;
@@ -49,27 +165,43 @@ pub fn sys_mincore(addr: u64, len: u64, vec_ptr: u64) -> SyscallResult {
 // ── mlock / munlock / mlockall / munlockall ─────────────────────────
 
 pub fn sys_mlock(addr: u64, len: u64) -> SyscallResult {
-    let _ = (addr, len);
-    Ok(0)
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    lock_range(pid, addr, len)
 }
 
 pub fn sys_munlock(addr: u64, len: u64) -> SyscallResult {
-    let _ = (addr, len);
-    Ok(0)
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    unlock_range(pid, addr, len)
 }
 
 pub fn sys_mlockall(flags: i32) -> SyscallResult {
-    let _ = flags;
+    if flags & !(MCL_CURRENT | MCL_FUTURE) != 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    if (flags & MCL_CURRENT) != 0 && !crate::rlimit::check_memlock(pid, u64::MAX / 2) {
+        return Err(SyscallError::OutOfMemory);
+    }
+    let mut table = LOCKED.lock();
+    let state = table.entry(pid).or_insert(LockState {
+        ranges: Vec::new(),
+        lock_all: false,
+    });
+    state.lock_all = (flags & (MCL_CURRENT | MCL_FUTURE)) != 0;
     Ok(0)
 }
 
 pub fn sys_munlockall() -> SyscallResult {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    LOCKED.lock().remove(&pid);
     Ok(0)
 }
 
 pub fn sys_mlock2(addr: u64, len: u64, flags: i32) -> SyscallResult {
-    let _ = (addr, len, flags);
-    Ok(0)
+    if flags & !1 != 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    sys_mlock(addr, len)
 }
 
 // ── mremap ──────────────────────────────────────────────────────────
@@ -94,6 +226,9 @@ pub fn sys_mremap(
         if result >= 0 {
             // Copy old data
             let copy_len = old_size.min(new_size) as usize;
+            // SAFETY: both mappings are this process's address space; lengths were
+            // accepted by `mmap`/`munmap` and `copy_len` is the overlap.
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 core::ptr::copy_nonoverlapping(old_addr as *const u8, result as *mut u8, copy_len);
             }
@@ -106,6 +241,9 @@ pub fn sys_mremap(
         // Kernel-mode mmap fallback
         let new = crate::syscall::memory::sys_mmap(0, new_size, 0x3, 0x22, -1, 0)?;
         let copy_len = old_size.min(new_size) as usize;
+        // SAFETY: kernel-mode mmap fallback; `new` and `old_addr` are live heap
+        // regions of at least `copy_len` bytes.
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(old_addr as *const u8, new as *mut u8, copy_len);
         }

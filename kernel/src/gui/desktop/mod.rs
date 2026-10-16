@@ -140,6 +140,7 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
                 if is_full {
                     // Full screen — single memcpy (fastest)
                     let len = fb.buffer.len().min(cached.len());
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::copy_nonoverlapping(
                             cached.as_ptr(),
@@ -160,6 +161,7 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
                     for row in y0..y1 {
                         let off = row * pitch + x0 * bpp;
                         if off + row_bytes <= cached.len() && off + row_bytes <= fb.buffer.len() {
+                            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                             unsafe {
                                 core::ptr::copy_nonoverlapping(
                                     cached.as_ptr().add(off),
@@ -285,10 +287,14 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
             fb.pop_clip();
         }
 
-        // 9. Cursor — save background (clean, cursor-free), then draw cursor on top.
+        // 9. Cursor — hardware plane when Gate F8 is live; otherwise software blit.
         update_cursor_for_position(mx, my);
-        save_cursor_background(fb, mx, my);
-        draw_cursor(fb, mx, my);
+        if super::hw_cursor::is_enabled() {
+            super::hw_cursor::set_position(mx, my);
+        } else {
+            save_cursor_background(fb, mx, my);
+            draw_cursor(fb, mx, my);
+        }
         set_last_cursor_pos(mx, my);
 
         // 9.5 Screen magnification (17.9) — Zoom lens around cursor

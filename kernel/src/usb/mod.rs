@@ -27,6 +27,7 @@ pub use cdc::*;
 pub use control::*;
 pub use enumerate::{
     address_device, enable_slot, enumerate_all_devices, enumerate_device, get_device_descriptor,
+    poll_events, poll_transfer_event, submit_interrupt_urb, submit_interrupt_urb_for_hid,
 };
 pub use ethernet::*;
 pub use gamepad::*;
@@ -38,10 +39,11 @@ pub use types::*;
 pub use uvc::*;
 pub use wacom::*;
 pub use xhci::{
-    TransferRing, Trb, TrbType, XHCI, XHCI_CMD_HCRST, XHCI_CMD_HSEE, XHCI_CMD_INTE, XHCI_CMD_RUN,
-    XHCI_CONFIG, XHCI_CRCR, XHCI_DCBAAP, XHCI_DNCTRL, XHCI_PAGESIZE, XHCI_STS_CNR, XHCI_STS_EINT,
-    XHCI_STS_HCH, XHCI_STS_HSE, XHCI_STS_PCD, XHCI_USBCMD, XHCI_USBSTS, XhciCapRegs,
-    XhciController, device_count, init_controller, is_available, list_devices,
+    GATE_XHCI_MMIO_MARKER, TransferRing, Trb, TrbType, XHCI, XHCI_CMD_HCRST, XHCI_CMD_HSEE,
+    XHCI_CMD_INTE, XHCI_CMD_RUN, XHCI_CONFIG, XHCI_CRCR, XHCI_DCBAAP, XHCI_DNCTRL, XHCI_PAGESIZE,
+    XHCI_STS_CNR, XHCI_STS_EINT, XHCI_STS_HCH, XHCI_STS_HSE, XHCI_STS_PCD, XHCI_USBCMD,
+    XHCI_USBSTS, XhciCapRegs, XhciController, device_count, init_controller, is_available,
+    list_devices, mmio_self_test,
 };
 
 use core::sync::atomic::Ordering;
@@ -65,6 +67,7 @@ pub fn init() {
         if init_controller(bus, dev, func, bar0) {
             XHCI_AVAILABLE.store(true, Ordering::Relaxed);
             serial_println!("[XHCI] USB 3.x Host Controller initialized");
+            let _ = mmio_self_test();
 
             // Enumerate connected devices via real PORTSC polling
             enumerate_all_devices();

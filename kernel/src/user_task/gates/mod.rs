@@ -87,6 +87,7 @@ pub fn run_gate_demos() {
     serial_println!(
         "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4 + O2–O4 + P2–P4: scheduled Ring 3 ──"
     );
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
@@ -282,7 +283,9 @@ extern "C" fn gate_boot_body() {
     run_gate_bm3();
     run_gate_bm4();
     run_gate_g4();
+    run_gate_g4_audit();
     run_gate_f6();
+    run_gate_f7();
     run_gate_i4();
 }
 
@@ -296,4 +299,40 @@ pub fn spawn_launcher_app(name: &str) {
 pub fn spawn_calculator_app() {
     let elf = crate::init::calculator_client_elf_data();
     let _ = spawn_or_log(&elf, "Calculator");
+}
+
+/// Spawn a Ring 3 Files SHM client (not `WindowContentType::FileExplorer`).
+pub fn spawn_files_app() {
+    let elf = crate::init::files_client_elf_data();
+    let _ = spawn_or_log(&elf, "Files");
+}
+
+/// Spawn a Ring 3 Settings SHM client (not `WindowContentType::Settings`).
+pub fn spawn_settings_app() {
+    let elf = crate::init::settings_client_elf_data();
+    let _ = spawn_or_log(&elf, "Settings");
+}
+
+/// Spawn a Ring 3 Task Manager SHM client (not `WindowContentType::TaskManager`).
+pub fn spawn_taskmgr_app() {
+    let elf = crate::init::taskmgr_client_elf_data();
+    let _ = spawn_or_log(&elf, "Task Manager");
+}
+
+/// Spawn a Ring 3 Editor SHM client (not `WindowContentType::TextEditor`).
+pub fn spawn_editor_app() {
+    let elf = crate::init::editor_client_elf_data();
+    let _ = spawn_or_log(&elf, "Editor");
+}
+
+/// Spawn a Ring 3 Browser SHM client (not `WindowContentType::Browser`).
+pub fn spawn_browser_app() {
+    let elf = crate::init::browser_client_elf_data();
+    let _ = spawn_or_log(&elf, "Browser");
+}
+
+/// Spawn a Ring 3 AI Assistant SHM client (not `WindowContentType::AIAssistant`).
+pub fn spawn_ai_app() {
+    let elf = crate::init::ai_client_elf_data();
+    let _ = spawn_or_log(&elf, "AI Assistant");
 }

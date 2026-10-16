@@ -478,6 +478,32 @@ fn update_readahead(inode: u64, current_index: u64) {
     ra.last_index = current_index;
 }
 
+/// Prefetch `[offset, offset+count)` into the page cache (readahead / fadvise).
+pub fn prefetch(inode: u64, offset: u64, count: u64) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    let start = offset / PAGE_SIZE as u64;
+    let end = offset.saturating_add(count).div_ceil(PAGE_SIZE as u64);
+    let mut loaded = 0;
+    for idx in start..end {
+        if find_page(inode, idx).is_some() {
+            continue;
+        }
+        match load_from_backing(inode, idx) {
+            Ok(data) => {
+                insert_page(inode, idx, &data, false);
+                loaded += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    if loaded > 0 {
+        CACHE.lock().stats.readaheads += 1;
+    }
+    loaded
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // BACKING STORE INTERFACE
 // ═══════════════════════════════════════════════════════════════════════

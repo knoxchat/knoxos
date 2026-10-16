@@ -359,6 +359,7 @@ impl SwapManager {
         let mut best_idx = 0;
         let mut best_score = u64::MAX;
 
+        let mut found = false;
         for (i, page) in self.lru_pages.iter().enumerate() {
             if page.pinned {
                 continue;
@@ -367,10 +368,24 @@ impl SwapManager {
             if score < best_score {
                 best_score = score;
                 best_idx = i;
+                found = true;
             }
         }
 
+        if !found {
+            return None;
+        }
         Some(self.lru_pages.remove(best_idx))
+    }
+
+    /// Pin or unpin tracked anonymous pages in `[start, start+len)`.
+    pub fn set_range_pinned(&mut self, pid: u32, start: u64, len: u64, pinned: bool) {
+        let end = start.saturating_add(len);
+        for page in self.lru_pages.iter_mut() {
+            if page.pid == pid && page.virt_addr >= start && page.virt_addr < end {
+                page.pinned = pinned;
+            }
+        }
     }
 
     /// Get swap usage statistics
@@ -446,6 +461,13 @@ pub fn track_anon_page(pid: u32, vaddr: u64, phys_addr: u64) {
     });
 }
 
+/// Pin or unpin anonymous pages so `mlock` can keep them out of swap.
+pub fn set_range_pinned(pid: u32, start: u64, len: u64, pinned: bool) {
+    SWAP_MANAGER
+        .lock()
+        .set_range_pinned(pid, start, len, pinned);
+}
+
 /// Page out up to `max` tracked anonymous pages. Returns how many succeeded.
 pub fn reclaim_anonymous(max: usize) -> usize {
     let mut freed = 0;
@@ -454,6 +476,9 @@ pub fn reclaim_anonymous(max: usize) -> usize {
         let Some(page) = victim else {
             break;
         };
+        if crate::syscall::is_page_locked(page.pid, page.virt_addr) {
+            continue;
+        }
         if crate::vmm::swap_out_page(page.pid, page.virt_addr) {
             freed += 1;
         }

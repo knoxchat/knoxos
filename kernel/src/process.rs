@@ -524,6 +524,8 @@ pub fn destroy_process(pid: Pid) {
     crate::fd::destroy_fd_table(pid);
     // Clean up signals
     crate::signals::destroy_process_signals(pid);
+    crate::syscall::cleanup_mlock(pid);
+    crate::syscall::cleanup_robust_list(pid);
     // Remove from scheduler
     crate::scheduler::SCHEDULER.lock().remove_process(pid);
 }

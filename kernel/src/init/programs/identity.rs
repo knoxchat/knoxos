@@ -499,6 +499,140 @@ pub fn getcpu_userspace_elf_data() -> Vec<u8> {
     ])
 }
 
+/// Remaining G4 no-ops store real state: robust list round-trip, madvise
+/// EINVAL, mlock, readahead/fadvise EBADF. Then `GATE_G4 audit live\n`.
+pub fn g4_audit_elf_data() -> Vec<u8> {
+    use alloc::collections::BTreeMap;
+    let marker = b"GATE_G4 audit live\n";
+    let mut code = Vec::new();
+    let mut rels: Vec<(usize, &'static str)> = Vec::new();
+    let mut labels = BTreeMap::new();
+
+    let mut emit = |code: &mut Vec<u8>, bytes: &[u8]| code.extend_from_slice(bytes);
+    let mut js = |code: &mut Vec<u8>, rels: &mut Vec<(usize, &'static str)>, name: &'static str| {
+        emit(code, &[0x0F, 0x88]);
+        rels.push((code.len(), name));
+        emit(code, &[0, 0, 0, 0]);
+    };
+    let mut jne =
+        |code: &mut Vec<u8>, rels: &mut Vec<(usize, &'static str)>, name: &'static str| {
+            emit(code, &[0x0F, 0x85]);
+            rels.push((code.len(), name));
+            emit(code, &[0, 0, 0, 0]);
+        };
+    let mut lea_rsi =
+        |code: &mut Vec<u8>, rels: &mut Vec<(usize, &'static str)>, name: &'static str| {
+            emit(code, &[0x48, 0x8D, 0x35]);
+            rels.push((code.len(), name));
+            emit(code, &[0, 0, 0, 0]);
+        };
+
+    // mmap(NULL, 4096, PROT_READ|WRITE, MAP_PRIVATE|ANONYMOUS, -1, 0)
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x09, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0x31, 0xFF]);
+    emit(&mut code, &[0x48, 0xC7, 0xC6, 0x00, 0x10, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC2, 0x03, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x49, 0xC7, 0xC2, 0x22, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x49, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]);
+    emit(&mut code, &[0x4D, 0x31, 0xC9]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    js(&mut code, &mut rels, "fail");
+    emit(&mut code, &[0x49, 0x89, 0xC4]); // r12 = mapped
+
+    // set_robust_list(r12, 24)
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x11, 0x01, 0x00, 0x00]);
+    emit(&mut code, &[0x4C, 0x89, 0xE7]);
+    emit(&mut code, &[0x48, 0xC7, 0xC6, 0x18, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    jne(&mut code, &mut rels, "fail");
+
+    // get_robust_list(0, rsp, rsp+8)
+    emit(&mut code, &[0x48, 0x83, 0xEC, 0x10]);
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x12, 0x01, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0x31, 0xFF]);
+    emit(&mut code, &[0x48, 0x89, 0xE6]);
+    emit(&mut code, &[0x48, 0x8D, 0x54, 0x24, 0x08]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    jne(&mut code, &mut rels, "fail");
+    emit(&mut code, &[0x4C, 0x39, 0x24, 0x24]); // cmp [rsp], r12
+    jne(&mut code, &mut rels, "fail");
+    emit(&mut code, &[0x48, 0x83, 0x7C, 0x24, 0x08, 0x18]); // cmp qword [rsp+8], 24
+    jne(&mut code, &mut rels, "fail");
+    emit(&mut code, &[0x48, 0x83, 0xC4, 0x10]);
+
+    // madvise(r12, 4096, MADV_NORMAL)
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x1C, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x4C, 0x89, 0xE7]);
+    emit(&mut code, &[0x48, 0xC7, 0xC6, 0x00, 0x10, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0x31, 0xD2]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    jne(&mut code, &mut rels, "fail");
+
+    // madvise(r12, 4096, 99) == -EINVAL
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x1C, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x4C, 0x89, 0xE7]);
+    emit(&mut code, &[0x48, 0xC7, 0xC6, 0x00, 0x10, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC2, 0x63, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x83, 0xF8, 0xEA]); // cmp rax, -22
+    jne(&mut code, &mut rels, "fail");
+
+    // mlock(r12, 4096)
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x95, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x4C, 0x89, 0xE7]);
+    emit(&mut code, &[0x48, 0xC7, 0xC6, 0x00, 0x10, 0x00, 0x00]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    jne(&mut code, &mut rels, "fail");
+
+    // readahead(-1, 0, 4096) == -EBADF
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0xBB, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC7, 0xFF, 0xFF, 0xFF, 0xFF]);
+    emit(&mut code, &[0x48, 0x31, 0xF6]);
+    emit(&mut code, &[0x48, 0xC7, 0xC2, 0x00, 0x10, 0x00, 0x00]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x83, 0xF8, 0xF7]); // cmp rax, -9
+    jne(&mut code, &mut rels, "fail");
+
+    // fadvise64(-1, 0, 4096, 0) == -EBADF
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0xDD, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC7, 0xFF, 0xFF, 0xFF, 0xFF]);
+    emit(&mut code, &[0x48, 0x31, 0xF6]);
+    emit(&mut code, &[0x48, 0xC7, 0xC2, 0x00, 0x10, 0x00, 0x00]);
+    emit(&mut code, &[0x4D, 0x31, 0xD2]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x83, 0xF8, 0xF7]);
+    jne(&mut code, &mut rels, "fail");
+
+    // write(1, marker, n)
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00]);
+    lea_rsi(&mut code, &mut rels, "marker");
+    let n = marker.len() as u32;
+    emit(&mut code, &[0x48, 0xC7, 0xC2]);
+    emit(&mut code, &n.to_le_bytes());
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x31, 0xFF]);
+    emit(&mut code, &[0xEB, 0x07]);
+    labels.insert("fail", code.len());
+    emit(&mut code, &[0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x0F, 0x05]);
+    labels.insert("marker", code.len());
+    emit(&mut code, marker);
+
+    for (off, name) in rels {
+        let target = *labels.get(name).expect(name);
+        let disp = (target as i32).wrapping_sub((off as i32) + 4);
+        code[off..off + 4].copy_from_slice(&disp.to_le_bytes());
+    }
+    build_static_user_elf(&code)
+}
+
 /// `set_robust_list` returns 0; then `GATE_AZ2 set_robust\n`.
 pub fn set_robust_list_userspace_elf_data() -> Vec<u8> {
     build_static_user_elf(&[

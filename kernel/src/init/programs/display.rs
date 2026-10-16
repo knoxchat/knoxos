@@ -24,6 +24,36 @@ pub fn calculator_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF20_C997, b"GATE_F6 calculator userspace\n")
 }
 
+/// Gate F7: Files is a Ring 3 SHM client, not `WindowContentType::FileExplorer`.
+pub fn files_client_elf_data() -> Vec<u8> {
+    shm_present_client_elf(0xFF4E_8A26, b"GATE_F7 files userspace\n")
+}
+
+/// Settings is a Ring 3 SHM client, not `WindowContentType::Settings`.
+pub fn settings_client_elf_data() -> Vec<u8> {
+    shm_present_client_elf(0xFF38_3840, b"GATE_F8 settings userspace\n")
+}
+
+/// Task Manager is a Ring 3 SHM client, not `WindowContentType::TaskManager`.
+pub fn taskmgr_client_elf_data() -> Vec<u8> {
+    shm_present_client_elf(0xFF48_3248, b"GATE_F9 taskmgr userspace\n")
+}
+
+/// Editor is a Ring 3 SHM client, not `WindowContentType::TextEditor`.
+pub fn editor_client_elf_data() -> Vec<u8> {
+    shm_present_client_elf(0xFF1E_1E1E, b"GATE_F10 editor userspace\n")
+}
+
+/// Browser is a Ring 3 SHM client, not `WindowContentType::Browser`.
+pub fn browser_client_elf_data() -> Vec<u8> {
+    shm_present_client_elf(0xFF28_2D3A, b"GATE_F11 browser userspace\n")
+}
+
+/// AI Assistant is a Ring 3 SHM client, not `WindowContentType::AIAssistant`.
+pub fn ai_client_elf_data() -> Vec<u8> {
+    shm_present_client_elf(0xFF12_1626, b"GATE_F12 ai userspace\n")
+}
+
 /// Gate F5: mmap SHM, `connect(/run/wayland-0)`, `sendto` the buffer vaddr.
 pub fn wayland_unix_client_elf_data() -> Vec<u8> {
     let marker = b"GATE_F5 wayland unix\n";

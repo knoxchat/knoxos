@@ -120,8 +120,12 @@ pub struct XhciController {
     pub pci_bus: u8,
     pub pci_dev: u8,
     pub pci_func: u8,
-    /// BAR0 MMIO base
+    /// BAR0 MMIO base (kernel virtual address after `map_mmio`)
     pub mmio_base: u64,
+    /// BAR0 physical address
+    pub mmio_phys: u64,
+    /// True once BAR0 is in the kernel page tables (uncached).
+    pub mmio_mapped: bool,
     /// Capability register length
     pub cap_length: u8,
     /// Operational registers base
@@ -195,6 +199,8 @@ impl XhciController {
             pci_dev: 0,
             pci_func: 0,
             mmio_base: 0,
+            mmio_phys: 0,
+            mmio_mapped: false,
             cap_length: 0,
             op_base: 0,
             rt_base: 0,
@@ -260,6 +266,9 @@ pub(super) fn pci_read32(bus: u8, dev: u8, func: u8, offset: u8) -> u32 {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: 0xCF8/0xCFC are the architecture PCI config ports; this
+    // BDF+offset was formed as a type-1 configuration address.
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -288,6 +297,9 @@ pub(super) fn pci_write32(bus: u8, dev: u8, func: u8, offset: u8, value: u32) {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: 0xCF8/0xCFC are the architecture PCI config ports; this
+    // BDF+offset was formed as a type-1 configuration address.
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -308,43 +320,107 @@ pub(super) const TRANSFER_RING_SIZE: usize = 256;
 /// Size of a TRB in bytes
 pub(super) const TRB_SIZE: usize = 16;
 
-/// Allocate a page-aligned, zeroed buffer and return (virtual_addr, Layout)
-pub(super) fn alloc_ring_buffer(size: usize) -> (u64, alloc::alloc::Layout) {
-    let layout = alloc::alloc::Layout::from_size_align(size, 4096).unwrap();
-    let ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
-    if ptr.is_null() {
-        panic!("[XHCI] Failed to allocate ring buffer of {} bytes", size);
+/// Serial marker: XHCI BAR0 was mapped uncached and capability registers
+/// read back a valid CapLength.
+pub const GATE_XHCI_MMIO_MARKER: &str = "GATE_USB xhci mmio";
+
+/// Kernel virtual address of a buddy DMA frame (offset map).
+pub(super) fn dma_virt(phys: u64) -> u64 {
+    crate::vmm::phys_to_virt(phys)
+}
+
+/// Allocate contiguous DMA pages. The returned address is **physical**
+/// (program it into TRBs / DCBAAP / CRCR). CPU access goes through
+/// [`dma_virt`].
+pub(super) fn alloc_dma(bytes: usize) -> Option<u64> {
+    let pages = bytes.max(1).div_ceil(4096);
+    let phys = crate::vmm::allocate_contiguous_frames(pages)?;
+    // SAFETY: `phys` is a freshly allocated buddy run owned by this
+    // driver; the offset map is live after `vmm::init`.
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
+    unsafe {
+        core::ptr::write_bytes(dma_virt(phys) as *mut u8, 0, pages * 4096);
     }
-    (ptr as u64, layout)
+    Some(phys)
+}
+
+/// Allocate a page-aligned DMA buffer and return `(phys, Layout)`.
+///
+/// The address is physical. Use [`dma_virt`] before dereferencing.
+pub(super) fn alloc_ring_buffer(size: usize) -> (u64, alloc::alloc::Layout) {
+    let aligned = size.max(4096);
+    let layout = alloc::alloc::Layout::from_size_align(aligned, 4096).unwrap();
+    let Some(phys) = alloc_dma(aligned) else {
+        panic!("[XHCI] Failed to allocate DMA buffer of {} bytes", aligned);
+    };
+    (phys, layout)
+}
+
+fn probe_bar_size(bus: u8, dev: u8, func: u8, bar0: u32) -> u64 {
+    let orig0 = pci_read32(bus, dev, func, 0x10);
+    if bar0 & 0x04 != 0 {
+        let orig1 = pci_read32(bus, dev, func, 0x14);
+        pci_write32(bus, dev, func, 0x10, 0xFFFF_FFFF);
+        pci_write32(bus, dev, func, 0x14, 0xFFFF_FFFF);
+        let s0 = pci_read32(bus, dev, func, 0x10);
+        let s1 = pci_read32(bus, dev, func, 0x14);
+        pci_write32(bus, dev, func, 0x10, orig0);
+        pci_write32(bus, dev, func, 0x14, orig1);
+        let mask = ((s1 as u64) << 32) | (s0 as u64 & !0xF);
+        let size = (!mask).wrapping_add(1);
+        if size == 0 { 0x1_0000 } else { size }
+    } else {
+        pci_write32(bus, dev, func, 0x10, 0xFFFF_FFFF);
+        let s0 = pci_read32(bus, dev, func, 0x10);
+        pci_write32(bus, dev, func, 0x10, orig0);
+        let size = (!(s0 | 0xF)).wrapping_add(1) as u64;
+        if size == 0 { 0x1_0000 } else { size }
+    }
 }
 
 /// Initialize the XHCI controller — real register programming
 pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     let mut xhci = XHCI.lock();
 
+    // Get MMIO base from BAR0 (handle 32-bit and 64-bit BARs)
+    let mut mmio_phys = (bar0 & 0xFFFFFFF0) as u64;
+    if bar0 & 0x04 != 0 {
+        let bar1 = pci_read32(bus, dev, func, 0x14);
+        mmio_phys |= (bar1 as u64) << 32;
+    }
+
+    // Size the BAR before enabling memory space (standard PCI probe).
+    let bar_size = probe_bar_size(bus, dev, func, bar0);
+
     // Enable bus mastering, memory space, disable legacy interrupts
     let cmd = pci_read16(bus, dev, func, 0x04);
     let new_cmd = (cmd | 0x06) & !0x0400; // Bus Master + Memory Space, disable INTx
     pci_write32(bus, dev, func, 0x04, new_cmd as u32);
-
-    // Get MMIO base from BAR0 (handle 32-bit and 64-bit BARs)
-    let mut mmio_base = (bar0 & 0xFFFFFFF0) as u64;
-    if bar0 & 0x04 != 0 {
-        let bar1 = pci_read32(bus, dev, func, 0x14);
-        mmio_base |= (bar1 as u64) << 32;
-    }
+    let map_bytes = bar_size.max(0x1_0000) as usize;
+    let Some(mmio_base) = crate::vmm::map_mmio(mmio_phys, map_bytes) else {
+        serial_println!(
+            "[XHCI] Failed to map BAR0 phys={:#x} size={:#x}",
+            mmio_phys,
+            map_bytes
+        );
+        return false;
+    };
 
     xhci.pci_bus = bus;
     xhci.pci_dev = dev;
     xhci.pci_func = func;
+    xhci.mmio_phys = mmio_phys;
     xhci.mmio_base = mmio_base;
+    xhci.mmio_mapped = true;
 
     serial_println!(
-        "[XHCI] Controller at PCI {:02x}:{:02x}.{}, MMIO={:#x}",
+        "[XHCI] Controller at PCI {:02x}:{:02x}.{}, BAR0 phys={:#x} virt={:#x} size={:#x}",
         bus,
         dev,
         func,
-        mmio_base
+        mmio_phys,
+        mmio_base,
+        map_bytes
     );
 
     // ─── Read Capability Registers ───────────────────────────────
@@ -355,6 +431,7 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     let db_offset: u32;
     let rts_offset: u32;
 
+    // SAFETY: `mmio_base` is the uncached mapping of this controller's BAR0.
     unsafe {
         let cap0 = xhci_read32(mmio_base, 0x00);
         cap_length = (cap0 & 0xFF) as u8;
@@ -364,6 +441,7 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
         db_offset = xhci_read32(mmio_base, 0x14);
         rts_offset = xhci_read32(mmio_base, 0x18);
     }
+    let _ = hcc_params1;
 
     let max_slots = (hcs_params1 & 0xFF) as u8;
     let max_intrs = ((hcs_params1 >> 8) & 0x7FF) as u16;
@@ -390,6 +468,7 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     let op_base = xhci.op_base;
 
     // ─── Halt the controller ─────────────────────────────────────
+    // SAFETY: `op_base` is inside the mapped XHCI BAR.
     unsafe {
         let usbcmd = xhci_read32(op_base, XHCI_USBCMD);
         if usbcmd & XHCI_CMD_RUN != 0 {
@@ -408,6 +487,7 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     }
 
     // ─── Reset the controller ────────────────────────────────────
+    // SAFETY: controller is halted; HCRST is a documented USBCMD bit.
     unsafe {
         xhci_write32(op_base, XHCI_USBCMD, XHCI_CMD_HCRST);
         // Wait for HCRST to clear and CNR to clear
@@ -425,6 +505,7 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     }
 
     // ─── Read page size ──────────────────────────────────────────
+    // SAFETY: PAGESIZE is a documented operational register.
     unsafe {
         let ps = xhci_read32(op_base, XHCI_PAGESIZE);
         xhci.page_size = (ps & 0xFFFF) << 12; // Bit n means 2^(n+12) page size
@@ -435,6 +516,7 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     }
 
     // ─── Set Max Device Slots Enabled ────────────────────────────
+    // SAFETY: CONFIG is a documented operational register.
     unsafe {
         xhci_write32(op_base, XHCI_CONFIG, max_slots as u32);
         serial_println!("[XHCI] MaxSlotsEn set to {}", max_slots);
@@ -448,12 +530,16 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     xhci.dcbaa_ptr = dcbaa_ptr;
     xhci.dcbaa_layout = Some(dcbaa_layout);
 
+    // SAFETY: DCBAAP takes the guest-physical address of the DCBAA.
     unsafe {
-        // Write DCBAAP (64-bit, two 32-bit writes)
         xhci_write32(op_base, XHCI_DCBAAP, (dcbaa_ptr & 0xFFFFFFFF) as u32);
         xhci_write32(op_base, XHCI_DCBAAP + 4, (dcbaa_ptr >> 32) as u32);
     }
-    serial_println!("[XHCI] DCBAA at {:#x} ({} slots)", dcbaa_ptr, max_slots);
+    serial_println!(
+        "[XHCI] DCBAA at phys {:#x} ({} slots)",
+        dcbaa_ptr,
+        max_slots
+    );
 
     // ─── Allocate Command Ring ───────────────────────────────────
     let cmd_ring_bytes = CMD_RING_SIZE * TRB_SIZE;
@@ -464,8 +550,9 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     xhci.cmd_ring_cycle = true;
 
     // Place a Link TRB at the last entry pointing back to the start
+    // SAFETY: command ring is a DMA page we own; Link TRB param is physical.
     unsafe {
-        let link_trb_addr = cmd_ring_ptr + ((CMD_RING_SIZE - 1) * TRB_SIZE) as u64;
+        let link_trb_addr = dma_virt(cmd_ring_ptr) + ((CMD_RING_SIZE - 1) * TRB_SIZE) as u64;
         let link = link_trb_addr as *mut Trb;
         (*link).param_lo = (cmd_ring_ptr & 0xFFFFFFFF) as u32;
         (*link).param_hi = (cmd_ring_ptr >> 32) as u32;
@@ -474,8 +561,8 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
         (*link).control = ((TrbType::Link as u32) << 10) | (1 << 1) | 1; // TC=1, C=1
     }
 
+    // SAFETY: CRCR takes the guest-physical command-ring address.
     unsafe {
-        // Write CRCR — command ring pointer with cycle bit
         let crcr_val = cmd_ring_ptr | 1; // RCS = 1 (Ring Cycle State)
         xhci_write32(op_base, XHCI_CRCR, (crcr_val & 0xFFFFFFFF) as u32);
         xhci_write32(op_base, XHCI_CRCR + 4, (crcr_val >> 32) as u32);
@@ -499,17 +586,18 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     xhci.erst_ptr = erst_ptr;
     xhci.erst_layout = Some(erst_layout);
 
+    // SAFETY: ERST is a DMA page we own; segment base is the event-ring phys addr.
     unsafe {
-        // Fill ERST entry 0: base = event_ring_ptr, size = EVENT_RING_SIZE
-        let erst = erst_ptr as *mut u64;
+        let erst_virt = dma_virt(erst_ptr);
+        let erst = erst_virt as *mut u64;
         *erst = event_ring_ptr;
-        let erst_size = (erst_ptr + 8) as *mut u32;
+        let erst_size = (erst_virt + 8) as *mut u32;
         *erst_size = EVENT_RING_SIZE as u32;
-        // rsvd at +12 already zeroed
     }
 
     // Program interrupter 0: ERSTSZ, ERSTBA, ERDP
     let ir0_base = xhci.rt_base + 0x20; // Interrupter Register Set 0
+    // SAFETY: interrupter 0 lives in the mapped runtime register block.
     unsafe {
         // ERSTSZ — number of segments
         xhci_write32(ir0_base, 0x08, 1);
@@ -530,6 +618,7 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     );
 
     // ─── Start the controller ────────────────────────────────────
+    // SAFETY: rings and DCBAA are programmed; RUN+INTE starts the HC.
     unsafe {
         let usbcmd = xhci_read32(op_base, XHCI_USBCMD);
         xhci_write32(op_base, XHCI_USBCMD, usbcmd | XHCI_CMD_RUN | XHCI_CMD_INTE);
@@ -565,17 +654,52 @@ pub fn device_count() -> usize {
     XHCI.lock().devices.len()
 }
 
+/// Prove BAR0 is mapped and CapLength is a real XHCI value.
+pub fn mmio_self_test() -> bool {
+    let xhci = XHCI.lock();
+    if !xhci.mmio_mapped || xhci.mmio_base == 0 {
+        serial_println!("[XHCI] GATE USB MMIO FAILED: BAR not mapped");
+        return false;
+    }
+    // SAFETY: `mmio_base` is the uncached mapping of this controller's BAR0.
+    let cap0 = unsafe { xhci_read32(xhci.mmio_base, 0x00) };
+    let cap_len = (cap0 & 0xFF) as u8;
+    let ver = ((cap0 >> 16) & 0xFFFF) as u16;
+    if cap_len < 0x20 {
+        serial_println!(
+            "[XHCI] GATE USB MMIO FAILED: caplength={:#x} ver={:#x}",
+            cap_len,
+            ver
+        );
+        return false;
+    }
+    serial_println!(
+        "[XHCI] {} (caplength={:#x} hci={:#x} phys={:#x})",
+        GATE_XHCI_MMIO_MARKER,
+        cap_len,
+        ver,
+        xhci.mmio_phys
+    );
+    true
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // XHCI REGISTER ACCESS (MMIO)
 // ═══════════════════════════════════════════════════════════════════════
 
 /// Read a 32-bit XHCI register via MMIO
+///
+/// # Safety
+/// `base + offset` must be inside a mapped XHCI BAR.
 pub(super) unsafe fn xhci_read32(base: u64, offset: u32) -> u32 {
     let addr = (base + offset as u64) as *const u32;
     core::ptr::read_volatile(addr)
 }
 
 /// Write a 32-bit XHCI register via MMIO
+///
+/// # Safety
+/// `base + offset` must be inside a mapped XHCI BAR.
 pub(super) unsafe fn xhci_write32(base: u64, offset: u32, val: u32) {
     let addr = (base + offset as u64) as *mut u32;
     core::ptr::write_volatile(addr, val);

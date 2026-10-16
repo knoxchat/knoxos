@@ -269,6 +269,16 @@ pub fn prlimit64(
     Ok(())
 }
 
+/// Check whether `bytes` of locked memory is within `RLIMIT_MEMLOCK`.
+pub fn check_memlock(pid: Pid, bytes: u64) -> bool {
+    let table = PROCESS_LIMITS.lock();
+    if let Some(limits) = table.get(&pid) {
+        limits.check(Resource::Memlock, bytes)
+    } else {
+        ProcessLimits::new().check(Resource::Memlock, bytes)
+    }
+}
+
 /// Check if a process can open more file descriptors
 pub fn check_nofile(pid: Pid, current_count: u64) -> bool {
     let table = PROCESS_LIMITS.lock();

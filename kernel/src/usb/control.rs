@@ -6,7 +6,7 @@ use crate::serial_println;
 
 use super::enumerate::{submit_transfer, wait_command_completion};
 use super::types::{UsbDevice, UsbSetupPacket, UsbSpeed};
-use super::xhci::{Trb, TrbType, XHCI, alloc_ring_buffer};
+use super::xhci::{Trb, TrbType, XHCI, alloc_ring_buffer, dma_virt};
 
 /// Perform a control transfer via XHCI transfer ring
 pub fn control_transfer(
@@ -60,8 +60,9 @@ pub fn control_transfer(
 
         if !is_in {
             // Copy outgoing data to DMA buffer
+            // SAFETY: bounce page is a DMA frame we own; `ptr` is physical.
             unsafe {
-                core::ptr::copy_nonoverlapping(buf.as_ptr(), ptr as *mut u8, buf.len());
+                core::ptr::copy_nonoverlapping(buf.as_ptr(), dma_virt(ptr) as *mut u8, buf.len());
             }
         }
 
@@ -101,9 +102,10 @@ pub fn control_transfer(
             // Copy received data back
             if let Some(buf) = data {
                 if is_in && data_buf_ptr != 0 {
+                    // SAFETY: bounce page is a DMA frame we own; HC wrote IN data.
                     unsafe {
                         core::ptr::copy_nonoverlapping(
-                            data_buf_ptr as *const u8,
+                            dma_virt(data_buf_ptr) as *const u8,
                             buf.as_mut_ptr(),
                             buf.len(),
                         );

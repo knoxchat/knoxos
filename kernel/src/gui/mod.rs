@@ -849,6 +849,12 @@ pub fn update_cursor_only() {
             return;
         }
 
+        if crate::gui::hw_cursor::is_enabled() {
+            crate::gui::hw_cursor::set_position(mx, my);
+            desktop::set_last_cursor_pos(mx, my);
+            return;
+        }
+
         // The save area origin = cursor_pos - CURSOR_SAVE_PAD
         let old_sx = old_x - desktop::CURSOR_SAVE_PAD;
         let old_sy = old_y - desktop::CURSOR_SAVE_PAD;
