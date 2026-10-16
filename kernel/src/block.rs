@@ -170,6 +170,7 @@ impl AtaDrive {
             return Err(BlockError::InvalidBlock);
         }
 
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             self.select();
             self.wait_ready()?;
@@ -217,6 +218,7 @@ impl AtaDrive {
             return Err(BlockError::InvalidBlock);
         }
 
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             self.select();
             self.wait_ready()?;
@@ -433,10 +435,15 @@ pub fn read_blocks(
             }
         }
         BlockDeviceType::Virtio => {
+            let virtio_idx = devices
+                .iter()
+                .take(device_index + 1)
+                .filter(|d| d.device_type == BlockDeviceType::Virtio)
+                .count()
+                .saturating_sub(1);
             drop(devices);
-            // Delegate to virtio-blk driver
             let mut vbuf = alloc::vec![0u8; count as usize * BLOCK_SIZE];
-            if crate::virtio_blk::read(lba, count as usize, &mut vbuf) {
+            if crate::virtio_blk::read_n(virtio_idx, lba, count as usize, &mut vbuf) {
                 buf[..vbuf.len()].copy_from_slice(&vbuf);
                 Ok(())
             } else {
@@ -483,9 +490,14 @@ pub fn write_blocks(
             }
         }
         BlockDeviceType::Virtio => {
+            let virtio_idx = devices
+                .iter()
+                .take(device_index + 1)
+                .filter(|d| d.device_type == BlockDeviceType::Virtio)
+                .count()
+                .saturating_sub(1);
             drop(devices);
-            // Delegate to virtio-blk driver
-            if crate::virtio_blk::write(lba, count as usize, buf) {
+            if crate::virtio_blk::write_n(virtio_idx, lba, count as usize, buf) {
                 Ok(())
             } else {
                 Err(BlockError::IoError)
@@ -497,6 +509,14 @@ pub fn write_blocks(
 /// List all block devices
 pub fn list_devices() -> Vec<BlockDevice> {
     BLOCK_DEVICES.lock().clone()
+}
+
+/// Index of the first RAM disk in `BLOCK_DEVICES`, if one was created.
+pub fn ramdisk_index() -> Option<usize> {
+    BLOCK_DEVICES
+        .lock()
+        .iter()
+        .position(|d| d.device_type == BlockDeviceType::RamDisk)
 }
 
 /// Create a RAM disk
@@ -555,6 +575,7 @@ pub fn init() {
 
     let mut drive_count = 0;
     for (base, ctrl, slave, name) in configs.iter() {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         if let Some(drive) = unsafe { identify_drive(*base, *ctrl, *slave) } {
             let size_mb = drive.total_sectors * BLOCK_SIZE as u64 / (1024 * 1024);
             crate::serial_println!(

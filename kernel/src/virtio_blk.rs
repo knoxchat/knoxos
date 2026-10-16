@@ -242,16 +242,20 @@ impl VirtioBlkDevice {
         (self.vq_virt() + self.avail_off as u64) as *mut u16
     }
     fn avail_idx_ptr(&self) -> *mut u16 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { self.avail_flags_ptr().add(1) }
     }
     fn avail_ring_entry(&self, i: u16) -> *mut u16 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { self.avail_flags_ptr().add(2 + i as usize) }
     }
 
     fn used_idx_ptr(&self) -> *const u16 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { ((self.vq_virt() + self.used_off as u64) as *const u16).add(1) }
     }
     fn used_ring_elem(&self, i: u16) -> *const VirtqUsedElem {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             let base = ((self.vq_virt() + self.used_off as u64) as *const u16).add(2)
                 as *const VirtqUsedElem;
@@ -261,6 +265,7 @@ impl VirtioBlkDevice {
 
     /// Initialize the virtio-blk device with real virtqueue DMA
     pub fn init_legacy(&mut self) -> bool {
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             use crate::arch_compat::instructions::port::Port;
@@ -410,6 +415,7 @@ impl VirtioBlkDevice {
         let bounce = self.bounce_virt();
         let bounce_phys = self.bounce_phys;
 
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(header.to_bytes().as_ptr(), bounce as *mut u8, 16);
             *(bounce as *mut u8).add(STATUS_OFF as usize) = 0xFF;
@@ -424,6 +430,7 @@ impl VirtioBlkDevice {
         core::sync::atomic::fence(Ordering::SeqCst);
 
         // Serialized I/O: descriptors 0 → 1 → 2 (or 0 → 1 when there is no data).
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let has_data = data_len > 0;
             core::ptr::write_volatile(
@@ -473,15 +480,18 @@ impl VirtioBlkDevice {
         }
 
         let avail_slot = self.avail_idx % self.queue_size;
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             core::ptr::write_volatile(self.avail_ring_entry(avail_slot), 0u16);
         }
         core::sync::atomic::fence(Ordering::Release);
         self.avail_idx = self.avail_idx.wrapping_add(1);
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             core::ptr::write_volatile(self.avail_idx_ptr(), self.avail_idx);
         }
 
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             let mut notify: crate::arch_compat::instructions::port::Port<u16> =
                 crate::arch_compat::instructions::port::Port::new(
@@ -493,11 +503,13 @@ impl VirtioBlkDevice {
         let mut completed = false;
         for iter in 0..500_000u32 {
             if VIRTIO_BLK_IRQ_PENDING.swap(false, Ordering::AcqRel) {
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 let device_used_idx = unsafe { core::ptr::read_volatile(self.used_idx_ptr()) };
                 if device_used_idx != self.used_idx {
                     while self.used_idx != device_used_idx {
                         let used_slot = self.used_idx % self.queue_size;
                         let _elem =
+                            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                             unsafe { core::ptr::read_volatile(self.used_ring_elem(used_slot)) };
                         self.used_idx = self.used_idx.wrapping_add(1);
                     }
@@ -507,6 +519,7 @@ impl VirtioBlkDevice {
             }
 
             if iter % 64 == 0 {
+                // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
                 let isr = unsafe {
                     let mut isr_port: crate::arch_compat::instructions::port::Port<u8> =
                         crate::arch_compat::instructions::port::Port::new(
@@ -516,11 +529,13 @@ impl VirtioBlkDevice {
                 };
 
                 if isr & 1 != 0 {
+                    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                     let device_used_idx = unsafe { core::ptr::read_volatile(self.used_idx_ptr()) };
                     if device_used_idx != self.used_idx {
                         while self.used_idx != device_used_idx {
                             let used_slot = self.used_idx % self.queue_size;
                             let _elem =
+                                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                                 unsafe { core::ptr::read_volatile(self.used_ring_elem(used_slot)) };
                             self.used_idx = self.used_idx.wrapping_add(1);
                         }
@@ -530,10 +545,12 @@ impl VirtioBlkDevice {
                 }
             }
 
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             let device_used_idx = unsafe { core::ptr::read_volatile(self.used_idx_ptr()) };
             if device_used_idx != self.used_idx {
                 while self.used_idx != device_used_idx {
                     let used_slot = self.used_idx % self.queue_size;
+                    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                     let _elem = unsafe { core::ptr::read_volatile(self.used_ring_elem(used_slot)) };
                     self.used_idx = self.used_idx.wrapping_add(1);
                 }
@@ -550,6 +567,7 @@ impl VirtioBlkDevice {
             return false;
         }
 
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let status = unsafe { *(self.bounce_virt() as *const u8).add(STATUS_OFF as usize) };
         if status != VIRTIO_BLK_S_OK {
             serial_println!("[VIRTIO-BLK] Request failed with status={}", status);
@@ -558,6 +576,7 @@ impl VirtioBlkDevice {
         }
 
         if data_len > 0 && device_writes_data && !data_buf.is_null() {
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     (self.bounce_virt() as *const u8).add(DATA_OFF as usize),
@@ -660,7 +679,9 @@ impl VirtioBlkDevice {
 // ─── Global Device ──────────────────────────────────────────────────────
 
 lazy_static::lazy_static! {
-    pub static ref VIRTIO_BLK: Mutex<Option<VirtioBlkDevice>> = Mutex::new(None);
+    /// All initialized virtio-blk devices, in PCI discovery order.
+    /// Index 0 is `/dev/vda` (persist blob). A later disk may be ext4 root.
+    pub static ref VIRTIO_DEVICES: Mutex<Vec<VirtioBlkDevice>> = Mutex::new(Vec::new());
 }
 
 static BLK_AVAILABLE: AtomicBool = AtomicBool::new(false);
@@ -671,13 +692,14 @@ static VIRTIO_BLK_IRQ_PENDING: AtomicBool = AtomicBool::new(false);
 
 /// Handle a virtio-blk interrupt from the IDT handler.
 /// Called from `interrupts::virtio_irq_handler` on shared PCI IRQ lines.
-/// We try_lock to avoid deadlocking if the main thread holds VIRTIO_BLK.
+/// We try_lock to avoid deadlocking if the main thread holds VIRTIO_DEVICES.
 pub fn handle_interrupt() {
     // Try to acquire the device without blocking (we're in interrupt context)
-    if let Some(ref mut guard) = VIRTIO_BLK.try_lock() {
-        if let Some(ref dev) = **guard {
+    if let Some(ref mut guard) = VIRTIO_DEVICES.try_lock() {
+        for dev in guard.iter() {
             // Read the ISR register to acknowledge the interrupt.
             // Bit 0 = used buffer notification, Bit 1 = config change.
+            // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
             let isr: u8 = unsafe {
                 let mut isr_port: crate::arch_compat::instructions::port::Port<u8> =
                     crate::arch_compat::instructions::port::Port::new(
@@ -706,56 +728,78 @@ pub fn is_available() -> bool {
     BLK_AVAILABLE.load(Ordering::Relaxed)
 }
 
-/// Read sectors from the virtio block device
-pub fn read(start_sector: u64, count: usize, buffer: &mut [u8]) -> bool {
-    if let Some(ref mut dev) = *VIRTIO_BLK.lock() {
+/// Read sectors from virtio-blk device `idx` (0 = `/dev/vda`).
+pub fn read_n(idx: usize, start_sector: u64, count: usize, buffer: &mut [u8]) -> bool {
+    let mut devices = VIRTIO_DEVICES.lock();
+    if let Some(dev) = devices.get_mut(idx) {
         dev.read_sectors(start_sector, count, buffer)
     } else {
         false
     }
 }
 
-/// Write sectors to the virtio block device
-pub fn write(start_sector: u64, count: usize, data: &[u8]) -> bool {
-    if let Some(ref mut dev) = *VIRTIO_BLK.lock() {
+/// Write sectors to virtio-blk device `idx` (0 = `/dev/vda`).
+pub fn write_n(idx: usize, start_sector: u64, count: usize, data: &[u8]) -> bool {
+    let mut devices = VIRTIO_DEVICES.lock();
+    if let Some(dev) = devices.get_mut(idx) {
         dev.write_sectors(start_sector, count, data)
     } else {
         false
     }
 }
 
-/// Flush the device
+/// Read sectors from the first virtio block device
+pub fn read(start_sector: u64, count: usize, buffer: &mut [u8]) -> bool {
+    read_n(0, start_sector, count, buffer)
+}
+
+/// Write sectors to the first virtio block device
+pub fn write(start_sector: u64, count: usize, data: &[u8]) -> bool {
+    write_n(0, start_sector, count, data)
+}
+
+/// Flush the first device
 pub fn flush() -> bool {
-    if let Some(ref mut dev) = *VIRTIO_BLK.lock() {
+    let mut devices = VIRTIO_DEVICES.lock();
+    if let Some(dev) = devices.get_mut(0) {
         dev.flush()
     } else {
         false
     }
 }
 
-/// Get capacity in sectors
+/// Get capacity in sectors of the first device
 pub fn capacity() -> u64 {
-    VIRTIO_BLK.lock().as_ref().map(|d| d.capacity).unwrap_or(0)
+    VIRTIO_DEVICES
+        .lock()
+        .first()
+        .map(|d| d.capacity)
+        .unwrap_or(0)
+}
+
+/// Number of initialized virtio-blk devices.
+pub fn device_count() -> usize {
+    VIRTIO_DEVICES.lock().len()
 }
 
 /// Get device info
 pub fn info() -> Option<String> {
-    VIRTIO_BLK.lock().as_ref().map(|d| d.info())
+    VIRTIO_DEVICES.lock().first().map(|d| d.info())
 }
 
-/// Register the virtio-blk device with the block layer
-fn register_with_block_layer(capacity: u64, read_only: bool) {
+/// Register a virtio-blk device with the block layer (`vda`, `vdb`, …).
+fn register_with_block_layer(name: &str, capacity: u64, read_only: bool, serial_n: usize) {
     let mut devices = crate::block::BLOCK_DEVICES.lock();
     devices.push(crate::block::BlockDevice {
-        name: String::from("vda"),
+        name: String::from(name),
         device_type: crate::block::BlockDeviceType::Virtio,
         block_size: SECTOR_SIZE,
         total_blocks: capacity,
         read_only,
         model: String::from("QEMU Virtio Block Device"),
-        serial: String::from("VIRTIO-BLK-0"),
+        serial: alloc::format!("VIRTIO-BLK-{}", serial_n),
     });
-    serial_println!("[VIRTIO-BLK] Registered /dev/vda with block layer");
+    serial_println!("[VIRTIO-BLK] Registered /dev/{} with block layer", name);
 }
 
 /// Initialize virtio-blk driver
@@ -768,6 +812,7 @@ pub fn init() {
     for pci_dev in &pci_devices {
         if pci_dev.vendor_id == crate::virtio_net::VIRTIO_PCI_VENDOR {
             // Check subsystem device ID for block device
+            // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
             let subsystem = unsafe {
                 let address = 0x8000_0000u32
                     | ((pci_dev.bus as u32) << 16)
@@ -795,6 +840,7 @@ pub fn init() {
                 let io_base = (pci_dev.bar0 & 0xFFFC) as u16;
 
                 // Enable I/O and bus mastering (critical for DMA!)
+                // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
                 unsafe {
                     let cmd_addr = 0x8000_0000u32
                         | ((pci_dev.bus as u32) << 16)
@@ -824,15 +870,25 @@ pub fn init() {
                 if dev.init_legacy() {
                     let cap = dev.capacity;
                     let ro = dev.read_only;
+                    let idx = VIRTIO_DEVICES.lock().len();
+                    let name = alloc::format!("vd{}", (b'a' + idx as u8) as char);
+                    dev.name = name.clone();
                     BLK_AVAILABLE.store(true, Ordering::Relaxed);
-                    *VIRTIO_BLK.lock() = Some(dev);
-                    register_with_block_layer(cap, ro);
-                    return;
+                    VIRTIO_DEVICES.lock().push(dev);
+                    register_with_block_layer(&name, cap, ro, idx);
+                    // Keep scanning — a second virtio-blk may be the ext4 root.
                 }
             }
         }
     }
 
-    serial_println!("[VIRTIO-BLK] No virtio-blk device found");
-    serial_println!("[VIRTIO-BLK] Block I/O using ramdisk fallback");
+    if VIRTIO_DEVICES.lock().is_empty() {
+        serial_println!("[VIRTIO-BLK] No virtio-blk device found");
+        serial_println!("[VIRTIO-BLK] Block I/O using ramdisk fallback");
+    } else {
+        serial_println!(
+            "[VIRTIO-BLK] {} virtio-blk device(s) ready",
+            VIRTIO_DEVICES.lock().len()
+        );
+    }
 }

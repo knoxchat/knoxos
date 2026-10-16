@@ -1111,6 +1111,26 @@ pub fn stat_dispatch(path: &str) -> Result<VfsStat, i32> {
     vfs.stat(path)
 }
 
+#[cfg(feature = "fs-ext4")]
+fn ext4_create_parents_and_file(fs_idx: usize, rel_path: &str, data: &[u8]) -> bool {
+    let trimmed = rel_path.trim_start_matches('/');
+    let mut parts: Vec<&str> = trimmed.split('/').filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        return false;
+    }
+    let name = parts.pop().unwrap();
+    let mut parent = String::from("/");
+    for part in parts {
+        let _ = crate::ext4::mkdir(fs_idx, &parent, part);
+        if parent == "/" {
+            parent = alloc::format!("/{}", part);
+        } else {
+            parent = alloc::format!("{}/{}", parent, part);
+        }
+    }
+    crate::ext4::create_file(fs_idx, &parent, name, data).is_ok()
+}
+
 /// Write a file, dispatching to ext4 if under ext4 mount
 pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
     let path = overlay_path(path, true);
@@ -1129,7 +1149,9 @@ pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
         match crate::ext4::write_file(fs_idx, &rel_path, data) {
             Ok(()) => return true,
             Err(_) => {
-                // Fall through to in-memory VFS
+                if ext4_create_parents_and_file(fs_idx, &rel_path, data) {
+                    return true;
+                }
             }
         }
     }

@@ -353,6 +353,16 @@ pub fn persist_directory(path: &str, permissions: u16) {
     let _ = commit_through_journal(path, &[], permissions, 1);
 }
 
+/// True when virtio-blk0 has an ext4 superblock at LBA 2 (byte 1024).
+/// Persist must not write `KNOXPERSIST` over that volume.
+fn virtio0_is_ext4() -> bool {
+    let mut buf = [0u8; 1024];
+    if !crate::virtio_blk::read(2, 2, &mut buf) {
+        return false;
+    }
+    u16::from_le_bytes([buf[56], buf[57]]) == 0xEF53
+}
+
 /// Restore all persisted files into the VFS on boot
 pub fn restore_all() {
     if !crate::virtio_blk::is_available() {
@@ -375,6 +385,12 @@ pub fn restore_all() {
     }
 
     if &header_buf[0..12] != MAGIC {
+        if virtio0_is_ext4() {
+            crate::serial_println!(
+                "[persist] virtio-blk0 is ext4; leaving the volume alone (no KNOXPERSIST)"
+            );
+            return;
+        }
         crate::serial_println!("[persist] No persistent data found (fresh disk), initializing...");
         // Write empty header
         let mut new_header = [0u8; SECTOR_SIZE];

@@ -520,6 +520,21 @@ fn resolve_device_name(source: &str) -> Option<usize> {
     None
 }
 
+/// Paths that stay on the RAM VFS even when ext4 is mounted at `/`.
+fn is_virtual_fs_path(path: &str) -> bool {
+    const PREFIXES: &[&str] = &["/dev", "/proc", "/sys", "/run", "/tmp"];
+    PREFIXES
+        .iter()
+        .any(|p| path == *p || path.starts_with(&alloc::format!("{}/", p)))
+}
+
+fn path_under_mount(path: &str, target: &str) -> bool {
+    if target == "/" {
+        return path.starts_with('/') && !is_virtual_fs_path(path);
+    }
+    path == target || path.starts_with(&alloc::format!("{}/", target))
+}
+
 /// Find the ext4 filesystem index for a given path by checking mount points
 pub fn find_ext4_fs_for_path(path: &str) -> Option<(usize, String)> {
     let table = MOUNT_TABLE.lock();
@@ -527,7 +542,9 @@ pub fn find_ext4_fs_for_path(path: &str) -> Option<(usize, String)> {
         .mounts
         .iter()
         .filter(|m| {
-            m.fs_type == FilesystemType::Ext4 && m.fs_index.is_some() && path.starts_with(&m.target)
+            m.fs_type == FilesystemType::Ext4
+                && m.fs_index.is_some()
+                && path_under_mount(path, &m.target)
         })
         .max_by_key(|m| m.target.len())
         .map(|m| {
@@ -549,6 +566,59 @@ pub fn find_ext4_fs_for_path(path: &str) -> Option<(usize, String)> {
         })
 }
 
+#[cfg(feature = "fs-ext4")]
+pub const GATE_C9_MARKER: &str = "GATE_C9 ext4 root";
+
+#[cfg(feature = "fs-ext4")]
+fn probe_ext4_magic(dev_idx: usize) -> bool {
+    let mut buf = [0u8; 1024];
+    if crate::block::read_blocks(dev_idx, 2, 2, &mut buf).is_err() {
+        return false;
+    }
+    u16::from_le_bytes([buf[56], buf[57]]) == 0xEF53
+}
+
+#[cfg(feature = "fs-ext4")]
+fn seed_ext4_fhs(fs_idx: usize) {
+    for name in ["etc", "bin", "home", "var", "usr", "opt", "root"] {
+        let _ = crate::ext4::mkdir(fs_idx, "/", name);
+    }
+    let _ = crate::ext4::mkdir(fs_idx, "/var", "lib");
+    let _ = crate::ext4::mkdir(fs_idx, "/etc", "knoxos");
+    let _ = crate::ext4::mkdir(fs_idx, "/home", "user");
+}
+
+#[cfg(feature = "fs-ext4")]
+fn ext4_root_self_test() -> bool {
+    let Some((fs_idx, _)) = find_ext4_fs_for_path("/etc") else {
+        serial_println!("[mount] GATE_C9 FAILED: /etc is not on ext4");
+        return false;
+    };
+    if find_ext4_fs_for_path("/dev/null").is_some() {
+        serial_println!("[mount] GATE_C9 FAILED: /dev was stolen by ext4");
+        return false;
+    }
+    let payload = b"knoxos-c9-root\n";
+    if !crate::vfs::write_file_dispatch("/etc/knoxos/gate_c9", payload) {
+        serial_println!("[mount] GATE_C9 FAILED: write /etc/knoxos/gate_c9");
+        return false;
+    }
+    match crate::ext4::read_file(fs_idx, "/etc/knoxos/gate_c9") {
+        Ok(data) if data.as_slice() == payload => {
+            serial_println!("[mount] {}", GATE_C9_MARKER);
+            true
+        }
+        Ok(_) => {
+            serial_println!("[mount] GATE_C9 FAILED: ext4 bytes did not match");
+            false
+        }
+        Err(e) => {
+            serial_println!("[mount] GATE_C9 FAILED: ext4 read {:?}", e);
+            false
+        }
+    }
+}
+
 /// Try to mount the root ext4 filesystem from the first available virtio-blk device
 pub fn try_mount_ext4_root() {
     #[cfg(not(feature = "fs-ext4"))]
@@ -567,54 +637,62 @@ fn try_mount_ext4_root_inner() {
     }
 
     let devices = crate::block::list_devices();
-    let mut virtio_dev_idx = None;
+    let mut ext4_dev = None;
     for (i, dev) in devices.iter().enumerate() {
-        if alloc::format!("{:?}", dev.device_type).contains("Virtio") {
-            virtio_dev_idx = Some(i);
+        if !alloc::format!("{:?}", dev.device_type).contains("Virtio") {
+            continue;
+        }
+        if probe_ext4_magic(i) {
+            ext4_dev = Some((i, dev.name.clone()));
             break;
         }
     }
 
-    if let Some(dev_idx) = virtio_dev_idx {
-        serial_println!(
-            "[mount] Attempting to mount ext4 from virtio device index {}",
-            dev_idx
-        );
-        match crate::ext4::mount(dev_idx) {
-            Ok(fs_idx) => {
-                serial_println!(
-                    "[mount] ext4 rootfs mounted successfully (fs_index={})",
-                    fs_idx
-                );
-                let mut table = MOUNT_TABLE.lock();
-                let id = table.next_id;
-                table.next_id += 1;
-                table.mounts.push(MountEntry {
-                    mount_id: id,
-                    parent_id: 1,
-                    source: String::from("/dev/vda"),
-                    target: String::from("/mnt/ext4"),
-                    fs_type: FilesystemType::Ext4,
-                    flags: MountFlags::empty(),
-                    options: String::from("rw,data=ordered"),
-                    dev_major: 254,
-                    dev_minor: 0,
-                    fs_index: Some(fs_idx),
-                    block_device_index: Some(dev_idx),
-                });
-                drop(table);
-                let mut vfs = crate::vfs::VFS.lock();
-                let _ = vfs.mkdir("/mnt/ext4", 0o755);
-                serial_println!("[mount] ext4 available at /mnt/ext4");
-            }
-            Err(e) => {
-                serial_println!(
-                    "[mount] ext4 mount failed: {:?} (disk may not have ext4 filesystem)",
-                    e
-                );
-            }
+    let Some((dev_idx, name)) = ext4_dev else {
+        serial_println!("[mount] No ext4 superblock on any virtio-blk device");
+        return;
+    };
+
+    serial_println!(
+        "[mount] Attempting to mount ext4 root from /dev/{} (block {})",
+        name,
+        dev_idx
+    );
+    match crate::ext4::mount(dev_idx) {
+        Ok(fs_idx) => {
+            serial_println!(
+                "[mount] ext4 rootfs mounted successfully (fs_index={})",
+                fs_idx
+            );
+            seed_ext4_fhs(fs_idx);
+            let mut table = MOUNT_TABLE.lock();
+            table
+                .mounts
+                .retain(|m| !(m.target == "/" && m.fs_type == FilesystemType::Tmpfs));
+            let id = table.next_id;
+            table.next_id += 1;
+            table.mounts.push(MountEntry {
+                mount_id: id,
+                parent_id: 1,
+                source: alloc::format!("/dev/{}", name),
+                target: String::from("/"),
+                fs_type: FilesystemType::Ext4,
+                flags: MountFlags::empty(),
+                options: String::from("rw,data=ordered"),
+                dev_major: 254,
+                dev_minor: 0,
+                fs_index: Some(fs_idx),
+                block_device_index: Some(dev_idx),
+            });
+            drop(table);
+            serial_println!("[mount] ext4 is the root filesystem");
+            let _ = ext4_root_self_test();
         }
-    } else {
-        serial_println!("[mount] No virtio block device found in device table");
+        Err(e) => {
+            serial_println!(
+                "[mount] ext4 mount failed: {:?} (disk may not have ext4 filesystem)",
+                e
+            );
+        }
     }
 }
