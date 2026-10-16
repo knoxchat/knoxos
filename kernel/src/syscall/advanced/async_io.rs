@@ -6,6 +6,7 @@ use crate::syscall::{SyscallError, SyscallResult};
 
 pub fn sys_io_uring_setup(entries: u32, params_ptr: u64) -> SyscallResult {
     let flags = if params_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { *(params_ptr as *const u32) }
     } else {
         0

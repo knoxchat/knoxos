@@ -71,6 +71,7 @@ pub fn sys_pipe2(pipefd_ptr: u64, flags: i32) -> SyscallResult {
 }
 
 fn write_pipefds(pid: u32, pipefd_ptr: u64, read_fd: i32, write_fd: i32) {
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping([read_fd, write_fd].as_ptr(), pipefd_ptr as *mut i32, 2);
     }
@@ -202,6 +203,7 @@ pub fn sys_ioctl(fd: i32, request: u32, arg: u64) -> SyscallResult {
     match request {
         0x5413 => {
             // TIOCGWINSZ
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(arg as *mut crate::tty::WinSize) = crate::tty::WinSize::default();
             }

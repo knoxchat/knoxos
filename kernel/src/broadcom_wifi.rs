@@ -230,10 +230,12 @@ impl BroadcomWifi {
     }
 
     fn read_reg32(&self, offset: u32) -> u32 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::read_volatile((self.mmio_base + offset as u64) as *const u32) }
     }
 
     fn write_reg32(&self, offset: u32, value: u32) {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::write_volatile((self.mmio_base + offset as u64) as *mut u32, value) }
     }
 }

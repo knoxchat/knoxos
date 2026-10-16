@@ -492,6 +492,7 @@ unsafe fn dmar_write64(base: u64, offset: usize, val: u64) {
 
 /// Parse capabilities from a DRHD register base
 fn parse_dmar_capabilities(reg_base: u64) -> DmarCapabilities {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let cap = dmar_read64(reg_base, DMAR_CAP_REG);
         let ecap = dmar_read64(reg_base, DMAR_ECAP_REG);
@@ -519,6 +520,7 @@ fn parse_dmar_capabilities(reg_base: u64) -> DmarCapabilities {
 fn parse_dmar_table(dmar_addr: u64) -> Vec<DmarUnit> {
     let mut units = Vec::new();
 
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe {
         // Read DMAR table header
         let sig = core::ptr::read_volatile(dmar_addr as *const [u8; 4]);
@@ -624,6 +626,7 @@ fn parse_dmar_table(dmar_addr: u64) -> Vec<DmarUnit> {
 
 /// Enable DMA translation on a DRHD unit
 fn enable_translation(unit: &DmarUnit, root_table_phys: u64) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Set root table pointer
         dmar_write64(unit.register_base, DMAR_RTADDR_REG, root_table_phys);
@@ -664,6 +667,7 @@ fn enable_interrupt_remapping(unit: &DmarUnit, irte_phys: u64, irte_entries: u32
         return;
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Set interrupt remapping table address
         // Bits 3:0 = size (log2(entries) - 1), Bit 11 = Extended Interrupt Mode
@@ -698,6 +702,7 @@ fn enable_interrupt_remapping(unit: &DmarUnit, irte_phys: u64, irte_entries: u32
 pub fn read_fault_status(unit_idx: usize) -> Option<u32> {
     let state = IOMMU.lock();
     let unit = state.dmar_units.get(unit_idx)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { Some(dmar_read32(unit.register_base, DMAR_FSTS_REG)) }
 }
 
@@ -705,6 +710,7 @@ pub fn read_fault_status(unit_idx: usize) -> Option<u32> {
 pub fn flush_iotlb_hw(unit_idx: usize, domain_id: u32) {
     let mut state = IOMMU.lock();
     if let Some(unit) = state.dmar_units.get(unit_idx) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             // Domain-selective invalidation via context command register
             // Write domain ID and invalidation type

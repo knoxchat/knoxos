@@ -199,6 +199,7 @@ pub(super) fn restore_cpu_state() {
 
 /// Read current P-state ratio from IA32_PERF_STATUS MSR
 pub(super) fn read_perf_status() -> u8 {
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let mut lo: u32 = 0;
         let mut _hi: u32 = 0;
@@ -216,6 +217,7 @@ pub(super) fn read_perf_status() -> u8 {
 
 /// Write desired P-state ratio to IA32_PERF_CTL MSR
 fn write_perf_ctl(ratio: u8) {
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let val = (ratio as u32) << 8;
         #[cfg(target_arch = "x86_64")]
@@ -237,6 +239,7 @@ fn hwp_supported() -> bool {
     }
     // Simplified: check CPUID leaf 6, EAX bit 7
     let mut result: u32 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         // ebx is reserved by LLVM, so save/restore it manually
         #[cfg(target_arch = "x86_64")]
@@ -257,6 +260,7 @@ pub(super) fn enable_hwp() -> bool {
     if !hwp_supported() {
         return false;
     }
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         // Write 1 to IA32_PM_ENABLE
         #[cfg(target_arch = "x86_64")]
@@ -274,6 +278,7 @@ pub(super) fn enable_hwp() -> bool {
 /// Set HWP request (min/max/desired performance)
 fn set_hwp_request(min_ratio: u8, max_ratio: u8, desired: u8) {
     let val = (min_ratio as u32) | ((max_ratio as u32) << 8) | ((desired as u32) << 16);
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
@@ -441,6 +446,7 @@ pub fn cpu_idle_enter(target_residency_us: u32) -> u32 {
 
     // Enter C-state via MWAIT
     if chosen_hint > 0 {
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             // MONITOR + MWAIT sequence
             // MONITOR: set up address range to monitor (use a dummy location)

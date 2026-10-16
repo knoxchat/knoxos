@@ -9,6 +9,7 @@ pub fn memory_barrier() {
 /// Store fence (sfence) — orders all stores before this point
 #[inline(always)]
 pub fn store_barrier() {
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("sfence", options(nostack, nomem));
@@ -18,6 +19,7 @@ pub fn store_barrier() {
 /// Load fence (lfence) — orders all loads before this point
 #[inline(always)]
 pub fn load_barrier() {
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("lfence", options(nostack, nomem));
@@ -28,6 +30,7 @@ pub fn load_barrier() {
 #[inline(always)]
 pub fn irq_save() -> bool {
     let mut flags: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("pushfq; pop {}", out(reg) flags, options(nomem));

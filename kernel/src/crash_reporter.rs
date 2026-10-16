@@ -228,6 +228,7 @@ pub fn record_exception(
 fn capture_registers() -> RegisterState {
     let mut regs = RegisterState::default();
     // Read current register state via inline assembly
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
@@ -266,6 +267,7 @@ fn capture_backtrace(mut rbp: u64) -> Vec<StackFrame> {
         }
 
         // Frame pointer chain: [rbp] = prev_rbp, [rbp+8] = return_addr
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         let prev_rbp = unsafe {
             let ptr = rbp as *const u64;
             if (ptr as usize) < 0x1000 || (ptr as usize) > 0xFFFF_FFFF_FFFF_0000 {
@@ -274,6 +276,7 @@ fn capture_backtrace(mut rbp: u64) -> Vec<StackFrame> {
             core::ptr::read_volatile(ptr)
         };
 
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         let return_addr = unsafe {
             let ptr = (rbp + 8) as *const u64;
             core::ptr::read_volatile(ptr)

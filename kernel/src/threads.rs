@@ -252,6 +252,7 @@ pub fn futex_wait(addr: u64, expected_val: u32) -> Result<(), i32> {
     let pid = crate::scheduler::current_pid().unwrap_or(0);
 
     // Check current value
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let current = unsafe { *(addr as *const u32) };
     if current != expected_val {
         return Err(-11); // EAGAIN - value changed

@@ -251,6 +251,7 @@ fn usb_control_transfer(
     };
 
     // XHCI Transfer Ring: enqueue TRBs for control transfer
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Read endpoint context to get TR dequeue pointer
         // Endpoint 0 (default control) = DCI 1
@@ -377,6 +378,7 @@ fn usb_interrupt_in(
     endpoint: u8,
     buf: &mut [u8],
 ) -> Result<usize, &'static str> {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Interrupt IN endpoint DCI = endpoint_addr * 2 + 1
         // EP1 IN (0x81) → DCI = 3
@@ -436,6 +438,7 @@ fn usb_bulk_out(
     endpoint: u8,
     data: &[u8],
 ) -> Result<usize, &'static str> {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Bulk OUT endpoint DCI = endpoint_addr * 2
         let dci = (endpoint & 0x7F) * 2;
@@ -490,6 +493,7 @@ fn usb_bulk_in(
     endpoint: u8,
     buf: &mut [u8],
 ) -> Result<usize, &'static str> {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe {
         let dci = (endpoint & 0x7F) * 2 + 1;
         let ep_ring = read_xhci_ep_ring(xhci_base, slot_id, dci);
@@ -1016,6 +1020,7 @@ fn pci_config_read32(bus: u8, dev: u8, func: u8, offset: u8) -> u32 {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut addr_port = Port::<u32>::new(0xCF8);
         let mut data_port = Port::<u32>::new(0xCFC);

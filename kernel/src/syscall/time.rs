@@ -9,6 +9,7 @@ pub fn sys_gettimeofday(tv_ptr: u64) -> SyscallResult {
         let mut buf = [0u8; 16];
         buf[0..8].copy_from_slice(&tv.tv_sec.to_ne_bytes());
         buf[8..16].copy_from_slice(&tv.tv_usec.to_ne_bytes());
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), tv_ptr as *mut u8, buf.len());
         }
@@ -24,6 +25,7 @@ pub fn sys_clock_gettime(clock_id: u32, tp_ptr: u64) -> SyscallResult {
         let mut buf = [0u8; 16];
         buf[0..8].copy_from_slice(&ts.tv_sec.to_ne_bytes());
         buf[8..16].copy_from_slice(&ts.tv_nsec.to_ne_bytes());
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), tp_ptr as *mut u8, buf.len());
         }
@@ -38,6 +40,7 @@ pub fn sys_nanosleep(req_ptr: u64) -> SyscallResult {
     }
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let mut raw = [0u8; 16];
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(req_ptr as *const u8, raw.as_mut_ptr(), 16);
     }

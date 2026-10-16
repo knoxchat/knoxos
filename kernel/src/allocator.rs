@@ -35,6 +35,8 @@ impl TieredAllocator {
     }
 }
 
+// SAFETY: allocation and deallocation go through the slab or the locked
+// heap; the returned pointer is either null or a unique block of `layout`.
 unsafe impl GlobalAlloc for TieredAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let size = layout.size();
@@ -79,11 +81,13 @@ pub fn init_heap(
             .allocate_frame()
             .ok_or(MapToError::FrameAllocationFailed)?;
         let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             mapper.map_to(page, frame, flags, frame_allocator)?.flush();
         }
     }
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         ALLOCATOR
             .fallback

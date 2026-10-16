@@ -265,6 +265,7 @@ static FS_BASES: Mutex<BTreeMap<u64, u64>> = Mutex::new(BTreeMap::new());
 /// Set FS base for a process (arch_prctl ARCH_SET_FS)
 pub fn arch_set_fs(pid: u64, addr: u64) -> i64 {
     // Write MSR_FS_BASE (0xC0000100)
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let lo = addr as u32;
         let hi = (addr >> 32) as u32;
@@ -288,6 +289,7 @@ pub fn arch_get_fs(pid: u64) -> u64 {
 
 /// Set GS base for a process
 pub fn arch_set_gs(pid: u64, addr: u64) -> i64 {
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let lo = addr as u32;
         let hi = (addr >> 32) as u32;
@@ -313,6 +315,7 @@ pub fn sys_arch_prctl(code: u64, addr: u64, pid: u64) -> i64 {
             // Read GS base from MSR 0xC0000101 (IA32_GS_BASE)
             let mut lo: u32 = 0;
             let mut hi: u32 = 0;
+            // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
             unsafe {
                 #[cfg(target_arch = "x86_64")]
                 core::arch::asm!(

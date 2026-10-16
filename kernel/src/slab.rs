@@ -62,6 +62,7 @@ impl Slab {
             self.allocated += 1;
             let ptr = (self.base + idx * self.obj_size) as *mut u8;
             // Zero the memory
+            // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
             unsafe {
                 core::ptr::write_bytes(ptr, 0, self.obj_size);
             }
@@ -137,6 +138,7 @@ impl SlabCache {
             return None; // Too many slabs
         }
 
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let page = unsafe {
             alloc::alloc::alloc(
                 alloc::alloc::Layout::from_size_align(SLAB_PAGE_SIZE, SLAB_PAGE_SIZE).unwrap(),

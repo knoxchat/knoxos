@@ -163,6 +163,7 @@ pub fn suspend() -> Result<(), &'static str> {
 
     // Write SLP_TYPa | SLP_EN to PM1a_CNT
     let value = ((slp_typ as u16) << 10) | (1 << 13); // SLP_EN = bit 13
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         crate::arch_compat::instructions::port::Port::<u16>::new(pm1a as u16).write(value);
     }
@@ -200,6 +201,7 @@ pub fn hibernate() -> Result<(), &'static str> {
 
     // Write SLP_TYPa | SLP_EN
     let value = ((slp_typ as u16) << 10) | (1 << 13);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         crate::arch_compat::instructions::port::Port::<u16>::new(pm1a as u16).write(value);
     }

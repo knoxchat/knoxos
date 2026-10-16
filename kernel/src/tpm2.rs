@@ -95,6 +95,7 @@ impl Tpm2Device {
     /// Probe for TPM at TIS base address
     pub fn probe(&mut self) -> Result<(), &'static str> {
         // Read TPM_DID_VID register
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let did_vid = unsafe { self.read_reg32(TPM_DID_VID) };
         if did_vid == 0 || did_vid == 0xFFFF_FFFF {
             return Err("No TPM detected");
@@ -111,6 +112,7 @@ impl Tpm2Device {
 
     /// Request locality 0
     pub fn request_locality(&mut self) -> Result<(), &'static str> {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             self.write_reg8(TPM_ACCESS, 0x02); // REQUEST_USE
             // Poll until activeLocality is set
@@ -210,6 +212,7 @@ impl Tpm2Device {
     }
 
     fn send_command(&self, cmd: &[u8]) -> Result<(), &'static str> {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             // Write STS = commandReady
             self.write_reg8(TPM_STS, STS_COMMAND_READY);
@@ -225,6 +228,7 @@ impl Tpm2Device {
     }
 
     fn read_response(&self) -> Result<Vec<u8>, &'static str> {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             // Wait for STS.dataAvail
             let mut resp = Vec::new();

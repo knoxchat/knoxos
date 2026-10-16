@@ -11,24 +11,28 @@ pub fn shutdown() -> ! {
     crate::serial_println!("[KnoxOS] Initiating system shutdown...");
 
     // Method 1: QEMU debug exit (for testing)
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u32>::new(0x604);
         port.write(0x2000);
     }
 
     // Method 2: Bochs/older QEMU
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(0xB004);
         port.write(0x2000);
     }
 
     // Method 3: QEMU newer versions
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(0x604);
         port.write(0x2000);
     }
 
     // Method 4: VirtualBox
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(0x4004);
         port.write(0x3400);
@@ -43,6 +47,7 @@ pub fn shutdown() -> ! {
 pub fn reboot() -> ! {
     crate::serial_println!("[KnoxOS] Initiating system reboot...");
 
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         // Method 1: Keyboard controller reset (8042)
         let mut cmd_port = Port::<u8>::new(0x64);

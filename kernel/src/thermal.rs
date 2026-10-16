@@ -290,6 +290,7 @@ pub fn read_cpu_temperature() -> MilliCelsius {
         // MSR 0x1A2 = MSR_TEMPERATURE_TARGET (Tj,max)
         let mut therm_status: u64 = 0;
         let mut temp_target: u64 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             // Read MSR_TEMPERATURE_TARGET to get Tj,max
             #[cfg(target_arch = "x86_64")]

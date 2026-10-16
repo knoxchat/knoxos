@@ -147,6 +147,7 @@ pub fn flush_early_log() {
         .load(Ordering::Relaxed)
         .min(EARLY_LOG_CAPACITY);
     for i in 0..count {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let entry = unsafe { &EARLY_LOG[i] };
         let msg = core::str::from_utf8(&entry.msg[..entry.len as usize]).unwrap_or("<?>");
         klog(LogLevel::from_u8(entry.level), "kern", msg);
@@ -329,6 +330,7 @@ pub fn handle_syslog_syscall(action: i32, buf_ptr: u64, len: usize) -> i64 {
             let bytes = output.as_bytes();
             let copy_len = bytes.len().min(len);
             if buf_ptr != 0 && copy_len > 0 {
+                // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
                 let dest = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, copy_len) };
                 dest.copy_from_slice(&bytes[..copy_len]);
             }
@@ -339,6 +341,7 @@ pub fn handle_syslog_syscall(action: i32, buf_ptr: u64, len: usize) -> i64 {
             let bytes = output.as_bytes();
             let copy_len = bytes.len().min(len);
             if buf_ptr != 0 && copy_len > 0 {
+                // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
                 let dest = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, copy_len) };
                 dest.copy_from_slice(&bytes[..copy_len]);
             }

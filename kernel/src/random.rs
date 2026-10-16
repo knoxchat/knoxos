@@ -388,6 +388,7 @@ pub fn rdrand_u64() -> Option<u64> {
     for _ in 0..10 {
         let mut val: u64 = 0;
         let mut success: u8 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!(
@@ -413,6 +414,7 @@ pub fn rdseed_u64() -> Option<u64> {
     for _ in 0..10 {
         let mut val: u64 = 0;
         let mut success: u8 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!(

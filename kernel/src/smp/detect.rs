@@ -31,6 +31,7 @@ fn detect_cpus_from_madt() -> Option<u32> {
     let rsdp_addr = find_rsdp(phys_offset)?;
 
     // Read RSDP to find RSDT
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let rsdp = unsafe { &*((phys_offset + rsdp_addr) as *const AcpiRsdp) };
     if &rsdp.signature != b"RSD PTR " {
         return None;
@@ -38,6 +39,7 @@ fn detect_cpus_from_madt() -> Option<u32> {
     let rsdt_addr = rsdp.rsdt_address as u64;
 
     // Read RSDT header
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let rsdt = unsafe { &*((phys_offset + rsdt_addr) as *const AcpiSdtHeader) };
     if &rsdt.signature != b"RSDT" {
         return None;
@@ -45,6 +47,7 @@ fn detect_cpus_from_madt() -> Option<u32> {
 
     // Iterate RSDT entries (array of u32 physical pointers after the header)
     let entry_count = (rsdt.length as usize - core::mem::size_of::<AcpiSdtHeader>()) / 4;
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let entries = unsafe {
         core::slice::from_raw_parts(
             ((phys_offset + rsdt_addr) as usize + core::mem::size_of::<AcpiSdtHeader>())
@@ -54,6 +57,7 @@ fn detect_cpus_from_madt() -> Option<u32> {
     };
 
     for &entry_phys in entries {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let hdr = unsafe { &*((phys_offset + entry_phys as u64) as *const AcpiSdtHeader) };
         if &hdr.signature == b"APIC" {
             // Found the MADT
@@ -72,7 +76,9 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, total_len: u32) -> Option<u32> {
     let mut cpu_count = 0u32;
 
     while offset + 2 <= total_len as usize {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let entry_type = unsafe { *(base.wrapping_add(offset) as *const u8) };
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let entry_len = unsafe { *(base.wrapping_add(offset + 1) as *const u8) } as usize;
         if entry_len < 2 {
             break;
@@ -81,6 +87,7 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, total_len: u32) -> Option<u32> {
         if entry_type == 0 && entry_len >= 8 {
             // Type 0 = Processor Local APIC
             // Byte 4 = APIC ID, Byte 8 (offset+4) = flags
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let flags = unsafe { *((base + offset + 4) as *const u32) };
             // Bit 0 = Processor Enabled, Bit 1 = Online Capable
             if flags & 0x01 != 0 {
@@ -97,10 +104,12 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, total_len: u32) -> Option<u32> {
 /// Search for the ACPI RSDP signature in standard locations
 fn find_rsdp(phys_offset: u64) -> Option<u64> {
     // Check EBDA pointer at 0x040E
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let ebda_seg = unsafe { *((phys_offset + 0x040E) as *const u16) } as u64;
     let ebda_base = ebda_seg << 4;
     if ebda_base > 0 && ebda_base < 0xA0000 {
         for addr in (ebda_base..ebda_base + 1024).step_by(16) {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let sig = unsafe { &*((phys_offset + addr) as *const [u8; 8]) };
             if sig == b"RSD PTR " {
                 return Some(addr);
@@ -110,6 +119,7 @@ fn find_rsdp(phys_offset: u64) -> Option<u64> {
 
     // Search BIOS read-only area 0xE0000 - 0xFFFFF
     for addr in (0xE0000u64..0x100000).step_by(16) {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let sig = unsafe { &*((phys_offset + addr) as *const [u8; 8]) };
         if sig == b"RSD PTR " {
             return Some(addr);

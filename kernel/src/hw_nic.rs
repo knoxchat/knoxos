@@ -277,6 +277,7 @@ impl HwNicDevice {
         if self.mmio_base == 0 {
             return 0;
         }
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let ptr = (self.mmio_base + offset as u64) as *const u32;
             core::ptr::read_volatile(ptr)
@@ -288,6 +289,7 @@ impl HwNicDevice {
         if self.mmio_base == 0 {
             return;
         }
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let ptr = (self.mmio_base + offset as u64) as *mut u32;
             core::ptr::write_volatile(ptr, value);
@@ -655,6 +657,7 @@ fn pci_read_config_dword(bus: u8, slot: u8, func: u8, offset: u8) -> u32 {
         | ((slot as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         crate::arch_compat::instructions::port::Port::new(0xCF8).write(address);
         crate::arch_compat::instructions::port::Port::<u32>::new(0xCFC).read()
@@ -671,6 +674,7 @@ fn pci_write_config_word(bus: u8, slot: u8, func: u8, offset: u8, value: u16) {
         | ((slot as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         crate::arch_compat::instructions::port::Port::new(0xCF8).write(address);
         crate::arch_compat::instructions::port::Port::new(0xCFC).write(current);

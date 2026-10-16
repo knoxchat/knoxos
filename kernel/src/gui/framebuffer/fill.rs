@@ -22,6 +22,7 @@ impl FrameBuffer {
             // Stamp first row as packed BGRA u32s (unaligned-safe)
             if bpp == 4 {
                 let packed = u32::from_le_bytes([color.b, color.g, color.r, color.a]);
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     let mut p = self.buffer.as_mut_ptr().add(first_row_offset);
                     for _ in 0..row_pixel_count {
@@ -44,6 +45,7 @@ impl FrameBuffer {
                 let dst_offset = y * self.pitch + x_start * bpp;
                 // Safety: both src and dst slices are within buffer bounds
                 // and don't overlap (different rows)
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     let src = self.buffer.as_ptr().add(first_row_offset);
                     let dst = self.buffer.as_mut_ptr().add(dst_offset);

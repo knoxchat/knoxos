@@ -95,6 +95,7 @@ fn test_cpu_features() -> (bool, String) {
     {
         // Basic feature check via CPUID
         let mut cpuid_result: u32 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             let mut _ebx: u32 = 0;
             #[cfg(target_arch = "x86_64")]
@@ -180,6 +181,7 @@ fn test_serial_port() -> (bool, String) {
 fn test_interrupts_enabled() -> (bool, String) {
     let mut flags: u64 = 0;
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!("pushfq; pop {}", out(reg) flags);
     }

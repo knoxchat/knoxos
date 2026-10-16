@@ -445,6 +445,7 @@ pub struct SignalFrame {
 impl SignalFrame {
     /// Create a new signal frame with trampoline code
     pub fn new(signo: u32) -> Self {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let mut frame: Self = unsafe { core::mem::zeroed() };
         frame.signo = signo;
 
@@ -515,6 +516,7 @@ fn setup_signal_frame(pid: Pid, signal: Signal, handler: u64) {
     let frame_size = core::mem::size_of::<SignalFrame>() as u64;
     let new_rsp = ctx.rsp.saturating_sub(frame_size) & !0xF;
 
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let frame_bytes = unsafe {
         core::slice::from_raw_parts(
             &frame as *const SignalFrame as *const u8,
@@ -563,6 +565,7 @@ pub fn sigreturn(pid: Pid) -> Option<(u64, u64)> {
     let mut frame_bytes = alloc::vec![0u8; frame_size];
     crate::vmm::read_user_memory(pid, frame_rsp, &mut frame_bytes);
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let frame = unsafe { &*(frame_bytes.as_ptr() as *const SignalFrame) };
 
     // Restore signal mask

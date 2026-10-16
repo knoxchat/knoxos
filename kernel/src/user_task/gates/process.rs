@@ -10,6 +10,7 @@ pub(super) fn run_gate_b3() {
     let Some(pid) = spawn_or_log(&elf, "init-hello") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -29,6 +30,7 @@ pub(super) fn run_gate_b4() {
     let Some(pid) = spawn_or_log(&elf, "fork-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -45,6 +47,7 @@ pub(super) fn run_gate_b5() {
     // SIGKILL a parked pause() task.
     let pause = crate::init::pause_userspace_elf_data();
     if let Some(pid) = spawn_or_log(&pause, "pause-kill") {
+        // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
         unsafe {
             run_until_desktop(pid);
         }
@@ -56,6 +59,7 @@ pub(super) fn run_gate_b5() {
     // SIGSEGV: load a null pointer in Ring 3.
     let boom = crate::init::segfault_userspace_elf_data();
     if let Some(pid) = spawn_or_log(&boom, "segfault") {
+        // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
         unsafe {
             run_until_desktop(pid);
         }
@@ -69,6 +73,7 @@ pub(super) fn run_gate_b5() {
         if let Ok((pty, _)) = crate::pty::openpty() {
             let _ = crate::pty::open_slave(pty);
             let _ = crate::pty::pty_ioctl(pty, crate::pty::TIOCSPGRP, pid as u64);
+            // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
             unsafe {
                 run_until_desktop(pid);
             }
@@ -114,6 +119,7 @@ pub(super) fn run_gate_b6() {
     let _ = crate::pty::open_slave(pty);
     let _ = crate::pty::pty_ioctl(pty, crate::pty::TIOCSPGRP, pid as u64);
     crate::fd::attach_pty_stdio(pid, pty);
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -140,6 +146,7 @@ pub(super) fn run_gate_j1() {
     let Some(pid) = spawn_or_log(&elf, "clone-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -153,6 +160,7 @@ pub(super) fn run_gate_k1() {
     let Some(pid) = spawn_or_log(&elf, "clone-thread") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -166,6 +174,7 @@ pub(super) fn run_gate_bl2() {
     let Some(pid) = spawn_or_log(&elf, "pidfd-open-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -179,6 +188,7 @@ pub(super) fn run_gate_bl3() {
     let Some(pid) = spawn_or_log(&elf, "clone3-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -193,6 +203,7 @@ pub(super) fn run_gate_bm1() {
     let Some(pid) = spawn_or_log(&elf, "gate-dyn") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -207,6 +218,7 @@ pub(super) fn run_gate_bm2() {
     let Some(pid) = spawn_or_log(&elf, "gate-dlopen") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -221,6 +233,7 @@ pub(super) fn run_gate_bm3() {
     let Some(pid) = spawn_or_log(&elf, "gate-musl") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -235,6 +248,7 @@ pub(super) fn run_gate_bm4() {
     let Some(pid) = spawn_or_log(&elf, "gate-musl-dyn") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -254,6 +268,7 @@ pub(super) fn run_gate_k3() {
     let Some(pid) = spawn_or_log(&elf, "init") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -281,6 +296,7 @@ pub(super) fn run_gate_l1() {
     let Some(pid) = spawn_or_log(&elf, "tls-fs") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -294,11 +310,13 @@ pub(super) fn run_gate_b7() {
     let Some(pid) = spawn_or_log(&elf, "sigreturn") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
     let _ = crate::signals::kill(pid, crate::signals::Signal::SIGINT, 0);
     crate::signals::deliver_signals(pid);
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -330,6 +348,7 @@ pub(super) fn run_gate_b8() {
         crate::apic_timer::total_ticks()
     );
     let before = crate::scheduler::user_preempt_count();
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         crate::context::switch_to(spinner);
     }
@@ -366,6 +385,7 @@ pub(super) fn run_gate_b8() {
     // Spinner never exits; kill it so it cannot steal the CPU again.
     terminate(spinner, -(crate::signals::Signal::SIGKILL as i32));
     if crate::context::has_runnable_context(writer) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             crate::context::switch_to(writer);
         }

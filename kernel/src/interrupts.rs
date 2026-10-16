@@ -26,6 +26,7 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 
 #[cfg(target_arch = "x86_64")]
 pub static PICS: Mutex<ChainedPics> =
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
 #[cfg(target_arch = "x86_64")]
@@ -64,6 +65,7 @@ lazy_static! {
 
         // CPU Exception handlers
         idt.breakpoint.set_handler_fn(breakpoint_handler);
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             idt.double_fault
                 .set_handler_fn(double_fault_handler)
@@ -93,6 +95,7 @@ lazy_static! {
         idt[InterruptIndex::SecondaryATA.as_u8()].set_handler_fn(ata_irq_handler);
 
         // APIC timer vector (0x40 = 64) — naked stub saves GPRs + FXSAVE on preempt
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             idt[crate::apic_timer::TIMER_VECTOR].set_handler_addr(VirtAddr::new(
                 apic_timer_interrupt_naked as *const () as u64,
@@ -158,6 +161,7 @@ extern "x86-interrupt" fn page_fault_handler(
     // read `gs:[32]` (current PID) or `gs:[24]` (CPU index).
     if is_user {
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("swapgs", options(nomem, nostack));
         }
@@ -183,6 +187,7 @@ extern "x86-interrupt" fn page_fault_handler(
         // VMM handled it (CoW, guard page, etc.) — resume
         if is_user {
             #[cfg(target_arch = "x86_64")]
+            // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
             unsafe {
                 core::arch::asm!("swapgs", options(nomem, nostack));
             }
@@ -227,6 +232,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
     let from_user = (stack_frame.code_segment.rpl() as u8) == 3;
     if from_user {
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("swapgs", options(nomem, nostack));
         }
@@ -262,6 +268,7 @@ extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFram
     let from_user = (stack_frame.code_segment.rpl() as u8) == 3;
     if from_user {
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("swapgs", options(nomem, nostack));
         }
@@ -339,6 +346,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
         if crate::smp::is_apic_mode() {
             crate::smp::eoi();
         } else {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 PICS.lock()
                     .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
@@ -361,6 +369,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     if crate::smp::is_apic_mode() {
         crate::smp::eoi();
     } else {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             PICS.lock()
                 .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
@@ -376,6 +385,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     use crate::arch_compat::instructions::port::Port;
 
     let mut port = Port::new(0x60);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     let scancode: u8 = unsafe { port.read() };
 
     crate::task::keyboard::add_scancode(scancode);
@@ -383,6 +393,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     if crate::smp::is_apic_mode() {
         crate::smp::eoi();
     } else {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             PICS.lock()
                 .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
@@ -398,6 +409,7 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
     use crate::arch_compat::instructions::port::Port;
 
     let mut port = Port::new(0x60);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     let data: u8 = unsafe { port.read() };
 
     crate::gui::input::add_mouse_byte(data);
@@ -405,6 +417,7 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
     if crate::smp::is_apic_mode() {
         crate::smp::eoi();
     } else {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             PICS.lock()
                 .notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
@@ -436,6 +449,7 @@ extern "x86-interrupt" fn virtio_irq_handler(_stack_frame: InterruptStackFrame) 
     if crate::smp::is_apic_mode() {
         crate::smp::eoi();
     } else {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             PICS.lock()
                 .notify_end_of_interrupt(InterruptIndex::Free1.as_u8());
@@ -529,6 +543,7 @@ extern "x86-interrupt" fn ata_irq_handler(_stack_frame: InterruptStackFrame) {
 
     // Read the ATA status register to acknowledge the interrupt
     // Primary: 0x1F7, Secondary: 0x177
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -546,6 +561,7 @@ extern "x86-interrupt" fn ata_irq_handler(_stack_frame: InterruptStackFrame) {
     if crate::smp::is_apic_mode() {
         crate::smp::eoi();
     } else {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             PICS.lock()
                 .notify_end_of_interrupt(InterruptIndex::PrimaryATA.as_u8());

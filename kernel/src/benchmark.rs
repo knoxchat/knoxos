@@ -74,6 +74,7 @@ impl BenchmarkResult {
 /// Read the Time Stamp Counter
 #[inline(always)]
 pub fn rdtsc() -> u64 {
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let mut lo: u32 = 0;
         let mut hi: u32 = 0;
@@ -86,6 +87,7 @@ pub fn rdtsc() -> u64 {
 /// Serializing barrier + TSC read for accurate timing
 #[inline(always)]
 pub fn rdtscp() -> u64 {
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let mut lo: u32 = 0;
         let mut hi: u32 = 0;

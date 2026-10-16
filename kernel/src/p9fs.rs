@@ -738,6 +738,7 @@ fn detect_virtio_9p() -> usize {
     for bus in 0..=255u8 {
         for dev in 0..32u8 {
             let addr: u32 = (1 << 31) | ((bus as u32) << 16) | ((dev as u32) << 11);
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let id = unsafe {
                 let mut p = Port::<u32>::new(0xCF8);
                 let mut d = Port::<u32>::new(0xCFC);
@@ -751,6 +752,7 @@ fn detect_virtio_9p() -> usize {
             // VirtIO 9P: vendor 0x1AF4, device 0x1009 (transitional) or 0x105A (modern)
             if vendor == 0x1AF4 && (device_id == 0x1009 || device_id == 0x105A) {
                 // Read BAR0
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let bar0 = unsafe {
                     let mut p = Port::<u32>::new(0xCF8);
                     let mut d = Port::<u32>::new(0xCFC);
@@ -788,6 +790,7 @@ fn detect_virtio_9p() -> usize {
 
 /// Read the 9P mount tag from VirtIO device config
 fn read_9p_tag(mmio_base: u64) -> String {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe {
         // Tag length is at device-specific config offset 0
         let tag_len = core::ptr::read_volatile((mmio_base + 0x100) as *const u16);

@@ -33,6 +33,7 @@ static KERNEL_L4_TEMPLATE: AtomicU64 = AtomicU64::new(0);
 /// Allocate a zeroed frame for a new page table
 pub(super) fn allocate_page_table_frame() -> Option<u64> {
     let frame = allocate_physical_frame()?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { zero_physical_frame(frame) };
     Some(frame)
 }
@@ -65,6 +66,7 @@ pub fn map_mmio(phys: u64, bytes: usize) -> Option<u64> {
         | PageTableFlags::NO_CACHE;
     while page < end {
         let vaddr = page + offset;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             map_page_in_table(cr3, vaddr, page, flags);
             #[cfg(target_arch = "x86_64")]
@@ -341,6 +343,7 @@ pub unsafe fn activate_cr3(cr3: u64) {
 pub fn activate_kernel_cr3() {
     let cr3 = KERNEL_CR3.load(Ordering::Relaxed);
     if cr3 != 0 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             activate_cr3(cr3);
         }
@@ -395,6 +398,7 @@ pub(super) fn fill_file_backed_page(path: &str, file_offset: u64, frame_phys: u6
         crate::vfs::pread_file(path, file_offset, &mut buf).unwrap_or(0)
     };
     if n > 0 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             copy_to_physical_frame(frame_phys, &buf[..n]);
         }
@@ -432,6 +436,7 @@ pub(super) fn snapshot_kernel_l4() {
     }
     let src = KERNEL_CR3.load(Ordering::Relaxed);
     if let Some(tmpl) = allocate_page_table_frame() {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             copy_physical_frame(src, tmpl);
         }

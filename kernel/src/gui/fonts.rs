@@ -280,13 +280,16 @@ const SP_FILTER_CENTER: u32 = 128; // 1/2
 fn generate_subpixel_row(row_data: *const u8, gw: usize, out: &mut [u16]) {
     // We need gw*3 entries in `out`
     for col in 0..gw {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let c = unsafe { *row_data.add(col) } as u16;
         let cl = if col > 0 {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             (unsafe { *row_data.add(col - 1) }) as u16
         } else {
             0
         };
         let cr = if col + 1 < gw {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             (unsafe { *row_data.add(col + 1) }) as u16
         } else {
             0
@@ -354,6 +357,7 @@ fn draw_subpixel_glyph(
         }
 
         // Step 1: Generate 3× subpixel coverage from glyph row
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let row_ptr = unsafe { data.add(row * gw) };
         generate_subpixel_row(row_ptr, gw, &mut sp_raw[..sp_len]);
 
@@ -698,9 +702,13 @@ fn sample_bilinear(data: *const u8, gw: usize, gh: usize, sx: i32, sy: i32) -> u
     let ifx = 256 - fx;
     let ify = 256 - fy;
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let c00 = unsafe { *data.add(y0 * gw + x0) } as u32;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let c10 = unsafe { *data.add(y0 * gw + x1) } as u32;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let c01 = unsafe { *data.add(y1 * gw + x0) } as u32;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let c11 = unsafe { *data.add(y1 * gw + x1) } as u32;
 
     // Bilinear: lerp in X for both rows, then lerp in Y
@@ -739,6 +747,7 @@ fn draw_aa_glyph(
                 continue;
             }
             for col in 0..gw {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let raw_cov = unsafe { *data.add(row * gw + col) };
                 if raw_cov == 0 {
                     continue;

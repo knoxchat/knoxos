@@ -119,6 +119,7 @@ pub fn signalfd_read(fd: i32) -> Result<SignalFdSiginfo, i32> {
 /// Copy a pending `signalfd_siginfo` into `buf`.
 pub fn signalfd_read_bytes(id: i32, buf: &mut [u8]) -> Result<usize, i32> {
     let info = signalfd_read(id)?;
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let bytes = unsafe {
         core::slice::from_raw_parts(
             (&info as *const SignalFdSiginfo).cast::<u8>(),

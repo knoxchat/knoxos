@@ -220,15 +220,18 @@ pub mod aarch64_hal {
         /// Initialize GICv3 distributor
         pub fn init_distributor(&mut self) {
             // Read GICD_TYPER to determine number of IRQs
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let typer = unsafe { read_mmio32(self.dist_base + GICD_TYPER) };
             self.num_irqs = ((typer & 0x1F) + 1) * 32;
             serial_println!("[GICv3] Distributor: {} IRQ lines detected", self.num_irqs);
 
             // Disable distributor while configuring
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe { write_mmio32(self.dist_base + GICD_CTLR, 0) };
 
             // Configure all SPIs (32+) as Group 1, edge-triggered
             for i in 1..(self.num_irqs / 32) {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     // Group 1
                     write_mmio32(self.dist_base + GICD_IGROUPR + (i as u64) * 4, 0xFFFF_FFFF);
@@ -243,6 +246,7 @@ pub mod aarch64_hal {
             }
 
             // Enable distributor: Group 0/1 enable, affinity routing
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_mmio32(self.dist_base + GICD_CTLR, (1 << 0) | (1 << 1) | (1 << 4));
             }
@@ -256,6 +260,7 @@ pub mod aarch64_hal {
             let redist = self.redist_base + (cpu_id as u64) * 0x20000;
 
             // Wake up redistributor
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 let waker = read_mmio32(redist + GICR_WAKER);
                 write_mmio32(redist + GICR_WAKER, waker & !(1 << 1)); // Clear ProcessorSleep
@@ -268,6 +273,7 @@ pub mod aarch64_hal {
             }
 
             // Configure SGIs/PPIs (0-31): Group 1, default priority
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_mmio32(redist + GICR_IGROUPR0, 0xFFFF_FFFF);
                 for i in 0..8 {
@@ -293,6 +299,7 @@ pub mod aarch64_hal {
             if irq >= 32 {
                 let reg_index = irq / 32;
                 let bit = 1u32 << (irq % 32);
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     write_mmio32(
                         self.dist_base + GICD_ISENABLER + (reg_index as u64) * 4,
@@ -307,6 +314,7 @@ pub mod aarch64_hal {
             if irq >= 32 {
                 let reg_index = irq / 32;
                 let bit = 1u32 << (irq % 32);
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     write_mmio32(
                         self.dist_base + GICD_ICENABLER + (reg_index as u64) * 4,
@@ -319,6 +327,7 @@ pub mod aarch64_hal {
         /// Set IRQ routing to specific CPU (affinity routing)
         pub fn set_irq_affinity(&self, irq: u32, mpidr: u64) {
             if irq >= 32 {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     let addr = self.dist_base + GICD_IROUTER + (irq as u64) * 8;
                     write_mmio64(addr, mpidr & 0xFF00FFFFFF);
@@ -481,6 +490,7 @@ pub mod aarch64_hal {
         }
 
         pub fn init(&mut self) {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let idr0 = unsafe { read_mmio32(self.base + SMMU_IDR0) };
             let s2p = idr0 & 1; // Stage 2 translation
             let s1p = (idr0 >> 1) & 1; // Stage 1 translation
@@ -490,6 +500,7 @@ pub mod aarch64_hal {
 
             // Configure stream table base
             // Enable SMMU
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_mmio32(self.base + SMMU_CR0, 1); // SMMUEN
             }
@@ -703,6 +714,7 @@ pub mod riscv64_hal {
 
             // Set all priorities to 1 (minimum non-zero)
             for irq in 1..=self.num_sources {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     write_mmio32(self.base + PLIC_PRIORITY + (irq as u64) * 4, 1);
                 }
@@ -710,6 +722,7 @@ pub mod riscv64_hal {
 
             // Set threshold to 0 (accept all priorities)
             let context = (hart_id * 2 + 1) as u64; // S-mode context
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_mmio32(
                     self.base + PLIC_THRESHOLD_BASE + context * PLIC_CONTEXT_STRIDE,
@@ -729,6 +742,7 @@ pub mod riscv64_hal {
             let context = (hart_id * 2 + 1) as u64;
             let reg_index = (irq / 32) as u64;
             let bit = 1u32 << (irq % 32);
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 let addr =
                     self.base + PLIC_ENABLE_BASE + context * PLIC_ENABLE_STRIDE + reg_index * 4;
@@ -742,6 +756,7 @@ pub mod riscv64_hal {
             let context = (hart_id * 2 + 1) as u64;
             let reg_index = (irq / 32) as u64;
             let bit = 1u32 << (irq % 32);
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 let addr =
                     self.base + PLIC_ENABLE_BASE + context * PLIC_ENABLE_STRIDE + reg_index * 4;
@@ -753,12 +768,14 @@ pub mod riscv64_hal {
         /// Claim interrupt (returns IRQ number)
         pub fn claim(&self, hart_id: u32) -> u32 {
             let context = (hart_id * 2 + 1) as u64;
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe { read_mmio32(self.base + PLIC_CLAIM_BASE + context * PLIC_CONTEXT_STRIDE) }
         }
 
         /// Complete interrupt (signal EOI)
         pub fn complete(&self, hart_id: u32, irq: u32) {
             let context = (hart_id * 2 + 1) as u64;
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_mmio32(
                     self.base + PLIC_CLAIM_BASE + context * PLIC_CONTEXT_STRIDE,
@@ -769,6 +786,7 @@ pub mod riscv64_hal {
 
         /// Set interrupt priority (1-7)
         pub fn set_priority(&self, irq: u32, priority: u32) {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_mmio32(self.base + PLIC_PRIORITY + (irq as u64) * 4, priority);
             }
@@ -797,11 +815,13 @@ pub mod riscv64_hal {
 
         /// Read mtime counter
         pub fn read_mtime(&self) -> u64 {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe { read_mmio64(self.base + CLINT_MTIME) }
         }
 
         /// Set mtimecmp for hart (timer interrupt)
         pub fn set_timer(&self, hart_id: u32, deadline: u64) {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_mmio64(self.base + CLINT_MTIMECMP + (hart_id as u64) * 8, deadline);
             }
@@ -816,6 +836,7 @@ pub mod riscv64_hal {
 
         /// Send software interrupt to hart (IPI)
         pub fn send_ipi(&self, hart_id: u32) {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_mmio32(self.base + CLINT_MSIP + (hart_id as u64) * 4, 1);
             }
@@ -823,6 +844,7 @@ pub mod riscv64_hal {
 
         /// Clear software interrupt for hart
         pub fn clear_ipi(&self, hart_id: u32) {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_mmio32(self.base + CLINT_MSIP + (hart_id as u64) * 4, 0);
             }
@@ -1305,6 +1327,7 @@ impl DtbParser {
     /// Parse DTB at given physical address
     pub fn parse(base: u64) -> Option<Self> {
         // Validate magic (big-endian)
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         let magic = unsafe { u32::from_be(core::ptr::read_volatile(base as *const u32)) };
         if magic != FDT_MAGIC {
             serial_println!(
@@ -1316,10 +1339,13 @@ impl DtbParser {
         }
 
         let total_size =
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe { u32::from_be(core::ptr::read_volatile((base + 4) as *const u32)) };
         let struct_offset =
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe { u32::from_be(core::ptr::read_volatile((base + 8) as *const u32)) };
         let strings_offset =
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe { u32::from_be(core::ptr::read_volatile((base + 12) as *const u32)) };
 
         serial_println!(

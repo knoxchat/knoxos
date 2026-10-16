@@ -104,6 +104,7 @@ fn get_hw_random() -> u64 {
     if has_rdrand {
         let mut val: u64 = 0;
         let mut ok: u8 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!(
@@ -121,6 +122,7 @@ fn get_hw_random() -> u64 {
 
     // Fallback: use TSC (always available on x86_64)
     let mut tsc: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let mut eax: u32 = 0;
         let mut edx: u32 = 0;
@@ -312,6 +314,7 @@ pub fn detect_cpu_security() -> CpuSecurityFeatures {
 
     // Read CR0 for WP bit
     let mut cr0: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack));
@@ -335,6 +338,7 @@ pub fn detect_cpu_security() -> CpuSecurityFeatures {
 pub fn enable_smep() -> bool {
     let features = detect_cpu_security();
     if features.smep {
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             let mut cr4: u64 = 0;
             core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack));
@@ -353,6 +357,7 @@ pub fn enable_smep() -> bool {
 pub fn enable_smap() -> bool {
     let features = detect_cpu_security();
     if features.smap {
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             let mut cr4: u64 = 0;
             #[cfg(target_arch = "x86_64")]
@@ -373,6 +378,7 @@ pub fn enable_nx() -> bool {
     let features = detect_cpu_security();
     if features.nx {
         const IA32_EFER: u32 = 0xC0000080;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             let mut efer: u64 = 0;
             #[cfg(target_arch = "x86_64")]

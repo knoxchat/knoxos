@@ -44,6 +44,7 @@ fn launch_hello_userspace() -> Result<(), &'static str> {
     );
     let (entry, rsp) = crate::vmm::map_static_elf_into_current(&elf)?;
     serial_println!("[init] hello mapped: entry={:#x} rsp={:#x}", entry, rsp);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         crate::usermode::run_userspace_once(entry, rsp);
     }

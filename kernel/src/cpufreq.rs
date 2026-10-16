@@ -274,6 +274,7 @@ pub fn set_frequency(freq_mhz: FreqMHz) {
     TARGET_FREQ.store(clamped as u64, Ordering::Relaxed);
 
     // Write to PERF_CTL MSR
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let value = (ratio as u64) << 8;
         write_msr(MSR_IA32_PERF_CTL, value);
@@ -334,6 +335,7 @@ pub fn tick(cpu_load_percent: u8) {
             // HWP: let hardware manage
             if FREQ_INFO.lock().hwp_supported {
                 // Set HWP request for desired performance level
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     let perf = cpu_load_percent as u64;
                     let hwp_req = perf | (perf << 8) | (0xFF_u64 << 16);

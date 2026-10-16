@@ -634,6 +634,7 @@ pub fn list_nodes() -> Vec<ClusterNode> {
 }
 
 fn rdtsc() -> u64 {
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let mut lo: u32 = 0;
         let mut hi: u32 = 0;

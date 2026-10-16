@@ -66,12 +66,14 @@ pub struct TicketLockGuard<'a, T> {
 impl<'a, T> Deref for TicketLockGuard<'a, T> {
     type Target = T;
     fn deref(&self) -> &T {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { &*self.lock.data.get() }
     }
 }
 
 impl<'a, T> DerefMut for TicketLockGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut T {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { &mut *self.lock.data.get() }
     }
 }
@@ -174,6 +176,7 @@ pub struct RwSpinLockReadGuard<'a, T> {
 impl<'a, T> Deref for RwSpinLockReadGuard<'a, T> {
     type Target = T;
     fn deref(&self) -> &T {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { &*self.lock.data.get() }
     }
 }
@@ -191,12 +194,14 @@ pub struct RwSpinLockWriteGuard<'a, T> {
 impl<'a, T> Deref for RwSpinLockWriteGuard<'a, T> {
     type Target = T;
     fn deref(&self) -> &T {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { &*self.lock.data.get() }
     }
 }
 
 impl<'a, T> DerefMut for RwSpinLockWriteGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut T {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { &mut *self.lock.data.get() }
     }
 }
@@ -238,6 +243,7 @@ impl<T: Copy> SeqLock<T> {
                 core::hint::spin_loop();
                 continue;
             }
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let data = unsafe { *self.data.get() };
             let seq2 = self.sequence.load(Ordering::Acquire);
             if seq1 == seq2 {
@@ -257,6 +263,7 @@ impl<T: Copy> SeqLock<T> {
             core::hint::spin_loop();
         }
         self.sequence.fetch_add(1, Ordering::Release); // odd = writing
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             *self.data.get() = new_data;
         }
@@ -290,6 +297,7 @@ impl<T: Default + Copy> PerCpuData<T> {
     pub const fn new() -> Self {
         // Can't use Default in const, use MaybeUninit trick
         Self {
+            // SAFETY: the MaybeUninit slot is written before assume_init / assume_init_ref.
             data: unsafe { core::mem::MaybeUninit::zeroed().assume_init() },
         }
     }
@@ -297,6 +305,7 @@ impl<T: Default + Copy> PerCpuData<T> {
     /// Get reference to current CPU's data
     pub fn get(&self, cpu_id: usize) -> &T {
         let idx = cpu_id.min(63);
+        // SAFETY: the MaybeUninit slot is written before assume_init / assume_init_ref.
         unsafe { &*self.data[idx].get() }
     }
 
@@ -304,6 +313,7 @@ impl<T: Default + Copy> PerCpuData<T> {
     #[allow(clippy::mut_from_ref)]
     pub fn get_mut(&self, cpu_id: usize) -> &mut T {
         let idx = cpu_id.min(63);
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { &mut *self.data[idx].get() }
     }
 }
@@ -357,6 +367,7 @@ impl<'a, T> DerefMut for IrqSpinLockGuard<'a, T> {
 
 impl<'a, T> Drop for IrqSpinLockGuard<'a, T> {
     fn drop(&mut self) {
+        // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
         drop(unsafe { core::ptr::read(&self.guard) });
         if self.restore_interrupts {
             crate::arch_compat::instructions::interrupts::enable();

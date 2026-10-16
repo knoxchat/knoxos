@@ -244,17 +244,20 @@ fn resume_next_or_return() {
             && !crate::context::is_ap_idle_pid(next)
             && crate::context::has_runnable_context(next)
         {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 crate::context::abandon_current_and_enter(next);
             }
         }
     }
     if crate::context::has_runnable_context(DESKTOP_PID) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             crate::context::abandon_current_and_enter(DESKTOP_PID);
         }
     }
     if crate::context::has_runnable_context(crate::context::IDLE_PID) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             crate::context::abandon_current_and_enter(crate::context::IDLE_PID);
         }

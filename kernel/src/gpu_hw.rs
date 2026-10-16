@@ -577,6 +577,7 @@ impl VirtioGpuDevice {
         let size = (width as usize) * (height as usize) * 4;
         let layout = alloc::alloc::Layout::from_size_align(size, 4096)
             .unwrap_or(alloc::alloc::Layout::from_size_align(size, 8).unwrap());
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
         if ptr.is_null() {
             serial_println!(
@@ -619,6 +620,7 @@ impl VirtioGpuDevice {
         if let Some(resource) = self.resources.remove(&resource_id) {
             if resource.backing_addr != 0 {
                 if let Some(layout) = resource.backing_layout {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     unsafe {
                         alloc::alloc::dealloc(resource.backing_addr as *mut u8, layout);
                     }
@@ -659,6 +661,7 @@ impl VirtioGpuDevice {
                 let copy_len = src_stride.min(stride - (x as usize * 4));
 
                 if src_off + copy_len <= data.len() && dst_off + copy_len <= resource.backing_size {
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::copy_nonoverlapping(
                             data.as_ptr().add(src_off),
@@ -740,6 +743,7 @@ impl VirtioGpuDevice {
                     }
 
                     // Read BGRA pixel from resource
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let (b, g, r, a) = unsafe {
                         let base = resource.backing_addr as *const u8;
                         (
@@ -772,6 +776,7 @@ impl VirtioGpuDevice {
     pub fn read_resource(&self, resource_id: u32) -> Option<&[u8]> {
         if let Some(resource) = self.resources.get(&resource_id) {
             if resource.backing_addr != 0 {
+                // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
                 unsafe {
                     return Some(core::slice::from_raw_parts(
                         resource.backing_addr as *const u8,
@@ -872,6 +877,7 @@ fn pci_config_read32(bus: u8, dev: u8, func: u8, offset: u8) -> u32 {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -894,6 +900,7 @@ pub fn init() {
 
         // Enable bus mastering + memory space
         let cmd = pci_config_read32(bus, dev, func, 0x04);
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             use crate::arch_compat::instructions::port::Port;

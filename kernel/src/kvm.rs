@@ -384,6 +384,7 @@ pub fn has_ept() -> bool {
         return false;
     }
     // Check VMX secondary proc-based controls for EPT
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let procbased2 = unsafe { rdmsr(MSR_IA32_VMX_PROCBASED_CTLS2) };
     (procbased2 >> 32) & (1 << 1) != 0 // EPT bit in allowed-1
 }
@@ -393,6 +394,7 @@ pub fn has_vpid() -> bool {
     if !has_vmx() {
         return false;
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let procbased2 = unsafe { rdmsr(MSR_IA32_VMX_PROCBASED_CTLS2) };
     (procbased2 >> 32) & (1 << 5) != 0
 }
@@ -402,6 +404,7 @@ pub fn has_unrestricted_guest() -> bool {
     if !has_vmx() {
         return false;
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let procbased2 = unsafe { rdmsr(MSR_IA32_VMX_PROCBASED_CTLS2) };
     (procbased2 >> 32) & (1 << 7) != 0
 }
@@ -621,6 +624,7 @@ pub fn init() {
         );
 
         // Check and enable VMX in IA32_FEATURE_CONTROL
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let feature_ctl = rdmsr(MSR_IA32_FEATURE_CONTROL);
             if feature_ctl & FEATURE_CONTROL_LOCKED == 0 {
@@ -641,6 +645,7 @@ pub fn init() {
         VMX_ENABLED.store(true, Ordering::Relaxed);
 
         // Read VMX basic info
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let vmx_basic = unsafe { rdmsr(MSR_IA32_VMX_BASIC) };
         let vmcs_revision = vmx_basic as u32;
         let vmcs_size = ((vmx_basic >> 32) & 0x1FFF) as u32;

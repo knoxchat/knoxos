@@ -344,6 +344,7 @@ pub fn init() {
 
 /// Initialize GPU hardware after MMIO mapping
 fn init_hardware(mmio: u64, generation: IntelGen) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // 1. Enable power wells (Gen9+)
         if generation as u8 >= IntelGen::Gen9 as u8 {
@@ -423,6 +424,7 @@ unsafe fn power_well_enable(mmio: u64) {
 
 /// Read EDID from the display via GMBUS I2C
 fn read_edid(mmio: u64) -> Option<EdidInfo> {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Select GMBUS port (analog = 2, HDMI-B = 5, etc.)
         // Try DDI ports in sequence
@@ -562,6 +564,7 @@ pub fn set_mode(mode: &DisplayMode) -> Result<(), &'static str> {
         return Err("i915 driver not ready");
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // 1. Disable pipe A
         let conf = mmio_read32(mmio, regs::PIPECONF_A);
@@ -681,9 +684,11 @@ pub fn set_backlight(percent: u32) {
     let guard = I915.lock();
     if let Some(dev) = guard.as_ref() {
         let mmio = dev.mmio_base;
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let max_val = unsafe { mmio_read32(mmio, regs::BLC_PWM_CTL) >> 16 };
         if max_val > 0 {
             let val = (max_val * percent.min(100)) / 100;
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 mmio_write32(mmio, regs::BLC_PWM_DATA, val);
             }
@@ -708,6 +713,7 @@ pub fn gtt_write(mmio: u64, entry_index: u32, phys_addr: u64) {
     // Format: bits 38:12 = physical address, bit 0 = valid
     let gtt_entry = (phys_addr & 0x7FFFFFF000) | 1; // valid bit
     let gtt_offset = 0x800000 + entry_index * 8; // Gen8+ uses 8-byte GTT entries
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe {
         let ptr = (mmio + gtt_offset as u64) as *mut u64;
         core::ptr::write_volatile(ptr, gtt_entry);
@@ -716,6 +722,7 @@ pub fn gtt_write(mmio: u64, entry_index: u32, phys_addr: u64) {
 
 /// Flush GTT TLB
 pub fn gtt_flush(mmio: u64) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         mmio_write32(mmio, regs::GFX_FLSH_CNTL, 1);
         mmio_read32(mmio, regs::GFX_FLSH_CNTL); // Read-back to ensure completion
@@ -728,6 +735,7 @@ pub fn gtt_flush(mmio: u64) {
 pub fn set_display_surface(phys_addr: u64) {
     let guard = I915.lock();
     if let Some(dev) = guard.as_ref() {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             mmio_write32(
                 dev.mmio_base,

@@ -154,6 +154,7 @@ impl DmaQueue {
         let bounce_phys = crate::vmm::allocate_contiguous_frames(bounce_pages)?;
         let vq_virt = crate::vmm::phys_to_virt(vq_phys);
         let bounce_virt = crate::vmm::phys_to_virt(bounce_phys);
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             core::ptr::write_bytes(vq_virt as *mut u8, 0, vq_pages * 4096);
             core::ptr::write_bytes(bounce_virt as *mut u8, 0, bounce_pages * 4096);
@@ -184,18 +185,22 @@ impl DmaQueue {
     }
 
     fn avail_idx_ptr(&self) -> *mut u16 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { self.avail_flags_ptr().add(1) }
     }
 
     fn avail_ring_entry(&self, i: u16) -> *mut u16 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { self.avail_flags_ptr().add(2 + i as usize) }
     }
 
     fn used_idx_ptr(&self) -> *const u16 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { ((self.vq_virt() + self.used_off as u64) as *const u16).add(1) }
     }
 
     fn used_ring_elem(&self, i: u16) -> *const VirtqUsedElem {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             let base = ((self.vq_virt() + self.used_off as u64) as *const u16).add(2)
                 as *const VirtqUsedElem;
@@ -213,22 +218,26 @@ impl DmaQueue {
 
     fn push_avail(&mut self, desc: u16) {
         let slot = self.avail_idx % self.size;
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             core::ptr::write_volatile(self.avail_ring_entry(slot), desc);
         }
         core::sync::atomic::fence(Ordering::Release);
         self.avail_idx = self.avail_idx.wrapping_add(1);
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             core::ptr::write_volatile(self.avail_idx_ptr(), self.avail_idx);
         }
     }
 
     fn pop_used(&mut self) -> Option<VirtqUsedElem> {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         let device_used = unsafe { core::ptr::read_volatile(self.used_idx_ptr()) };
         if device_used == self.used_idx {
             return None;
         }
         let slot = self.used_idx % self.size;
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         let elem = unsafe { core::ptr::read_volatile(self.used_ring_elem(slot)) };
         self.used_idx = self.used_idx.wrapping_add(1);
         Some(elem)
@@ -337,6 +346,7 @@ impl VirtioNetDevice {
 
     /// Initialize the virtio-net device (legacy PCI transport)
     pub fn init_legacy(&mut self) -> bool {
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             use crate::arch_compat::instructions::port::Port;
@@ -465,6 +475,7 @@ impl VirtioNetDevice {
     }
 
     fn notify_queue(&self, queue: u16) {
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             let mut sel: crate::arch_compat::instructions::port::Port<u16> =
                 crate::arch_compat::instructions::port::Port::new(
@@ -480,6 +491,7 @@ impl VirtioNetDevice {
     }
 
     fn ack_isr(&self) -> u8 {
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             let mut isr: crate::arch_compat::instructions::port::Port<u8> =
                 crate::arch_compat::instructions::port::Port::new(
@@ -507,6 +519,7 @@ impl VirtioNetDevice {
         }
 
         let bounce = self.tx_queue.bounce_virt_i(0) as *mut u8;
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::write_bytes(bounce, 0, VIRTIO_NET_HDR_SIZE);
             core::ptr::copy_nonoverlapping(
@@ -568,6 +581,7 @@ impl VirtioNetDevice {
                 let data_len = (n - VIRTIO_NET_HDR_SIZE).min(MAX_PACKET_SIZE);
                 let src = self.rx_queue.bounce_virt_i(id) as *const u8;
                 let mut packet = alloc::vec![0u8; data_len];
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         src.add(VIRTIO_NET_HDR_SIZE),
@@ -579,6 +593,7 @@ impl VirtioNetDevice {
                 self.rx_count += 1;
             }
 
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe {
                 core::ptr::write_volatile(
                     self.rx_queue.desc_ptr(id),
@@ -694,6 +709,7 @@ pub fn scan_pci_bus() -> Vec<PciDevice> {
     for bus in 0..=255u16 {
         for device in 0..32u8 {
             for func in 0..8u8 {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     let vendor_id = pci_config_read16(bus as u8, device, func, 0x00);
                     if vendor_id == 0xFFFF {
@@ -759,6 +775,7 @@ pub fn find_virtio_net() -> Option<PciDevice> {
 
         // Check for virtio vendor ID with network device
         if dev.vendor_id == VIRTIO_PCI_VENDOR {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let subsystem = unsafe { pci_config_read16(dev.bus, dev.device, dev.function, 0x2E) };
             // Subsystem device ID 1 = network
             if dev.device_id >= 0x1000 && dev.device_id <= 0x103F && subsystem == 1 {
@@ -1146,6 +1163,7 @@ pub fn init() {
         let io_base = (pci_dev.bar0 & 0xFFFC) as u16; // I/O port base (low bits are flags)
 
         // Enable I/O access and bus mastering
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let cmd = pci_config_read16(pci_dev.bus, pci_dev.device, pci_dev.function, PCI_COMMAND);
             let new_cmd = cmd | PCI_COMMAND_IO | PCI_COMMAND_BUS_MASTER;

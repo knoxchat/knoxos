@@ -8,6 +8,7 @@ pub(super) fn run_gate_ac3() {
     let Some(pid) = spawn_or_log(&elf, "getuid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -21,6 +22,7 @@ pub(super) fn run_gate_ad3() {
     let Some(pid) = spawn_or_log(&elf, "getgid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -34,6 +36,7 @@ pub(super) fn run_gate_ae3() {
     let Some(pid) = spawn_or_log(&elf, "geteuid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -47,6 +50,7 @@ pub(super) fn run_gate_af3() {
     let Some(pid) = spawn_or_log(&elf, "getegid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -60,6 +64,7 @@ pub(super) fn run_gate_ag3() {
     let Some(pid) = spawn_or_log(&elf, "getppid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -73,6 +78,7 @@ pub(super) fn run_gate_ah3() {
     let Some(pid) = spawn_or_log(&elf, "getpgid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -86,6 +92,7 @@ pub(super) fn run_gate_ai3() {
     let Some(pid) = spawn_or_log(&elf, "getsid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -99,6 +106,7 @@ pub(super) fn run_gate_aj3() {
     let Some(pid) = spawn_or_log(&elf, "setuid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -112,6 +120,7 @@ pub(super) fn run_gate_ak3() {
     let Some(pid) = spawn_or_log(&elf, "setgid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -125,6 +134,7 @@ pub(super) fn run_gate_al3() {
     let Some(pid) = spawn_or_log(&elf, "setresuid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -138,6 +148,7 @@ pub(super) fn run_gate_am3() {
     let Some(pid) = spawn_or_log(&elf, "setresgid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -151,6 +162,7 @@ pub(super) fn run_gate_an2() {
     let Some(pid) = spawn_or_log(&elf, "setreuid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -164,6 +176,7 @@ pub(super) fn run_gate_an3() {
     let Some(pid) = spawn_or_log(&elf, "getgroups-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -177,6 +190,7 @@ pub(super) fn run_gate_ao2() {
     let Some(pid) = spawn_or_log(&elf, "setregid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -190,6 +204,7 @@ pub(super) fn run_gate_ao3() {
     let Some(pid) = spawn_or_log(&elf, "getresuid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -203,6 +218,7 @@ pub(super) fn run_gate_ap2() {
     let Some(pid) = spawn_or_log(&elf, "getresgid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -216,6 +232,7 @@ pub(super) fn run_gate_ap3() {
     let Some(pid) = spawn_or_log(&elf, "setpgid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -229,6 +246,7 @@ pub(super) fn run_gate_aq2() {
     let Some(pid) = spawn_or_log(&elf, "setsid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -242,6 +260,7 @@ pub(super) fn run_gate_aq3() {
     let Some(pid) = spawn_or_log(&elf, "setpriority-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -255,6 +274,7 @@ pub(super) fn run_gate_ar2() {
     let Some(pid) = spawn_or_log(&elf, "getrusage-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -268,6 +288,7 @@ pub(super) fn run_gate_ar3() {
     let Some(pid) = spawn_or_log(&elf, "clock-gettime-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -281,6 +302,7 @@ pub(super) fn run_gate_as2() {
     let Some(pid) = spawn_or_log(&elf, "clock-getres-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -294,6 +316,7 @@ pub(super) fn run_gate_as3() {
     let Some(pid) = spawn_or_log(&elf, "times-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -307,6 +330,7 @@ pub(super) fn run_gate_at2() {
     let Some(pid) = spawn_or_log(&elf, "gettimeofday-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -320,6 +344,7 @@ pub(super) fn run_gate_at3() {
     let Some(pid) = spawn_or_log(&elf, "sysinfo-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -333,6 +358,7 @@ pub(super) fn run_gate_au2() {
     let Some(pid) = spawn_or_log(&elf, "sched-yield-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -346,6 +372,7 @@ pub(super) fn run_gate_au3() {
     let Some(pid) = spawn_or_log(&elf, "alarm-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -359,6 +386,7 @@ pub(super) fn run_gate_av2() {
     let Some(pid) = spawn_or_log(&elf, "getpid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -372,6 +400,7 @@ pub(super) fn run_gate_av3() {
     let Some(pid) = spawn_or_log(&elf, "gettid-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -385,6 +414,7 @@ pub(super) fn run_gate_aw2() {
     let Some(pid) = spawn_or_log(&elf, "getsched-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -398,6 +428,7 @@ pub(super) fn run_gate_aw3() {
     let Some(pid) = spawn_or_log(&elf, "getparam-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -411,6 +442,7 @@ pub(super) fn run_gate_ax2() {
     let Some(pid) = spawn_or_log(&elf, "prio-max-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -424,6 +456,7 @@ pub(super) fn run_gate_ax3() {
     let Some(pid) = spawn_or_log(&elf, "prio-min-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -437,6 +470,7 @@ pub(super) fn run_gate_ay2() {
     let Some(pid) = spawn_or_log(&elf, "rr-interval-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -450,6 +484,7 @@ pub(super) fn run_gate_ay3() {
     let Some(pid) = spawn_or_log(&elf, "getcpu-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -463,6 +498,7 @@ pub(super) fn run_gate_az2() {
     let Some(pid) = spawn_or_log(&elf, "set-robust-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -476,6 +512,7 @@ pub(super) fn run_gate_az3() {
     let Some(pid) = spawn_or_log(&elf, "get-robust-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -489,6 +526,7 @@ pub(super) fn run_gate_ba2() {
     let Some(pid) = spawn_or_log(&elf, "personality-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -502,6 +540,7 @@ pub(super) fn run_gate_ba3() {
     let Some(pid) = spawn_or_log(&elf, "nanosleep-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -515,6 +554,7 @@ pub(super) fn run_gate_bb2() {
     let Some(pid) = spawn_or_log(&elf, "capget-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -528,6 +568,7 @@ pub(super) fn run_gate_bb3() {
     let Some(pid) = spawn_or_log(&elf, "ioprio-get-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -541,6 +582,7 @@ pub(super) fn run_gate_bc2() {
     let Some(pid) = spawn_or_log(&elf, "capset-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -554,6 +596,7 @@ pub(super) fn run_gate_bc3() {
     let Some(pid) = spawn_or_log(&elf, "ioprio-set-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -567,6 +610,7 @@ pub(super) fn run_gate_bd2() {
     let Some(pid) = spawn_or_log(&elf, "clock-nanosleep-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -580,6 +624,7 @@ pub(super) fn run_gate_bd3() {
     let Some(pid) = spawn_or_log(&elf, "getitimer-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -593,6 +638,7 @@ pub(super) fn run_gate_be2() {
     let Some(pid) = spawn_or_log(&elf, "setitimer-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }
@@ -606,6 +652,7 @@ pub(super) fn run_gate_be3() {
     let Some(pid) = spawn_or_log(&elf, "timer-gettime-demo") else {
         return;
     };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
     unsafe {
         run_until_desktop(pid);
     }

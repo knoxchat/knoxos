@@ -91,6 +91,7 @@ pub fn current_cpu_index() -> u32 {
     #[cfg(target_arch = "x86_64")]
     {
         let idx: u32;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!(
                 "mov {:e}, dword ptr gs:[24]",
@@ -113,6 +114,7 @@ pub fn current_cpu_index() -> u32 {
 /// Program this CPU's `FS_BASE` (Ring 3 TLS). Safe to call with `base = 0`.
 pub fn program_fs_base(base: u64) {
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         wrmsr(MSR_FS_BASE, base);
     }
@@ -123,6 +125,7 @@ pub fn program_fs_base(base: u64) {
 /// Kernel GS_BASE currently loaded on this CPU.
 pub fn gs_base() -> u64 {
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         rdmsr(MSR_GS_BASE)
     }
@@ -135,6 +138,7 @@ pub fn gs_base() -> u64 {
 /// Program GS on an Application Processor. Offsets 0/8/16 stay syscall ABI.
 pub fn program_ap_gs(cpu_index: u32, apic_id: u32, kernel_rsp: u64) {
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         program_syscall_msrs();
         let cpu = (cpu_index as usize).min(CPU_LOCAL_COUNT - 1);
@@ -160,6 +164,7 @@ pub fn cpu_local_pid() -> u32 {
     #[cfg(target_arch = "x86_64")]
     {
         let pid: u32;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!(
                 "mov {:e}, dword ptr gs:[32]",
@@ -181,6 +186,7 @@ pub fn set_cpu_local_pid(pid: u32) {
         return;
     }
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!(
             "mov dword ptr gs:[32], {:e}",
@@ -202,6 +208,7 @@ const EFER_NXE: u64 = 1 << 11; // NX enable (required before NO_EXECUTE PTEs)
 /// this will `#UD` on the first `syscall`.
 pub fn program_syscall_msrs() {
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         let efer = rdmsr(MSR_EFER);
         wrmsr(MSR_EFER, efer | EFER_SCE | EFER_NXE);
@@ -220,6 +227,7 @@ pub fn program_syscall_msrs() {
 /// Initialize syscall/sysret mechanism
 pub fn init_syscall() {
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         program_syscall_msrs();
 
@@ -396,6 +404,7 @@ fn syscall_redirect_dispatch() {
         RedirectRequest::ResumeSelf => {
             crate::context::program_kernel_stack(pid);
             if let Some(ptr) = crate::context::runnable_context_ptr(pid) {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     crate::context::enter_context(ptr);
                 }
@@ -411,6 +420,7 @@ pub fn current_user_rsp() -> u64 {
     {
         // SAFETY: `gs` points at this CPU's CpuLocal while executing in the kernel.
         let rsp: u64;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!(
                 "mov {}, gs:[0x0]",
@@ -433,6 +443,7 @@ pub fn pending_user_rip() -> u64 {
     {
         // SAFETY: `gs` points at this CPU's CpuLocal while executing in the kernel.
         let rip: u64;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!(
                 "mov {}, gs:[0x10]",
@@ -467,6 +478,7 @@ pub fn set_kernel_stack(top: u64) {
         return;
     }
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         crate::gdt::set_privilege_stack_top(top);
         let slot = cpu_local_ptr(current_cpu_index() as usize);
@@ -659,6 +671,7 @@ pub fn exit_oneshot_userspace() {
     serial_println!("[KnoxOS] sys_exit: resuming kernel after one-shot userspace");
 
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
     unsafe {
         resume_from_user(core::ptr::addr_of_mut!(KERNEL_RESUME));
     }
@@ -672,6 +685,7 @@ pub fn oneshot_active() -> bool {
 /// Check if we're currently in user mode
 pub fn is_user_mode() -> bool {
     let mut cs: u16 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(

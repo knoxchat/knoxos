@@ -61,7 +61,9 @@ impl<T> TicketLock<T> {
     }
 }
 
+// SAFETY: the lock serializes access; T: Send is enough for both Send and Sync.
 unsafe impl<T: Send> Send for TicketLock<T> {}
+// SAFETY: the lock serializes access; T: Send is enough for both Send and Sync.
 unsafe impl<T: Send> Sync for TicketLock<T> {}
 
 pub struct TicketLockGuard<'a, T> {
@@ -136,7 +138,9 @@ impl<T> RwSpinLock<T> {
     }
 }
 
+// SAFETY: the reader/writer lock serializes mutation; T: Send may move across CPUs.
 unsafe impl<T: Send> Send for RwSpinLock<T> {}
+// SAFETY: shared readers require T: Sync; the lock excludes writers.
 unsafe impl<T: Send + Sync> Sync for RwSpinLock<T> {}
 
 pub struct RwReadGuard<'a, T> {
@@ -146,6 +150,7 @@ pub struct RwReadGuard<'a, T> {
 impl<'a, T> core::ops::Deref for RwReadGuard<'a, T> {
     type Target = T;
     fn deref(&self) -> &T {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { &*self.lock.data.get() }
     }
 }
@@ -163,12 +168,14 @@ pub struct RwWriteGuard<'a, T> {
 impl<'a, T> core::ops::Deref for RwWriteGuard<'a, T> {
     type Target = T;
     fn deref(&self) -> &T {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { &*self.lock.data.get() }
     }
 }
 
 impl<'a, T> core::ops::DerefMut for RwWriteGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut T {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { &mut *self.lock.data.get() }
     }
 }

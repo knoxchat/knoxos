@@ -57,6 +57,7 @@ fn rdrand64() -> Option<u64> {
     }
     let mut val: u64 = 0;
     let mut ok: u8 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
@@ -76,6 +77,7 @@ fn rdseed64() -> Option<u64> {
     }
     let mut val: u64 = 0;
     let mut ok: u8 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
@@ -124,6 +126,7 @@ pub extern "C" fn __stack_chk_fail() -> ! {
 
     // Get return address (approximate caller)
     let mut rip: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("lea {}, [rip]", out(reg) rip);
@@ -182,6 +185,7 @@ pub fn enable_nx() {
         serial_println!("[SSP] NX/XD not supported by CPU");
         return;
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let efer = crate::arch_compat::registers::model_specific::Efer::read_raw();
         if efer & (1 << 11) == 0 {
@@ -202,6 +206,7 @@ pub fn init() {
     STACK_CANARY.store(canary, Ordering::SeqCst);
 
     // Update the compiler-referenced symbol
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         __stack_chk_guard = canary;
     }

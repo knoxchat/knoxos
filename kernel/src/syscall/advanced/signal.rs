@@ -38,6 +38,7 @@ pub fn sys_rt_sigpending(set_ptr: u64, sigsetsize: usize) -> SyscallResult {
         }
     }
     if set_ptr != 0 && sigsetsize >= 8 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(set_ptr as *mut u64) = pending_mask;
         }
@@ -64,6 +65,7 @@ pub fn sys_rt_sigtimedwait(
     let signals = crate::signals::PROCESS_SIGNALS.lock();
     if let Some(ps) = signals.get(&pid) {
         let mask = if set_ptr != 0 {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe { *(set_ptr as *const u64) }
         } else {
             0

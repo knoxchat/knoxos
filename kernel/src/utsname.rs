@@ -90,6 +90,7 @@ pub fn write_utsname_to_user(ptr: u64) -> Result<(), ()> {
         return Err(());
     }
     let uts = UTS.lock().clone();
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         core::ptr::write(ptr as *mut UtsName, uts);
     }

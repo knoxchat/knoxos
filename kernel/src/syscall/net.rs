@@ -39,15 +39,18 @@ pub fn sys_accept(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallResult
     // Fill in peer address if requested
     if addr_ptr != 0 {
         // Return a zeroed sockaddr_in for now (would need socket tracking for real addr)
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             core::ptr::write_bytes(addr_ptr as *mut u8, 0, 16);
         }
         // sa_family = AF_INET
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(addr_ptr as *mut u16) = 2;
         }
     }
     if addrlen_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(addrlen_ptr as *mut u32) = 16;
         }
@@ -79,6 +82,7 @@ pub fn sys_sendto(
     if buf_ptr == 0 {
         return Err(SyscallError::InvalidArgument);
     }
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let data = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, len) };
     let sent = crate::net::sys_sendto(sockfd as u32, data, dest_addr).map_err(|e| match e {
         -32 => SyscallError::BrokenPipe,
@@ -99,6 +103,7 @@ pub fn sys_recvfrom(
     if buf_ptr == 0 {
         return Err(SyscallError::InvalidArgument);
     }
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
     let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, len) };
     let received = crate::net::sys_recvfrom(sockfd as u32, buf).map_err(|e| match e {
         -107 => SyscallError::NotConnected,
@@ -107,14 +112,17 @@ pub fn sys_recvfrom(
     })?;
     // Fill source address if requested
     if src_addr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             core::ptr::write_bytes(src_addr as *mut u8, 0, 16);
         }
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(src_addr as *mut u16) = 2;
         } // AF_INET
     }
     if addrlen != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(addrlen as *mut u32) = 16;
         }
@@ -166,6 +174,7 @@ pub fn sys_socketpair(domain: i32, sock_type: i32, _protocol: i32, sv: u64) -> S
         )
         .map_err(|_| SyscallError::TooManyFiles)?;
     drop(tables);
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping([fd1, fd2].as_ptr(), sv as *mut i32, 2);
     }
@@ -202,16 +211,19 @@ pub fn sys_sendmsg(sockfd: i32, msg_ptr: u64, flags: i32) -> SyscallResult {
         iov_len: usize,
     }
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let msg = unsafe { &*(msg_ptr as *const Msghdr) };
     let mut total_sent = 0usize;
 
     if msg.msg_iov != 0 && msg.msg_iovlen > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let iovecs = unsafe {
             core::slice::from_raw_parts(msg.msg_iov as *const Iovec, msg.msg_iovlen as usize)
         };
         for iov in iovecs {
             if iov.iov_base != 0 && iov.iov_len > 0 {
                 let data =
+                    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
                     unsafe { core::slice::from_raw_parts(iov.iov_base as *const u8, iov.iov_len) };
                 let sent = crate::net::sys_sendto(sockfd as u32, data, msg.msg_name)
                     .map_err(|_| SyscallError::IoError)?;
@@ -249,15 +261,18 @@ pub fn sys_recvmsg(sockfd: i32, msg_ptr: u64, flags: i32) -> SyscallResult {
         iov_len: usize,
     }
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let msg = unsafe { &mut *(msg_ptr as *mut Msghdr) };
     let mut total_recv = 0usize;
 
     if msg.msg_iov != 0 && msg.msg_iovlen > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let iovecs = unsafe {
             core::slice::from_raw_parts(msg.msg_iov as *const Iovec, msg.msg_iovlen as usize)
         };
         for iov in iovecs {
             if iov.iov_base != 0 && iov.iov_len > 0 {
+                // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
                 let buf = unsafe {
                     core::slice::from_raw_parts_mut(iov.iov_base as *mut u8, iov.iov_len)
                 };

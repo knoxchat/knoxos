@@ -9,6 +9,7 @@ use super::types::{SystemState, TripType};
 /// Get CPU temperature (millidegrees Celsius)
 pub fn get_cpu_temp() -> i32 {
     // Try reading from MSR IA32_THERM_STATUS (0x19C)
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     let temp = unsafe {
         let mut lo: u32 = 0;
         let mut _hi: u32 = 0;

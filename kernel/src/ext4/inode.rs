@@ -65,6 +65,7 @@ impl Ext4Fs {
             _padding: [0; 96],
         };
         let copy_len = inode_bytes.len().min(core::mem::size_of::<Ext4Inode>());
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 inode_bytes.as_ptr(),
@@ -116,6 +117,7 @@ impl Ext4Fs {
 
         // Copy inode data into the block
         let copy_len = core::mem::size_of::<Ext4Inode>().min(self.inode_size as usize);
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 inode as *const Ext4Inode as *const u8,

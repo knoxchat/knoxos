@@ -52,6 +52,7 @@ impl AddressSpace {
         let cr3 = allocate_page_table_frame()?;
 
         // Copy kernel mappings from the current (kernel) page table to the new one
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { clone_kernel_mappings(cr3) };
 
         // Use ASLR-randomized layout
@@ -141,6 +142,7 @@ impl AddressSpace {
                 let page_addr = vaddr + i * PAGE_SIZE;
                 if let Some(frame_phys) = allocate_physical_frame() {
                     self.owned_frames.push(frame_phys);
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         map_page_in_table(self.cr3, page_addr, frame_phys, prot.to_page_flags());
                         // Zero the page
@@ -198,6 +200,7 @@ impl AddressSpace {
             let pages = page_align_up(size) / PAGE_SIZE;
             for i in 0..pages {
                 let page_addr = vaddr + i * PAGE_SIZE;
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 if let Some(frame) = unsafe { get_mapped_frame(self.cr3, page_addr) } {
                     fill_file_backed_page(path, offset + i * PAGE_SIZE, frame);
                 }
@@ -229,6 +232,7 @@ impl AddressSpace {
 
                 for i in 0..pages {
                     let page_addr = unmap_start + i * PAGE_SIZE;
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe { unmap_page_in_table(self.cr3, page_addr) };
                 }
 
@@ -273,6 +277,7 @@ impl AddressSpace {
                 let pages = size / PAGE_SIZE;
                 for i in 0..pages {
                     let page_addr = addr + i * PAGE_SIZE;
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         update_page_flags_in_table(self.cr3, page_addr, prot.to_page_flags());
                     }
@@ -304,6 +309,7 @@ impl AddressSpace {
                 let page_addr = old_end + i * PAGE_SIZE;
                 if let Some(frame) = allocate_physical_frame() {
                     self.owned_frames.push(frame);
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         map_page_in_table(
                             self.cr3,
@@ -328,6 +334,7 @@ impl AddressSpace {
 
             for i in 0..pages {
                 let page_addr = new_end + i * PAGE_SIZE;
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe { unmap_page_in_table(self.cr3, page_addr) };
             }
         }
@@ -368,6 +375,7 @@ impl AddressSpace {
             let page_addr = stack_start + i * PAGE_SIZE;
             let frame = allocate_physical_frame()?;
             self.owned_frames.push(frame);
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 map_page_in_table(
                     self.cr3,
@@ -426,12 +434,14 @@ impl AddressSpace {
                 let page_addr = vma.start + i * PAGE_SIZE;
 
                 // Get the physical frame from parent's page table
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 if let Some(phys_frame) = unsafe { get_mapped_frame(self.cr3, page_addr) } {
                     // CoW: share the frame, writable removed, execute preserved.
                     // Forcing NO_EXECUTE here made the parent's text page NX, so
                     // `sysretq` from fork #PF'd on the next instruction fetch.
                     let mut cow_flags = vma.prot.to_page_flags();
                     cow_flags.remove(PageTableFlags::WRITABLE);
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         map_page_in_table(child.cr3, page_addr, phys_frame, cow_flags);
                         update_page_flags_in_table(self.cr3, page_addr, cow_flags);
@@ -448,6 +458,7 @@ impl AddressSpace {
         // Flush TLB only if this address space is on the CPU. A self-test
         // fork of a detached space must not `mov cr3` onto tables that Drop
         // will free (that left the kernel running on a recycled L4).
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             {
@@ -472,6 +483,7 @@ impl AddressSpace {
                 self.owned_frames.push(new_frame);
 
                 // Copy data from original frame to new frame
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     copy_physical_frame(original_frame, new_frame);
                 }
@@ -486,6 +498,7 @@ impl AddressSpace {
                 };
 
                 // Remap with write permission
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     unmap_page_in_table(self.cr3, page_addr);
                     map_page_in_table(self.cr3, page_addr, new_frame, flags);
@@ -518,6 +531,7 @@ impl AddressSpace {
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE
         };
         self.owned_frames.push(frame);
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             copy_to_physical_frame(frame, &data);
             map_page_in_table(self.cr3, page_addr, frame, flags);
@@ -563,6 +577,7 @@ impl AddressSpace {
         }
 
         // Check if there's already a physical frame mapped
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let already_mapped = unsafe { get_mapped_frame(self.cr3, page_addr).is_some() };
         if already_mapped {
             return false; // Page is present — fault is something else
@@ -571,6 +586,7 @@ impl AddressSpace {
         // Allocate a new zeroed frame and map it
         if let Some(frame) = allocate_physical_frame() {
             self.owned_frames.push(frame);
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 map_page_in_table(self.cr3, page_addr, frame, prot_flags);
                 zero_physical_frame(frame);
@@ -808,6 +824,7 @@ pub fn replace_address_space(pid: Pid) -> bool {
         return false;
     };
     let new_cr3 = new_as.cr3;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         activate_cr3(new_cr3);
     }
@@ -1042,6 +1059,7 @@ pub fn swap_out_page(pid: Pid, vaddr: u64) -> bool {
         let Some(addr_space) = spaces.get(&pid) else {
             return false;
         };
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { get_mapped_frame(addr_space.cr3, page) }
     };
     let Some(phys) = phys else {
@@ -1057,6 +1075,7 @@ pub fn swap_out_page(pid: Pid, vaddr: u64) -> bool {
             return false;
         };
         if let Some(addr_space) = spaces.get_mut(&pid) {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 unmap_page_in_table(addr_space.cr3, page);
             }

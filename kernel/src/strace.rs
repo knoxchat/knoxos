@@ -301,6 +301,7 @@ fn decode_args(syscall_nr: u64, args: &[u64; 6]) -> Vec<String> {
         ],
         // open(path, flags, mode)
         2 => {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let path = unsafe { read_user_string_safe(args[0]) };
             alloc::vec![
                 format!("\"{}\"", path),

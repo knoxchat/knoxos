@@ -11,6 +11,7 @@ use super::state::{IOAPIC_GSI_BASE, IOAPIC_PHYS, PHYS_OFFSET};
 /// Disable the legacy 8259 PIC by masking all IRQ lines.
 /// Called after I/O APIC is configured to take over interrupt routing.
 pub fn disable_legacy_pic() {
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -47,6 +48,7 @@ unsafe fn ioapic_write(reg: u32, value: u32) {
 
 /// Set up an I/O APIC redirection entry
 pub fn ioapic_route_irq(irq: u8, vector: u8, dest_apic_id: u8) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let reg_lo = IOAPIC_RED_TABLE_BASE + (irq as u32) * 2;
         let reg_hi = reg_lo + 1;
@@ -63,6 +65,7 @@ pub fn ioapic_route_irq(irq: u8, vector: u8, dest_apic_id: u8) {
 
 /// Initialize the I/O APIC
 pub fn init_ioapic() {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let version = ioapic_read(IOAPIC_REG_VERSION);
         let max_redir = ((version >> 16) & 0xFF) as u8;
@@ -139,6 +142,7 @@ pub fn apply_madt_ioapic() {
         );
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let version = ioapic_read(IOAPIC_REG_VERSION);
         let max_redir = ((version >> 16) & 0xFF) as u8;

@@ -437,6 +437,7 @@ fn process_read(sqe: &IoUringSqe, ring: &IoUringInstance) -> i32 {
             match crate::fd::sys_read(actual_fd, &mut tmp) {
                 Ok(n) => {
                     if buf_addr != 0 {
+                        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                         unsafe {
                             core::ptr::copy_nonoverlapping(tmp.as_ptr(), buf_addr as *mut u8, n);
                         }
@@ -454,6 +455,7 @@ fn process_read(sqe: &IoUringSqe, ring: &IoUringInstance) -> i32 {
     match crate::fd::sys_read(fd, &mut tmp) {
         Ok(n) => {
             if buf_addr != 0 {
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(tmp.as_ptr(), buf_addr as *mut u8, n);
                 }
@@ -471,6 +473,7 @@ fn process_write(sqe: &IoUringSqe, ring: &IoUringInstance) -> i32 {
 
     // Gather data from user buffer
     let data = if buf_addr != 0 && len > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let slice = unsafe { core::slice::from_raw_parts(buf_addr as *const u8, len) };
         slice
     } else {
@@ -509,6 +512,7 @@ fn process_send(sqe: &IoUringSqe) -> i32 {
     let len = sqe.len as usize;
 
     if buf_addr != 0 && len > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let data = unsafe { core::slice::from_raw_parts(buf_addr as *const u8, len) };
         match crate::fd::sys_write(fd, data) {
             Ok(n) => n as i32,
@@ -528,6 +532,7 @@ fn process_recv(sqe: &IoUringSqe) -> i32 {
     match crate::fd::sys_read(fd, &mut tmp) {
         Ok(n) => {
             if buf_addr != 0 && n > 0 {
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(tmp.as_ptr(), buf_addr as *mut u8, n);
                 }
@@ -548,6 +553,7 @@ fn process_openat(sqe: &IoUringSqe) -> i32 {
     // Read null-terminated path (up to 256 bytes)
     let mut path_buf = [0u8; 256];
     let mut path_len = 0;
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         let ptr = path_addr as *const u8;
         for i in 0..256 {

@@ -10,11 +10,14 @@ pub fn sys_setxattr(
     size: usize,
     flags: i32,
 ) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let path = crate::process::translate_path(pid, &path);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let value = if size > 0 && value_ptr != 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         unsafe { core::slice::from_raw_parts(value_ptr as *const u8, size) }
     } else {
         &[]
@@ -29,9 +32,11 @@ pub fn sys_setxattr(
 }
 
 pub fn sys_getxattr(path_ptr: u64, name_ptr: u64, value_ptr: u64, size: usize) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let path = crate::process::translate_path(pid, &path);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let vfs = crate::vfs::VFS.lock();
     let ino = vfs.resolve_path(&path).ok_or(SyscallError::FileNotFound)?;
@@ -47,6 +52,7 @@ pub fn sys_getxattr(path_ptr: u64, name_ptr: u64, value_ptr: u64, size: usize) -
         match crate::xattr::getxattr(ino, &name, &mut tmp) {
             Ok(n) => {
                 let n = n.min(tmp.len());
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(tmp.as_ptr(), value_ptr as *mut u8, n);
                 }
@@ -59,6 +65,7 @@ pub fn sys_getxattr(path_ptr: u64, name_ptr: u64, value_ptr: u64, size: usize) -
 }
 
 pub fn sys_listxattr(path_ptr: u64, list_ptr: u64, size: usize) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let path = crate::process::translate_path(pid, &path);
@@ -76,6 +83,7 @@ pub fn sys_listxattr(path_ptr: u64, list_ptr: u64, size: usize) -> SyscallResult
             Ok(n) => {
                 let n = n.min(tmp.len());
                 if list_ptr != 0 && n > 0 {
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::copy_nonoverlapping(tmp.as_ptr(), list_ptr as *mut u8, n);
                     }
@@ -89,9 +97,11 @@ pub fn sys_listxattr(path_ptr: u64, list_ptr: u64, size: usize) -> SyscallResult
 }
 
 pub fn sys_removexattr(path_ptr: u64, name_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let path = crate::process::translate_path(pid, &path);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let vfs = crate::vfs::VFS.lock();
     let ino = vfs.resolve_path(&path).ok_or(SyscallError::FileNotFound)?;
@@ -126,8 +136,10 @@ pub fn sys_fsetxattr(
     flags: i32,
 ) -> SyscallResult {
     let ino = inode_for_fd(fd)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let value = if size > 0 && value_ptr != 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         unsafe { core::slice::from_raw_parts(value_ptr as *const u8, size) }
     } else {
         &[]
@@ -140,6 +152,7 @@ pub fn sys_fsetxattr(
 pub fn sys_fgetxattr(fd: i32, name_ptr: u64, value_ptr: u64, size: usize) -> SyscallResult {
     let ino = inode_for_fd(fd)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     if size == 0 {
         let mut tmp = [0u8; 4096];
@@ -152,6 +165,7 @@ pub fn sys_fgetxattr(fd: i32, name_ptr: u64, value_ptr: u64, size: usize) -> Sys
             Ok(n) => {
                 let n = n.min(tmp.len());
                 if value_ptr != 0 && n > 0 {
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::copy_nonoverlapping(tmp.as_ptr(), value_ptr as *mut u8, n);
                     }
@@ -178,6 +192,7 @@ pub fn sys_flistxattr(fd: i32, list_ptr: u64, size: usize) -> SyscallResult {
             Ok(n) => {
                 let n = n.min(tmp.len());
                 if list_ptr != 0 && n > 0 {
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::copy_nonoverlapping(tmp.as_ptr(), list_ptr as *mut u8, n);
                     }
@@ -192,6 +207,7 @@ pub fn sys_flistxattr(fd: i32, list_ptr: u64, size: usize) -> SyscallResult {
 
 pub fn sys_fremovexattr(fd: i32, name_ptr: u64) -> SyscallResult {
     let ino = inode_for_fd(fd)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     crate::xattr::removexattr(ino, &name)
         .map(|_| 0u64)

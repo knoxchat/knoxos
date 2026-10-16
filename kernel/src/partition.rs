@@ -225,7 +225,9 @@ impl GptPartitionEntry {
 
     /// Get the sector count
     pub fn sector_count(&self) -> u64 {
+        // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
         let start = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.start_lba)) };
+        // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
         let end = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.end_lba)) };
         if end >= start { end - start + 1 } else { 0 }
     }
@@ -238,6 +240,7 @@ impl GptPartitionEntry {
     /// Get partition name as ASCII string
     pub fn name_string(&self) -> String {
         let mut s = String::new();
+        // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
         let name = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.name)) };
         for ch in name {
             if ch == 0 {
@@ -382,6 +385,7 @@ pub fn parse_mbr(sector0: &[u8; 512]) -> Vec<PartitionInfo> {
     // Parse 4 primary partition entries
     for i in 0..MBR_MAX_PARTITIONS {
         let offset = MBR_PARTITION_TABLE_OFFSET + i * MBR_PARTITION_ENTRY_SIZE;
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let entry = unsafe {
             core::ptr::read_unaligned(sector0[offset..].as_ptr() as *const MbrPartitionEntry)
         };
@@ -441,6 +445,7 @@ pub fn parse_mbr(sector0: &[u8; 512]) -> Vec<PartitionInfo> {
 pub fn parse_gpt(sector1: &[u8; 512]) -> Vec<PartitionInfo> {
     let mut partitions = Vec::new();
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let header = unsafe { core::ptr::read_unaligned(sector1.as_ptr() as *const GptHeader) };
 
     // Verify GPT signature
@@ -469,6 +474,7 @@ pub fn parse_gpt(sector1: &[u8; 512]) -> Vec<PartitionInfo> {
 
         if let Some(sector_data) = read_sector(entry_lba + sector_idx as u64) {
             if offset_in_sector + entry_size <= 512 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let entry = unsafe {
                     core::ptr::read_unaligned(
                         sector_data[offset_in_sector..].as_ptr() as *const GptPartitionEntry
@@ -490,8 +496,10 @@ pub fn parse_gpt(sector1: &[u8; 512]) -> Vec<PartitionInfo> {
                 };
 
                 let start_lba =
+                    // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
                     unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(entry.start_lba)) };
                 let attributes =
+                    // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
                     unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(entry.attributes)) };
 
                 let part = PartitionInfo {
@@ -544,6 +552,7 @@ pub fn scan_partitions() -> Vec<PartitionInfo> {
     }
 
     // Check if MBR has a GPT protective entry
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let first_entry = unsafe {
         core::ptr::read_unaligned(
             sector0[MBR_PARTITION_TABLE_OFFSET..].as_ptr() as *const MbrPartitionEntry

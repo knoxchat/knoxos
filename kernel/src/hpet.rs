@@ -105,6 +105,7 @@ pub fn read_capabilities() -> Option<HpetCapabilities> {
         return None;
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let caps = unsafe { hpet_read(HPET_GENERAL_CAPABILITIES) };
     let period = (caps >> 32) as u32;
 
@@ -125,6 +126,7 @@ pub fn read_timer_config(timer_index: u8) -> Option<HpetTimer> {
     }
 
     let offset = HPET_TIMER_CONFIG_BASE + (timer_index as usize) * HPET_TIMER_STRIDE;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let config = unsafe { hpet_read(offset) };
 
     Some(HpetTimer {
@@ -145,6 +147,7 @@ pub fn enable_counter() {
         return;
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let config = hpet_read(HPET_GENERAL_CONFIG);
         hpet_write(HPET_GENERAL_CONFIG, config | HPET_ENABLE_CNF);
@@ -159,6 +162,7 @@ pub fn disable_counter() {
         return;
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let config = hpet_read(HPET_GENERAL_CONFIG);
         hpet_write(HPET_GENERAL_CONFIG, config & !HPET_ENABLE_CNF);
@@ -171,6 +175,7 @@ pub fn enable_legacy_mode() {
         return;
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let config = hpet_read(HPET_GENERAL_CONFIG);
         hpet_write(HPET_GENERAL_CONFIG, config | HPET_LEG_RT_CNF);
@@ -185,6 +190,7 @@ pub fn read_counter() -> u64 {
         return 0;
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { hpet_read(HPET_MAIN_COUNTER) }
 }
 
@@ -194,6 +200,7 @@ pub fn reset_counter() {
         return;
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Must disable counter before writing
         let config = hpet_read(HPET_GENERAL_CONFIG);
@@ -212,6 +219,7 @@ pub fn configure_timer(timer_index: u8, mode: TimerMode, comparator_value: u64, 
     let config_offset = HPET_TIMER_CONFIG_BASE + (timer_index as usize) * HPET_TIMER_STRIDE;
     let comparator_offset = HPET_TIMER_COMPARATOR_BASE + (timer_index as usize) * HPET_TIMER_STRIDE;
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let mut config = hpet_read(config_offset);
 
@@ -283,6 +291,7 @@ pub fn disable_timer(timer_index: u8) {
 
     let config_offset = HPET_TIMER_CONFIG_BASE + (timer_index as usize) * HPET_TIMER_STRIDE;
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let config = hpet_read(config_offset);
         hpet_write(config_offset, config & !HPET_TN_INT_ENB_CNF);
@@ -353,6 +362,7 @@ pub fn handle_interrupt(timer_index: u8) {
 
     // Clear interrupt status
     if HPET_INITIALIZED.load(Ordering::Relaxed) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let status = hpet_read(HPET_GENERAL_INT_STATUS);
             hpet_write(HPET_GENERAL_INT_STATUS, status | (1u64 << timer_index));

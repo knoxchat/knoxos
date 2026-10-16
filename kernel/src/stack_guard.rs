@@ -200,6 +200,7 @@ fn map_stack_pages(base: u64, size: usize) -> bool {
         let Some(phys_addr) = crate::vmm::allocate_physical_frame() else {
             return mapped > 0;
         };
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             crate::vmm::map_page_in_table_pub(cr3, page, phys_addr, flags);
         }

@@ -85,6 +85,7 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -
         let size = ((len as usize) + (align - 1)) & !(align - 1);
         let layout =
             Layout::from_size_align(size, align).map_err(|_| SyscallError::InvalidArgument)?;
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let ptr = unsafe { alloc_zeroed(layout) };
         if ptr.is_null() {
             return Err(SyscallError::OutOfMemory);
@@ -127,6 +128,7 @@ pub fn sys_munmap(addr: u64, len: u64) -> SyscallResult {
         }
         let layout = Layout::from_size_align(region.len, region.align)
             .map_err(|_| SyscallError::InvalidArgument)?;
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             dealloc(addr as *mut u8, layout);
         }

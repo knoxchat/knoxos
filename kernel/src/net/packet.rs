@@ -24,6 +24,7 @@ pub fn process_packet(data: &[u8]) {
         }
     }
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let eth_hdr = unsafe { &*(data.as_ptr() as *const EthernetHeader) };
 
     match eth_hdr.ether_type_value() {
@@ -37,6 +38,7 @@ fn process_arp(data: &[u8]) {
     if data.len() < core::mem::size_of::<ArpPacket>() {
         return;
     }
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let arp = unsafe { &*(data.as_ptr() as *const ArpPacket) };
 
     // Cache sender's MAC/IP
@@ -51,6 +53,7 @@ fn process_ipv4(data: &[u8]) {
     if data.len() < 20 {
         return;
     }
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let ip_hdr = unsafe { &*(data.as_ptr() as *const Ipv4Header) };
 
     let payload_offset = ip_hdr.header_len();
@@ -108,6 +111,7 @@ fn process_icmp(ip_hdr: &Ipv4Header, data: &[u8]) {
     if data.len() < 8 {
         return;
     }
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let icmp = unsafe { &*(data.as_ptr() as *const IcmpHeader) };
 
     if icmp.icmp_type == ICMP_ECHO_REQUEST {
@@ -226,6 +230,7 @@ fn process_udp(ip_hdr: &Ipv4Header, data: &[u8]) {
     if data.len() < 8 {
         return;
     }
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let udp = unsafe { &*(data.as_ptr() as *const UdpHeader) };
     let src_port = u16::from_be(udp.src_port);
     let dst_port = u16::from_be(udp.dst_port);

@@ -116,6 +116,7 @@ fn calibrate_timer() -> u32 {
     const CALIBRATION_MS: u64 = 10;
     const PIT_TICKS: u16 = (PIT_FREQ * CALIBRATION_MS / 1000) as u16;
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Set divide to 16
         apic_write(APIC_TIMER_DIVIDE_CONFIG, DIVIDE_BY_16);
@@ -187,6 +188,7 @@ pub fn start_periodic(quantum_us: u64) {
 
     let count = (quantum_us * ticks_per_us) as u32;
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         apic_write(APIC_TIMER_DIVIDE_CONFIG, DIVIDE_BY_16);
         apic_write(APIC_LVT_TIMER, TIMER_MODE_PERIODIC | TIMER_VECTOR as u32);
@@ -217,6 +219,7 @@ pub fn start_oneshot(timeout_us: u64) {
 
     let count = (timeout_us * ticks_per_us) as u32;
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         apic_write(APIC_TIMER_DIVIDE_CONFIG, DIVIDE_BY_16);
         apic_write(APIC_LVT_TIMER, TIMER_MODE_ONESHOT | TIMER_VECTOR as u32);
@@ -229,6 +232,7 @@ pub fn stop() {
     if !INITIALIZED.load(Ordering::Relaxed) {
         return;
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         apic_write(APIC_TIMER_INIT_COUNT, 0);
         apic_write(APIC_LVT_TIMER, LVT_MASKED);
@@ -237,6 +241,7 @@ pub fn stop() {
 
 /// Send End-of-Interrupt to the local APIC
 pub fn send_eoi() {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         apic_write(APIC_EOI, 0);
     }
@@ -306,6 +311,7 @@ pub fn init() {
     // Get APIC base from MSR
     let mut lo: u32 = 0;
     let mut hi: u32 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(

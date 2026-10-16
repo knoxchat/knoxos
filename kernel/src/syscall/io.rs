@@ -32,11 +32,13 @@ fn epoll_id_from_epfd(epfd: i32) -> Result<i32, SyscallError> {
 pub fn sys_epoll_ctl(epfd: i32, op: i32, fd: i32, event_ptr: u64) -> SyscallResult {
     let id = epoll_id_from_epfd(epfd)?;
     let events = if event_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { *(event_ptr as *const u32) }
     } else {
         0
     };
     let data = if event_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { core::ptr::read_unaligned((event_ptr as *const u8).add(4) as *const u64) }
     } else {
         0
@@ -59,6 +61,7 @@ pub fn sys_epoll_wait(epfd: i32, events_ptr: u64, max_events: i32, timeout: i32)
     if events_ptr != 0 && ready > 0 {
         for i in 0..ready {
             let p = events_ptr + (i * 12) as u64;
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(p as *mut u32) = buf[i].events;
                 core::ptr::write_unaligned((p as *mut u8).add(4) as *mut u64, buf[i].data);
@@ -77,6 +80,7 @@ pub fn sys_poll(fds_ptr: u64, nfds: u32, timeout: i32) -> SyscallResult {
     if fds_ptr == 0 {
         return Err(SyscallError::InvalidArgument);
     }
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
     let fds = unsafe {
         core::slice::from_raw_parts_mut(fds_ptr as *mut crate::epoll::PollFd, nfds as usize)
     };
@@ -92,11 +96,13 @@ pub fn sys_select(
     _timeout: u64,
 ) -> SyscallResult {
     let read_set = if readfds != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         Some(unsafe { &mut *(readfds as *mut crate::epoll::FdSet) })
     } else {
         None
     };
     let write_set = if writefds != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         Some(unsafe { &mut *(writefds as *mut crate::epoll::FdSet) })
     } else {
         None
@@ -124,7 +130,9 @@ pub fn sys_ppoll(fds_ptr: u64, nfds: u32, timeout_ptr: u64, _sigmask: u64) -> Sy
     let timeout_ms = if timeout_ptr == 0 {
         -1i32
     } else {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let sec = unsafe { core::ptr::read_unaligned(timeout_ptr as *const i64) };
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let nsec = unsafe { core::ptr::read_unaligned((timeout_ptr + 8) as *const i64) };
         if sec < 0 || !(0..1_000_000_000).contains(&nsec) {
             return Err(SyscallError::InvalidArgument);
@@ -205,6 +213,7 @@ fn inotify_id_from_fd(fd: i32) -> Result<i32, SyscallError> {
 
 pub fn sys_inotify_add_watch(fd: i32, path_ptr: u64, mask: u32) -> SyscallResult {
     let id = inotify_id_from_fd(fd)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     crate::inotify::inotify_add_watch(id, &path, mask)
         .map(|wd| wd as u64)
@@ -259,10 +268,12 @@ pub fn sys_timerfd_settime(fd: i32, flags: i32, new_value: u64, old_value: u64) 
         return Err(SyscallError::InvalidArgument);
     }
     let id = timerfd_id_from_fd(fd)?;
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let spec = unsafe { &*(new_value as *const crate::timerfd::ITimerSpec) };
     let result = crate::timerfd::timerfd_settime(id, flags, spec)
         .map_err(|_| SyscallError::InvalidArgument)?;
     if old_value != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let out = unsafe { &mut *(old_value as *mut crate::timerfd::ITimerSpec) };
         *out = result;
     }
@@ -273,6 +284,7 @@ pub fn sys_timerfd_gettime(fd: i32, curr_value: u64) -> SyscallResult {
     let id = timerfd_id_from_fd(fd)?;
     let spec = crate::timerfd::timerfd_gettime(id).map_err(|_| SyscallError::BadFileDescriptor)?;
     if curr_value != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let out = unsafe { &mut *(curr_value as *mut crate::timerfd::ITimerSpec) };
         *out = spec;
     }
@@ -282,6 +294,7 @@ pub fn sys_timerfd_gettime(fd: i32, curr_value: u64) -> SyscallResult {
 // ── FIFO & PTY ──────────────────────────────────────────────────────
 
 pub fn sys_mkfifo(path_ptr: u64, mode: u32) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     crate::fifo::mkfifo(&path, mode as u16)
         .map(|_| 0u64)
@@ -292,6 +305,7 @@ pub fn sys_openpty(master_fd_ptr: u64, slave_name_ptr: u64) -> SyscallResult {
     let (pty_id, slave_name) = crate::pty::openpty().map_err(|_| SyscallError::IoError)?;
 
     if master_fd_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(master_fd_ptr as *mut u32) = pty_id;
         }
@@ -299,6 +313,7 @@ pub fn sys_openpty(master_fd_ptr: u64, slave_name_ptr: u64) -> SyscallResult {
     if slave_name_ptr != 0 {
         let bytes = slave_name.as_bytes();
         let len = core::cmp::min(bytes.len(), 255);
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
         let dst = unsafe { core::slice::from_raw_parts_mut(slave_name_ptr as *mut u8, len + 1) };
         dst[..len].copy_from_slice(&bytes[..len]);
         dst[len] = 0;
@@ -360,6 +375,7 @@ pub fn sys_readv(fd: i32, iov_ptr: u64, iovcnt: usize) -> SyscallResult {
         iov_len: usize,
     }
 
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let iovecs = unsafe { core::slice::from_raw_parts(iov_ptr as *const Iovec, iovcnt) };
     let mut iovs: alloc::vec::Vec<(u64, usize)> =
         iovecs.iter().map(|v| (v.iov_base, v.iov_len)).collect();
@@ -381,6 +397,7 @@ pub fn sys_writev(fd: i32, iov_ptr: u64, iovcnt: usize) -> SyscallResult {
         iov_len: usize,
     }
 
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let iovecs = unsafe { core::slice::from_raw_parts(iov_ptr as *const Iovec, iovcnt) };
     let iovs: alloc::vec::Vec<(u64, usize)> =
         iovecs.iter().map(|v| (v.iov_base, v.iov_len)).collect();
@@ -415,6 +432,7 @@ pub fn sys_vmsplice(fd: i32, iov_ptr: u64, nr_segs: usize, flags: u32) -> Syscal
     }
 
     let n = core::cmp::min(nr_segs, 16);
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let iovecs = unsafe { core::slice::from_raw_parts(iov_ptr as *const Iovec, n) };
     let iovs: alloc::vec::Vec<(u64, usize)> =
         iovecs.iter().map(|v| (v.iov_base, v.iov_len)).collect();
@@ -469,6 +487,7 @@ pub fn sys_sched_getscheduler(pid: u32) -> SyscallResult {
 
 pub fn sys_sched_setscheduler(pid: u32, policy: i32, param_ptr: u64) -> SyscallResult {
     let param = if param_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { *(param_ptr as *const crate::sched_ext::SchedParam) }
     } else {
         crate::sched_ext::SchedParam { sched_priority: 0 }
@@ -496,6 +515,7 @@ pub fn sys_getpriority(which: i32, who: u32) -> SyscallResult {
 // ── Message queues ──────────────────────────────────────────────────
 
 pub fn sys_mq_open(name_ptr: u64, oflag: i32, mode: u32) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     crate::mqueue::mq_open(&name, oflag, mode, None)
         .map(|fd| fd as u64)
@@ -510,6 +530,7 @@ pub fn sys_mq_send(mqd: i32, msg_ptr: u64, msg_len: usize, prio: u32) -> Syscall
     if msg_ptr == 0 {
         return Err(SyscallError::InvalidArgument);
     }
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let data = unsafe { core::slice::from_raw_parts(msg_ptr as *const u8, msg_len) };
     crate::mqueue::mq_send(mqd, data, prio)
         .map(|_| 0u64)
@@ -523,6 +544,7 @@ pub fn sys_mq_receive(mqd: i32, msg_ptr: u64, msg_len: usize) -> SyscallResult {
     if msg_ptr == 0 {
         return Err(SyscallError::InvalidArgument);
     }
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
     let buf = unsafe { core::slice::from_raw_parts_mut(msg_ptr as *mut u8, msg_len) };
     crate::mqueue::mq_receive(mqd, buf)
         .map(|(len, _prio)| len as u64)

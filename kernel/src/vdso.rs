@@ -394,6 +394,7 @@ pub fn map_vdso_for_process(pid: Pid) -> bool {
         let vvar_flags = crate::arch_compat::structures::paging::PageTableFlags::PRESENT
             | crate::arch_compat::structures::paging::PageTableFlags::USER_ACCESSIBLE
             | crate::arch_compat::structures::paging::PageTableFlags::NO_EXECUTE;
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             crate::vmm::map_page_in_table_pub(addr_space.cr3, VVAR_BASE, data_frame, vvar_flags);
         }
@@ -401,6 +402,7 @@ pub fn map_vdso_for_process(pid: Pid) -> bool {
         // Map vDSO code page (read + execute for user)
         let vdso_flags = crate::arch_compat::structures::paging::PageTableFlags::PRESENT
             | crate::arch_compat::structures::paging::PageTableFlags::USER_ACCESSIBLE;
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             crate::vmm::map_page_in_table_pub(addr_space.cr3, VDSO_BASE, code_frame, vdso_flags);
         }
@@ -482,6 +484,7 @@ pub fn init() {
         let offset = crate::vmm::get_phys_mem_offset();
         if offset != 0 {
             let code = generate_vdso_code();
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 let ptr = (offset + code_frame) as *mut u8;
                 core::ptr::copy_nonoverlapping(code.as_ptr(), ptr, 4096);
@@ -495,6 +498,7 @@ pub fn init() {
         // Zero the vvar page
         let offset = crate::vmm::get_phys_mem_offset();
         if offset != 0 {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 let ptr = (offset + data_frame) as *mut u8;
                 core::ptr::write_bytes(ptr, 0, 4096);

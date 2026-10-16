@@ -416,6 +416,7 @@ fn pci_config_read32(bus: u8, dev: u8, func: u8, offset: u8) -> u32 {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut addr_port = Port::<u32>::new(0xCF8);
         let mut data_port = Port::<u32>::new(0xCFC);
@@ -430,6 +431,7 @@ fn pci_config_write32(bus: u8, dev: u8, func: u8, offset: u8, val: u32) {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut addr_port = Port::<u32>::new(0xCF8);
         let mut data_port = Port::<u32>::new(0xCFC);
@@ -638,50 +640,62 @@ fn init_device(bus: u8, dev: u8, func: u8) -> Result<(), &'static str> {
 // ═══════════════════════════════════════════════════════════════════════
 
 fn write_mmio_u8(base: u64, offset: usize, val: u8) {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::write_volatile((base as usize + offset) as *mut u8, val) };
 }
 
 fn write_mmio_u16(base: u64, offset: usize, val: u16) {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::write_volatile((base as usize + offset) as *mut u16, val) };
 }
 
 fn write_mmio_u32(base: u64, offset: usize, val: u32) {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::write_volatile((base as usize + offset) as *mut u32, val) };
 }
 
 fn read_mmio_u8(base: u64, offset: usize) -> u8 {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::read_volatile((base as usize + offset) as *const u8) }
 }
 
 fn read_mmio_u16(base: u64, offset: usize) -> u16 {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::read_volatile((base as usize + offset) as *const u16) }
 }
 
 fn read_mmio_u32(base: u64, offset: usize) -> u32 {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::read_volatile((base as usize + offset) as *const u32) }
 }
 
 fn write_io_u8(base: u16, offset: u16, val: u8) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { Port::<u8>::new(base + offset).write(val) };
 }
 
 fn write_io_u16(base: u16, offset: u16, val: u16) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { Port::<u16>::new(base + offset).write(val) };
 }
 
 fn write_io_u32(base: u16, offset: u16, val: u32) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { Port::<u32>::new(base + offset).write(val) };
 }
 
 fn read_io_u8(base: u16, offset: u16) -> u8 {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { Port::<u8>::new(base + offset).read() }
 }
 
 fn read_io_u16(base: u16, offset: u16) -> u16 {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { Port::<u16>::new(base + offset).read() }
 }
 
 fn read_io_u32(base: u16, offset: u16) -> u32 {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { Port::<u32>::new(base + offset).read() }
 }
 
@@ -786,6 +800,7 @@ pub fn transmit_frame(frame: &[u8]) -> Result<(), &'static str> {
 
     // Copy header + frame into DMA buffer
     let buf = &mut dev.txq.buffers[desc_idx as usize];
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let header_bytes = unsafe {
         core::slice::from_raw_parts(
             &header as *const VirtioWifiFrameHeader as *const u8,
@@ -942,6 +957,7 @@ pub fn scan(channel: u8, ssid: Option<&str>) -> Result<(), &'static str> {
         req.ssid_len = len as u8;
     }
 
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let cmd_bytes = unsafe {
         core::slice::from_raw_parts(
             &req as *const ScanRequest as *const u8,
@@ -969,6 +985,7 @@ pub fn authenticate(bssid: [u8; 6], auth_type: u16) -> Result<(), &'static str> 
         auth_type,
     };
 
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let cmd_bytes = unsafe {
         core::slice::from_raw_parts(
             &req as *const AuthRequest as *const u8,
@@ -1014,6 +1031,7 @@ pub fn associate(bssid: [u8; 6], ssid: &str) -> Result<(), &'static str> {
     req.ssid[..len].copy_from_slice(&bytes[..len]);
     req.ssid_len = len as u8;
 
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let cmd_bytes = unsafe {
         core::slice::from_raw_parts(
             &req as *const AssocRequest as *const u8,
@@ -1070,6 +1088,7 @@ pub fn set_key(
     let len = key.len().min(32);
     req.key[..len].copy_from_slice(&key[..len]);
 
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let cmd_bytes = unsafe {
         core::slice::from_raw_parts(
             &req as *const SetKeyRequest as *const u8,

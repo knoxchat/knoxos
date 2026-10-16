@@ -110,6 +110,8 @@ impl BootInfoFrameAllocator {
     }
 }
 
+// SAFETY: frames come from the bootloader usable-memory map and are
+// handed out at most once as this allocator walks the region list.
 unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
         // Walk through regions, advancing to the next usable frame

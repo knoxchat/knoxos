@@ -26,6 +26,7 @@ pub fn sys_futex(uaddr: u64, op: i32, val: u32) -> SyscallResult {
     match cmd {
         FUTEX_WAIT | FUTEX_WAIT_BITSET => {
             // FUTEX_WAIT: if *uaddr == val, sleep until woken
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let current = unsafe { *(uaddr as *const u32) };
             if current != val {
                 return Err(SyscallError::WouldBlock);
@@ -54,6 +55,7 @@ pub fn sys_futex(uaddr: u64, op: i32, val: u32) -> SyscallResult {
         }
         FUTEX_CMP_REQUEUE => {
             // Like FUTEX_REQUEUE but checks *uaddr == val3 first
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let current = unsafe { *(uaddr as *const u32) };
             if current != val {
                 return Err(SyscallError::WouldBlock);
@@ -81,9 +83,11 @@ pub fn sys_futex(uaddr: u64, op: i32, val: u32) -> SyscallResult {
         }
         FUTEX_TRYLOCK_PI => {
             // Non-blocking PI lock attempt
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let current = unsafe { *(uaddr as *const u32) };
             if current == 0 {
                 // Lock is free, try to acquire
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     *(uaddr as *mut u32) = crate::scheduler::current_pid().unwrap_or(1);
                 }

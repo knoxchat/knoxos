@@ -159,6 +159,7 @@ fn validate_bpf(program: &[BpfInsn]) -> bool {
 
 /// Execute a BPF program against seccomp data
 fn execute_bpf(program: &[BpfInsn], data: &SeccompData) -> u32 {
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let data_bytes = unsafe {
         core::slice::from_raw_parts(
             data as *const SeccompData as *const u8,

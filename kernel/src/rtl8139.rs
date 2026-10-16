@@ -215,6 +215,7 @@ impl Rtl8139Driver {
 
     /// Reset the NIC
     fn reset(&mut self) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             // Power on
             port_write_u8(self.io_base + REG_CONFIG1, 0x00);
@@ -231,6 +232,7 @@ impl Rtl8139Driver {
 
     /// Read MAC address from EEPROM
     fn read_mac(&mut self) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let mac_lo = port_read_u32(self.io_base + REG_IDR0);
             let mac_hi = port_read_u16(self.io_base + REG_IDR4);
@@ -254,6 +256,7 @@ impl Rtl8139Driver {
 
     /// Configure the NIC for operation
     fn configure(&mut self) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             // Set RX buffer address
             let rx_buf_addr = self.rx_buffer.as_ptr() as u32;
@@ -304,6 +307,7 @@ impl Rtl8139Driver {
 
         let desc = self.current_tx;
 
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             // Check if descriptor is available
             let status = port_read_u32(self.io_base + REG_TSD0 + (desc as u16) * 4);
@@ -338,6 +342,7 @@ impl Rtl8139Driver {
     pub fn poll_frames(&mut self) -> Vec<Vec<u8>> {
         let mut frames = Vec::new();
 
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let cmd = port_read_u8(self.io_base + REG_CR);
             if cmd & CR_BUFE != 0 {
@@ -400,6 +405,7 @@ impl Rtl8139Driver {
 
     /// Handle interrupt
     pub fn handle_interrupt(&mut self) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let isr = port_read_u16(self.io_base + REG_ISR);
             // Acknowledge all interrupts
@@ -435,6 +441,7 @@ impl Rtl8139Driver {
 
     /// Get link status
     pub fn check_link(&mut self) -> LinkStatus {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let msr = port_read_u8(self.io_base + REG_MSR);
             self.link_status = if msr & 0x04 == 0 {

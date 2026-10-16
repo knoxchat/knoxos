@@ -8,6 +8,7 @@ pub(super) fn generate_guid() -> u64 {
     #[cfg(target_arch = "x86_64")]
     {
         let mut tsc: u64 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!("rdtsc", out("eax") _, out("edx") _, options(nostack));

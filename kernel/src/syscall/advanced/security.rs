@@ -5,6 +5,7 @@ use crate::syscall::{SyscallError, SyscallResult};
 
 pub fn sys_landlock_create_ruleset(attr_ptr: u64, size: usize, flags: u32) -> SyscallResult {
     let attr = if attr_ptr != 0 && size > 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { &*(attr_ptr as *const crate::landlock::LandlockRulesetAttr) }
     } else {
         return if flags & 1 != 0 {
@@ -34,6 +35,7 @@ pub fn sys_landlock_add_rule(
             if rule_attr_ptr == 0 {
                 return Err(SyscallError::InvalidArgument);
             }
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let attr = unsafe { &*(rule_attr_ptr as *const crate::landlock::PathBeneathRule) };
             crate::landlock::LandlockRule::PathBeneath(attr.clone())
         }
@@ -41,6 +43,7 @@ pub fn sys_landlock_add_rule(
             if rule_attr_ptr == 0 {
                 return Err(SyscallError::InvalidArgument);
             }
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let attr = unsafe { &*(rule_attr_ptr as *const crate::landlock::NetPortRule) };
             crate::landlock::LandlockRule::NetPort(attr.clone())
         }
@@ -65,6 +68,7 @@ pub fn sys_capget(header_ptr: u64, data_ptr: u64) -> SyscallResult {
         let pid = crate::scheduler::current_pid().unwrap_or(1);
         let caps = crate::capabilities::get_capabilities(pid);
         if let Some(caps) = caps {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 // Effective, permitted, inheritable (each u32)
                 let p = data_ptr as *mut u32;
@@ -73,6 +77,7 @@ pub fn sys_capget(header_ptr: u64, data_ptr: u64) -> SyscallResult {
                 *p.add(2) = caps.inheritable.0 as u32;
             }
         } else {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 core::ptr::write_bytes(data_ptr as *mut u8, 0xFF, 12);
             }

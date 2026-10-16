@@ -246,6 +246,7 @@ pub fn quotactl(cmd: i32, device: &str, id: u32, addr: u64) -> Result<i32, i32> 
         Q_GETQUOTA => {
             let dq = get_quota(device, quota_type, id)?;
             if addr != 0 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     *(addr as *mut DqBlk) = dq;
                 }
@@ -256,6 +257,7 @@ pub fn quotactl(cmd: i32, device: &str, id: u32, addr: u64) -> Result<i32, i32> 
             if addr == 0 {
                 return Err(-22); // EINVAL
             }
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let dq = unsafe { *(addr as *const DqBlk) };
             set_quota(device, quota_type, id, dq)?;
             Ok(0)

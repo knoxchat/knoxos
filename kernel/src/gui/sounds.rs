@@ -37,6 +37,7 @@ fn speaker_on(freq: u32) {
     #[cfg(target_arch = "x86_64")]
     {
         let divisor = PIT_FREQ / freq;
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             // Program PIT channel 2 for square wave
             let mut cmd_port: Port<u8> = Port::new(0x43);
@@ -57,6 +58,7 @@ fn speaker_on(freq: u32) {
 /// Turn off the PC speaker
 fn speaker_off() {
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut ctrl_port: Port<u8> = Port::new(0x61);
         let prev = ctrl_port.read();

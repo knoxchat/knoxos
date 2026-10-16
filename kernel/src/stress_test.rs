@@ -561,17 +561,20 @@ fn run_stress_test(test_type: StressTestType, iterations: u64) -> StressTestResu
                 let layout = core::alloc::Layout::from_size_align(size, 8);
                 match layout {
                     Ok(layout) => {
+                        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                         let ptr = unsafe { alloc::alloc::alloc(layout) };
                         if ptr.is_null() {
                             errors += 1;
                         } else {
                             // Write pattern to detect corruption
+                            // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
                             unsafe {
                                 core::ptr::write_bytes(ptr, 0xAA, size);
                             }
                             // Verify pattern
                             let mut corrupted = false;
                             for j in 0..size {
+                                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                                 if unsafe { *ptr.add(j) } != 0xAA {
                                     corrupted = true;
                                     break;
@@ -584,6 +587,7 @@ fn run_stress_test(test_type: StressTestType, iterations: u64) -> StressTestResu
                                     i
                                 );
                             }
+                            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                             unsafe {
                                 alloc::alloc::dealloc(ptr, layout);
                             }
@@ -603,15 +607,18 @@ fn run_stress_test(test_type: StressTestType, iterations: u64) -> StressTestResu
                 let _pid = i as u32;
                 // Allocate simulated process control block
                 let layout = core::alloc::Layout::from_size_align(2048, 8).unwrap();
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
                 if ptr.is_null() {
                     errors += 1;
                 } else {
                     // Simulate process execution
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     unsafe {
                         *(ptr as *mut u64) = i;
                     }
                     // Simulate process exit & cleanup
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         alloc::alloc::dealloc(ptr, layout);
                     }
@@ -647,23 +654,27 @@ fn run_stress_test(test_type: StressTestType, iterations: u64) -> StressTestResu
                 // Simulate: create temp buffer, write pattern, verify
                 let size = 1024;
                 let layout = core::alloc::Layout::from_size_align(size, 8).unwrap();
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let buf = unsafe { alloc::alloc::alloc(layout) };
                 if buf.is_null() {
                     errors += 1;
                 } else {
                     // Write sequential pattern
                     for j in 0..size {
+                        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                         unsafe {
                             *buf.add(j) = (j & 0xFF) as u8;
                         }
                     }
                     // Read back and verify
                     for j in 0..size {
+                        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                         if unsafe { *buf.add(j) } != (j & 0xFF) as u8 {
                             errors += 1;
                             break;
                         }
                     }
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         alloc::alloc::dealloc(buf, layout);
                     }
@@ -677,15 +688,18 @@ fn run_stress_test(test_type: StressTestType, iterations: u64) -> StressTestResu
             for i in 0..iterations {
                 let pkt_size = 1500; // MTU
                 let layout = core::alloc::Layout::from_size_align(pkt_size, 8).unwrap();
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let pkt = unsafe { alloc::alloc::alloc(layout) };
                 if pkt.is_null() {
                     errors += 1;
                 } else {
                     // Simulate packet header construction
+                    // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
                     unsafe {
                         core::ptr::write_bytes(pkt, 0, 14); // Ethernet header
                         core::ptr::write_bytes(pkt.add(14), 0x45, 1); // IP header
                     }
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         alloc::alloc::dealloc(pkt, layout);
                     }
@@ -717,10 +731,12 @@ fn run_stress_test(test_type: StressTestType, iterations: u64) -> StressTestResu
 
             // Phase 1: Allocate until OOM
             for _ in 0..iterations {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let ptr = unsafe { alloc::alloc::alloc(layout) };
                 if ptr.is_null() {
                     break; // OOM reached
                 }
+                // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
                 unsafe {
                     core::ptr::write_bytes(ptr, 0xBB, 4096);
                 }
@@ -736,6 +752,7 @@ fn run_stress_test(test_type: StressTestType, iterations: u64) -> StressTestResu
 
             // Phase 2: Free everything
             for (ptr, layout) in allocations.iter().rev() {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     alloc::alloc::dealloc(*ptr, *layout);
                 }
@@ -743,11 +760,13 @@ fn run_stress_test(test_type: StressTestType, iterations: u64) -> StressTestResu
 
             // Phase 3: Verify system still works (small allocation)
             let test_layout = core::alloc::Layout::from_size_align(64, 8).unwrap();
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let test_ptr = unsafe { alloc::alloc::alloc(test_layout) };
             if test_ptr.is_null() {
                 errors += 1;
                 serial_println!("[stress] OOM RECOVERY FAILED: cannot allocate after free!");
             } else {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     alloc::alloc::dealloc(test_ptr, test_layout);
                 }

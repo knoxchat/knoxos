@@ -74,6 +74,7 @@ pub(super) fn acpi_enter_sleep(state: SystemState) -> Result<(), i32> {
 
     // 6. Flush the write
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!("nop", options(nomem, nostack))
     };

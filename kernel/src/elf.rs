@@ -151,6 +151,7 @@ pub fn validate_elf(data: &[u8]) -> Result<&Elf64Header, ElfError> {
         return Err(ElfError::InvalidMagic);
     }
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let header = unsafe { &*(data.as_ptr() as *const Elf64Header) };
 
     // Check class (64-bit)
@@ -186,6 +187,7 @@ pub fn parse_program_headers(data: &[u8], header: &Elf64Header) -> Vec<Elf64Prog
     for i in 0..ph_count {
         let offset = ph_offset + i * ph_size;
         if offset + ph_size <= data.len() {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let phdr = unsafe { *(data.as_ptr().add(offset) as *const Elf64ProgramHeader) };
             phdrs.push(phdr);
         }

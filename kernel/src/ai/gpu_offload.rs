@@ -77,6 +77,7 @@ pub fn tensor_to_gpu(data: &[f32], shape: &[usize]) -> Result<GpuTensor, &'stati
 
     // Copy f32 data as raw bytes into the GPU buffer
     let byte_data: &[u8] =
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, size_bytes) };
     gpu_compute::buffer_write(buffer_id, 0, byte_data)?;
 
@@ -279,6 +280,7 @@ pub fn relu_gpu(x: &[f32]) -> Result<Vec<f32>, &'static str> {
         .map(|&v| if v > 0.0 { v } else { 0.0 })
         .collect();
     let byte_data: &[u8] =
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         unsafe { core::slice::from_raw_parts(relu_result.as_ptr() as *const u8, out_size) };
     gpu_compute::buffer_write(out_buffer_id, 0, byte_data)?;
 

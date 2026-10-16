@@ -17,6 +17,7 @@ pub fn mount(device_index: usize) -> Result<usize, Ext4Error> {
     let mut sb_buf = [0u8; 1024];
     block::read_blocks(device_index, 2, 2, &mut sb_buf).map_err(|_| Ext4Error::IoError)?;
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let superblock = unsafe { *(sb_buf.as_ptr() as *const Ext4Superblock) };
 
     if superblock.s_magic != EXT4_MAGIC {
@@ -92,6 +93,7 @@ pub fn mount(device_index: usize) -> Result<usize, Ext4Error> {
             bg_reserved: 0,
         };
         let copy_len = (desc_size as usize).min(core::mem::size_of::<Ext4GroupDesc>());
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 bgd_buf[offset..].as_ptr(),
@@ -150,6 +152,7 @@ pub fn mount(device_index: usize) -> Result<usize, Ext4Error> {
     );
 
     let sb_inodes_count =
+        // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
         unsafe { core::ptr::addr_of!(superblock.s_inodes_count).read_unaligned() };
     serial_println!(
         "[ext4] Mounted device {} — block_size={}, inodes={}, blocks={}, volume=\"{}\" features=[{}]",
@@ -416,6 +419,7 @@ pub fn mkdir(fs_index: usize, parent_path: &str, name: &str) -> Result<u32, Ext4
         name_len: 1,
         file_type: EXT4_FT_DIR,
     };
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(
             &dot_entry as *const Ext4DirEntry as *const u8,
@@ -433,6 +437,7 @@ pub fn mkdir(fs_index: usize, parent_path: &str, name: &str) -> Result<u32, Ext4
         name_len: 2,
         file_type: EXT4_FT_DIR,
     };
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(
             &dotdot_entry as *const Ext4DirEntry as *const u8,
@@ -486,6 +491,7 @@ pub fn list_mounts() -> Vec<String> {
             if fs.has_journal { "has_journal," } else { "" },
         );
         let sb_inodes_count =
+            // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
             unsafe { core::ptr::addr_of!(fs.superblock.s_inodes_count).read_unaligned() };
         result.push(alloc::format!(
             "/dev/sd{} on /mnt/{} type ext4 (block_size={}, inodes={}, blocks={}, features={})",

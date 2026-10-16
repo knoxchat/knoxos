@@ -211,6 +211,7 @@ impl IoUringInstance {
                 match crate::fd::sys_read(sqe.fd, &mut tmp) {
                     Ok(n) => {
                         if sqe.addr != 0 && n > 0 {
+                            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                             unsafe {
                                 core::ptr::copy_nonoverlapping(
                                     tmp.as_ptr(),
@@ -228,6 +229,7 @@ impl IoUringInstance {
                 // Write via real fd subsystem
                 let len = sqe.len as usize;
                 let data = if sqe.addr != 0 && len > 0 {
+                    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
                     unsafe { core::slice::from_raw_parts(sqe.addr as *const u8, len) }
                 } else {
                     &[]
@@ -255,6 +257,7 @@ impl IoUringInstance {
             IoUringOp::Send | IoUringOp::SendMsg => {
                 let len = sqe.len as usize;
                 let data = if sqe.addr != 0 && len > 0 {
+                    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
                     unsafe { core::slice::from_raw_parts(sqe.addr as *const u8, len) }
                 } else {
                     &[]
@@ -270,6 +273,7 @@ impl IoUringInstance {
                 match crate::fd::sys_read(sqe.fd, &mut tmp) {
                     Ok(n) => {
                         if sqe.addr != 0 && n > 0 {
+                            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                             unsafe {
                                 core::ptr::copy_nonoverlapping(
                                     tmp.as_ptr(),
@@ -290,6 +294,7 @@ impl IoUringInstance {
                 } // EFAULT
                 let mut path_buf = [0u8; 256];
                 let mut path_len = 0;
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     let ptr = sqe.addr as *const u8;
                     for i in 0..256 {

@@ -382,6 +382,7 @@ fn test_heap_allocator() -> TestResult {
 
 fn test_page_tables() -> TestResult {
     let mut cr3: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("mov {}, cr3", out(reg) cr3);

@@ -95,6 +95,7 @@ pub fn speaker_on(frequency: u32) {
 
     let divisor = PIT_FREQUENCY / frequency;
 
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         // Set PIT channel 2 to square wave mode
         let mut cmd_port = Port::<u8>::new(PIT_COMMAND);
@@ -116,6 +117,7 @@ pub fn speaker_on(frequency: u32) {
 
 /// Turn off the PC speaker
 pub fn speaker_off() {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let mut speaker = Port::<u8>::new(SPEAKER_PORT);
         let val = speaker.read();

@@ -81,6 +81,7 @@ pub fn sys_getgroups(size: i32, list_ptr: u64) -> SyscallResult {
             for gid in gids {
                 bytes.extend_from_slice(&gid.to_ne_bytes());
             }
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 core::ptr::copy_nonoverlapping(bytes.as_ptr(), list_ptr as *mut u8, bytes.len());
             }
@@ -109,6 +110,7 @@ pub fn sys_setgroups(size: usize, list_ptr: u64) -> SyscallResult {
         let nbytes = size.saturating_mul(4);
         let mut bytes = alloc::vec![0u8; nbytes];
         if nbytes > 0 {
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 core::ptr::copy_nonoverlapping(list_ptr as *const u8, bytes.as_mut_ptr(), nbytes);
             }

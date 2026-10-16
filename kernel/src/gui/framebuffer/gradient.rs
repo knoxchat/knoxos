@@ -37,6 +37,7 @@ impl FrameBuffer {
 
             if has_prev && b == prev_b && g == prev_g && r == prev_r {
                 // Same color as previous row — fast memcpy
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     let src = self.buffer.as_ptr().add(prev_row_offset);
                     let dst = self.buffer.as_mut_ptr().add(row_offset);
@@ -100,6 +101,7 @@ impl FrameBuffer {
         // Copy first row to all remaining rows
         for y in (y_start + 1)..y_end {
             let dst_offset = y * self.pitch + x_start * bpp;
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 let src = self.buffer.as_ptr().add(first_row_offset);
                 let dst = self.buffer.as_mut_ptr().add(dst_offset);

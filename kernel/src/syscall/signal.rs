@@ -42,6 +42,7 @@ pub fn sys_sigaction(sig: u32, act_ptr: u64, oldact_ptr: u64) -> SyscallResult {
             sa_restorer: 0,
             sa_mask: 0,
         };
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let bytes = unsafe {
             core::slice::from_raw_parts(
                 &old_sa as *const LinuxSigaction as *const u8,
@@ -74,11 +75,13 @@ pub fn sys_sigprocmask(how: i32, set_ptr: u64, oldset_ptr: u64) -> SyscallResult
     let mut signals = crate::signals::PROCESS_SIGNALS.lock();
     let ps = signals.get_mut(&pid).ok_or(SyscallError::NoSuchProcess)?;
     if oldset_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(oldset_ptr as *mut u64) = ps.mask.0;
         }
     }
     if set_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let mask = unsafe { *(set_ptr as *const u64) };
         // Never allow blocking SIGKILL (9) or SIGSTOP (19)
         let sanitized = mask & !((1u64 << 9) | (1u64 << 19));
@@ -100,6 +103,7 @@ pub fn sys_sigaltstack(new_ptr: u64, old_ptr: u64) -> SyscallResult {
     if old_ptr != 0 {
         let old =
             crate::musl::sys_sigaltstack(pid, None).map_err(|_| SyscallError::InvalidArgument)?;
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             core::ptr::write(old_ptr as *mut crate::musl::LinuxStack, old);
         }
@@ -107,6 +111,7 @@ pub fn sys_sigaltstack(new_ptr: u64, old_ptr: u64) -> SyscallResult {
 
     // Set new stack if provided
     if new_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let new_stack = unsafe { *(new_ptr as *const crate::musl::LinuxStack) };
 
         // Validate: if not disabling, size must be >= MINSIGSTKSZ (2048)

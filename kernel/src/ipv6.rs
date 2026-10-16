@@ -659,6 +659,7 @@ pub fn process_ipv6_packet(data: &[u8]) {
         return;
     }
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let header = unsafe { &*(data.as_ptr() as *const Ipv6Header) };
 
     if header.version() != 6 {
@@ -698,6 +699,7 @@ fn process_icmpv6(src: Ipv6Address, dst: Ipv6Address, data: &[u8]) {
         }
         Some(Icmpv6Type::NeighborSolicitation) => {
             if data.len() >= 24 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let target = unsafe { &*(data[4..20].as_ptr() as *const [u8; 16]) };
                 serial_println!("[NDP] Neighbor Solicitation for {:?}", target);
                 process_neighbor_solicitation(src, dst, data);
@@ -743,6 +745,7 @@ fn send_echo_reply(to: Ipv6Address, from: Ipv6Address, request_data: &[u8]) {
     // Build IPv6 packet
     let header = Ipv6Header::new(from, to, 58, reply.len() as u16, 64);
     let header_bytes =
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         unsafe { core::slice::from_raw_parts(&header as *const _ as *const u8, Ipv6Header::SIZE) };
 
     let mut packet = Vec::with_capacity(Ipv6Header::SIZE + reply.len());

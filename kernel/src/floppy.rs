@@ -219,6 +219,7 @@ impl FloppyController {
         use crate::arch_compat::instructions::port::Port;
         #[cfg(not(target_arch = "x86_64"))]
         use crate::arch_compat::instructions::port::Port;
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             let mut cmd_port: Port<u8> = Port::new(0x70);
             let mut data_port: Port<u8> = Port::new(0x71);
@@ -441,6 +442,7 @@ impl FloppyController {
         use crate::arch_compat::instructions::port::Port;
         #[cfg(not(target_arch = "x86_64"))]
         use crate::arch_compat::instructions::port::Port;
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             let mut p: Port<u8> = Port::new(port);
             p.write(value);
@@ -452,6 +454,7 @@ impl FloppyController {
         use crate::arch_compat::instructions::port::Port;
         #[cfg(not(target_arch = "x86_64"))]
         use crate::arch_compat::instructions::port::Port;
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             let mut p: Port<u8> = Port::new(port);
             p.read()

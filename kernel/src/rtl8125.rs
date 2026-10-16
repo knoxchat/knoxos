@@ -309,26 +309,32 @@ impl Rtl8125 {
 
     // MMIO register access helpers
     fn read_reg8(&self, offset: u32) -> u8 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::read_volatile((self.mmio_base + offset as u64) as *const u8) }
     }
 
     fn read_reg16(&self, offset: u32) -> u16 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::read_volatile((self.mmio_base + offset as u64) as *const u16) }
     }
 
     fn read_reg32(&self, offset: u32) -> u32 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::read_volatile((self.mmio_base + offset as u64) as *const u32) }
     }
 
     fn write_reg8(&self, offset: u32, value: u8) {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::write_volatile((self.mmio_base + offset as u64) as *mut u8, value) }
     }
 
     fn write_reg16(&self, offset: u32, value: u16) {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::write_volatile((self.mmio_base + offset as u64) as *mut u16, value) }
     }
 
     fn write_reg32(&self, offset: u32, value: u32) {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::write_volatile((self.mmio_base + offset as u64) as *mut u32, value) }
     }
 }

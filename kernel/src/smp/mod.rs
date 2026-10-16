@@ -107,6 +107,7 @@ pub fn init(phys_mem_offset: u64) {
     // bit remains set, blocking further interrupts in the same priority class.
     // Send multiple EOIs to clear all potentially stuck vectors.
     for _ in 0..8 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { lapic::lapic_write(LAPIC_EOI, 0) };
     }
 
@@ -120,6 +121,7 @@ pub fn init(phys_mem_offset: u64) {
 
         // Identity-map low memory for the AP trampoline
         let mut cr3: u64 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack));

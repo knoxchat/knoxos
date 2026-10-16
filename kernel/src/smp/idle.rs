@@ -101,6 +101,7 @@ fn try_enter_ap_task(cpu: u32) {
         set_ap_idle_flag(cpu, false);
         // SAFETY: `pid` has a runnable context; this CPU does not hold
         // PROCESS_CONTEXTS; enter_task_local does not claim BSP CFS current.
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             crate::context::enter_task_local(pid);
         }

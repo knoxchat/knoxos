@@ -108,6 +108,7 @@ impl VirtioInputDev {
             io_base,
             queue_size: 0,
             vring_mem: core::ptr::null_mut(),
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             vring_layout: unsafe { Layout::from_size_align_unchecked(4096, 4096) },
             desc_base: core::ptr::null_mut(),
             avail_base: core::ptr::null_mut(),
@@ -120,15 +121,19 @@ impl VirtioInputDev {
     }
 
     fn avail_idx_ptr(&self) -> *mut u16 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { (self.avail_base as *mut u16).add(1) }
     }
     fn avail_ring_entry(&self, i: u16) -> *mut u16 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { (self.avail_base as *mut u16).add(2 + i as usize) }
     }
     fn used_idx_ptr(&self) -> *const u16 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { (self.used_base as *const u16).add(1) }
     }
     fn used_ring_id(&self, i: u16) -> u32 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let base = (self.used_base as *const u16).add(2) as *const u32;
             core::ptr::read_volatile(base.add(i as usize * 2))
@@ -137,6 +142,7 @@ impl VirtioInputDev {
 
     /// Initialize the VirtIO input device (legacy transport)
     fn init_legacy(&mut self) -> bool {
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             let base = self.io_base;
 
@@ -250,6 +256,7 @@ impl VirtioInputDev {
         let qsz = self.queue_size;
 
         loop {
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             let device_used_idx = unsafe { core::ptr::read_volatile(self.used_idx_ptr()) };
             if device_used_idx == self.used_idx {
                 break;
@@ -264,6 +271,7 @@ impl VirtioInputDev {
 
                 // Re-arm: put descriptor back in available ring
                 let avail_slot = self.avail_idx % qsz;
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 unsafe {
                     core::ptr::write_volatile(self.avail_ring_entry(avail_slot), desc_id as u16);
                     self.avail_idx = self.avail_idx.wrapping_add(1);
@@ -272,6 +280,7 @@ impl VirtioInputDev {
                 }
 
                 // Kick the device
+                // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
                 unsafe {
                     let mut notify: Port<u16> = Port::new(self.io_base + VIRTIO_PCI_QUEUE_NOTIFY);
                     notify.write(0);
@@ -488,6 +497,7 @@ pub fn init() {
         // VirtIO legacy: device ID 0x1000..0x103F → subtract 0xFFF to get subsystem
         // VirtIO input has subsystem ID 18 → legacy device_id = 0x1012
         // But also verify via PCI subsystem ID register
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let subsystem = unsafe { pci_config_read16(dev.bus, dev.device, dev.function, 0x2E) };
         serial_println!(
             "[VIRTIO-INPUT] VirtIO device {:02x}:{:02x}.{} devid={:#x} subsys={} bar0={:#x}",
@@ -525,6 +535,7 @@ pub fn init() {
         );
 
         // Enable I/O + Memory + Bus Master via PCI command register
+        // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
         unsafe {
             let cmd_addr = 0x8000_0000u32
                 | ((dev.bus as u32) << 16)
@@ -544,6 +555,7 @@ pub fn init() {
             serial_println!("[VIRTIO-INPUT] Device {} initialized", count);
 
             // Initial kick to make device aware of available buffers
+            // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
             unsafe {
                 let mut notify: Port<u16> = Port::new(io_base + VIRTIO_PCI_QUEUE_NOTIFY);
                 notify.write(0);

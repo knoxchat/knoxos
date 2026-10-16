@@ -341,6 +341,7 @@ pub fn record_sw_event(event: SwEvent) {
 pub fn rdpmc(counter: u32) -> u64 {
     let mut low: u32 = 0;
     let mut high: u32 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
@@ -358,6 +359,7 @@ pub fn rdpmc(counter: u32) -> u64 {
 pub fn rdtsc() -> u64 {
     let mut low: u32 = 0;
     let mut high: u32 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(

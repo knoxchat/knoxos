@@ -22,6 +22,7 @@ impl FrameBuffer {
         let hw_stride_bytes = self.hw_stride * hw_bpp;
         let internal_bpp = self.bytes_per_pixel;
 
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             let fb_ptr = self.framebuffer_addr as *mut u8;
 
@@ -86,6 +87,7 @@ impl FrameBuffer {
         let hw_stride_bytes = self.hw_stride * hw_bpp;
         let internal_bpp = self.bytes_per_pixel; // always 4
 
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             let fb_ptr = self.framebuffer_addr as *mut u8;
 

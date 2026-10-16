@@ -172,6 +172,7 @@ fn hash_page(phys_addr: u64) -> u64 {
 
     // Read page content and hash
     for i in 0..PAGE_SIZE {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let byte = unsafe { *ptr.add(i) };
         h ^= byte as u64;
         h = h.wrapping_mul(0x100000001b3); // FNV prime
@@ -187,6 +188,7 @@ fn pages_equal(addr_a: u64, addr_b: u64) -> bool {
     let words = PAGE_SIZE / 8;
 
     for i in 0..words {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             if *a.add(i) != *b.add(i) {
                 return false;

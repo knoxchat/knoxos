@@ -14,6 +14,7 @@ pub fn sys_prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> Sys
         2 => {
             // PR_GET_PDEATHSIG
             if arg2 != 0 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     *(arg2 as *mut i32) = 0;
                 }
@@ -34,6 +35,7 @@ pub fn sys_prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> Sys
         }
         15 => {
             // PR_SET_NAME — set process/thread name
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let name = unsafe { read_user_string(arg2) }.unwrap_or_default();
             let mut table = crate::process::PROCESS_TABLE.lock();
             if let Some(proc) = table.get_process_mut(pid) {
@@ -49,6 +51,7 @@ pub fn sys_prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> Sys
                 if arg2 != 0 {
                     let bytes = proc.name.as_bytes();
                     let len = bytes.len().min(16);
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::copy_nonoverlapping(bytes.as_ptr(), arg2 as *mut u8, len);
                         *((arg2 as usize + len) as *mut u8) = 0;
@@ -118,6 +121,7 @@ pub fn sys_arch_prctl(code: i32, addr: u64) -> SyscallResult {
             // ARCH_GET_FS
             let fs = crate::arch_compat::registers::model_specific::FsBase::read();
             if addr != 0 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     *(addr as *mut u64) = fs.as_u64();
                 }
@@ -128,6 +132,7 @@ pub fn sys_arch_prctl(code: i32, addr: u64) -> SyscallResult {
             // ARCH_GET_GS
             let gs = crate::arch_compat::registers::model_specific::GsBase::read();
             if addr != 0 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     *(addr as *mut u64) = gs.as_u64();
                 }

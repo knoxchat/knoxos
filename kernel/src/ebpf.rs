@@ -510,6 +510,7 @@ fn call_helper(id: u32, ctx: &mut BpfContext) -> u64 {
             // Simple PRNG
             let mut lo: u32 = 0;
             let mut hi: u32 = 0;
+            // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
             unsafe {
                 #[cfg(target_arch = "x86_64")]
                 core::arch::asm!("rdtsc", out("eax") lo, out("edx") hi);

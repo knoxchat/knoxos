@@ -46,6 +46,7 @@ pub fn vmx_revision_id() -> u32 {
     if cached != 0 {
         return cached as u32;
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let basic = unsafe { rdmsr(super::kvm::MSR_IA32_VMX_BASIC) };
     let rev = (basic & 0x7FFF_FFFF) as u32; // Bits 30:0
     VMX_REVISION_ID.store(rev as u64, Ordering::Relaxed);
@@ -54,6 +55,7 @@ pub fn vmx_revision_id() -> u32 {
 
 /// Get VMCS size from IA32_VMX_BASIC
 pub fn vmcs_size() -> u32 {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let basic = unsafe { rdmsr(super::kvm::MSR_IA32_VMX_BASIC) };
     ((basic >> 32) & 0x1FFF) as u32
 }
@@ -65,6 +67,7 @@ fn alloc_vmx_page() -> u64 {
     static VMX_POOL_NEXT: AtomicU64 = AtomicU64::new(0x0100_0000); // Start at 16MB
     let addr = VMX_POOL_NEXT.fetch_add(4096, Ordering::SeqCst);
     // Zero the page
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         core::ptr::write_bytes(addr as *mut u8, 0, 4096);
     }
@@ -80,6 +83,7 @@ fn alloc_vmx_page() -> u64 {
 /// 4. Execute VMXON
 pub fn vmxon() -> Result<(), &'static str> {
     // 1. Enable VMX in CR4
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let mut cr4: u64 = 0;
         #[cfg(target_arch = "x86_64")]
@@ -92,12 +96,14 @@ pub fn vmxon() -> Result<(), &'static str> {
 
     // 3. Write revision ID
     let rev_id = vmx_revision_id();
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe {
         core::ptr::write_volatile(vmxon_phys as *mut u32, rev_id);
     }
 
     // 4. Execute VMXON
     let mut rflags: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
@@ -132,12 +138,14 @@ pub fn vmxoff() -> Result<(), &'static str> {
         return Err("VMX not active");
     }
 
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("vmxoff");
     }
 
     // Clear CR4.VMXE
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let mut cr4: u64 = 0;
         core::arch::asm!("mov {}, cr4", out(reg) cr4);
@@ -170,6 +178,7 @@ impl Vmcs {
         let rev_id = vmx_revision_id();
 
         // Write revision ID to first 4 bytes (required by hardware)
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             core::ptr::write_volatile(phys as *mut u32, rev_id);
         }
@@ -185,6 +194,7 @@ impl Vmcs {
     /// Clear VMCS (VMCLEAR) — detaches from current CPU, transitions to "clear" state
     pub fn clear(&mut self) -> Result<(), &'static str> {
         let mut rflags: u64 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!(
@@ -210,6 +220,7 @@ impl Vmcs {
     /// Load VMCS (VMPTRLD) — makes this the current VMCS on this CPU
     pub fn load(&mut self) -> Result<(), &'static str> {
         let mut rflags: u64 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!(
@@ -239,6 +250,7 @@ impl Vmcs {
 /// Write a field to the current VMCS (VMWRITE)
 pub fn vmwrite(field: u32, value: u64) -> Result<(), &'static str> {
     let mut rflags: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
@@ -263,6 +275,7 @@ pub fn vmwrite(field: u32, value: u64) -> Result<(), &'static str> {
 pub fn vmread(field: u32) -> Result<u64, &'static str> {
     let mut value: u64 = 0;
     let mut rflags: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
@@ -330,6 +343,7 @@ pub const ENTRY_LOAD_IA32_EFER: u64 = 1 << 15;
 
 /// Adjust VMX control bits based on MSR-reported allowed-0/allowed-1 fields
 fn adjust_vmx_controls(ctl: u64, msr: u32) -> u64 {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let msr_val = unsafe { rdmsr(msr) };
     let allowed_0 = msr_val as u32; // Must be 1
     let allowed_1 = (msr_val >> 32) as u32; // May be 1
@@ -399,6 +413,7 @@ pub fn configure_vmcs(
     let mut host_cr0: u64 = 0;
     let mut host_cr3: u64 = 0;
     let mut host_cr4: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("mov {}, cr0", out(reg) host_cr0);
@@ -415,6 +430,7 @@ pub fn configure_vmcs(
     let mut ds: u16 = 0;
     let mut es: u16 = 0;
     let mut tr: u16 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("mov {:x}, cs", out(reg) cs);
@@ -436,6 +452,7 @@ pub fn configure_vmcs(
     // Host GDT/IDT base
     let mut gdtr: [u8; 10] = [0; 10];
     let mut idtr: [u8; 10] = [0; 10];
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("sgdt [{}]", in(reg) gdtr.as_mut_ptr());
@@ -456,6 +473,7 @@ pub fn configure_vmcs(
     // HOST_RSP will be set just before VMLAUNCH
 
     // Host EFER / PAT
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let host_efer = unsafe { rdmsr(0xC000_0080) };
     vmwrite(0x2C02, host_efer)?; // HOST_IA32_EFER
 
@@ -579,6 +597,7 @@ pub fn vmlaunch(regs: &mut super::kvm::VcpuRegs) -> Result<VmExitInfo, &'static 
     // Simplified version for compilation (real asm in vm_entry.S):
 
     let mut launch_result: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         // Set HOST_RSP to current stack
         let mut host_rsp: u64 = 0;
@@ -625,6 +644,7 @@ pub fn vmresume(regs: &mut super::kvm::VcpuRegs) -> Result<VmExitInfo, &'static 
     vmwrite(super::kvm::VMCS_GUEST_RIP, regs.rip)?;
 
     let mut resume_result: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         let mut host_rsp: u64 = 0;
         #[cfg(target_arch = "x86_64")]
@@ -719,6 +739,7 @@ impl EptTables {
         // Allocate PDPT (level 3)
         let pdpt_phys = alloc_vmx_page();
         // PML4[0] → PDPT
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             core::ptr::write_volatile(
                 pml4_phys as *mut u64,
@@ -732,6 +753,7 @@ impl EptTables {
             let pd_phys = alloc_vmx_page();
 
             // PDPT[pd_idx] → PD
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe {
                 core::ptr::write_volatile(
                     (pdpt_phys + (pd_idx as u64) * 8) as *mut u64,
@@ -753,6 +775,7 @@ impl EptTables {
                     | super::kvm::EPT_EXECUTE
                     | super::kvm::EPT_MEMORY_TYPE_WB
                     | super::kvm::EPT_LARGE_PAGE;
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 unsafe {
                     core::ptr::write_volatile(
                         (pd_phys + (page - start_page) * 8) as *mut u64,
@@ -788,6 +811,7 @@ pub const INVEPT_ALL: u64 = 2;
 /// Invalidate EPT-derived translations
 pub fn invept(inv_type: u64, eptp: u64) {
     let descriptor: [u64; 2] = [eptp, 0];
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
@@ -808,6 +832,7 @@ pub const INVVPID_ALL: u64 = 2;
 /// Invalidate VPID-tagged translations
 pub fn invvpid(inv_type: u64, vpid: u16, addr: u64) {
     let descriptor: [u64; 2] = [vpid as u64, addr];
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!(
             "invvpid {}, [{}]",

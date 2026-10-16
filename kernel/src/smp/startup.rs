@@ -164,6 +164,7 @@ static AP_TRAMPOLINE_CODE: &[u8] = &[
 /// Set up the AP trampoline GDT at AP_DATA_ADDR + 0x20
 /// GDT layout: null(0), code32(0x08), data32(0x10), code64(0x18), data64(0x20)
 fn setup_trampoline_gdt(phys_offset: u64) {
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         let gdt_base = (phys_offset + AP_DATA_ADDR + 0x26) as *mut u64;
         let gdtr = (phys_offset + AP_DATA_ADDR + 0x20) as *mut u8;
@@ -201,6 +202,7 @@ fn setup_trampoline_gdt(phys_offset: u64) {
 ///   - The first 2 MiB is typically unused in the virtual address space
 ///   - We only need it during AP startup
 pub(crate) fn identity_map_low_memory(phys_offset: u64, cr3: u64) {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe {
         let pml4_phys = cr3 & !0xFFF; // strip flags
         let pml4 = (phys_offset + pml4_phys) as *mut u64;
@@ -274,6 +276,7 @@ pub(crate) fn identity_map_low_memory(phys_offset: u64, cr3: u64) {
 
 /// Install AP trampoline code and data into low memory
 pub fn install_trampoline(phys_offset: u64, cr3: u64) {
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         // Zero the entire data area first to avoid stale data
         let data_base_ptr = (phys_offset + AP_DATA_ADDR) as *mut u8;
@@ -342,6 +345,7 @@ pub fn install_trampoline(phys_offset: u64, cr3: u64) {
 fn allocate_ap_stack(_cpu_index: u32) -> u64 {
     use alloc::alloc::{Layout, alloc};
     let layout = Layout::from_size_align(AP_STACK_SIZE, 16).unwrap();
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let ptr = unsafe { alloc(layout) };
     if ptr.is_null() {
         // Fallback to the old static scheme (may not be mapped)
@@ -361,6 +365,7 @@ pub fn start_ap(apic_id: u32, cpu_index: u32) {
     let stack_top = allocate_ap_stack(cpu_index);
     serial_println!("[SMP]   stack_top = {:#x}", stack_top);
 
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe {
         let data_base = phys_offset + AP_DATA_ADDR;
         // Stack top at offset 0x10
@@ -372,6 +377,7 @@ pub fn start_ap(apic_id: u32, cpu_index: u32) {
     AP_ALIVE.store(false, Ordering::SeqCst);
 
     serial_println!("[SMP]   sending INIT IPI...");
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Send INIT IPI (level-triggered assert)
         // Bits: delivery mode INIT (0x500) | level assert (bit14=1, 0x4000)
@@ -446,6 +452,7 @@ extern "C" fn ap_entry_64(apic_id: u32) {
 
     let mut kernel_rsp: u64 = 0;
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!("mov {}, rsp", out(reg) kernel_rsp, options(nostack));
     }
@@ -453,6 +460,7 @@ extern "C" fn ap_entry_64(apic_id: u32) {
 
     let mut tr: u16 = 0;
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!("str {0:x}", out(reg) tr, options(nostack, nomem));
     }
@@ -505,6 +513,7 @@ pub fn smp_self_test() -> bool {
     let cpu = crate::usermode::current_cpu_index();
     let mut tr: u16 = 0;
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!("str {0:x}", out(reg) tr, options(nostack, nomem));
     }

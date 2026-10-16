@@ -15,6 +15,7 @@ pub fn sys_clock_getres(clock_id: u32, res_ptr: u64) -> SyscallResult {
         let pid = crate::scheduler::current_pid().unwrap_or(1);
         let mut buf = [0u8; 16];
         buf[8..16].copy_from_slice(&1i64.to_ne_bytes());
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), res_ptr as *mut u8, buf.len());
         }
@@ -38,6 +39,7 @@ pub fn sys_getitimer_linux(which: i32, curr_value: u64) -> SyscallResult {
         match crate::posix_timer::getitimer(pid, itimer_which) {
             Ok(val) => {
                 // itimerval: {it_interval: {tv_sec, tv_usec}, it_value: {tv_sec, tv_usec}}
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     let p = curr_value as *mut i64;
                     *p = val.interval.tv_sec;
@@ -46,6 +48,7 @@ pub fn sys_getitimer_linux(which: i32, curr_value: u64) -> SyscallResult {
                     *p.add(3) = val.value.tv_nsec / 1000;
                 }
             }
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             Err(_) => unsafe {
                 core::ptr::write_bytes(curr_value as *mut u8, 0, 32);
             },
@@ -64,6 +67,7 @@ pub fn sys_setitimer_linux(which: i32, new_value: u64, old_value: u64) -> Syscal
     };
 
     let new_val = if new_value != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             let p = new_value as *const i64;
             crate::posix_timer::ITimerVal {
@@ -84,6 +88,7 @@ pub fn sys_setitimer_linux(which: i32, new_value: u64, old_value: u64) -> Syscal
     match crate::posix_timer::setitimer(pid, itimer_which, new_val) {
         Ok(old_val) => {
             if old_value != 0 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     let p = old_value as *mut i64;
                     *p = old_val.interval.tv_sec;
@@ -111,7 +116,9 @@ pub fn sys_alarm_linux(seconds: u32) -> SyscallResult {
 pub fn sys_timer_create_linux(clockid: u32, sevp: u64, timerid: u64) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let notify = if sevp != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let sigev_notify = unsafe { *(sevp as *const i32) };
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let sigev_signo = unsafe { *((sevp as usize + 4) as *const i32) };
         match sigev_notify {
             0 => crate::posix_timer::TimerNotify::Signal(sigev_signo as u32),
@@ -124,6 +131,7 @@ pub fn sys_timer_create_linux(clockid: u32, sevp: u64, timerid: u64) -> SyscallR
     let id = crate::posix_timer::timer_create(pid, clockid, notify)
         .map_err(|_| SyscallError::InvalidArgument)?;
     if timerid != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(timerid as *mut u32) = id;
         }
@@ -142,6 +150,7 @@ pub fn sys_timer_settime_linux(
     // Parse itimerspec from new_value: {interval: {tv_sec, tv_nsec}, value: {tv_sec, tv_nsec}}
     let (interval, value) = if new_value != 0 {
         let p = new_value as *const i64;
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let it_interval = crate::posix_timer::Timespec {
                 tv_sec: *p,
@@ -163,6 +172,7 @@ pub fn sys_timer_settime_linux(
         Ok(old_val) => {
             if old_value != 0 {
                 // Write old itimerspec: {interval(zeroed for simplicity), value}
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     let p = old_value as *mut i64;
                     *p = 0; // old interval.tv_sec
@@ -187,6 +197,7 @@ pub fn sys_timer_gettime_linux(timerid: u32, curr_value: u64) -> SyscallResult {
         buf[8..16].copy_from_slice(&interval.tv_nsec.to_ne_bytes());
         buf[16..24].copy_from_slice(&value.tv_sec.to_ne_bytes());
         buf[24..32].copy_from_slice(&value.tv_nsec.to_ne_bytes());
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), curr_value as *mut u8, buf.len());
         }

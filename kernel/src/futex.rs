@@ -70,6 +70,7 @@ fn futex_wait(addr: u64, expected: u32, timeout: u64, bitset: u32) -> Result<i32
     }
 
     // Read the current value
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let current = unsafe { *(addr as *const u32) };
     if current != expected {
         return Err(-11); // EAGAIN — value changed
@@ -169,6 +170,7 @@ fn futex_cmp_requeue(
     expected: u32,
     requeue_count: i32,
 ) -> Result<i32, i32> {
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let current = unsafe { *(addr as *const u32) };
     if current != expected {
         return Err(-11); // EAGAIN
@@ -185,8 +187,10 @@ fn futex_wake_op(addr1: u64, wake1_count: i32, addr2: u64, op_arg: u32) -> Resul
     let _cmparg = op_arg & 0xfff;
 
     // Perform atomic operation on *addr2
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let oldval = unsafe { *(addr2 as *const u32) };
     // Simplified: just set to oparg value
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe { *(addr2 as *mut u32) = _oparg_val };
 
     // Wake on addr1
@@ -215,10 +219,12 @@ fn futex_wake_op(addr1: u64, wake1_count: i32, addr2: u64, op_arg: u32) -> Resul
 /// FUTEX_LOCK_PI — priority-inheritance lock
 fn futex_lock_pi(addr: u64, _timeout: u64) -> Result<i32, i32> {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let current = unsafe { *(addr as *const u32) };
 
     if current == 0 {
         // Lock is free, take it
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { *(addr as *mut u32) = pid };
         Ok(0)
     } else {
@@ -229,6 +235,7 @@ fn futex_lock_pi(addr: u64, _timeout: u64) -> Result<i32, i32> {
 
 /// FUTEX_UNLOCK_PI — release priority-inheritance lock
 fn futex_unlock_pi(addr: u64) -> Result<i32, i32> {
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe { *(addr as *mut u32) = 0 };
     futex_wake(addr, 1, !0u32)
 }

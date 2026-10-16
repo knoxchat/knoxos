@@ -404,6 +404,7 @@ fn pci_read32(bus: u8, dev: u8, func: u8, offset: u8) -> u32 {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -422,6 +423,7 @@ fn pci_write32(bus: u8, dev: u8, func: u8, offset: u8, value: u32) {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -460,6 +462,7 @@ fn find_hda_controller() -> Option<(u8, u8, u8)> {
 
 /// Reset the HDA controller
 fn controller_reset(base: u64) -> bool {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Clear CRST to enter reset
         let gctl = mmio_read32(base, REG_GCTL);
@@ -576,6 +579,7 @@ pub fn handle_interrupt() {
 
     let mmio = ctrl.mmio_base;
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Read global interrupt status
         let intsts = mmio_read32(mmio, REG_INTSTS);
@@ -700,6 +704,7 @@ pub fn pcm_write(_handle: u32, data: &[u8]) -> Result<usize, &'static str> {
         }
 
         // Copy PCM data into the DMA buffer
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             let dst = (stream.buffer_base as *mut u8).add(write_pos);
             core::ptr::copy_nonoverlapping(data.as_ptr(), dst, to_write);
@@ -856,6 +861,7 @@ impl HdaController {
         // Allocate DMA buffer (page-aligned for hardware DMA)
         let dma_layout = alloc::alloc::Layout::from_size_align(buffer_size, 4096)
             .unwrap_or(alloc::alloc::Layout::from_size_align(buffer_size, 8).unwrap());
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let dma_ptr = unsafe { alloc::alloc::alloc_zeroed(dma_layout) };
         if dma_ptr.is_null() {
             serial_println!(
@@ -870,8 +876,10 @@ impl HdaController {
         let bdl_size = core::mem::size_of::<BdlEntry>() * num_periods as usize;
         let bdl_layout = alloc::alloc::Layout::from_size_align(bdl_size, 128)
             .unwrap_or(alloc::alloc::Layout::from_size_align(bdl_size, 8).unwrap());
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let bdl_ptr = unsafe { alloc::alloc::alloc_zeroed(bdl_layout) } as *mut BdlEntry;
         if bdl_ptr.is_null() {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 alloc::alloc::dealloc(dma_ptr, dma_layout);
             }
@@ -886,6 +894,7 @@ impl HdaController {
                 length: period_bytes as u32,
                 ioc: 1, // Interrupt on completion for every period
             };
+            // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
             unsafe {
                 core::ptr::write(bdl_ptr.add(i), entry);
             }
@@ -899,6 +908,7 @@ impl HdaController {
 
         // Program HDA stream descriptor registers
         if self.mmio_base != 0 {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 let sd_base = 0x80u16 + (stream_index as u16) * 0x20;
 
@@ -985,6 +995,7 @@ impl HdaController {
         // Allocate DMA buffer (page-aligned)
         let dma_layout = alloc::alloc::Layout::from_size_align(buffer_size, 4096)
             .unwrap_or(alloc::alloc::Layout::from_size_align(buffer_size, 8).unwrap());
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let dma_ptr = unsafe { alloc::alloc::alloc_zeroed(dma_layout) };
         if dma_ptr.is_null() {
             serial_println!("[HDA] Failed to allocate capture DMA buffer");
@@ -995,8 +1006,10 @@ impl HdaController {
         let bdl_size = core::mem::size_of::<BdlEntry>() * num_periods as usize;
         let bdl_layout = alloc::alloc::Layout::from_size_align(bdl_size, 128)
             .unwrap_or(alloc::alloc::Layout::from_size_align(bdl_size, 8).unwrap());
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let bdl_ptr = unsafe { alloc::alloc::alloc_zeroed(bdl_layout) } as *mut BdlEntry;
         if bdl_ptr.is_null() {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 alloc::alloc::dealloc(dma_ptr, dma_layout);
             }
@@ -1011,6 +1024,7 @@ impl HdaController {
                 length: period_bytes as u32,
                 ioc: 1,
             };
+            // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
             unsafe {
                 core::ptr::write(bdl_ptr.add(i), entry);
             }
@@ -1024,6 +1038,7 @@ impl HdaController {
 
         // Program HDA stream descriptor registers for capture
         if self.mmio_base != 0 {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 let sd_base = 0x80u16 + (stream_index as u16) * 0x20;
                 mmio_write32(self.mmio_base, sd_base + SD_CTL, 0);
@@ -1080,6 +1095,7 @@ impl HdaController {
             stream.dma_position_in_buffer = 0;
 
             if self.mmio_base != 0 {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     let sd_base = 0x80u16 + (stream.stream_index as u16) * 0x20;
 
@@ -1127,6 +1143,7 @@ impl HdaController {
     pub fn stop_playback(&mut self) -> bool {
         if let Some(ref mut stream) = self.playback_stream {
             stream.state = StreamState::Stopped;
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 let stream_offset = 0x80u16 + (stream.stream_index as u16) * 0x20;
                 mmio_write32(self.mmio_base, stream_offset + SD_CTL, 0); // Stop
@@ -1142,6 +1159,7 @@ impl HdaController {
     pub fn start_capture(&mut self) -> bool {
         if let Some(ref mut stream) = self.capture_stream {
             stream.state = StreamState::Running;
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 let stream_offset = 0x80u16 + (stream.stream_index as u16) * 0x20;
                 mmio_write32(
@@ -1204,6 +1222,7 @@ pub fn init() {
             // Reset the controller
             let reset_ok = controller_reset(ctrl.mmio_base);
 
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 let gcap = mmio_read16(ctrl.mmio_base, REG_GCAP);
                 ctrl.num_output_streams = ((gcap >> 12) & 0x0F) as u8;

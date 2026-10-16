@@ -11,6 +11,7 @@ pub fn init_mouse() {
 
         // Disable interrupts during init so ACK bytes don't go into the queue
         crate::arch_compat::instructions::interrupts::without_interrupts(|| {
+            // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
             unsafe {
                 let mut cmd_port = Port::<u8>::new(0x64);
                 let mut data_port = Port::<u8>::new(0x60);

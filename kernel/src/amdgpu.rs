@@ -353,6 +353,7 @@ impl AmdGpu {
         let mmio = self.mmio_base;
         for (i, &word) in packet.iter().enumerate() {
             let addr = base + ring.write_ptr as u64 + (i * 4) as u64;
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe {
                 core::ptr::write_volatile(addr as *mut u32, word);
             }
@@ -369,6 +370,7 @@ impl AmdGpu {
             RingType::Vcn => 0x0C,
         };
         // Write directly to avoid borrow conflict with self.write_reg
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             core::ptr::write_volatile(
                 (mmio + (0x1A000 + doorbell_offset) as u64) as *mut u32,
@@ -415,10 +417,12 @@ impl AmdGpu {
     }
 
     fn read_reg(&self, offset: u32) -> u32 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::read_volatile((self.mmio_base + offset as u64) as *const u32) }
     }
 
     fn write_reg(&self, offset: u32, value: u32) {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::write_volatile((self.mmio_base + offset as u64) as *mut u32, value) }
     }
 }

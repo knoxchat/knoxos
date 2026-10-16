@@ -633,6 +633,7 @@ pub fn random_bytes(buf: &mut [u8]) {
     let mut i = 0;
     while i + 8 <= buf.len() {
         let mut val: u64 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!(
@@ -645,6 +646,7 @@ pub fn random_bytes(buf: &mut [u8]) {
     }
     if i < buf.len() {
         let mut val: u64 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!(

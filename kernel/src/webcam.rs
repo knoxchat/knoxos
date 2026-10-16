@@ -502,6 +502,7 @@ pub fn scan_for_uvc_devices() -> usize {
             // In XHCI: enumerate port status registers to find attached devices
             // USB webcam will appear as Interface Class 0x0E (Video)
             // with Subclass 0x01 (Video Control) and 0x02 (Video Streaming)
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe {
                 // Read XHCI capability registers
                 let caplength = core::ptr::read_volatile(xhci_base as *const u8);

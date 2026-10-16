@@ -395,6 +395,7 @@ fn detect_virtio_gamepads() -> usize {
     for bus in 0..=255u8 {
         for dev in 0..32u8 {
             let addr: u32 = (1 << 31) | ((bus as u32) << 16) | ((dev as u32) << 11);
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let id = unsafe {
                 let mut p = Port::<u32>::new(0xCF8);
                 let mut d = Port::<u32>::new(0xCFC);

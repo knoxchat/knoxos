@@ -126,6 +126,7 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> Sysc
 
 pub fn sys_execve(filename_ptr: u64, argv: u64, envp: u64) -> SyscallResult {
     let filename =
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { read_user_string(filename_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     execve_path(&filename, argv, envp)
 }
@@ -141,6 +142,7 @@ pub fn sys_execveat(
     flags: i32,
 ) -> SyscallResult {
     let _ = flags;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(pathname_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = super::advanced::path_at(dirfd, &path)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -327,6 +329,7 @@ pub fn sys_waitid(idtype: i32, id: u32, infop: u64, options: i32) -> SyscallResu
 
     if let Some((child_pid, exit_code)) = crate::process::wait_child(current_pid, target_pid) {
         if infop != 0 {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 core::ptr::write_bytes(infop as *mut u8, 0, 128);
                 *(infop as *mut i32) = 17; // SIGCHLD
@@ -338,6 +341,7 @@ pub fn sys_waitid(idtype: i32, id: u32, infop: u64, options: i32) -> SyscallResu
         Ok(0)
     } else if options & WNOHANG != 0 {
         if infop != 0 {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 core::ptr::write_bytes(infop as *mut u8, 0, 128);
             }

@@ -95,6 +95,7 @@ impl Ipv4Header {
             if i == 5 {
                 continue;
             } // Skip checksum field
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             sum += unsafe { *ptr.add(i) } as u32;
         }
         while sum >> 16 != 0 {

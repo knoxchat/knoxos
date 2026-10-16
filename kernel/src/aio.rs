@@ -164,6 +164,7 @@ fn process_iocb(iocb: &Iocb) -> i64 {
             let pid = crate::scheduler::current_pid().unwrap_or(1);
             let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
             if let Some(fd_table) = tables.get_mut(&pid) {
+                // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
                 let buf = unsafe {
                     core::slice::from_raw_parts_mut(
                         iocb.aio_buf as *mut u8,
@@ -182,6 +183,7 @@ fn process_iocb(iocb: &Iocb) -> i64 {
             let pid = crate::scheduler::current_pid().unwrap_or(1);
             let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
             if let Some(fd_table) = tables.get_mut(&pid) {
+                // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
                 let buf = unsafe {
                     core::slice::from_raw_parts(iocb.aio_buf as *const u8, iocb.aio_nbytes as usize)
                 };

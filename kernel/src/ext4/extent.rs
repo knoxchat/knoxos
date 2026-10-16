@@ -13,12 +13,14 @@ impl Ext4Fs {
     ) -> Result<Ext4ExtentHeader, Ext4Error> {
         // Copy i_block out of packed struct to avoid unaligned reference
         let i_block = { inode.i_block };
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let bytes = unsafe {
             core::slice::from_raw_parts(
                 i_block.as_ptr() as *const u8,
                 core::mem::size_of::<Ext4ExtentHeader>(),
             )
         };
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let header = unsafe { *(bytes.as_ptr() as *const Ext4ExtentHeader) };
         if header.eh_magic != EXT4_EXT_MAGIC {
             return Err(Ext4Error::InvalidExtent);
@@ -45,6 +47,7 @@ impl Ext4Fs {
             for i in 0..header.eh_entries as usize {
                 let offset = entry_offset + i * core::mem::size_of::<Ext4Extent>();
                 if offset + core::mem::size_of::<Ext4Extent>() <= 60 {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let extent = unsafe { *(base.add(offset) as *const Ext4Extent) };
                     extents.push(extent);
                 }
@@ -57,6 +60,7 @@ impl Ext4Fs {
             for i in 0..header.eh_entries as usize {
                 let offset = entry_offset + i * core::mem::size_of::<Ext4ExtentIdx>();
                 if offset + core::mem::size_of::<Ext4ExtentIdx>() <= 60 {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let idx = unsafe { *(base.add(offset) as *const Ext4ExtentIdx) };
                     let child_block = (idx.ei_leaf_lo as u64) | ((idx.ei_leaf_hi as u64) << 32);
                     // Recursively read extent leaves from the child block
@@ -77,6 +81,7 @@ impl Ext4Fs {
         let mut buf = vec![0u8; self.block_size];
         self.read_block(block_num, &mut buf)?;
 
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let header = unsafe { *(buf.as_ptr() as *const Ext4ExtentHeader) };
         if header.eh_magic != EXT4_EXT_MAGIC {
             return Err(Ext4Error::InvalidExtent);
@@ -90,6 +95,7 @@ impl Ext4Fs {
             for i in 0..header.eh_entries as usize {
                 let offset = entry_offset + i * core::mem::size_of::<Ext4Extent>();
                 if offset + core::mem::size_of::<Ext4Extent>() <= self.block_size {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let extent = unsafe { *(buf[offset..].as_ptr() as *const Ext4Extent) };
                     extents.push(extent);
                 }
@@ -99,6 +105,7 @@ impl Ext4Fs {
             for i in 0..header.eh_entries as usize {
                 let offset = entry_offset + i * core::mem::size_of::<Ext4ExtentIdx>();
                 if offset + core::mem::size_of::<Ext4ExtentIdx>() <= self.block_size {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let idx = unsafe { *(buf[offset..].as_ptr() as *const Ext4ExtentIdx) };
                     let child = (idx.ei_leaf_lo as u64) | ((idx.ei_leaf_hi as u64) << 32);
                     let child_extents = self.read_extents_from_block(child)?;

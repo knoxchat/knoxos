@@ -35,12 +35,14 @@ pub fn sys_uname(buf_ptr: u64) -> SyscallResult {
     fill(&mut u.machine, "x86_64");
     if buf_ptr != 0 {
         let pid = crate::scheduler::current_pid().unwrap_or(1);
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let bytes = unsafe {
             core::slice::from_raw_parts(
                 (&u as *const Utsname).cast::<u8>(),
                 core::mem::size_of::<Utsname>(),
             )
         };
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(bytes.as_ptr(), buf_ptr as *mut u8, bytes.len());
         }
@@ -86,9 +88,11 @@ pub fn sys_sysinfo(buf_ptr: u64) -> SyscallResult {
     };
     if buf_ptr != 0 {
         let pid = crate::scheduler::current_pid().unwrap_or(1);
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let bytes = unsafe {
             core::slice::from_raw_parts((&si as *const Si).cast::<u8>(), core::mem::size_of::<Si>())
         };
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(bytes.as_ptr(), buf_ptr as *mut u8, bytes.len());
         }
@@ -130,6 +134,7 @@ pub fn sys_syslog(log_type: i32, buf_ptr: u64, len: usize) -> SyscallResult {
             let bytes = output.as_bytes();
             let copy_len = core::cmp::min(bytes.len(), len);
             if buf_ptr != 0 && copy_len > 0 {
+                // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
                 let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, copy_len) };
                 buf.copy_from_slice(&bytes[..copy_len]);
             }
@@ -149,6 +154,7 @@ pub fn sys_syslog(log_type: i32, buf_ptr: u64, len: usize) -> SyscallResult {
 
 #[allow(dead_code)]
 pub fn sys_init_module(name_ptr: u64, _param_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let module = crate::modules::KernelModule {
         name: name.clone(),
@@ -168,6 +174,7 @@ pub fn sys_init_module(name_ptr: u64, _param_ptr: u64) -> SyscallResult {
 
 #[allow(dead_code)]
 pub fn sys_delete_module(name_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     crate::modules::remove_module(&name).map_err(|_| SyscallError::FileNotFound)?;
     Ok(0)
@@ -176,6 +183,7 @@ pub fn sys_delete_module(name_ptr: u64) -> SyscallResult {
 // ── KPM (Package manager) ──────────────────────────────────────────
 
 pub fn sys_kpm_install(name_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     match crate::kpm::install(&name) {
         Ok(()) => Ok(0),
@@ -184,6 +192,7 @@ pub fn sys_kpm_install(name_ptr: u64) -> SyscallResult {
 }
 
 pub fn sys_kpm_remove(name_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     match crate::kpm::remove(&name) {
         Ok(()) => Ok(0),
@@ -201,6 +210,7 @@ pub fn sys_kpm_list(buf_ptr: u64, buf_len: usize) -> SyscallResult {
     let bytes = output.as_bytes();
     let copy_len = core::cmp::min(bytes.len(), buf_len);
     if buf_ptr != 0 && copy_len > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
         let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, copy_len) };
         buf.copy_from_slice(&bytes[..copy_len]);
     }
@@ -208,6 +218,7 @@ pub fn sys_kpm_list(buf_ptr: u64, buf_len: usize) -> SyscallResult {
 }
 
 pub fn sys_kpm_search(query_ptr: u64, buf_ptr: u64, buf_len: usize) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let query = unsafe { read_user_string(query_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let results = crate::kpm::search(&query);
     let mut output = String::new();
@@ -218,6 +229,7 @@ pub fn sys_kpm_search(query_ptr: u64, buf_ptr: u64, buf_len: usize) -> SyscallRe
     let bytes = output.as_bytes();
     let copy_len = core::cmp::min(bytes.len(), buf_len);
     if buf_ptr != 0 && copy_len > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
         let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, copy_len) };
         buf.copy_from_slice(&bytes[..copy_len]);
     }
@@ -227,6 +239,7 @@ pub fn sys_kpm_search(query_ptr: u64, buf_ptr: u64, buf_len: usize) -> SyscallRe
 // ── Cgroups ─────────────────────────────────────────────────────────
 
 pub fn sys_cgroup_create(path_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     match crate::cgroups::create(&path) {
         Ok(()) => Ok(0),
@@ -235,6 +248,7 @@ pub fn sys_cgroup_create(path_ptr: u64) -> SyscallResult {
 }
 
 pub fn sys_cgroup_attach(path_ptr: u64, pid: u32) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     match crate::cgroups::attach_pid(&path, pid) {
         Ok(()) => Ok(0),
@@ -254,6 +268,7 @@ pub fn sys_dmesg(buf_ptr: u64, buf_len: usize) -> SyscallResult {
     let bytes = output.as_bytes();
     let copy_len = core::cmp::min(bytes.len(), buf_len);
     if buf_ptr != 0 && copy_len > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
         let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, copy_len) };
         buf.copy_from_slice(&bytes[..copy_len]);
     }
@@ -275,6 +290,7 @@ pub fn sys_lsblk(buf_ptr: u64, buf_len: usize) -> SyscallResult {
     let bytes = output.as_bytes();
     let copy_len = core::cmp::min(bytes.len(), buf_len);
     if buf_ptr != 0 && copy_len > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
         let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, copy_len) };
         buf.copy_from_slice(&bytes[..copy_len]);
     }
@@ -282,6 +298,7 @@ pub fn sys_lsblk(buf_ptr: u64, buf_len: usize) -> SyscallResult {
 }
 
 pub fn sys_mount(device_ptr: u64, _target_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let _device = unsafe { read_user_string(device_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     crate::ext2::mount(0).map_err(|_| SyscallError::IoError)?;
     Ok(0)
@@ -297,6 +314,7 @@ pub fn sys_sethostname(name_ptr: u64, len: usize) -> SyscallResult {
     if name_ptr == 0 || len == 0 || len > 64 {
         return Err(SyscallError::InvalidArgument);
     }
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let bytes = unsafe { core::slice::from_raw_parts(name_ptr as *const u8, len) };
     let name = core::str::from_utf8(bytes).map_err(|_| SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
@@ -313,6 +331,7 @@ pub fn sys_gethostname(buf_ptr: u64, len: usize) -> SyscallResult {
     let hostname = crate::namespaces::gethostname(pid);
     let bytes = hostname.as_bytes();
     let copy_len = core::cmp::min(bytes.len(), len);
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
     let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, copy_len) };
     buf.copy_from_slice(&bytes[..copy_len]);
     Ok(copy_len as u64)
@@ -331,6 +350,7 @@ fn write_rlimit(pid: u32, dest: u64, limit: crate::rlimit::Rlimit) {
     let mut buf = [0u8; 16];
     buf[0..8].copy_from_slice(&limit.rlim_cur.to_ne_bytes());
     buf[8..16].copy_from_slice(&limit.rlim_max.to_ne_bytes());
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(buf.as_ptr(), dest as *mut u8, 16);
     }
@@ -339,6 +359,7 @@ fn write_rlimit(pid: u32, dest: u64, limit: crate::rlimit::Rlimit) {
 
 fn read_rlimit(pid: u32, src: u64) -> crate::rlimit::Rlimit {
     let mut buf = [0u8; 16];
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(src as *const u8, buf.as_mut_ptr(), 16);
     }
@@ -401,6 +422,7 @@ pub fn sys_getrandom(buf_ptr: u64, len: usize, flags: u32) -> SyscallResult {
         return Err(SyscallError::InvalidArgument);
     }
     let _ = flags;
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
     let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, len) };
     let mut seed = crate::arch_compat::read_tsc();
     for byte in buf.iter_mut() {

@@ -87,6 +87,7 @@ fn update_tpr(ipl: u8) {
     // Write to APIC TPR if available (use LAPIC_BASE from smp)
     let apic_base = crate::apic_timer::APIC_BASE.load(core::sync::atomic::Ordering::Relaxed);
     if apic_base != 0 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let tpr_ptr = (apic_base + 0x80) as *mut u32; // TPR offset = 0x80
             core::ptr::write_volatile(tpr_ptr, tpr_value);

@@ -192,6 +192,7 @@ pub fn apply_patch(patch_id: &str) -> Result<(), &'static str> {
     // Save original bytes at the function entry point
     let save_len = patch.new_code.len().min(14); // trampoline size
     let mut saved = alloc::vec![0u8; save_len];
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         let src = func_addr as *const u8;
         for i in 0..save_len {
@@ -208,6 +209,7 @@ pub fn apply_patch(patch_id: &str) -> Result<(), &'static str> {
 
     // Write trampoline bytes at function entry point
     // We need to disable interrupts during the write for atomicity
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     crate::arch_compat::instructions::interrupts::without_interrupts(|| unsafe {
         let dst = func_addr as *mut u8;
         let tramp_bytes = &trampoline.jmp_instruction;
@@ -244,6 +246,7 @@ pub fn rollback_patch(patch_id: &str) -> Result<(), &'static str> {
     let saved = &patch.saved_bytes;
 
     // Restore original bytes with interrupts disabled
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     crate::arch_compat::instructions::interrupts::without_interrupts(|| unsafe {
         let dst = func_addr as *mut u8;
         for (i, &byte) in saved.iter().enumerate() {

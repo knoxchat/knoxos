@@ -366,6 +366,7 @@ pub fn apply_relocations(base: u64, rela: &[Elf64Rela], symtab: &[Elf64Sym], _st
             R_X86_64_RELATIVE => {
                 // B + A (base + addend)
                 let value = base.wrapping_add(rel.r_addend as u64);
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     *(target as *mut u64) = value;
                 }
@@ -376,6 +377,7 @@ pub fn apply_relocations(base: u64, rela: &[Elf64Rela], symtab: &[Elf64Sym], _st
                     let sym = &symtab[sym_idx];
                     if sym.st_value != 0 {
                         let value = base + sym.st_value;
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe {
                             *(target as *mut u64) = value;
                         }
@@ -387,6 +389,7 @@ pub fn apply_relocations(base: u64, rela: &[Elf64Rela], symtab: &[Elf64Sym], _st
                 if sym_idx < symtab.len() {
                     let sym = &symtab[sym_idx];
                     let value = (base + sym.st_value).wrapping_add(rel.r_addend as u64);
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     unsafe {
                         *(target as *mut u64) = value;
                     }

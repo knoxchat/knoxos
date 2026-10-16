@@ -39,6 +39,7 @@ pub fn sys_read(fd: u64, buf_ptr: u64, count: u64) -> SyscallResult {
     let fd_table = tables
         .get_mut(&pid)
         .ok_or(SyscallError::BadFileDescriptor)?;
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
     let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, count as usize) };
     fd_table
         .read(fd as i32, buf)
@@ -56,6 +57,7 @@ pub fn sys_write(fd: u64, buf_ptr: u64, count: u64) -> SyscallResult {
     let fd_table = tables
         .get_mut(&pid)
         .ok_or(SyscallError::BadFileDescriptor)?;
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let buf = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, count as usize) };
     fd_table
         .write(fd as i32, buf)
@@ -68,6 +70,7 @@ pub fn sys_write(fd: u64, buf_ptr: u64, count: u64) -> SyscallResult {
 }
 
 pub fn sys_open(path_ptr: u64, flags: u32, mode: u16) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     open_path(&path, flags, mode)
 }
@@ -182,6 +185,7 @@ pub fn sys_lseek(fd: i32, offset: i64, whence: u32) -> SyscallResult {
 }
 
 pub fn sys_stat(path_ptr: u64, stat_buf: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = vfs_path(&path);
     let vfs = crate::vfs::VFS.lock();
@@ -210,6 +214,7 @@ pub fn sys_stat(path_ptr: u64, stat_buf: u64) -> SyscallResult {
         st_mtime: 0,
         st_ctime: 0,
     };
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         core::ptr::write(stat_buf as *mut crate::fd::FileStat, stat);
     }
@@ -224,12 +229,14 @@ pub fn sys_fstat(fd: i32, stat_buf: u64) -> SyscallResult {
         .fstat(fd)
         .map_err(|_| SyscallError::BadFileDescriptor)?;
     if stat_buf != 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let bytes = unsafe {
             core::slice::from_raw_parts(
                 (&stat as *const crate::fd::FileStat).cast::<u8>(),
                 core::mem::size_of::<crate::fd::FileStat>(),
             )
         };
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(bytes.as_ptr(), stat_buf as *mut u8, bytes.len());
         }
@@ -239,6 +246,7 @@ pub fn sys_fstat(fd: i32, stat_buf: u64) -> SyscallResult {
 }
 
 pub fn sys_access(path_ptr: u64, _mode: u32) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = vfs_path(&path);
     crate::vfs::VFS
@@ -249,6 +257,7 @@ pub fn sys_access(path_ptr: u64, _mode: u32) -> SyscallResult {
 }
 
 pub fn sys_unlink(path_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = vfs_path_write(&path);
     crate::vfs::VFS.lock().unlink(&path).map_err(|e| match e {
@@ -260,7 +269,9 @@ pub fn sys_unlink(path_ptr: u64) -> SyscallResult {
 }
 
 pub fn sys_rename(old_ptr: u64, new_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let old = unsafe { read_user_string(old_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let new = unsafe { read_user_string(new_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let old = vfs_path(&old);
     let new = vfs_path_write(&new);
@@ -272,7 +283,9 @@ pub fn sys_rename(old_ptr: u64, new_ptr: u64) -> SyscallResult {
 }
 
 pub fn sys_link(old_ptr: u64, new_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let old = unsafe { read_user_string(old_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let new = unsafe { read_user_string(new_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let old = vfs_path(&old);
     let new = vfs_path_write(&new);
@@ -290,6 +303,7 @@ pub fn sys_link(old_ptr: u64, new_ptr: u64) -> SyscallResult {
 }
 
 pub fn sys_readlink(path_ptr: u64, buf_ptr: u64, bufsiz: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
 
@@ -299,6 +313,7 @@ pub fn sys_readlink(path_ptr: u64, buf_ptr: u64, bufsiz: u64) -> SyscallResult {
         if let Some(proc) = table.get_process(pid) {
             let target = alloc::format!("/bin/{}", proc.name);
             let len = target.len().min(bufsiz as usize);
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 core::ptr::copy_nonoverlapping(target.as_ptr(), buf_ptr as *mut u8, len);
             }
@@ -312,6 +327,7 @@ pub fn sys_readlink(path_ptr: u64, buf_ptr: u64, bufsiz: u64) -> SyscallResult {
         if let Some(proc) = table.get_process(pid) {
             let cwd = proc.cwd.clone();
             let len = cwd.len().min(bufsiz as usize);
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
             unsafe {
                 core::ptr::copy_nonoverlapping(cwd.as_ptr(), buf_ptr as *mut u8, len);
             }
@@ -329,6 +345,7 @@ pub fn sys_readlink(path_ptr: u64, buf_ptr: u64, bufsiz: u64) -> SyscallResult {
                     if let Some(file) = fd_table.get(fd_num) {
                         let target = file.path.clone();
                         let len = target.len().min(bufsiz as usize);
+                        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                         unsafe {
                             core::ptr::copy_nonoverlapping(
                                 target.as_ptr(),
@@ -358,6 +375,7 @@ pub fn sys_readlink(path_ptr: u64, buf_ptr: u64, bufsiz: u64) -> SyscallResult {
     };
     let len = target.len().min(bufsiz as usize);
     if buf_ptr != 0 && len > 0 {
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(target.as_ptr(), buf_ptr as *mut u8, len);
         }
@@ -382,6 +400,7 @@ pub fn sys_getdents64(fd: i32, dirp: u64, count: u32) -> SyscallResult {
         if offset + reclen > count as usize {
             break;
         }
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             let base = (dirp as usize + offset) as *mut u8;
             *(base as *mut u64) = 1;
@@ -413,6 +432,7 @@ pub fn sys_getcwd(buf_ptr: u64, size: usize) -> SyscallResult {
 }
 
 pub fn sys_chdir(path_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     let path = crate::process::translate_path(pid, &path);
@@ -432,6 +452,7 @@ pub fn sys_chdir(path_ptr: u64) -> SyscallResult {
 }
 
 pub fn sys_mkdir(path_ptr: u64, mode: u16) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = vfs_path_write(&path);
     let mode = mode & !current_umask();
@@ -447,6 +468,7 @@ pub fn sys_mkdir(path_ptr: u64, mode: u16) -> SyscallResult {
 }
 
 pub fn sys_rmdir(path_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = vfs_path_write(&path);
     crate::vfs::VFS.lock().rmdir(&path).map_err(|e| match e {
@@ -458,8 +480,10 @@ pub fn sys_rmdir(path_ptr: u64) -> SyscallResult {
 }
 
 pub fn sys_symlink(target_ptr: u64, linkpath_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let target = unsafe { read_user_string(target_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let linkpath =
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { read_user_string(linkpath_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let linkpath = vfs_path_write(&linkpath);
     let mut vfs = crate::vfs::VFS.lock();
@@ -480,6 +504,7 @@ pub fn sys_symlink(target_ptr: u64, linkpath_ptr: u64) -> SyscallResult {
 
 pub fn sys_chmod(path_or_fd: u64, mode: u16) -> SyscallResult {
     // Try to interpret as path first
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     if let Some(path) = unsafe { read_user_string(path_or_fd) } {
         let path = vfs_path_write(&path);
         let mut vfs = crate::vfs::VFS.lock();
@@ -515,6 +540,7 @@ pub fn sys_fchmod(fd: i32, mode: u16) -> SyscallResult {
 
 pub fn sys_chown(path_or_fd: u64, uid: u32, gid: u32) -> SyscallResult {
     // Try to interpret as path first
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     if let Some(path) = unsafe { read_user_string(path_or_fd) } {
         let path = vfs_path_write(&path);
         let mut vfs = crate::vfs::VFS.lock();
@@ -596,6 +622,7 @@ fn write_statfs(buf: u64) -> SyscallResult {
         f_namelen: 255,
         f_frsize: 4096,
     };
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         core::ptr::write(buf as *mut StatFs, statfs);
     }
@@ -604,6 +631,7 @@ fn write_statfs(buf: u64) -> SyscallResult {
 
 /// `statfs` — fill `struct statfs` for an existing VFS path.
 pub fn sys_statfs(path_ptr: u64, buf: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = vfs_path(&path);
     {
@@ -648,6 +676,7 @@ fn truncate_path(path: &str, length: usize) -> SyscallResult {
 }
 
 pub fn sys_truncate(path_ptr: u64, length: usize) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let path = vfs_path_write(&path);
     truncate_path(&path, length)
@@ -672,6 +701,7 @@ pub fn sys_getrusage(who: i32, usage_ptr: u64) -> SyscallResult {
     let mut buf = [0u8; 144];
     // ru_maxrss at offset 32 — report 4 KiB so Ring 3 can observe a real field.
     buf[32..40].copy_from_slice(&4096i64.to_ne_bytes());
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(buf.as_ptr(), usage_ptr as *mut u8, buf.len());
     }

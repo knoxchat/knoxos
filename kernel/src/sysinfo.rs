@@ -137,6 +137,7 @@ pub fn write_sysinfo_to_user(ptr: u64) -> Result<(), ()> {
     }
     let info = get_sysinfo();
     let dest = ptr as *mut SysInfo;
+    // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
     unsafe {
         core::ptr::write(dest, info);
     }

@@ -163,6 +163,7 @@ pub fn parse_multiboot2(info_addr: u64) -> Option<Multiboot2Info> {
 
     let mut offset = 8usize; // skip total_size + reserved
     while offset < total_size {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let tag = unsafe { &*(ptr.add(offset) as *const TagHeader) };
         if tag.tag_type == MB2_TAG_END {
             break;
@@ -170,33 +171,43 @@ pub fn parse_multiboot2(info_addr: u64) -> Option<Multiboot2Info> {
 
         match tag.tag_type {
             MB2_TAG_CMDLINE => {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let str_ptr = unsafe { ptr.add(offset + 8) };
                 let len = tag.size as usize - 9; // minus header + null
+                // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
                 let slice = unsafe { core::slice::from_raw_parts(str_ptr, len) };
                 if let Ok(s) = core::str::from_utf8(slice) {
                     info.command_line = Some(String::from(s));
                 }
             }
             MB2_TAG_BOOT_LOADER => {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let str_ptr = unsafe { ptr.add(offset + 8) };
                 let len = tag.size as usize - 9;
+                // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
                 let slice = unsafe { core::slice::from_raw_parts(str_ptr, len) };
                 if let Ok(s) = core::str::from_utf8(slice) {
                     info.bootloader_name = Some(String::from(s));
                 }
             }
             MB2_TAG_BASIC_MEMINFO => {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let data = unsafe { ptr.add(offset + 8) as *const u32 };
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 info.mem_lower = unsafe { *data };
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 info.mem_upper = unsafe { *data.add(1) };
             }
             MB2_TAG_MMAP => {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let entry_size = unsafe { *(ptr.add(offset + 8) as *const u32) } as usize;
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let _entry_ver = unsafe { *(ptr.add(offset + 12) as *const u32) };
                 let entries_start = offset + 16;
                 let entries_end = offset + tag.size as usize;
                 let mut eoff = entries_start;
                 while eoff + entry_size <= entries_end {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let entry = unsafe { &*(ptr.add(eoff) as *const MmapEntry) };
                     info.memory_map.push((
                         entry.base_addr,
@@ -207,11 +218,17 @@ pub fn parse_multiboot2(info_addr: u64) -> Option<Multiboot2Info> {
                 }
             }
             MB2_TAG_FRAMEBUFFER => {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let fb_addr = unsafe { *(ptr.add(offset + 8) as *const u64) };
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let fb_pitch = unsafe { *(ptr.add(offset + 16) as *const u32) };
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let fb_width = unsafe { *(ptr.add(offset + 20) as *const u32) };
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let fb_height = unsafe { *(ptr.add(offset + 24) as *const u32) };
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let fb_bpp = unsafe { *ptr.add(offset + 28) };
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let fb_type = unsafe { *ptr.add(offset + 29) };
                 info.framebuffer = Some(FramebufferInfo {
                     addr: fb_addr,

@@ -251,6 +251,7 @@ pub fn map_2m_page(
     let page = Page::<Size2MiB>::containing_address(VirtAddr::new(virt_addr));
     let frame = PhysFrame::<Size2MiB>::containing_address(PhysAddr::new(phys_addr));
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         match mapper.map_to(page, frame, flags, frame_allocator) {
             Ok(flush) => {

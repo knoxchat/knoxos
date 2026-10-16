@@ -172,6 +172,7 @@ impl E1000Device {
 
     /// Read a 32-bit register
     fn read_reg(&self, offset: u32) -> u32 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let addr = self.mmio_base + offset as u64;
             core::ptr::read_volatile(addr as *const u32)
@@ -180,6 +181,7 @@ impl E1000Device {
 
     /// Write a 32-bit register
     fn write_reg(&self, offset: u32, value: u32) {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let addr = self.mmio_base + offset as u64;
             core::ptr::write_volatile(addr as *mut u32, value);
@@ -557,6 +559,7 @@ fn find_e1000() -> Option<E1000PciInfo> {
     for bus in 0..=255u16 {
         for device in 0..32u8 {
             for func in 0..8u8 {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     let vendor_id = pci_read16(bus as u8, device, func, 0x00);
                     if vendor_id == 0xFFFF {
@@ -621,6 +624,7 @@ pub fn init() {
         );
 
         // Enable PCI bus mastering and memory access
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let cmd = pci_read16(pci_dev.bus, pci_dev.device, pci_dev.function, 0x04);
             pci_write32(

@@ -67,6 +67,7 @@ pub fn enumerate_ports() -> Vec<UsbPort> {
         // Port register set starts at operational base + 0x400 + (port * 0x10)
         let port_base = op_base + 0x400 + (port_idx as u64 * 0x10);
 
+        // SAFETY: port register set is inside the mapped operational BAR.
         let portsc = unsafe { xhci_read32(port_base, PORTSC_OFFSET) };
 
         let connected = portsc & PORTSC_CCS != 0;
@@ -97,6 +98,7 @@ pub fn enumerate_ports() -> Vec<UsbPort> {
             // Clear any pending change bits (write-1-to-clear)
             let clear_bits = portsc & (PORTSC_CSC | PORTSC_PEC | PORTSC_PRC);
             if clear_bits != 0 {
+                // SAFETY: port register set is inside the mapped operational BAR.
                 unsafe {
                     // Preserve RO/RW bits, write 1 to clear change bits
                     // Must NOT write 1 to PED (bit 1) as that disables the port
@@ -123,6 +125,7 @@ pub fn reset_port(port_num: u8) -> bool {
 
     serial_println!("[XHCI] Resetting port {}...", port_num);
 
+    // SAFETY: port register set is inside the mapped operational BAR.
     unsafe {
         let portsc = xhci_read32(port_base, PORTSC_OFFSET);
         if portsc & PORTSC_CCS == 0 {

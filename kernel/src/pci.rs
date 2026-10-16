@@ -178,6 +178,7 @@ pub fn pci_config_read32(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
         | ((function as u32) << 8)
         | ((offset as u32) & 0xFC);
 
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut addr_port = Port::<u32>::new(PCI_CONFIG_ADDR);
         let mut data_port = Port::<u32>::new(PCI_CONFIG_DATA);
@@ -206,6 +207,7 @@ pub fn pci_config_write32(bus: u8, device: u8, function: u8, offset: u8, value: 
         | ((function as u32) << 8)
         | ((offset as u32) & 0xFC);
 
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut addr_port = Port::<u32>::new(PCI_CONFIG_ADDR);
         let mut data_port = Port::<u32>::new(PCI_CONFIG_DATA);

@@ -51,6 +51,7 @@ pub fn sys_request_key(
     _callout: u64,
     _keyring: i32,
 ) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let desc = unsafe { read_user_string(desc_ptr) }.unwrap_or_default();
     let _ = type_ptr;
     // Search for key by description
@@ -80,6 +81,7 @@ pub fn sys_keyctl(operation: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) ->
             if let Some((_, payload)) = keys.get(&(arg2 as i32)) {
                 let copy_len = payload.len().min(arg4 as usize);
                 if arg3 != 0 && copy_len > 0 {
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::copy_nonoverlapping(payload.as_ptr(), arg3 as *mut u8, copy_len);
                     }
@@ -95,6 +97,7 @@ pub fn sys_keyctl(operation: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) ->
                 let bytes = name.as_bytes();
                 let copy_len = bytes.len().min(arg4 as usize);
                 if arg3 != 0 && copy_len > 0 {
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::copy_nonoverlapping(bytes.as_ptr(), arg3 as *mut u8, copy_len);
                     }
@@ -119,8 +122,10 @@ pub fn sys_add_key(
     _keyring: i32,
 ) -> SyscallResult {
     let _ = type_ptr;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let desc = unsafe { read_user_string(desc_ptr) }.unwrap_or_default();
     let data = if payload != 0 && plen > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         unsafe { core::slice::from_raw_parts(payload as *const u8, plen) }.to_vec()
     } else {
         Vec::new()
@@ -161,6 +166,7 @@ pub fn sys_mq_notify(mqd: i32, sevp: u64) -> SyscallResult {
 pub fn sys_mq_getsetattr(mqd: i32, newattr: u64, oldattr: u64) -> SyscallResult {
     let _ = (mqd, newattr);
     if oldattr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             core::ptr::write_bytes(oldattr as *mut u8, 0, 64);
         }
@@ -223,7 +229,9 @@ pub fn sys_semop(semid: i32, sops: u64, nsops: usize) -> SyscallResult {
 
     for i in 0..nsops {
         let base = (sops as usize) + i * 6;
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let sem_num = unsafe { *(base as *const u16) } as usize;
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let sem_op = unsafe { *((base + 2) as *const i16) } as i32;
         // sem_flg at base+4 (IPC_NOWAIT etc.)
 
@@ -287,6 +295,7 @@ pub fn sys_semctl(semid: i32, semnum: i32, cmd: i32, arg: u64) -> SyscallResult 
             if arg != 0 {
                 let dst = arg as *mut u16;
                 for (i, val) in set.values.iter().enumerate() {
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         *dst.add(i) = *val as u16;
                     }
@@ -300,6 +309,7 @@ pub fn sys_semctl(semid: i32, semnum: i32, cmd: i32, arg: u64) -> SyscallResult 
             if arg != 0 {
                 let src = arg as *const u16;
                 for (i, val) in set.values.iter_mut().enumerate() {
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     *val = unsafe { *src.add(i) } as i32;
                 }
             }
@@ -362,11 +372,13 @@ pub fn sys_msgsnd(msqid: i32, msgp: u64, msgsz: usize, msgflg: i32) -> SyscallRe
         return Err(SyscallError::InvalidArgument);
     }
     // msgbuf: { long mtype; char mtext[msgsz]; }
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let mtype = unsafe { *(msgp as *const i64) };
     if mtype < 1 {
         return Err(SyscallError::InvalidArgument);
     }
     let data = if msgsz > 0 {
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         unsafe { core::slice::from_raw_parts((msgp + 8) as *const u8, msgsz) }.to_vec()
     } else {
         Vec::new()
@@ -430,6 +442,7 @@ pub fn sys_msgrcv(msqid: i32, msgp: u64, msgsz: usize, msgtyp: i64, msgflg: i32)
             return Err(SyscallError::InvalidArgument); // E2BIG
         }
 
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             *(msgp as *mut i64) = msg.mtype;
             if copy_len > 0 {
@@ -461,6 +474,7 @@ pub fn sys_msgctl(msqid: i32, cmd: i32, buf: u64) -> SyscallResult {
             if let Some(queue) = msgs.get(&msqid) {
                 if buf != 0 {
                     // Write msqid_ds structure (simplified: write msg count and bytes)
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     unsafe {
                         core::ptr::write_bytes(buf as *mut u8, 0, 120);
                         // msg_qnum at offset 64

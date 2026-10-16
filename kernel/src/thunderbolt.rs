@@ -325,6 +325,7 @@ pub fn init() {
                     | ((dev as u32) << 11)
                     | ((func as u32) << 8);
 
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let id = unsafe {
                     crate::arch_compat::instructions::port::Port::new(0xCF8).write(addr);
                     crate::arch_compat::instructions::port::Port::<u32>::new(0xCFC).read()
@@ -353,6 +354,7 @@ pub fn init() {
 
                     // Read BAR0 for NHI MMIO
                     let bar_addr = addr | 0x10;
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     let bar0 = unsafe {
                         crate::arch_compat::instructions::port::Port::new(0xCF8).write(bar_addr);
                         crate::arch_compat::instructions::port::Port::<u32>::new(0xCFC).read()

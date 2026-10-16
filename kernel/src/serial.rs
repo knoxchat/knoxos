@@ -15,6 +15,7 @@ impl MmioSerialPort {
     }
     pub fn init(&mut self) {
         // Minimal 8250/16550 init via MMIO
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let base = self.base as *mut u8;
             base.add(1).write_volatile(0x00); // Disable interrupts
@@ -26,6 +27,7 @@ impl MmioSerialPort {
         }
     }
     fn write_byte(&mut self, byte: u8) {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let base = self.base as *mut u8;
             // Wait for transmit holding register empty
@@ -70,6 +72,7 @@ impl core::fmt::Write for SerialPort {
 
 #[cfg(target_arch = "x86_64")]
 lazy_static! {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     pub static ref SERIAL1: Mutex<SerialPort> = Mutex::new(unsafe { SerialPort::new(0x3F8) });
 }
 
@@ -77,6 +80,7 @@ lazy_static! {
 lazy_static! {
     pub static ref SERIAL1: Mutex<MmioSerialPort> = {
         // QEMU virt machine PL011 UART base
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let mut serial_port = unsafe { MmioSerialPort::new(0x0900_0000) };
         serial_port.init();
         Mutex::new(serial_port)
@@ -87,6 +91,7 @@ lazy_static! {
 lazy_static! {
     pub static ref SERIAL1: Mutex<MmioSerialPort> = {
         // QEMU virt machine UART base
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let mut serial_port = unsafe { MmioSerialPort::new(0x1000_0000) };
         serial_port.init();
         Mutex::new(serial_port)

@@ -43,6 +43,7 @@ pub fn acpi_shutdown() -> Result<(), &'static str> {
 
     // Fallback: QEMU debug exit
     serial_println!("[PM]   ACPI S5 failed, trying QEMU debug exit...");
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u32>::new(0xf4);
         port.write(0x10);
@@ -50,6 +51,7 @@ pub fn acpi_shutdown() -> Result<(), &'static str> {
 
     // Fallback: keyboard controller reset (triple fault)
     serial_println!("[PM]   Attempting keyboard controller shutdown...");
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u8>::new(0x64);
         port.write(0xFE);
@@ -71,12 +73,14 @@ pub fn acpi_reboot() -> Result<(), &'static str> {
     stop_all_services();
 
     // Try keyboard controller reset
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u8>::new(0x64);
         port.write(0xFE);
     }
 
     // Fallback: triple fault
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         core::arch::asm!("lidt [{}]", in(reg) &[0u8; 6] as *const _, options(noreturn));
@@ -106,6 +110,7 @@ pub fn handle_power_button_event() {
 pub fn enable_power_button_event() {
     // Enable PWRBTN in PM1 enable register
     let enable_reg: u16 = ACPI_PM1A_EVT_BLK + 2; // PM1_EN is at offset +2
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(enable_reg);
         let val = port.read();

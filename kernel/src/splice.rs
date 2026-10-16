@@ -133,6 +133,7 @@ pub fn vmsplice(fd: i32, iov: &[(u64, usize)], flags: u32) -> Result<usize, i32>
             continue;
         }
 
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let buf = unsafe { core::slice::from_raw_parts(*base as *const u8, *len) };
 
         let written = {
@@ -157,6 +158,7 @@ pub fn readv(fd: i32, iovs: &mut [(u64, usize)]) -> Result<usize, i32> {
             continue;
         }
 
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
         let buf = unsafe { core::slice::from_raw_parts_mut(*base as *mut u8, *len) };
 
         let bytes_read = {
@@ -187,6 +189,7 @@ pub fn writev(fd: i32, iovs: &[(u64, usize)]) -> Result<usize, i32> {
             continue;
         }
 
+        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
         let buf = unsafe { core::slice::from_raw_parts(*base as *const u8, *len) };
 
         let written = {

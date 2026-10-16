@@ -83,6 +83,7 @@ pub fn load_elf_into_address_space(pid: Pid, elf_data: &[u8]) -> Result<(u64, u6
             let frame_phys = allocate_physical_frame().ok_or("OOM mapping ELF segment")?;
             addr_space.owned_frames.push(frame_phys);
 
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 map_page_in_table(addr_space.cr3, page_addr, frame_phys, load_flags);
                 // Zero the frame first (handles .bss regions)
@@ -105,6 +106,7 @@ pub fn load_elf_into_address_space(pid: Pid, elf_data: &[u8]) -> Result<(u64, u6
 
                 if (file_offset as usize + copy_len) <= elf_data.len() {
                     let src = &elf_data[file_offset as usize..file_offset as usize + copy_len];
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         let dest_ptr = (offset + frame_phys + dest_offset_in_frame) as *mut u8;
                         core::ptr::copy_nonoverlapping(src.as_ptr(), dest_ptr, copy_len);
@@ -118,6 +120,7 @@ pub fn load_elf_into_address_space(pid: Pid, elf_data: &[u8]) -> Result<(u64, u6
             let final_flags = prot.to_page_flags();
             for i in 0..num_pages {
                 let page_addr = seg_start + i * PAGE_SIZE;
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     update_page_flags_in_table(addr_space.cr3, page_addr, final_flags);
                 }
@@ -256,10 +259,12 @@ pub fn map_static_elf_into_current(elf_data: &[u8]) -> Result<(u64, u64), &'stat
 
         for i in 0..num_pages {
             let page_addr = seg_start + i * PAGE_SIZE;
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             if unsafe { get_mapped_frame(cr3, page_addr) }.is_some() {
                 return Err("ELF vaddr already mapped in kernel tables");
             }
             let frame_phys = allocate_physical_frame().ok_or("OOM mapping ELF segment")?;
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 map_page_in_table(cr3, page_addr, frame_phys, load_flags);
                 zero_physical_frame(frame_phys);
@@ -278,6 +283,7 @@ pub fn map_static_elf_into_current(elf_data: &[u8]) -> Result<(u64, u64), &'stat
                 let copy_len = (copy_end - copy_start) as usize;
                 if (file_offset as usize + copy_len) <= elf_data.len() {
                     let src = &elf_data[file_offset as usize..file_offset as usize + copy_len];
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         let dest_ptr = (offset + frame_phys + dest_offset_in_frame) as *mut u8;
                         core::ptr::copy_nonoverlapping(src.as_ptr(), dest_ptr, copy_len);
@@ -290,6 +296,7 @@ pub fn map_static_elf_into_current(elf_data: &[u8]) -> Result<(u64, u64), &'stat
             let final_flags = prot.to_page_flags();
             for i in 0..num_pages {
                 let page_addr = seg_start + i * PAGE_SIZE;
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     update_page_flags_in_table(cr3, page_addr, final_flags);
                 }
@@ -308,16 +315,19 @@ pub fn map_static_elf_into_current(elf_data: &[u8]) -> Result<(u64, u64), &'stat
 
     for i in 0..HELLO_STACK_PAGES {
         let page_addr = stack_start + i * PAGE_SIZE;
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         if unsafe { get_mapped_frame(cr3, page_addr) }.is_some() {
             return Err("user stack vaddr already mapped in kernel tables");
         }
         let frame_phys = allocate_physical_frame().ok_or("OOM mapping user stack")?;
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             map_page_in_table(cr3, page_addr, frame_phys, stack_flags);
             zero_physical_frame(frame_phys);
         }
     }
 
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         let (frame, flags) = Cr3::read();
         Cr3::write(frame, flags);
@@ -386,8 +396,10 @@ pub fn setup_initial_stack(
     // Helper: write a u64 onto the stack
     let push_u64 = |sp: &mut u64, val: u64| -> bool {
         *sp -= 8;
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         if let Some(phys) = unsafe { get_mapped_frame(cr3, page_align_down(*sp)) } {
             let off_in_page = *sp & (PAGE_SIZE - 1);
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 let ptr = (offset + phys + off_in_page) as *mut u64;
                 core::ptr::write(ptr, val);
@@ -407,16 +419,20 @@ pub fn setup_initial_stack(
 
         for (i, &b) in bytes.iter().enumerate() {
             let addr = *sp + i as u64;
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let page_phys = unsafe { get_mapped_frame(cr3, page_align_down(addr))? };
             let off = addr & (PAGE_SIZE - 1);
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *((offset + page_phys + off) as *mut u8) = b;
             }
         }
         // NUL terminator
         let nul_addr = *sp + bytes.len() as u64;
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let page_phys = unsafe { get_mapped_frame(cr3, page_align_down(nul_addr))? };
         let off = nul_addr & (PAGE_SIZE - 1);
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *((offset + page_phys + off) as *mut u8) = 0;
         }

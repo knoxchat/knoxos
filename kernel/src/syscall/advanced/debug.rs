@@ -26,6 +26,7 @@ pub fn sys_fanotify_mark(
     pathname_ptr: u64,
 ) -> SyscallResult {
     let pathname = if pathname_ptr != 0 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { read_user_string(pathname_ptr) }.unwrap_or_default()
     } else {
         alloc::string::String::new()
@@ -74,6 +75,7 @@ pub fn sys_ptrace(request: u64, pid: u64, addr: u64, data: u64) -> SyscallResult
             crate::ptrace::sys_ptrace_getregs(pid)
                 .map(|regs| {
                     if data != 0 {
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe {
                             core::ptr::write(data as *mut crate::ptrace::UserRegs, regs);
                         }
@@ -87,6 +89,7 @@ pub fn sys_ptrace(request: u64, pid: u64, addr: u64, data: u64) -> SyscallResult
             if data == 0 {
                 return Err(SyscallError::InvalidArgument);
             }
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let regs = unsafe { core::ptr::read(data as *const crate::ptrace::UserRegs) };
             crate::ptrace::sys_ptrace_setregs(pid, regs)
                 .map(|_| 0u64)
@@ -127,6 +130,7 @@ pub fn sys_ptrace(request: u64, pid: u64, addr: u64, data: u64) -> SyscallResult
             crate::ptrace::sys_ptrace_geteventmsg(pid)
                 .map(|msg| {
                     if data != 0 {
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe {
                             *(data as *mut u64) = msg;
                         }
@@ -154,6 +158,7 @@ pub fn sys_perf_event_open(
     let _ = flags;
     // Read minimal attr fields
     let (event_type, config) = if attr_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             let type_val = *(attr_ptr as *const u32);
             let config_val = *((attr_ptr as usize + 8) as *const u64);

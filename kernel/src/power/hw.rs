@@ -44,6 +44,7 @@ pub fn pm_timer_read() -> u32 {
     let pm = PM.lock();
     let port_addr = pm.pm_tmr_blk;
     drop(pm);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u32>::new(port_addr);
         port.read()
@@ -78,6 +79,7 @@ pub(super) fn pm1_read_status() -> u16 {
     let pm = PM.lock();
     let addr = pm.pm1a_evt_blk;
     drop(pm);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(addr);
         port.read()
@@ -89,6 +91,7 @@ pub(super) fn pm1_clear_status(bits: u16) {
     let pm = PM.lock();
     let addr = pm.pm1a_evt_blk;
     drop(pm);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(addr);
         port.write(bits);
@@ -100,6 +103,7 @@ pub(super) fn pm1_read_enable() -> u16 {
     let pm = PM.lock();
     let addr = pm.pm1a_evt_blk + 2;
     drop(pm);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(addr);
         port.read()
@@ -111,6 +115,7 @@ pub(super) fn pm1_write_enable(bits: u16) {
     let pm = PM.lock();
     let addr = pm.pm1a_evt_blk + 2;
     drop(pm);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(addr);
         port.write(bits);
@@ -122,6 +127,7 @@ pub(super) fn pm1_read_control() -> u16 {
     let pm = PM.lock();
     let addr = pm.pm1a_cnt_blk;
     drop(pm);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(addr);
         port.read()
@@ -133,6 +139,7 @@ pub(super) fn pm1_write_control(val: u16) {
     let pm = PM.lock();
     let addr = pm.pm1a_cnt_blk;
     drop(pm);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut port = Port::<u16>::new(addr);
         port.write(val);

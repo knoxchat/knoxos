@@ -105,6 +105,7 @@ fn dot_product_sse2(a: &[f32], b: &[f32], len: usize) -> f32 {
         let chunks = len / 4;
         let remainder = len % 4;
 
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let mut acc = _mm_setzero_ps();
             for i in 0..chunks {
@@ -144,6 +145,7 @@ fn dot_product_avx2(a: &[f32], b: &[f32], len: usize) -> f32 {
         let chunks = len / 8;
         let remainder = len % 8;
 
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             let mut acc = _mm256_setzero_ps();
             for i in 0..chunks {
@@ -202,6 +204,7 @@ fn vec_add_avx2(a: &[f32], b: &[f32], result: &mut Vec<f32>, len: usize) {
     let chunks = len / 8;
     let remainder = len % 8;
 
+    // SAFETY: the Vec backing store was written for the new length; those elements are initialized.
     unsafe {
         result.set_len(len);
         for i in 0..chunks {
@@ -245,6 +248,7 @@ fn vec_mul_avx2(a: &[f32], b: &[f32], result: &mut Vec<f32>, len: usize) {
     let chunks = len / 8;
     let remainder = len % 8;
 
+    // SAFETY: the Vec backing store was written for the new length; those elements are initialized.
     unsafe {
         result.set_len(len);
         for i in 0..chunks {
@@ -275,6 +279,7 @@ pub fn vec_scale(a: &[f32], scalar: f32) -> Vec<f32> {
             let chunks = len / 8;
             let remainder = len % 8;
 
+            // SAFETY: the Vec backing store was written for the new length; those elements are initialized.
             unsafe {
                 result.set_len(len);
                 let vs = _mm256_set1_ps(scalar);
@@ -341,6 +346,7 @@ fn matmul_avx2(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize
         let col_rem = n % 8;
 
         for jc in 0..col_chunks {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 let mut acc = _mm256_setzero_ps();
                 for l in 0..k {
@@ -383,6 +389,7 @@ pub fn relu_simd(data: &[f32]) -> Vec<f32> {
             let chunks = len / 8;
             let remainder = len % 8;
 
+            // SAFETY: the Vec backing store was written for the new length; those elements are initialized.
             unsafe {
                 result.set_len(len);
                 let vzero = _mm256_setzero_ps();

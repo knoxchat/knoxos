@@ -22,6 +22,7 @@ impl Ext4Fs {
                 break;
             }
 
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let entry = unsafe { *(data[offset..].as_ptr() as *const Ext4DirEntry) };
 
             if entry.inode != 0 && entry.name_len > 0 {
@@ -110,6 +111,7 @@ impl Ext4Fs {
                 break;
             }
 
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let entry = unsafe { *(buf[offset..].as_ptr() as *const Ext4DirEntry) };
             let actual_len = if entry.name_len > 0 {
                 (8 + entry.name_len as usize + 3) & !3
@@ -126,6 +128,7 @@ impl Ext4Fs {
                     name_len: name.len() as u8,
                     file_type,
                 };
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         &new_entry as *const Ext4DirEntry as *const u8,
@@ -148,6 +151,7 @@ impl Ext4Fs {
                     name_len: entry.name_len,
                     file_type: entry.file_type,
                 };
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         &new_existing_entry as *const Ext4DirEntry as *const u8,
@@ -164,6 +168,7 @@ impl Ext4Fs {
                     name_len: name.len() as u8,
                     file_type,
                 };
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         &new_entry as *const Ext4DirEntry as *const u8,

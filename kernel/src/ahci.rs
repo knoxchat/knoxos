@@ -242,6 +242,7 @@ fn pci_read32(bus: u8, dev: u8, func: u8, offset: u8) -> u32 {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -270,6 +271,7 @@ fn pci_write32(bus: u8, dev: u8, func: u8, offset: u8, value: u32) {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         use crate::arch_compat::instructions::port::Port;
@@ -319,10 +321,12 @@ const BOUNCE_MAX: usize = 4096;
 const PORT_TFES: u32 = 1 << 30;
 
 fn mmio_read(addr: u64) -> u32 {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::read_volatile(addr as *const u32) }
 }
 
 fn mmio_write(addr: u64, value: u32) {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::write_volatile(addr as *mut u32, value) }
 }
 
@@ -394,6 +398,7 @@ fn issue_dma(port: u8, command: u8, lba: u64, count: u16, buf: &mut [u8], write:
     let ct_virt = crate::vmm::phys_to_virt(dma_phys + CT_OFF);
     let ct_phys = dma_phys + CT_OFF;
 
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         if write {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), bounce_virt as *mut u8, total);
@@ -480,6 +485,7 @@ fn issue_dma(port: u8, command: u8, lba: u64, count: u16, buf: &mut [u8], write:
     }
 
     if !write {
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(bounce_virt as *const u8, buf.as_mut_ptr(), total);
         }
@@ -619,6 +625,7 @@ pub fn init() {
             serial_println!("[AHCI] No DMA frames");
             return;
         };
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             core::ptr::write_bytes(
                 crate::vmm::phys_to_virt(dma_phys) as *mut u8,

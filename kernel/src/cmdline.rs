@@ -219,6 +219,7 @@ fn read_fw_cfg_cmdline() -> Option<String> {
     const FW_CFG_CMDLINE_SIZE: u16 = 0x0014;
     const FW_CFG_CMDLINE_DATA: u16 = 0x0015;
 
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut sel: Port<u16> = Port::new(FW_CFG_PORT_SEL);
         let mut data: Port<u8> = Port::new(FW_CFG_PORT_DATA);

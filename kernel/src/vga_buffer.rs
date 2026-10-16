@@ -52,10 +52,12 @@ struct Buffer {
 
 impl Buffer {
     fn read_volatile(&self, row: usize, col: usize) -> ScreenChar {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::read_volatile(&self.chars[row][col] as *const ScreenChar) }
     }
 
     fn write_volatile(&mut self, row: usize, col: usize, val: ScreenChar) {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::write_volatile(&mut self.chars[row][col] as *mut ScreenChar, val) }
     }
 }
@@ -132,6 +134,7 @@ lazy_static! {
     pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
         column_position: 0,
         color_code: ColorCode::new(Color::White, Color::Black),
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         buffer: unsafe { &mut *(0xb8000 as *mut Buffer) },
     });
 }

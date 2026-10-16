@@ -596,6 +596,7 @@ pub fn maybe_preempt_user(frame: &crate::context::IrqFrame) {
     );
     crate::context::set_current_pid(next);
     crate::context::program_kernel_stack(next);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         crate::context::enter_context(ptr);
     }
@@ -619,6 +620,7 @@ pub fn deferred_schedule() {
     let next = SCHEDULER.lock().schedule();
     if let Some(next_pid) = next {
         if next_pid != current && crate::context::has_runnable_context(next_pid) {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 crate::context::switch_to(next_pid);
             }

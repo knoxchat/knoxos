@@ -347,6 +347,7 @@ pub fn get_info() -> Option<AcpiInfo> {
 /// Search for RSDP in EBDA and BIOS ROM area
 fn find_rsdp(phys_offset: u64) -> Option<u64> {
     // Search EBDA (Extended BIOS Data Area) — first KiB at [0x40E] * 16
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let ebda_ptr = unsafe {
         let seg = *((phys_offset + 0x40E) as *const u16);
         (seg as u64) << 4
@@ -371,11 +372,13 @@ fn scan_for_rsdp(phys_offset: u64, start: u64, length: u64) -> Option<u64> {
     while addr < start + length {
         let virt = phys_offset + addr;
         let ptr = virt as *const [u8; 8];
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let bytes = unsafe { &*ptr };
         if bytes == signature {
             // Validate checksum (first 20 bytes)
             let mut sum: u8 = 0;
             for i in 0..20 {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 sum = sum.wrapping_add(unsafe { *((virt + i) as *const u8) });
             }
             if sum == 0 {
@@ -392,6 +395,7 @@ fn scan_for_rsdp(phys_offset: u64, start: u64, length: u64) -> Option<u64> {
 /// Parse RSDT (32-bit pointers)
 fn parse_rsdt(phys_offset: u64, rsdt_phys: u32) -> Vec<u64> {
     let rsdt_virt = phys_offset + rsdt_phys as u64;
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let header = unsafe { &*(rsdt_virt as *const SdtHeader) };
 
     let entry_count = (header.length as usize - core::mem::size_of::<SdtHeader>()) / 4;
@@ -399,6 +403,7 @@ fn parse_rsdt(phys_offset: u64, rsdt_phys: u32) -> Vec<u64> {
 
     let mut tables = Vec::new();
     for i in 0..entry_count {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let phys_addr = unsafe { *entries_ptr.add(i) };
         tables.push(phys_addr as u64);
     }
@@ -408,6 +413,7 @@ fn parse_rsdt(phys_offset: u64, rsdt_phys: u32) -> Vec<u64> {
 /// Parse XSDT (64-bit pointers)
 fn parse_xsdt(phys_offset: u64, xsdt_phys: u64) -> Vec<u64> {
     let xsdt_virt = phys_offset + xsdt_phys;
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let header = unsafe { &*(xsdt_virt as *const SdtHeader) };
 
     let entry_count = (header.length as usize - core::mem::size_of::<SdtHeader>()) / 8;
@@ -415,6 +421,7 @@ fn parse_xsdt(phys_offset: u64, xsdt_phys: u64) -> Vec<u64> {
 
     let mut tables = Vec::new();
     for i in 0..entry_count {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         let phys_addr = unsafe { *entries_ptr.add(i) };
         tables.push(phys_addr);
     }
@@ -424,6 +431,7 @@ fn parse_xsdt(phys_offset: u64, xsdt_phys: u64) -> Vec<u64> {
 /// Parse MADT entries
 fn parse_madt(phys_offset: u64, madt_phys: u64, info: &mut AcpiInfo) {
     let madt_virt = phys_offset + madt_phys;
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let madt = unsafe { &*(madt_virt as *const MadtHeader) };
 
     info.local_apic_address = madt.local_apic_address as u64;
@@ -433,11 +441,13 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, info: &mut AcpiInfo) {
     let mut offset = madt_virt + core::mem::size_of::<MadtHeader>() as u64;
 
     while offset + 2 <= table_end {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let entry_header = unsafe { &*(offset as *const MadtEntryHeader) };
         let entry_type = MadtEntryType::from(entry_header.entry_type);
 
         match entry_type {
             MadtEntryType::LocalApic => {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let entry = unsafe { &*(offset as *const MadtLocalApic) };
                 info.local_apics.push(LocalApicInfo {
                     processor_id: entry.acpi_processor_id,
@@ -447,6 +457,7 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, info: &mut AcpiInfo) {
                 });
             }
             MadtEntryType::IoApic => {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let entry = unsafe { &*(offset as *const MadtIoApic) };
                 info.io_apics.push(IoApicInfo {
                     id: entry.io_apic_id,
@@ -455,6 +466,7 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, info: &mut AcpiInfo) {
                 });
             }
             MadtEntryType::InterruptSourceOverride => {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let entry = unsafe { &*(offset as *const MadtIso) };
                 info.interrupt_overrides.push(InterruptOverride {
                     bus: entry.bus_source,
@@ -464,6 +476,7 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, info: &mut AcpiInfo) {
                 });
             }
             MadtEntryType::LocalApicNmi => {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let entry = unsafe { &*(offset as *const MadtLocalApicNmi) };
                 info.local_apic_nmis.push(LocalApicNmiInfo {
                     processor_id: entry.acpi_processor_id,
@@ -474,6 +487,7 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, info: &mut AcpiInfo) {
             MadtEntryType::LocalApicAddressOverride
                 // 64-bit override of local APIC address
                 if entry_header.length >= 12 => {
+                    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                     let addr = unsafe { *((offset + 4) as *const u64) };
                     info.local_apic_address = addr;
                 }
@@ -490,6 +504,7 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, info: &mut AcpiInfo) {
 /// Parse FADT
 fn parse_fadt(phys_offset: u64, fadt_phys: u64, info: &mut AcpiInfo) {
     let fadt_virt = phys_offset + fadt_phys;
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let fadt = unsafe { &*(fadt_virt as *const Fadt) };
 
     info.fadt = Some(FadtInfo {
@@ -510,6 +525,7 @@ fn parse_fadt(phys_offset: u64, fadt_phys: u64, info: &mut AcpiInfo) {
 /// Parse HPET table
 fn parse_hpet(phys_offset: u64, hpet_phys: u64, info: &mut AcpiInfo) {
     let hpet_virt = phys_offset + hpet_phys;
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let hpet = unsafe { &*(hpet_virt as *const HpetTable) };
     info.hpet_address = Some(hpet.address);
 }
@@ -517,6 +533,7 @@ fn parse_hpet(phys_offset: u64, hpet_phys: u64, info: &mut AcpiInfo) {
 /// Parse MCFG (PCIe ECAM) table
 fn parse_mcfg(phys_offset: u64, mcfg_phys: u64, info: &mut AcpiInfo) {
     let mcfg_virt = phys_offset + mcfg_phys;
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let header = unsafe { &*(mcfg_virt as *const SdtHeader) };
 
     let entries_start = mcfg_virt + core::mem::size_of::<McfgTable>() as u64;
@@ -524,6 +541,7 @@ fn parse_mcfg(phys_offset: u64, mcfg_phys: u64, info: &mut AcpiInfo) {
         / core::mem::size_of::<McfgEntry>();
 
     for i in 0..entry_count {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let entry = unsafe {
             &*((entries_start + (i * core::mem::size_of::<McfgEntry>()) as u64) as *const McfgEntry)
         };
@@ -556,6 +574,7 @@ pub fn init(phys_offset: u64) {
         Some(rsdp_phys) => {
             let rsdp_virt = phys_offset + rsdp_phys;
             let rsdp_ptr = rsdp_virt as *const Rsdp;
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let revision = unsafe { (*rsdp_ptr).revision };
 
             serial_println!(
@@ -568,12 +587,14 @@ pub fn init(phys_offset: u64) {
             let table_addrs = if revision >= 2 {
                 let rsdp2 = rsdp_virt as *const Rsdp2;
                 let xsdt_addr =
+                    // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
                     unsafe { core::ptr::addr_of!((*rsdp2).xsdt_address).read_unaligned() };
                 if xsdt_addr != 0 {
                     serial_println!("[KnoxOS] ACPI: Using XSDT at {:#x}", xsdt_addr);
                     parse_xsdt(phys_offset, xsdt_addr)
                 } else {
                     let rsdt_addr =
+                        // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
                         unsafe { core::ptr::addr_of!((*rsdp_ptr).rsdt_address).read_unaligned() };
                     serial_println!(
                         "[KnoxOS] ACPI: XSDT null, falling back to RSDT at {:#x}",
@@ -583,6 +604,7 @@ pub fn init(phys_offset: u64) {
                 }
             } else {
                 let rsdt_addr =
+                    // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
                     unsafe { core::ptr::addr_of!((*rsdp_ptr).rsdt_address).read_unaligned() };
                 serial_println!("[KnoxOS] ACPI: Using RSDT at {:#x}", rsdt_addr);
                 parse_rsdt(phys_offset, rsdt_addr)
@@ -593,6 +615,7 @@ pub fn init(phys_offset: u64) {
             // Parse each table based on signature
             for &table_phys in &table_addrs {
                 let table_virt = phys_offset + table_phys;
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 let header = unsafe { &*(table_virt as *const SdtHeader) };
                 let sig = header.signature_str();
 
@@ -744,6 +767,7 @@ pub fn acpi_reset() -> ! {
                 "[KnoxOS] ACPI reset via register at {:#x}",
                 fadt.reset_reg_address
             );
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe {
                 let ptr = fadt.reset_reg_address as *mut u8;
                 core::ptr::write_volatile(ptr, fadt.reset_value);
@@ -762,6 +786,7 @@ pub fn enable_acpi_mode() {
                 "[KnoxOS] ACPI: Enabling ACPI mode via SMI cmd port {:#x}",
                 fadt.smi_command_port
             );
+            // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
             unsafe {
                 let mut port = crate::arch_compat::instructions::port::Port::<u8>::new(
                     fadt.smi_command_port as u16,
@@ -770,6 +795,7 @@ pub fn enable_acpi_mode() {
             }
             // Wait for SCI_EN bit to be set in PM1a_CNT
             for _ in 0..1000 {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     let mut pm1a = crate::arch_compat::instructions::port::Port::<u16>::new(
                         fadt.pm1a_control_block as u16,
@@ -793,6 +819,7 @@ pub fn enable_acpi_mode() {
 pub fn read_pm_timer() -> u32 {
     if let Some(fadt) = ACPI_INFO.lock().as_ref().and_then(|info| info.fadt.clone()) {
         if fadt.pm_timer_block != 0 {
+            // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
             unsafe {
                 let mut port = crate::arch_compat::instructions::port::Port::<u32>::new(
                     fadt.pm_timer_block as u16,

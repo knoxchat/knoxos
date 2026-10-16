@@ -236,6 +236,7 @@ impl NouveauGpu {
         // Pushbuffer command format: method_count | (subchannel << 13) | method
         let header = (1 << 28) | ((channel & 0x7) << 13) | (method & 0x1FFF);
         let fifo_base = self.mmio_base + 0x800000; // PFIFO region
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             core::ptr::write_volatile(fifo_base as *mut u32, header);
             core::ptr::write_volatile((fifo_base + 4) as *mut u32, data);
@@ -256,10 +257,12 @@ impl NouveauGpu {
     }
 
     fn read_reg(&self, offset: u32) -> u32 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::read_volatile((self.mmio_base + offset as u64) as *const u32) }
     }
 
     fn write_reg(&self, offset: u32, value: u32) {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::write_volatile((self.mmio_base + offset as u64) as *mut u32, value) }
     }
 }

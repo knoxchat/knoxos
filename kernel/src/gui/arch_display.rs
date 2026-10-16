@@ -62,6 +62,7 @@ pub mod bga {
 
     impl DisplayBackend for BgaBackend {
         fn is_available(&self) -> bool {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let id = unsafe { read_reg(VBE_DISPI_INDEX_ID) };
             (0xB0C0..=0xB0C5).contains(&id)
         }
@@ -70,6 +71,7 @@ pub mod bga {
             if !self.is_available() {
                 return false;
             }
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 write_reg(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
                 write_reg(VBE_DISPI_INDEX_XRES, width);
@@ -80,7 +82,9 @@ pub mod bga {
                     VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED,
                 );
             }
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let actual_w = unsafe { read_reg(VBE_DISPI_INDEX_XRES) };
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let actual_h = unsafe { read_reg(VBE_DISPI_INDEX_YRES) };
             actual_w == width && actual_h == height
         }
@@ -220,6 +224,7 @@ pub fn read_timestamp() -> u64 {
     #[cfg(target_arch = "aarch64")]
     {
         let mut val: u64 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("mrs {}, cntvct_el0", out(reg) val);
         }
@@ -228,6 +233,7 @@ pub fn read_timestamp() -> u64 {
     #[cfg(target_arch = "riscv64")]
     {
         let mut val: u64 = 0;
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("rdtime {}", out(reg) val);
         }
@@ -292,6 +298,7 @@ fn translate_vaddr_x86_64(vaddr: u64, phys_offset: u64) -> Option<u64> {
     let l1_idx = ((vaddr >> 12) & 0x1FF) as usize;
     let page_off = vaddr & 0xFFF;
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         let l4 = &*((cr3 + phys_offset) as *const PageTable);
         let e4 = &l4[l4_idx];
@@ -331,6 +338,7 @@ fn translate_vaddr_x86_64(vaddr: u64, phys_offset: u64) -> Option<u64> {
 fn translate_vaddr_aarch64(vaddr: u64, phys_offset: u64) -> Option<u64> {
     // AArch64 4-level page table walk (4KB granule, 48-bit VA)
     let mut ttbr1: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!("mrs {}, ttbr1_el1", out(reg) ttbr1);
     }
@@ -342,6 +350,7 @@ fn translate_vaddr_aarch64(vaddr: u64, phys_offset: u64) -> Option<u64> {
     let l3_idx = ((vaddr >> 12) & 0x1FF) as usize;
     let page_off = vaddr & 0xFFF;
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         let l0_table = (base + phys_offset) as *const u64;
         let l0_entry = *l0_table.add(l0_idx);
@@ -386,6 +395,7 @@ fn translate_vaddr_aarch64(vaddr: u64, phys_offset: u64) -> Option<u64> {
 fn translate_vaddr_riscv64(vaddr: u64, phys_offset: u64) -> Option<u64> {
     // Sv48 4-level page table walk
     let mut satp: u64 = 0;
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!("csrr {}, satp", out(reg) satp);
     }
@@ -403,6 +413,7 @@ fn translate_vaddr_riscv64(vaddr: u64, phys_offset: u64) -> Option<u64> {
 
     let mut pa = root_pa;
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         // Walk levels 3→0
         for level in (0..4).rev() {

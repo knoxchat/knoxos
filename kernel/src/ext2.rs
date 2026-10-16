@@ -222,6 +222,7 @@ impl Ext2Fs {
         // Parse inode
         let inode_bytes =
             &block_buf[offset_in_block..offset_in_block + core::mem::size_of::<Ext2Inode>()];
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let inode = unsafe { *(inode_bytes.as_ptr() as *const Ext2Inode) };
 
         Ok(inode)
@@ -327,6 +328,7 @@ impl Ext2Fs {
                 break;
             }
 
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let entry = unsafe { *(data[offset..].as_ptr() as *const Ext2DirEntry) };
 
             if entry.inode != 0 && entry.name_len > 0 {
@@ -401,6 +403,7 @@ pub fn mount(device_index: usize) -> Result<usize, Ext2Error> {
     let mut sb_buf = [0u8; 1024];
     block::read_blocks(device_index, 2, 2, &mut sb_buf).map_err(|_| Ext2Error::IoError)?;
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let superblock = unsafe { *(sb_buf.as_ptr() as *const Ext2Superblock) };
 
     // Verify magic number
@@ -441,6 +444,7 @@ pub fn mount(device_index: usize) -> Result<usize, Ext2Error> {
     let mut groups = Vec::new();
     for i in 0..num_groups as usize {
         let offset = i * core::mem::size_of::<Ext2BlockGroupDesc>();
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let bgd = unsafe { *(bgd_buf[offset..].as_ptr() as *const Ext2BlockGroupDesc) };
         groups.push(bgd);
     }

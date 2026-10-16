@@ -394,6 +394,7 @@ pub fn sys_socket(domain: u32, sock_type: u32, protocol: u32) -> Result<u32, i32
 
 /// Bind a socket
 pub fn sys_bind(sockfd: u32, addr_ptr: u64) -> Result<(), i32> {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let mut addr = unsafe { parse_sockaddr(addr_ptr)? };
     if let SocketAddress::Inet(ip, port) = addr {
         let port = if port == 0 {
@@ -445,6 +446,7 @@ pub fn sys_accept(sockfd: u32) -> Result<u32, i32> {
 
 /// Connect to a remote address
 pub fn sys_connect(sockfd: u32, addr_ptr: u64) -> Result<(), i32> {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let addr = unsafe { parse_sockaddr(addr_ptr)? };
     let mut sockets = SOCKETS.lock();
     if !sockets.contains_key(&sockfd) {
@@ -465,6 +467,7 @@ pub fn sys_connect(sockfd: u32, addr_ptr: u64) -> Result<(), i32> {
 /// Send data on a socket
 pub fn sys_sendto(sockfd: u32, buf: &[u8], addr_ptr: u64) -> Result<usize, i32> {
     let dest = if addr_ptr != 0 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         Some(unsafe { parse_sockaddr(addr_ptr)? })
     } else {
         None

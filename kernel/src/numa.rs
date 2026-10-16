@@ -286,6 +286,7 @@ pub fn allocate_node(pid: u64, preferred_node: u32) -> u32 {
             }
             NumaPolicy::Interleave => {
                 // Round-robin (simplified — real impl uses page counter)
+                // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
                 let tsc = unsafe {
                     let mut lo: u32 = 0;
                     let mut hi: u32 = 0;

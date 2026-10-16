@@ -252,6 +252,7 @@ pub mod aarch64 {
         pub fn validate(base: u64) -> bool {
             // Check magic number (big-endian)
             let ptr = base as *const u32;
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             let magic = unsafe { core::ptr::read_volatile(ptr) };
             u32::from_be(magic) == Self::DTB_MAGIC
         }

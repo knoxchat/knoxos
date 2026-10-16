@@ -257,6 +257,7 @@ fn execute_software(commands: &[RenderCmd], sw: u32, sh: u32) {
                                 continue;
                             }
                             let off = (py * fb_stride + px * bpp) as usize;
+                            // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
                             unsafe {
                                 let ptr = base.add(off);
                                 core::ptr::write(ptr, c[0]); // B
@@ -311,6 +312,7 @@ fn execute_software(commands: &[RenderCmd], sw: u32, sh: u32) {
                                 continue;
                             }
                             let off = (py * fb_stride + px * bpp) as usize;
+                            // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
                             unsafe {
                                 let ptr = base.add(off);
                                 core::ptr::write(ptr, c[0]);
@@ -352,6 +354,7 @@ fn execute_software(commands: &[RenderCmd], sw: u32, sh: u32) {
                                 let py = cy + wy;
                                 if px >= 0 && px < sw as i32 && py >= 0 && py < sh as i32 {
                                     let off = (py * fb_stride + px * bpp) as usize;
+                                    // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
                                     unsafe {
                                         let ptr = base.add(off);
                                         core::ptr::write(ptr, c[0]);
@@ -433,6 +436,7 @@ fn execute_software(commands: &[RenderCmd], sw: u32, sh: u32) {
                                 continue;
                             }
                             let off = (py * fb_stride + px * bpp) as usize;
+                            // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
                             unsafe {
                                 let ptr = base.add(off);
                                 core::ptr::write(ptr, c[0]);
@@ -465,6 +469,7 @@ fn execute_software(commands: &[RenderCmd], sw: u32, sh: u32) {
                                     continue;
                                 }
                                 let off = py as usize * fb_stride + px as usize * bpp;
+                                // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
                                 unsafe {
                                     let ptr = base.add(off);
                                     core::ptr::write(ptr, c[0]);

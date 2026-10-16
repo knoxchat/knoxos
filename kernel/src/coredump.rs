@@ -226,6 +226,7 @@ pub fn generate_core_dump(
             prstatus.regs[i] = reg;
         }
     }
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let prstatus_bytes = unsafe {
         core::slice::from_raw_parts(
             &prstatus as *const PrStatus as *const u8,
@@ -243,6 +244,7 @@ pub fn generate_core_dump(
     let name_bytes = name.as_bytes();
     let copy_len = name_bytes.len().min(15);
     prpsinfo.fname[..copy_len].copy_from_slice(&name_bytes[..copy_len]);
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let prpsinfo_bytes = unsafe {
         core::slice::from_raw_parts(
             &prpsinfo as *const PrPsInfo as *const u8,

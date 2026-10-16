@@ -568,6 +568,7 @@ pub fn env_set_current_dir(path: &str) -> Result<(), i64> {
 pub fn process_exit(code: i32) -> ! {
     // Maps to exit_group() syscall (231)
     loop {
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!("hlt");
@@ -657,6 +658,7 @@ pub fn register_panic_handler() {
 pub fn abort() -> ! {
     // Send SIGABRT to self
     loop {
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             #[cfg(target_arch = "x86_64")]
             core::arch::asm!("hlt");

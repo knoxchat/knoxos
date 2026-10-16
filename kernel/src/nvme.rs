@@ -228,6 +228,7 @@ fn pci_read32(bus: u8, dev: u8, func: u8, offset: u8) -> u32 {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         use crate::arch_compat::instructions::port::Port;
         let mut addr_port: Port<u32> = Port::new(0xCF8);
@@ -253,6 +254,7 @@ fn pci_write32(bus: u8, dev: u8, func: u8, offset: u8, value: u32) {
         | ((dev as u32) << 11)
         | ((func as u32) << 8)
         | ((offset as u32) & 0xFC);
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         use crate::arch_compat::instructions::port::Port;
         let mut addr_port: Port<u32> = Port::new(0xCF8);
@@ -291,14 +293,17 @@ fn find_nvme_controller() -> Option<(u8, u8, u8, u64)> {
 }
 
 fn mmio_read32(addr: u64) -> u32 {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::read_volatile(addr as *const u32) }
 }
 
 fn mmio_write32(addr: u64, value: u32) {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::write_volatile(addr as *mut u32, value) }
 }
 
 fn mmio_read64(addr: u64) -> u64 {
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe { core::ptr::read_volatile(addr as *const u64) }
 }
 
@@ -335,6 +340,7 @@ fn submit_and_wait(
     let qid = qp.qid;
     let tail = qp.sq_tail as usize;
     let sq_virt = crate::vmm::phys_to_virt(qp.sq_phys);
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(
             (&sqe as *const NvmeSqe) as *const u8,
@@ -352,6 +358,7 @@ fn submit_and_wait(
     let cq_virt = crate::vmm::phys_to_virt(qp.cq_phys);
     let want_phase = qp.cq_phase;
     for _ in 0..2_000_000u32 {
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         let cqe = unsafe {
             core::ptr::read_volatile((cq_virt as *const NvmeCqe).add(qp.cq_head as usize))
         };
@@ -377,6 +384,7 @@ fn submit_and_wait(
         }
         core::hint::spin_loop();
     }
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     let cqe0 = unsafe { core::ptr::read_volatile(cq_virt as *const NvmeCqe) };
     serial_println!(
         "[NVMe] timeout qid={} tail={} csts={:#x} cqe dw3={:#x}",
@@ -395,6 +403,7 @@ fn ascii_trim(bytes: &[u8]) -> String {
 fn identify_and_io_queues(ctrl: &mut NvmeController) -> Result<(), &'static str> {
     let ident_phys = ctrl.dma_phys + IDENT_OFF;
     let ident_virt = crate::vmm::phys_to_virt(ident_phys);
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         core::ptr::write_bytes(ident_virt as *mut u8, 0, 4096);
     }
@@ -403,6 +412,7 @@ fn identify_and_io_queues(ctrl: &mut NvmeController) -> Result<(), &'static str>
     sqe.prp1 = ident_phys;
     sqe.cdw10 = 1; // CNS = controller
     submit_and_wait(ctrl, true, sqe)?;
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     unsafe {
         let buf = core::slice::from_raw_parts(ident_virt as *const u8, 4096);
         ctrl.serial = ascii_trim(&buf[4..24]);
@@ -410,6 +420,7 @@ fn identify_and_io_queues(ctrl: &mut NvmeController) -> Result<(), &'static str>
         ctrl.firmware = ascii_trim(&buf[64..72]);
     }
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         core::ptr::write_bytes(ident_virt as *mut u8, 0, 4096);
     }
@@ -418,6 +429,7 @@ fn identify_and_io_queues(ctrl: &mut NvmeController) -> Result<(), &'static str>
     sqe.cdw10 = 0; // CNS = namespace
     submit_and_wait(ctrl, true, sqe)?;
 
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     let (nsize, ncap, block_size, flba) = unsafe {
         let buf = core::slice::from_raw_parts(ident_virt as *const u8, 4096);
         let nsize = u64::from_le_bytes([
@@ -482,6 +494,7 @@ fn issue_io(nsid: u32, lba: u64, count: u16, buf: &mut [u8], write: bool) -> boo
     }
 
     let bounce_virt = crate::vmm::phys_to_virt(bounce_phys);
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         if write {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), bounce_virt as *mut u8, total);
@@ -509,6 +522,7 @@ fn issue_io(nsid: u32, lba: u64, count: u16, buf: &mut [u8], write: bool) -> boo
     }
     drop(ctrl);
     if !write {
+        // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(bounce_virt as *const u8, buf.as_mut_ptr(), total);
         }
@@ -602,6 +616,7 @@ pub fn init() {
             serial_println!("[NVMe] No DMA frames");
             return;
         };
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             core::ptr::write_bytes(
                 crate::vmm::phys_to_virt(dma_phys) as *mut u8,
@@ -729,6 +744,7 @@ pub fn trim(nsid: u32, lba: u64, count: u32) -> Result<(), &'static str> {
         ctrl.dma_phys + BOUNCE_OFF
     };
     let bounce_virt = crate::vmm::phys_to_virt(bounce_phys);
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe {
         core::ptr::write_bytes(bounce_virt as *mut u8, 0, 16);
         core::ptr::write_volatile(bounce_virt as *mut u64, lba);

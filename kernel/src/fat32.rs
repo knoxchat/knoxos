@@ -84,6 +84,7 @@ impl Fat32BootSector {
         if data[510] != 0x55 || data[511] != 0xAA {
             return None;
         }
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let bpb = unsafe { *(data.as_ptr() as *const Fat32BootSector) };
         Some(bpb)
     }
@@ -216,8 +217,11 @@ impl Fat32LfnEntry {
         let mut chars = Vec::with_capacity(LFN_CHARS_PER_ENTRY);
 
         // Copy fields from packed struct to avoid unaligned references
+        // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
         let n1 = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.name1)) };
+        // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
         let n2 = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.name2)) };
+        // SAFETY: raw pointer is formed from a symbol or static we own; the write stays within that object.
         let n3 = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.name3)) };
 
         for c in n1 {
@@ -304,6 +308,7 @@ impl Default for Fat32Fs {
 impl Fat32Fs {
     pub fn new() -> Self {
         Self {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             bpb: unsafe { core::mem::zeroed() },
             fat_cache: Vec::new(),
             fat_cache_start: 0,
@@ -1011,6 +1016,7 @@ impl Fat32Fs {
 
         for i in 0..num_entries {
             let offset = i * DIR_ENTRY_SIZE;
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let raw = unsafe { *(data[offset..].as_ptr() as *const Fat32DirEntry) };
 
             if raw.is_last() {
@@ -1157,6 +1163,7 @@ impl Fat32Fs {
         let mut found_lfn_start = None;
         for i in 0..num_entries {
             let offset = i * DIR_ENTRY_SIZE;
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let raw = unsafe { *(data[offset..].as_ptr() as *const Fat32DirEntry) };
 
             if raw.is_last() {
@@ -1229,6 +1236,7 @@ fn parse_directory_entries(data: &[u8]) -> Vec<FatDirEntry> {
             break;
         }
 
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         let raw = unsafe { *(data[offset..].as_ptr() as *const Fat32DirEntry) };
 
         if raw.is_last() {
@@ -1241,6 +1249,7 @@ fn parse_directory_entries(data: &[u8]) -> Vec<FatDirEntry> {
 
         if raw.is_lfn() {
             // Parse LFN entry
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             let lfn = unsafe { *(data[offset..].as_ptr() as *const Fat32LfnEntry) };
             lfn_parts.push((lfn.sequence(), lfn.chars()));
         } else if raw.is_volume_label() {

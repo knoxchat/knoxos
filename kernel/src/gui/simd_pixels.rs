@@ -122,12 +122,14 @@ pub fn fill_fast(dst: &mut [Pixel], color: Pixel) {
 pub fn fill_fast_u64(dst: &mut [Pixel], color: Pixel) {
     if color.a == 255 && dst.len() >= 2 {
         // Pack two pixels into a u64
+        // SAFETY: the source and destination layouts are the same size; the bit pattern is a valid value of the target type.
         let pixel_u32 = unsafe { core::mem::transmute::<Pixel, u32>(color) };
         let packed = ((pixel_u32 as u64) << 32) | (pixel_u32 as u64);
 
         let ptr = dst.as_mut_ptr() as *mut u64;
         let pairs = dst.len() / 2;
 
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe {
             for i in 0..pairs {
                 ptr.add(i).write(packed);

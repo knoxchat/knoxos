@@ -38,6 +38,7 @@ pub fn get_apic_id() -> u32 {
     if !APIC_AVAILABLE.load(Ordering::Relaxed) {
         return 0;
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { (lapic_read(LAPIC_ID) >> 24) & 0xFF }
 }
 
@@ -49,12 +50,14 @@ pub fn is_apic_mode() -> bool {
 /// Send End-of-Interrupt to the Local APIC
 pub fn eoi() {
     if APIC_AVAILABLE.load(Ordering::Relaxed) {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { lapic_write(LAPIC_EOI, 0) };
     }
 }
 
 /// Initialize the Local APIC on the current CPU
 pub fn init_lapic() {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Enable the APIC via MSR
         let msr_val = rdmsr(MSR_APIC_BASE);
@@ -80,6 +83,7 @@ pub fn init_lapic() {
 
 /// Configure the APIC timer for periodic interrupts
 pub fn init_timer(frequency_hz: u32) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Set divide configuration
         lapic_write(LAPIC_TIMER_DIVIDE, TIMER_DIVIDE_16);
@@ -136,6 +140,7 @@ pub(crate) fn pit_wait_10ms() {
 
 /// Send an IPI (Inter-Processor Interrupt) to another CPU
 pub fn send_ipi(dest_apic_id: u32, vector: u32) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         lapic_write(LAPIC_ICR_HI, dest_apic_id << 24);
         lapic_write(LAPIC_ICR_LO, IPI_FIXED | vector);
@@ -144,6 +149,7 @@ pub fn send_ipi(dest_apic_id: u32, vector: u32) {
 
 /// Send an IPI to all CPUs except self
 pub fn send_ipi_all_except_self(vector: u32) {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         lapic_write(LAPIC_ICR_LO, IPI_ALL_EXCL | IPI_FIXED | vector);
     }

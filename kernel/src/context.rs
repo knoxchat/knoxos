@@ -206,6 +206,7 @@ impl CpuContext {
         self.cs = frame.cs;
         self.ss = frame.ss;
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             let fx = core::ptr::addr_of_mut!(self.fxsave_area) as u64;
             core::arch::asm!(
@@ -827,6 +828,7 @@ pub fn schedule_tick() {
         if let Some(next_pid) = scheduler.schedule() {
             drop(scheduler);
             if next_pid != current_pid() && has_runnable_context(next_pid) {
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 unsafe {
                     switch_to(next_pid);
                 }
@@ -890,6 +892,7 @@ pub fn program_kernel_stack(pid: Pid) {
 pub fn yield_to_idle() {
     if current_pid() == IDLE_PID {
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("sti; hlt", options(nomem, nostack));
         }
@@ -897,11 +900,13 @@ pub fn yield_to_idle() {
     }
     if !has_runnable_context(IDLE_PID) {
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("sti; hlt", options(nomem, nostack));
         }
         return;
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         switch_to(IDLE_PID);
     }
@@ -910,11 +915,13 @@ pub fn yield_to_idle() {
 extern "C" fn idle_loop() -> ! {
     loop {
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("sti; hlt", options(nomem, nostack));
         }
         // After an interrupt, resume the desktop executor if it has a saved RIP.
         if has_runnable_context(DESKTOP_PID) {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             unsafe {
                 switch_to(DESKTOP_PID);
             }
@@ -930,15 +937,18 @@ const TEST_PID_B: Pid = 101;
 
 extern "C" fn kthread_a() -> ! {
     TEST_A.fetch_add(1, Ordering::SeqCst);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         switch_to(TEST_PID_B);
     }
     TEST_A.fetch_add(1, Ordering::SeqCst);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         switch_to(DESKTOP_PID);
     }
     loop {
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("hlt", options(nomem, nostack));
         }
@@ -947,11 +957,13 @@ extern "C" fn kthread_a() -> ! {
 
 extern "C" fn kthread_b() -> ! {
     TEST_B.fetch_add(1, Ordering::SeqCst);
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         switch_to(TEST_PID_A);
     }
     loop {
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
         unsafe {
             core::arch::asm!("hlt", options(nomem, nostack));
         }
@@ -966,6 +978,7 @@ fn self_test_rip_switch() {
     create_kernel_thread_context(TEST_PID_B, kthread_b as *const () as u64);
 
     let before = switch_count();
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         switch_to(TEST_PID_A);
     }

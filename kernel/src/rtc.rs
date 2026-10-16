@@ -116,6 +116,7 @@ fn bcd_to_bin(bcd: u8) -> u8 {
 
 /// Read the current date/time from CMOS RTC
 pub fn read_rtc() -> DateTime {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Wait for update to complete
         while cmos_is_updating() {}

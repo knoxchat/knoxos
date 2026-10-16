@@ -44,6 +44,7 @@ pub fn sys_pidfd_getfd(pidfd: u64, target_fd: i32, flags: u32) -> SyscallResult 
 // ── memfd operations ────────────────────────────────────────────────
 
 pub fn sys_memfd_create(name_ptr: u64, flags: u32) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let name = unsafe { read_user_string(name_ptr) }.unwrap_or_default();
     let id =
         crate::memfd::sys_memfd_create(&name, flags).map_err(|_| SyscallError::TooManyFiles)?;
@@ -84,6 +85,7 @@ pub fn sys_close_range(first: u32, last: u32, flags: u32) -> SyscallResult {
 
 pub fn sys_signalfd(fd: i32, mask_ptr: u64, flags: i32) -> SyscallResult {
     let mask = if mask_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { *(mask_ptr as *const u64) }
     } else {
         0

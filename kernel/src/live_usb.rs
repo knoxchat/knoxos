@@ -977,7 +977,9 @@ pub fn scan_usb_devices() -> Vec<UsbStorageDevice> {
         let mmio_base = bar0.base as usize;
 
         // Read XHCI capability registers
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         let cap_length = unsafe { core::ptr::read_volatile(mmio_base as *const u8) } as usize;
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         let hcsparams1 = unsafe { core::ptr::read_volatile((mmio_base + 0x04) as *const u32) };
         let max_ports = ((hcsparams1 >> 24) & 0xFF) as usize;
         let op_base = mmio_base + cap_length;
@@ -986,6 +988,7 @@ pub fn scan_usb_devices() -> Vec<UsbStorageDevice> {
 
         for port in 0..max_ports {
             let portsc =
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 unsafe { core::ptr::read_volatile((op_base + 0x400 + port * 0x10) as *const u32) };
 
             let connected = portsc & 1 != 0;
@@ -1019,6 +1022,7 @@ pub fn scan_usb_devices() -> Vec<UsbStorageDevice> {
             let ep_ring = op_base + 0x1000 + slot_id * 0x40; // Device context area (simplified)
 
             // Write SETUP TRB
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe {
                 core::ptr::write_volatile(ep_ring as *mut u64, setup_data);
                 core::ptr::write_volatile((ep_ring + 8) as *mut u32, 8); // TRB length = 8
@@ -1028,6 +1032,7 @@ pub fn scan_usb_devices() -> Vec<UsbStorageDevice> {
 
             // Ring doorbell
             let db_offset = mmio_base + cap_length + 0x800;
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe {
                 core::ptr::write_volatile((db_offset + slot_id * 4) as *mut u32, 1);
             }
@@ -1038,6 +1043,7 @@ pub fn scan_usb_devices() -> Vec<UsbStorageDevice> {
             }
 
             // Read back descriptor (from DATA TRB response area)
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             unsafe {
                 let desc_ptr = (ep_ring + 0x20) as *const [u8; 18];
                 desc_buf = core::ptr::read_volatile(desc_ptr);

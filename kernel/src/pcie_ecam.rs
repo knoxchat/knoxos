@@ -158,6 +158,7 @@ pub fn ecam_read8(segment: u16, bus: u8, device: u8, function: u8, offset: usize
     for region in regions.iter() {
         if region.segment == segment {
             if let Some(addr) = ecam_address(region, bus, device, function, offset) {
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 return unsafe { core::ptr::read_volatile(addr as *const u8) };
             }
         }
@@ -171,6 +172,7 @@ pub fn ecam_read16(segment: u16, bus: u8, device: u8, function: u8, offset: usiz
     for region in regions.iter() {
         if region.segment == segment {
             if let Some(addr) = ecam_address(region, bus, device, function, offset & !1) {
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 return unsafe { core::ptr::read_volatile(addr as *const u16) };
             }
         }
@@ -184,6 +186,7 @@ pub fn ecam_read32(segment: u16, bus: u8, device: u8, function: u8, offset: usiz
     for region in regions.iter() {
         if region.segment == segment {
             if let Some(addr) = ecam_address(region, bus, device, function, offset & !3) {
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 return unsafe { core::ptr::read_volatile(addr as *const u32) };
             }
         }
@@ -197,6 +200,7 @@ pub fn ecam_write8(segment: u16, bus: u8, device: u8, function: u8, offset: usiz
     for region in regions.iter() {
         if region.segment == segment {
             if let Some(addr) = ecam_address(region, bus, device, function, offset) {
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 unsafe { core::ptr::write_volatile(addr as *mut u8, value) };
                 return;
             }
@@ -210,6 +214,7 @@ pub fn ecam_write16(segment: u16, bus: u8, device: u8, function: u8, offset: usi
     for region in regions.iter() {
         if region.segment == segment {
             if let Some(addr) = ecam_address(region, bus, device, function, offset & !1) {
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 unsafe { core::ptr::write_volatile(addr as *mut u16, value) };
                 return;
             }
@@ -223,6 +228,7 @@ pub fn ecam_write32(segment: u16, bus: u8, device: u8, function: u8, offset: usi
     for region in regions.iter() {
         if region.segment == segment {
             if let Some(addr) = ecam_address(region, bus, device, function, offset & !3) {
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 unsafe { core::ptr::write_volatile(addr as *mut u32, value) };
                 return;
             }
@@ -792,6 +798,7 @@ pub fn ecam_read_extended(
 
     // Memory-mapped read
     let ptr = addr as *const u32;
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     Some(unsafe { core::ptr::read_volatile(ptr) })
 }
 
@@ -845,6 +852,7 @@ fn ecam_config_read16(dev: &PcieDevice, offset: u16) -> u16 {
             + ((dev.function as u64) << 12)
             + offset as u64;
         let ptr = addr as *const u16;
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::read_volatile(ptr) }
     } else {
         0xFFFF
@@ -864,6 +872,7 @@ fn ecam_config_write16(dev: &PcieDevice, offset: u16, value: u16) {
             + ((dev.function as u64) << 12)
             + offset as u64;
         let ptr = addr as *mut u16;
+        // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe { core::ptr::write_volatile(ptr, value) }
     }
 }

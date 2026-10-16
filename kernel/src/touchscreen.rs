@@ -503,6 +503,7 @@ fn detect_virtio_input_touch() -> usize {
     for bus in 0..=255u8 {
         for dev in 0..32u8 {
             let addr: u32 = (1 << 31) | ((bus as u32) << 16) | ((dev as u32) << 11);
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             let id = unsafe {
                 let mut p = Port::<u32>::new(0xCF8);
                 let mut d = Port::<u32>::new(0xCFC);
@@ -516,6 +517,7 @@ fn detect_virtio_input_touch() -> usize {
             // VirtIO vendor 0x1AF4, input device ID 0x1052
             if vendor == 0x1AF4 && device == 0x1052 {
                 // Read subdevice ID to distinguish touch from keyboard/mouse
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let subsys = unsafe {
                     let mut p = Port::<u32>::new(0xCF8);
                     let mut d = Port::<u32>::new(0xCFC);
@@ -525,6 +527,7 @@ fn detect_virtio_input_touch() -> usize {
                 let _subsys_id = ((subsys >> 16) & 0xFFFF) as u16;
 
                 // Read BAR0
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                 let bar0 = unsafe {
                     let mut p = Port::<u32>::new(0xCF8);
                     let mut d = Port::<u32>::new(0xCFC);

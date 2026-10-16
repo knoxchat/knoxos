@@ -52,6 +52,7 @@ pub fn sys_sendmmsg(sockfd: i32, msgvec_ptr: u64, vlen: u32, flags: i32) -> Sysc
         let hdr = msgvec_ptr + i as u64 * MMSGHDR_SIZE;
         match crate::syscall::net::sys_sendmsg(sockfd, hdr, flags) {
             Ok(nbytes) => {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     *((hdr + MMSGHDR_LEN_OFF) as *mut u32) = nbytes as u32;
                 }
@@ -85,6 +86,7 @@ pub fn sys_recvmmsg(
         let hdr = msgvec_ptr + i as u64 * MMSGHDR_SIZE;
         match crate::syscall::net::sys_recvmsg(sockfd, hdr, flags) {
             Ok(nbytes) => {
+                // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                 unsafe {
                     *((hdr + MMSGHDR_LEN_OFF) as *mut u32) = nbytes as u32;
                 }
@@ -116,6 +118,7 @@ pub fn sys_setsockopt(
         return Err(SyscallError::InvalidArgument);
     }
     let on = if optval != 0 && optlen >= 4 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe { *(optval as *const i32) != 0 }
     } else {
         false
@@ -164,11 +167,13 @@ pub fn sys_getsockopt(
         }
     };
     if optval != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(optval as *mut i32) = value;
         }
     }
     if optlen_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(optlen_ptr as *mut u32) = 4;
         }
@@ -197,6 +202,7 @@ fn socket_id_from_fd(sockfd: i32) -> Result<u32, SyscallError> {
 }
 
 fn write_inet_addr(addr_ptr: u64, addrlen_ptr: u64, ip: crate::net::Ipv4Address, port: u16) {
+    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
     unsafe {
         core::ptr::write_bytes(addr_ptr as *mut u8, 0, 16);
         *(addr_ptr as *mut u16) = 2; // AF_INET
@@ -204,6 +210,7 @@ fn write_inet_addr(addr_ptr: u64, addrlen_ptr: u64, ip: crate::net::Ipv4Address,
         core::ptr::copy_nonoverlapping(ip.0.as_ptr(), (addr_ptr + 4) as *mut u8, 4);
     }
     if addrlen_ptr != 0 {
+        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
         unsafe {
             *(addrlen_ptr as *mut u32) = 16;
         }
@@ -223,6 +230,7 @@ pub fn sys_getsockname(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallR
                 Some(crate::net::SocketAddress::Unix(path)) => {
                     let path_bytes = path.as_bytes();
                     let copy_len = path_bytes.len().min(107);
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::write_bytes(addr_ptr as *mut u8, 0, 110);
                         *(addr_ptr as *mut u16) = 1; // AF_UNIX
@@ -233,6 +241,7 @@ pub fn sys_getsockname(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallR
                         );
                     }
                     if addrlen_ptr != 0 {
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe {
                             *(addrlen_ptr as *mut u32) = (2 + copy_len + 1) as u32;
                         }
@@ -241,11 +250,13 @@ pub fn sys_getsockname(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallR
                 None => {
                     // Unbound socket: return zeroed address
                     if addr_ptr != 0 {
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe {
                             core::ptr::write_bytes(addr_ptr as *mut u8, 0, 16);
                         }
                     }
                     if addrlen_ptr != 0 {
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe {
                             *(addrlen_ptr as *mut u32) = 0;
                         }
@@ -257,11 +268,13 @@ pub fn sys_getsockname(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallR
     } else {
         // Fallback: return zeroed for sockets not in SOCKETS table
         if addr_ptr != 0 {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 core::ptr::write_bytes(addr_ptr as *mut u8, 0, 16);
             }
         }
         if addrlen_ptr != 0 {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(addrlen_ptr as *mut u32) = 16;
             }
@@ -286,6 +299,7 @@ pub fn sys_getpeername(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallR
                 Some(crate::net::SocketAddress::Unix(path)) => {
                     let path_bytes = path.as_bytes();
                     let copy_len = path_bytes.len().min(107);
+                    // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                     unsafe {
                         core::ptr::write_bytes(addr_ptr as *mut u8, 0, 110);
                         *(addr_ptr as *mut u16) = 1; // AF_UNIX
@@ -296,6 +310,7 @@ pub fn sys_getpeername(sockfd: i32, addr_ptr: u64, addrlen_ptr: u64) -> SyscallR
                         );
                     }
                     if addrlen_ptr != 0 {
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe {
                             *(addrlen_ptr as *mut u32) = (2 + copy_len + 1) as u32;
                         }

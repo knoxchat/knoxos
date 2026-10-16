@@ -130,6 +130,7 @@ pub fn poll_battery() {
     // For now, simulate a reasonable battery state
 
     // Try reading from ACPI embedded controller
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let ac_online = unsafe {
         let val =
             crate::arch_compat::instructions::port::Port::<u8>::new(ACPI_AC_ADAPTER_PORT).read();

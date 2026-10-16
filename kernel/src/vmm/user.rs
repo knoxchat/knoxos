@@ -24,6 +24,7 @@ pub fn write_user_memory(pid: Pid, vaddr: u64, data: &[u8]) {
             // Walk the page table to find the physical address
             if let Some(phys) = translate_vaddr_for_pid(addr_space.cr3, page_vaddr, offset) {
                 let dest = (phys + offset + page_offset as u64) as *mut u8;
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         data[written..written + chunk_size].as_ptr(),
@@ -54,6 +55,7 @@ pub fn read_user_memory(pid: Pid, vaddr: u64, buf: &mut [u8]) {
 
             if let Some(phys) = translate_vaddr_for_pid(addr_space.cr3, page_vaddr, offset) {
                 let src = (phys + offset + page_offset as u64) as *const u8;
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         src,
@@ -82,6 +84,7 @@ fn translate_vaddr_for_pid(cr3: u64, vaddr: u64, phys_offset: u64) -> Option<u64
     let l2_idx = ((vaddr >> 21) & 0x1FF) as usize;
     let l1_idx = ((vaddr >> 12) & 0x1FF) as usize;
 
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         let l4_table = &*((cr3 + phys_offset) as *const PageTable);
         let l4_entry = &l4_table[l4_idx];

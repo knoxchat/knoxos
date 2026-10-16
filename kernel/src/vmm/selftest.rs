@@ -128,10 +128,12 @@ pub fn cow_fault_self_test() -> bool {
         serial_println!("[VMM] Gate H1 FAILED: mmap");
         return false;
     };
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let Some(parent_frame) = (unsafe { get_mapped_frame(parent.cr3, addr) }) else {
         serial_println!("[VMM] Gate H1 FAILED: parent page not mapped");
         return false;
     };
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         copy_to_physical_frame(parent_frame, &[0xA4, 0x01]);
     }
@@ -148,6 +150,7 @@ pub fn cow_fault_self_test() -> bool {
         serial_println!("[VMM] Gate H1 FAILED: CoW fault not handled");
         return false;
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let Some(child_frame) = (unsafe { get_mapped_frame(child.cr3, addr) }) else {
         serial_println!("[VMM] Gate H1 FAILED: child page missing after CoW");
         return false;
@@ -156,10 +159,13 @@ pub fn cow_fault_self_test() -> bool {
         serial_println!("[VMM] Gate H1 FAILED: child still shares parent frame");
         return false;
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         copy_to_physical_frame(child_frame, &[0xB4, 0x02]);
     }
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let parent_byte = unsafe { read_physical_frame_byte(parent_frame, 0) };
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let child_byte = unsafe { read_physical_frame_byte(child_frame, 0) };
     if parent_byte != 0xA4 {
         serial_println!(
@@ -177,6 +183,7 @@ pub fn cow_fault_self_test() -> bool {
     }
 
     // Make sure Drop cannot free the live CR3 if fork switched us.
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         activate_cr3(KERNEL_CR3.load(Ordering::Relaxed));
     }
@@ -223,6 +230,7 @@ pub fn swap_fault_self_test() -> bool {
     {
         let spaces = ADDRESS_SPACES.lock();
         if let Some(addr_space) = spaces.get(&GATE_K2_PID) {
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
             if unsafe { get_mapped_frame(addr_space.cr3, vaddr) }.is_some() {
                 serial_println!("[VMM] Gate K2 FAILED: page still mapped");
                 drop(spaces);

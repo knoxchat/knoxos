@@ -1365,6 +1365,7 @@ fn do_reboot() {
     close_installer();
     // ACPI reboot: pulse reset line via keyboard controller port 0x64
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: inline assembly uses the architecture instruction and listed clobbers; no unexpected memory is accessed.
     unsafe {
         core::arch::asm!(
             "out dx, al",

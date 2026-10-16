@@ -76,6 +76,7 @@ fn tss(cpu: usize) -> &'static TaskStateSegment {
     let cpu = cpu.min(MAX_CPUS - 1);
     // SAFETY: `entries` is never relocated; callers only read, except through
     // `tss_mut` which is the documented writer.
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { &(*TSS.entries.get())[cpu] }
 }
 
@@ -83,6 +84,7 @@ fn tss_mut(cpu: usize) -> &'static mut TaskStateSegment {
     let cpu = cpu.min(MAX_CPUS - 1);
     // SAFETY: each CPU writes only its own TSS. RSP0 is updated from kernel
     // context on that CPU; IST is initialized once before `ltr`.
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe { &mut (*TSS.entries.get())[cpu] }
 }
 
@@ -206,6 +208,7 @@ pub fn init() {
     init_ist_stacks();
 
     GDT.0.load();
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         CS::set_reg(GDT.1.code_selector);
         DS::set_reg(GDT.1.data_selector);
@@ -240,6 +243,7 @@ pub fn init_ap(cpu_index: u32) {
 
     let cpu = (cpu_index as usize).min(MAX_CPUS - 1);
     GDT.0.load();
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         CS::set_reg(GDT.1.code_selector);
         DS::set_reg(GDT.1.data_selector);

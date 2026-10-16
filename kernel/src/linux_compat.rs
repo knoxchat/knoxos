@@ -858,6 +858,7 @@ pub fn translate_linux_syscall(
                 0x1002 => {
                     // ARCH_SET_FS
                     // Set FS base MSR for thread-local storage
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         crate::arch_compat::registers::model_specific::Msr::new(0xC0000100)
                             .write(arg1);
@@ -866,6 +867,7 @@ pub fn translate_linux_syscall(
                 }
                 0x1001 => {
                     // ARCH_SET_GS
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     unsafe {
                         crate::arch_compat::registers::model_specific::Msr::new(0xC0000101)
                             .write(arg1);
@@ -874,6 +876,7 @@ pub fn translate_linux_syscall(
                 }
                 0x1003 => {
                     // ARCH_GET_FS
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     let fs = unsafe {
                         crate::arch_compat::registers::model_specific::Msr::new(0xC0000100).read()
                     };
@@ -881,6 +884,7 @@ pub fn translate_linux_syscall(
                 }
                 0x1004 => {
                     // ARCH_GET_GS
+                    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
                     let gs = unsafe {
                         crate::arch_compat::registers::model_specific::Msr::new(0xC0000101).read()
                     };

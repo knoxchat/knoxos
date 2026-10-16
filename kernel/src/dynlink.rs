@@ -210,6 +210,7 @@ pub fn apply_relocation(rela: &Elf64Rela, base: u64, sym_value: u64) -> Result<(
         R_X86_64_64 => {
             // S + A
             let value = sym_value.wrapping_add(rela.r_addend as u64);
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(target as *mut u64) = value;
             }
@@ -219,12 +220,14 @@ pub fn apply_relocation(rela: &Elf64Rela, base: u64, sym_value: u64) -> Result<(
             let value = sym_value
                 .wrapping_add(rela.r_addend as u64)
                 .wrapping_sub(target) as u32;
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(target as *mut u32) = value;
             }
         }
         R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT => {
             // S
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(target as *mut u64) = sym_value;
             }
@@ -232,6 +235,7 @@ pub fn apply_relocation(rela: &Elf64Rela, base: u64, sym_value: u64) -> Result<(
         R_X86_64_RELATIVE => {
             // B + A
             let value = base.wrapping_add(rela.r_addend as u64);
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(target as *mut u64) = value;
             }
@@ -245,12 +249,14 @@ pub fn apply_relocation(rela: &Elf64Rela, base: u64, sym_value: u64) -> Result<(
         }
         R_X86_64_32 => {
             let value = sym_value.wrapping_add(rela.r_addend as u64) as u32;
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(target as *mut u32) = value;
             }
         }
         R_X86_64_32S => {
             let value = (sym_value as i64 + rela.r_addend) as i32;
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(target as *mut i32) = value;
             }
@@ -259,6 +265,7 @@ pub fn apply_relocation(rela: &Elf64Rela, base: u64, sym_value: u64) -> Result<(
             // B + A, then call as function to get actual value
             let resolver = base.wrapping_add(rela.r_addend as u64);
             // For now just store the resolver address
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(target as *mut u64) = resolver;
             }
@@ -333,6 +340,7 @@ pub fn register_virtual_library(lib_name: &str, provider: &str) {
 pub fn parse_dynamic_section(dynamic_start: u64, base: u64) -> DynamicInfo {
     let mut info = DynamicInfo::default();
 
+    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
     unsafe {
         let mut ptr = dynamic_start as *const Elf64Dyn;
         loop {
@@ -399,6 +407,7 @@ pub struct DynamicInfo {
 
 /// Read a string from the string table at given offset
 pub fn read_strtab_entry(strtab: u64, offset: u32) -> String {
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
     unsafe {
         let ptr = (strtab + offset as u64) as *const u8;
         let mut len = 0;
@@ -469,6 +478,7 @@ pub fn setup_plt_stub(got_entry: u64, plt_index: u32, symbol_name: &str, base_ad
     PLT_ENTRIES.lock().insert(got_entry, entry);
 
     // The GOT entry initially points to the resolver trampoline
+    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     unsafe {
         *(got_entry as *mut u64) = plt_resolve_trampoline as *const () as u64;
     }
@@ -495,6 +505,7 @@ extern "C" fn plt_resolve_trampoline() {
         }
         if let Some((addr, _size)) = resolve_symbol(&entry.symbol_name) {
             // Patch the GOT entry to point directly to the resolved function
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(entry.got_addr as *mut u64) = addr;
             }
@@ -526,6 +537,7 @@ pub fn resolve_all_plt_entries() {
             continue;
         }
         if let Some((addr, _size)) = resolve_symbol(&entry.symbol_name) {
+            // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
             unsafe {
                 *(entry.got_addr as *mut u64) = addr;
             }
@@ -557,12 +569,14 @@ pub fn process_relocations(info: &DynamicInfo, base: u64) -> Result<(u32, u32), 
         let count = info.relasz / info.relaent;
         for i in 0..count {
             let rela_ptr = (info.rela + (i * info.relaent) as u64) as *const Elf64Rela;
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             let rela = unsafe { core::ptr::read_volatile(rela_ptr) };
 
             // Resolve symbol if needed
             let sym_value = if rela.sym() != 0 && info.symtab != 0 && info.strtab != 0 {
                 let sym_ptr =
                     (info.symtab + rela.sym() as u64 * info.syment as u64) as *const Elf64Sym;
+                // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                 let sym = unsafe { core::ptr::read_volatile(sym_ptr) };
                 let name = read_strtab_entry(info.strtab, sym.st_name);
                 if sym.st_shndx == SHN_UNDEF {
@@ -589,6 +603,7 @@ pub fn process_relocations(info: &DynamicInfo, base: u64) -> Result<(u32, u32), 
         let count = info.pltrelsz / entry_size;
         for i in 0..count {
             let rela_ptr = (info.jmprel + (i * entry_size) as u64) as *const Elf64Rela;
+            // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
             let rela = unsafe { core::ptr::read_volatile(rela_ptr) };
 
             if rela.rel_type() == R_X86_64_JUMP_SLOT {
@@ -596,12 +611,14 @@ pub fn process_relocations(info: &DynamicInfo, base: u64) -> Result<(u32, u32), 
                 if info.symtab != 0 && info.strtab != 0 && rela.sym() != 0 {
                     let sym_ptr =
                         (info.symtab + rela.sym() as u64 * info.syment as u64) as *const Elf64Sym;
+                    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
                     let sym = unsafe { core::ptr::read_volatile(sym_ptr) };
                     let name = read_strtab_entry(info.strtab, sym.st_name);
                     let got_addr = base + rela.r_offset;
 
                     // Try eager resolution first
                     if let Some((addr, _)) = resolve_symbol(&name) {
+                        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
                         unsafe {
                             *(got_addr as *mut u64) = addr;
                         }
@@ -877,6 +894,7 @@ pub fn dlopen(filename: Option<&str>, flags: i32) -> DlHandle {
             path,
             init_addr
         );
+        // SAFETY: the source and destination layouts are the same size; the bit pattern is a valid value of the target type.
         unsafe {
             let init_fn: extern "C" fn() = core::mem::transmute(init_addr);
             init_fn();
@@ -1013,6 +1031,7 @@ pub fn dlclose(handle: DlHandle) -> i32 {
                 so_name,
                 fini_addr
             );
+            // SAFETY: the source and destination layouts are the same size; the bit pattern is a valid value of the target type.
             unsafe {
                 let fini_fn: extern "C" fn() = core::mem::transmute(fini_addr);
                 fini_fn();

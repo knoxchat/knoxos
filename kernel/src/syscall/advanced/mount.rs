@@ -5,6 +5,7 @@ use crate::syscall::{SyscallError, SyscallResult, read_user_string};
 // ── New mount API ───────────────────────────────────────────────────
 
 pub fn sys_fsopen(fstype_ptr: u64, flags: u32) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let fstype = unsafe { read_user_string(fstype_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     crate::mount_api::fsopen(&fstype, flags)
         .map(|fd| fd as u64)
@@ -13,11 +14,13 @@ pub fn sys_fsopen(fstype_ptr: u64, flags: u32) -> SyscallResult {
 
 pub fn sys_fsconfig(fd: i32, cmd: u32, key_ptr: u64, value_ptr: u64, aux: i32) -> SyscallResult {
     let key = if key_ptr != 0 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { read_user_string(key_ptr) }
     } else {
         None
     };
     let value = if value_ptr != 0 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { read_user_string(value_ptr) }
     } else {
         None
@@ -41,7 +44,9 @@ pub fn sys_move_mount(
     to_path_ptr: u64,
     flags: u32,
 ) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let from = unsafe { read_user_string(from_path_ptr) }.unwrap_or_default();
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let to = unsafe { read_user_string(to_path_ptr) }.unwrap_or_default();
     crate::mount_api::move_mount(from_dfd, &from, to_dfd, &to, flags)
         .map(|_| 0u64)
@@ -49,6 +54,7 @@ pub fn sys_move_mount(
 }
 
 pub fn sys_open_tree(dfd: i32, path_ptr: u64, flags: u32) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.unwrap_or_default();
     crate::mount_api::open_tree(dfd, &path, flags)
         .map(|fd| fd as u64)
@@ -56,6 +62,7 @@ pub fn sys_open_tree(dfd: i32, path_ptr: u64, flags: u32) -> SyscallResult {
 }
 
 pub fn sys_fspick(dfd: i32, path_ptr: u64, flags: u32) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let path = unsafe { read_user_string(path_ptr) }.unwrap_or_default();
     crate::mount_api::fspick(dfd, &path, flags)
         .map(|fd| fd as u64)
@@ -82,7 +89,9 @@ pub fn sys_setns(fd: i32, nstype: i32) -> SyscallResult {
 
 pub fn sys_pivot_root(new_root_ptr: u64, put_old_ptr: u64) -> SyscallResult {
     let new_root =
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
         unsafe { read_user_string(new_root_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let put_old = unsafe { read_user_string(put_old_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     match crate::process::pivot_root(pid, &new_root, &put_old) {
@@ -110,8 +119,11 @@ pub fn sys_mount_linux(
     flags: u64,
     data_ptr: u64,
 ) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let source = unsafe { read_user_string(source_ptr) }.unwrap_or_default();
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let target = unsafe { read_user_string(target_ptr) }.unwrap_or_default();
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let fstype = unsafe { read_user_string(fstype_ptr) }.unwrap_or_default();
     serial_println!("[KnoxOS] mount({}, {}, {})", source, target, fstype);
     // Create mount point in VFS
@@ -128,6 +140,7 @@ pub fn sys_mount_linux(
 
 pub fn sys_umount2(target_ptr: u64, flags: i32) -> SyscallResult {
     let _ = flags;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     let target = unsafe { read_user_string(target_ptr) }.ok_or(SyscallError::InvalidArgument)?;
     serial_println!("[KnoxOS] umount2({})", target);
     Ok(0)
