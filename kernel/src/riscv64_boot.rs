@@ -321,3 +321,50 @@ pub fn init() {
         "[RV64-Boot]   Targets: QEMU virt, SiFive HiFive, StarFive VisionFive 2"
     );
 }
+
+/// QEMU virt 16550 UART (does not use the allocator).
+#[cfg(all(target_arch = "riscv64", not(test)))]
+fn uart16550_write(s: &str) {
+    const THR: *mut u8 = 0x1000_0000 as *mut u8;
+    const LSR: *mut u8 = 0x1000_0005 as *mut u8;
+    const THRE: u8 = 0x20;
+    for b in s.bytes() {
+        // SAFETY: QEMU virt maps a 16550 at 0x10000000; we only write THR
+        // after LSR shows the transmit holding register is empty.
+        unsafe {
+            while LSR.read_volatile() & THRE == 0 {}
+            THR.write_volatile(b);
+        }
+    }
+}
+
+#[cfg(all(target_arch = "riscv64", not(test)))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_entry() -> ! {
+    uart16550_write("GATE_ARCH riscv64 boot\n");
+    loop {
+        // SAFETY: WFI is the architecture idle instruction; no memory is accessed.
+        unsafe {
+            core::arch::asm!("wfi");
+        }
+    }
+}
+
+#[cfg(all(target_arch = "riscv64", not(test)))]
+core::arch::global_asm!(
+    r#"
+    .section .text.boot, "ax"
+    .global _start
+    _start:
+        bnez a0, 1f
+        la sp, {stack}
+        li t0, {stack_size}
+        add sp, sp, t0
+        j rust_entry
+    1:
+        wfi
+        j 1b
+    "#,
+    stack = sym BOOT_STACK,
+    stack_size = const BOOT_STACK_SIZE,
+);

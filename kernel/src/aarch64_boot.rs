@@ -227,3 +227,53 @@ pub fn init() {
     crate::serial_println!("[AArch64-Boot]   MAIR_EL1 = 0x{:016X}", MAIR_EL1_VALUE);
     crate::serial_println!("[AArch64-Boot]   Targets: Raspberry Pi 4/5, Apple M1/M2/M3, QEMU virt");
 }
+
+/// QEMU virt PL011 UART (does not use the allocator).
+#[cfg(all(target_arch = "aarch64", not(test)))]
+fn pl011_write(s: &str) {
+    const UARTDR: *mut u32 = 0x0900_0000 as *mut u32;
+    const UARTFR: *mut u32 = 0x0900_0018 as *mut u32;
+    const TXFF: u32 = 1 << 5;
+    for b in s.bytes() {
+        // SAFETY: QEMU virt maps PL011 at 0x09000000; we only write UARTDR
+        // after UARTFR shows the TX FIFO is not full.
+        unsafe {
+            while UARTFR.read_volatile() & TXFF != 0 {}
+            UARTDR.write_volatile(b as u32);
+        }
+    }
+}
+
+#[cfg(all(target_arch = "aarch64", not(test)))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_entry() -> ! {
+    pl011_write("GATE_ARCH aarch64 boot\n");
+    loop {
+        // SAFETY: WFE is the architecture idle instruction; no memory is accessed.
+        unsafe {
+            core::arch::asm!("wfe");
+        }
+    }
+}
+
+#[cfg(all(target_arch = "aarch64", not(test)))]
+core::arch::global_asm!(
+    r#"
+    .section .text.boot, "ax"
+    .global _start
+    _start:
+        mrs x1, mpidr_el1
+        and x1, x1, #0xff
+        cbnz x1, 1f
+        adrp x2, {stack}
+        add x2, x2, :lo12:{stack}
+        add x2, x2, #{stack_size}
+        mov sp, x2
+        bl rust_entry
+    1:
+        wfe
+        b 1b
+    "#,
+    stack = sym BOOT_STACK,
+    stack_size = const BOOT_STACK_SIZE,
+);

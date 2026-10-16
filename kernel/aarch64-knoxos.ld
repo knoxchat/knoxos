@@ -1,13 +1,14 @@
-/* KnoxOS AArch64 linker script */
+/* KnoxOS AArch64 linker script — QEMU virt identity map */
 OUTPUT_FORMAT("elf64-littleaarch64")
 ENTRY(_start)
 
-KERNEL_VADDR = 0xFFFF000000080000;
+/* QEMU virt RAM starts at 0x40000000; -kernel jumps here with MMU off. */
+KERNEL_VADDR = 0x40080000;
 
 SECTIONS {
     . = KERNEL_VADDR;
 
-    .text ALIGN(4K) : AT(ADDR(.text) - KERNEL_VADDR + 0x80000) {
+    .text ALIGN(4K) : {
         KEEP(*(.text.boot))   /* Boot entry must be first */
         *(.text .text.*)
     }

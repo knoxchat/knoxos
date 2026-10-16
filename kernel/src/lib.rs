@@ -1,3 +1,7 @@
+//! KnoxOS kernel: scheduled Ring 3, VFS persist, VirtIO devices, in-kernel desktop.
+//!
+//! Only the **live path** (what runs after `./run.sh`) counts. Remaining
+//! work is listed in the repo `status/next.md`.
 #![no_std]
 #![cfg_attr(test, no_main)]
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
@@ -686,7 +690,6 @@ pub mod connection_pool;
 pub mod crash_dump;
 #[cfg(feature = "stub-drivers")]
 pub mod health_check;
-#[cfg(feature = "stub-drivers")]
 pub mod journal_replay;
 #[cfg(feature = "stub-drivers")]
 pub mod live_patch;
@@ -712,11 +715,11 @@ pub mod usb_installer;
 pub mod test_framework;
 
 // Phase 33+ modules — Architecture ports, Chromebook, tablet/2-in-1 support
-#[cfg(feature = "stub-drivers")]
+#[cfg(any(target_arch = "aarch64", feature = "stub-drivers"))]
 pub mod aarch64_boot;
 #[cfg(feature = "stub-drivers")]
 pub mod depthcharge;
-#[cfg(feature = "stub-drivers")]
+#[cfg(any(target_arch = "riscv64", feature = "stub-drivers"))]
 pub mod riscv64_boot;
 #[cfg(feature = "stub-drivers")]
 pub mod tablet_mode;
