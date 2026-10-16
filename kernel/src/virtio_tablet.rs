@@ -123,13 +123,7 @@ fn detect_usb_tablet() -> bool {
         return true;
     }
 
-    // Method 2: Check QEMU's i8042 (PS/2 controller) auxiliary device ID
-    // When USB tablet is active, QEMU still provides PS/2 compatibility
-    // but the device reports differently
-    if detect_via_ps2_id() {
-        return true;
-    }
-
+    // Do not poke the i8042 aux port — desktop input is USB HID only.
     false
 }
 
@@ -148,6 +142,7 @@ fn detect_via_fw_cfg() -> bool {
     const FW_CFG_CMDLINE_SIZE: u16 = 0x14;
     const FW_CFG_CMDLINE_DATA: u16 = 0x15;
 
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut sel_port = Port::<u16>::new(FW_CFG_PORT_SEL);
         let mut data_port = Port::<u8>::new(FW_CFG_PORT_DATA);
@@ -195,6 +190,7 @@ fn detect_via_ps2_id() -> bool {
     #[cfg(not(target_arch = "x86_64"))]
     use crate::arch_compat::instructions::port::Port;
 
+    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
     unsafe {
         let mut cmd_port = Port::<u8>::new(0x64);
         let mut data_port = Port::<u8>::new(0x60);
@@ -273,7 +269,7 @@ pub fn init() {
         // No USB tablet device found — stay in PS/2 relative mouse mode.
         // Do NOT activate tablet mode without a real device, or the cursor
         // sync assumptions will be wrong.
-        serial_println!("[TABLET] No USB tablet detected — using PS/2 relative mouse");
+        serial_println!("[TABLET] No USB tablet detected — USB HID relative mouse");
     }
 
     serial_println!(

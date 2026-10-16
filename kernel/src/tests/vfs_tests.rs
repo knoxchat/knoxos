@@ -83,6 +83,44 @@ fn test_persist_bin_if_virtio() {
 }
 
 #[test_case]
+fn test_jbd2_replay_if_ramdisk() {
+    if crate::block::ramdisk_index().is_none() {
+        return;
+    }
+    assert!(
+        crate::journal_replay::journal_recovery_self_test(),
+        "committed JBD2 transaction must apply; torn descriptor must not"
+    );
+}
+
+#[test_case]
+fn test_usb_hid_urb_complete() {
+    assert!(
+        crate::usb_hid::urb_completion_self_test(),
+        "HID interrupt URB must complete into evdev KEY_A"
+    );
+}
+
+#[test_case]
+fn test_usb_hid_no_ps2_cursor() {
+    assert!(
+        crate::usb_hid::cursor_self_test(),
+        "USB HID mouse URB must move the GUI cursor without PS/2"
+    );
+}
+
+#[test_case]
+fn test_xhci_mmio_mapped() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::mmio_self_test(),
+        "XHCI BAR0 must be mapped uncached with a valid CapLength"
+    );
+}
+
+#[test_case]
 fn test_page_cache_writeback() {
     assert!(
         crate::page_cache::writeback_self_test(),

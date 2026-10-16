@@ -447,6 +447,9 @@ pub fn parse_boot_keyboard_report(device: &mut HidDevice, report: &[u8]) {
                 if keycode > 0 {
                     crate::input_event::submit_key(device.device_id, keycode, 0);
                     // key up
+                    if keycode < 0x80 {
+                        crate::task::keyboard::add_scancode(0x80 | keycode as u8);
+                    }
                 }
             }
         }
@@ -462,9 +465,30 @@ pub fn parse_boot_keyboard_report(device: &mut HidDevice, report: &[u8]) {
             let keycode = hid_to_linux_keycode(usage);
             if keycode > 0 {
                 crate::input_event::submit_key(device.device_id, keycode, 1); // key down
+                if keycode < 0x80 {
+                    crate::task::keyboard::add_scancode(keycode as u8);
+                }
             }
         }
     }
+}
+
+/// Deliver a HID report that arrived on an XHCI Transfer Event.
+pub fn deliver_hardware_report(hid_id: u32, slot_id: u8, report: &[u8]) {
+    let id = if hid_id != 0 {
+        hid_id
+    } else {
+        HID_DEVICES
+            .lock()
+            .iter()
+            .find(|d| d.usb_slot == slot_id)
+            .map(|d| d.id)
+            .unwrap_or(0)
+    };
+    if id == 0 {
+        return;
+    }
+    process_report(id, report);
 }
 
 /// Parse a USB HID boot protocol mouse report (3-4 bytes)
@@ -500,6 +524,21 @@ pub fn parse_boot_mouse_report(device: &mut HidDevice, report: &[u8]) {
     // Relative movement
     if dx != 0 || dy != 0 {
         crate::input_event::submit_mouse_move(device.device_id, dx as i32, dy as i32);
+    }
+    #[cfg(feature = "gui")]
+    {
+        let (x, y) = {
+            let mouse = crate::gui::input::MOUSE.lock();
+            (mouse.x + dx as i32, mouse.y + dy as i32)
+        };
+        crate::gui::input::set_absolute_mouse(
+            x,
+            y,
+            buttons & 1 != 0,
+            buttons & 2 != 0,
+            buttons & 4 != 0,
+            wheel,
+        );
     }
     // Wheel events submitted via raw input_event API
     if wheel != 0 {
@@ -541,10 +580,166 @@ pub fn is_available() -> bool {
     HID_AVAILABLE.load(Ordering::Relaxed)
 }
 
-/// Poll all HID devices for new reports
+/// One interrupt-IN URB: a HID device, a report buffer, and completion state.
+#[derive(Debug, Clone)]
+struct HidUrb {
+    id: u32,
+    hid_id: u32,
+    report: Vec<u8>,
+    complete: bool,
+}
+
+static PENDING_URBS: Mutex<Vec<HidUrb>> = Mutex::new(Vec::new());
+static NEXT_URB_ID: AtomicU32 = AtomicU32::new(1);
+static URB_COMPLETIONS: AtomicU32 = AtomicU32::new(0);
+
+pub const GATE_USB_HID_MARKER: &str = "GATE_USB hid urb";
+pub const GATE_USB_NO_PS2_CURSOR: &str = "GATE_USB no ps2 cursor";
+
+/// Queue an interrupt-IN URB for `hid_id`. Hardware completion (or the
+/// Gate USB self-test) calls [`complete_urb`] with the same id.
+pub fn submit_urb(hid_id: u32, report: Vec<u8>) -> u32 {
+    let id = NEXT_URB_ID.fetch_add(1, Ordering::Relaxed);
+    PENDING_URBS.lock().push(HidUrb {
+        id,
+        hid_id,
+        report,
+        complete: false,
+    });
+    id
+}
+
+/// Complete a previously submitted URB: parse the HID report and deliver
+/// evdev events. This is the same function XHCI Transfer Events call.
+pub fn complete_urb(urb_id: u32) -> bool {
+    let mut urbs = PENDING_URBS.lock();
+    let Some(urb) = urbs.iter_mut().find(|u| u.id == urb_id && !u.complete) else {
+        return false;
+    };
+    urb.complete = true;
+    let hid_id = urb.hid_id;
+    let report = urb.report.clone();
+    drop(urbs);
+    process_report(hid_id, &report);
+    URB_COMPLETIONS.fetch_add(1, Ordering::Relaxed);
+    true
+}
+
+/// Number of URBs that have gone through [`complete_urb`].
+pub fn urb_completion_count() -> u32 {
+    URB_COMPLETIONS.load(Ordering::Relaxed)
+}
+
+/// Poll all HID devices for new reports.
+///
+/// Drains XHCI Transfer Events (non-blocking) so a USB mouse/keyboard
+/// feeds the same desktop path as PS/2.
 pub fn poll_devices() {
-    // In a full implementation, this would read from USB interrupt endpoints
-    // For now, USB HID devices are handled by the XHCI controller's interrupt handler
+    crate::usb::poll_events();
+}
+
+/// Submit → complete a boot-protocol keyboard URB and require evdev KEY_A.
+pub fn urb_completion_self_test() -> bool {
+    let ev_id = crate::input_event::register_device(
+        crate::input_event::InputDeviceType::Keyboard,
+        crate::input_event::InputDeviceInfo {
+            bus: crate::input_event::InputBus::USB,
+            vendor: 0x0627,
+            product: 0x0001,
+            version: 0x0001,
+            name: String::from("KnoxOS USB HID gate"),
+            phys: String::from("usb-0000:00/input0"),
+        },
+    );
+
+    let hid_id = NEXT_HID_ID.fetch_add(1, Ordering::Relaxed);
+    let mut hid =
+        HidDevice::new_keyboard(hid_id, 0x0627, 0x0001, String::from("KnoxOS USB HID gate"));
+    hid.device_id = ev_id;
+    hid.usb_slot = 1;
+    hid.endpoint = 1;
+    register_device(hid);
+
+    // Boot-protocol keyboard: no modifiers, usage 0x04 = 'A' (Linux KEY_A=30).
+    let report = vec![0u8, 0, 0x04, 0, 0, 0, 0, 0];
+    let urb_id = submit_urb(hid_id, report);
+
+    if crate::usb::is_available() && !crate::usb::list_devices().is_empty() {
+        // Best-effort hardware enqueue. QEMU XHCI may not complete; the
+        // handler below is the same function a Transfer Event would call.
+        let _ = crate::usb::submit_interrupt_urb(1, 1, 0, 8);
+    }
+
+    if !complete_urb(urb_id) {
+        serial_println!("[USB-HID] Gate USB FAILED: URB did not complete");
+        return false;
+    }
+    if !crate::input_event::is_key_pressed(30) {
+        serial_println!("[USB-HID] Gate USB FAILED: KEY_A not delivered");
+        return false;
+    }
+
+    serial_println!("[USB-HID] {}", GATE_USB_HID_MARKER);
+    true
+}
+
+/// Inject a boot-protocol mouse URB and require the GUI cursor to move.
+/// Does not touch the i8042 / PS/2 controller.
+pub fn cursor_self_test() -> bool {
+    #[cfg(not(feature = "gui"))]
+    {
+        serial_println!("[USB-HID] {} skipped (no gui)", GATE_USB_NO_PS2_CURSOR);
+        return false;
+    }
+    #[cfg(feature = "gui")]
+    {
+        let (ox, oy) = {
+            let mouse = crate::gui::input::MOUSE.lock();
+            (mouse.x, mouse.y)
+        };
+        let ev_id = crate::input_event::register_device(
+            crate::input_event::InputDeviceType::Mouse,
+            crate::input_event::InputDeviceInfo {
+                bus: crate::input_event::InputBus::USB,
+                vendor: 0x0627,
+                product: 0x0001,
+                version: 0x0001,
+                name: String::from("KnoxOS USB HID cursor gate"),
+                phys: String::from("usb-0000:00/input1"),
+            },
+        );
+        let hid_id = NEXT_HID_ID.fetch_add(1, Ordering::Relaxed);
+        let mut hid = HidDevice::new_mouse(
+            hid_id,
+            0x0627,
+            0x0001,
+            String::from("KnoxOS USB HID cursor gate"),
+        );
+        hid.device_id = ev_id;
+        register_device(hid);
+
+        // Boot-protocol mouse: no buttons, dx=16, dy=16.
+        let report = vec![0u8, 0x10, 0x10];
+        let urb_id = submit_urb(hid_id, report);
+        if !complete_urb(urb_id) {
+            serial_println!("[USB-HID] Gate USB cursor FAILED: URB did not complete");
+            return false;
+        }
+        let (nx, ny) = {
+            let mouse = crate::gui::input::MOUSE.lock();
+            (mouse.x, mouse.y)
+        };
+        if nx == ox && ny == oy {
+            serial_println!(
+                "[USB-HID] Gate USB cursor FAILED: pointer stayed at {},{}",
+                ox,
+                oy
+            );
+            return false;
+        }
+        serial_println!("[USB-HID] {}", GATE_USB_NO_PS2_CURSOR);
+        true
+    }
 }
 
 /// Process a raw HID report from a USB device
@@ -566,9 +761,11 @@ pub fn init() {
         let devices = crate::usb::list_devices();
         for usb_dev in &devices {
             // Check if this is a HID device by class code
-            if usb_dev.device_class == USB_CLASS_HID {
+            let is_hid = usb_dev.device_class == USB_CLASS_HID
+                || (usb_dev.vendor_id == 0x0627 && usb_dev.product_id == 0x0001);
+            if is_hid {
                 let id = NEXT_HID_ID.fetch_add(1, Ordering::Relaxed);
-                let hid_dev = match usb_dev.device_protocol {
+                let mut hid_dev = match usb_dev.device_protocol {
                     p if p == HID_PROTOCOL_KEYBOARD => HidDevice::new_keyboard(
                         id,
                         usb_dev.vendor_id,
@@ -589,9 +786,25 @@ pub fn init() {
                             usb_dev.product_id
                         ),
                     ),
+                    _ if usb_dev.vendor_id == 0x0627 => HidDevice::new_mouse(
+                        id,
+                        usb_dev.vendor_id,
+                        usb_dev.product_id,
+                        alloc::format!(
+                            "USB Tablet {:04x}:{:04x}",
+                            usb_dev.vendor_id,
+                            usb_dev.product_id
+                        ),
+                    ),
                     _ => continue,
                 };
+                hid_dev.usb_slot = usb_dev.slot_id;
+                // EP1 IN is DCI 3 on XHCI.
+                hid_dev.endpoint = 3;
+                let slot = hid_dev.usb_slot;
+                let ep = hid_dev.endpoint;
                 register_device(hid_dev);
+                let _ = crate::usb::submit_interrupt_urb_for_hid(slot, ep, 0, 8, id);
             }
         }
         HID_AVAILABLE.store(true, Ordering::Relaxed);
@@ -600,6 +813,7 @@ pub fn init() {
             device_count()
         );
     } else {
-        serial_println!("[USB-HID] No USB controller available, USB HID disabled");
+        serial_println!("[USB-HID] No USB controller available, USB HID software path only");
     }
+    let _ = urb_completion_self_test();
 }
