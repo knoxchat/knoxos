@@ -90,8 +90,13 @@ jobs:
         run: |
           BIOS_IMG=kernel/target/x86_64-unknown-none/release/knoxos-bios.img
           test -f "$BIOS_IMG"
+          dd if=/dev/zero of=tests/c1-persist.img bs=1M count=64 status=none
+          dd if=/dev/zero of=tests/c9-ext4.img bs=1M count=64 status=none
+          python3 scripts/mkfs-ext4-min.py tests/c9-ext4.img
           qemu-system-x86_64 \
             -drive format=raw,file="$BIOS_IMG" \
+            -drive if=virtio,format=raw,file=tests/c1-persist.img \
+            -drive if=virtio,format=raw,file=tests/c9-ext4.img \
             -device virtio-gpu-pci \
             -device qemu-xhci,id=xhci \
             -device usb-kbd,bus=xhci.0 \
@@ -109,9 +114,15 @@ jobs:
             if grep -q "Desktop Environment ready" serial.log 2>/dev/null; then
               echo "boot ok"
               kill "$QEMU_PID" 2>/dev/null || true
-              grep -E "RIP switch self-test|Idle thread|GDT:|syscall/sysret|hello from userspace|Returned from Ring 3" serial.log || true
-              if ! grep -q "hello from userspace" serial.log; then
-                echo "FAIL: Ring 3 hello did not print"
+              grep -E "RIP switch self-test|Idle thread|GDT:|syscall/sysret|hello from userspace|Returned from Ring 3|GATE_G5|GATE_C9|GATE_USB no ps2" serial.log || true
+              fail=0
+              for m in "hello from userspace" "GATE_G5 safety comments" "GATE_C9 ext4 root" "GATE_USB no ps2 cursor"; do
+                if ! grep -q "$m" serial.log; then
+                  echo "FAIL: missing $m"
+                  fail=1
+                fi
+              done
+              if [ "$fail" -ne 0 ]; then
                 tail -80 serial.log || true
                 exit 1
               fi

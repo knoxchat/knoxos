@@ -70,9 +70,13 @@ qemu-system-x86_64 \
   ...
 ```
 
-Sign the UEFI image with `sbsign --key db.key --cert db.crt knoxos-uefi.img`
-when `sbsign` (efitools) is available. TPM measured boot is a later gate.
+Sign `BOOTX64.EFI` extracted from the GPT (not the disk image) with
+`sbsign --key db.key --cert db.crt`. `scripts/qemu-secure-boot.sh` does
+that and boots OVMF with `smm=on`. TPM measured boot is a later gate.
 EOF
+
+# virt-fw-vars --set-pk takes a UUID, not a display name.
+SB_OWNER="${SB_OWNER:-4b6e6f78-4f53-11ef-9b0a-6b6e6f786f73}"
 
 enroll_ovmf() {
   if ! command -v virt-fw-vars >/dev/null 2>&1; then
@@ -82,14 +86,20 @@ enroll_ovmf() {
   fi
 
   local vars=""
+  # Prefer 4M templates: Ubuntu 24.04 dropped the 2M OVMF_VARS.fd, and
+  # qemu-secure-boot.sh pairs 4M secboot CODE with 4M VARS.
   local candidates=(
     "${OVMF_VARS:-}"
-    "/opt/homebrew/share/qemu/edk2-i386-vars.fd"
-    "/usr/local/share/qemu/edk2-i386-vars.fd"
+    "/usr/share/OVMF/OVMF_VARS_4M.fd"
+    "/usr/share/edk2/ovmf/OVMF_VARS_4M.fd"
+    "/usr/share/edk2-ovmf/x64/OVMF_VARS_4M.fd"
     "/usr/share/OVMF/OVMF_VARS.fd"
     "/usr/share/edk2/ovmf/OVMF_VARS.fd"
     "/usr/share/edk2-ovmf/x64/OVMF_VARS.fd"
+    "/opt/homebrew/share/qemu/edk2-i386-vars.fd"
+    "/usr/local/share/qemu/edk2-i386-vars.fd"
   )
+  local c
   for c in "${candidates[@]}"; do
     [ -n "$c" ] && [ -f "$c" ] && vars="$c" && break
   done
@@ -103,19 +113,11 @@ enroll_ovmf() {
     --input "$vars" \
     --output "$OUT/OVMF_VARS.knoxos.fd" \
     --secure-boot \
-    --set-pk Org "$OUT/pk.crt" \
-    --add-kek Org "$OUT/kek.crt" \
-    --add-db Org "$OUT/db.crt"
+    --set-pk "$SB_OWNER" "$OUT/pk.crt" \
+    --add-kek "$SB_OWNER" "$OUT/kek.crt" \
+    --add-db "$SB_OWNER" "$OUT/db.crt"
   echo "enrolled PK/KEK/db into $OUT/OVMF_VARS.knoxos.fd (from $vars)"
   echo "GATE_SB ovmf pk"
 }
 
 enroll_ovmf
-
-if command -v sbsign >/dev/null 2>&1; then
-  UEFI="${UEFI_IMG:-$ROOT/kernel/target/x86_64-unknown-none/release/knoxos-uefi.img}"
-  if [ -f "$UEFI" ]; then
-    sbsign --key "$OUT/db.key" --cert "$OUT/db.crt" --output "$OUT/knoxos-uefi.signed.img" "$UEFI"
-    echo "signed $OUT/knoxos-uefi.signed.img"
-  fi
-fi
