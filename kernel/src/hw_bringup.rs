@@ -488,7 +488,7 @@ pub enum FirmwareMemType {
     Framebuffer,
 }
 
-/// UEFI runtime services stub
+/// UEFI runtime services — time from the CMOS RTC, variables in a kernel map.
 pub struct UefiRuntime {
     pub available: bool,
     pub version: (u32, u32), // major, minor
@@ -499,19 +499,15 @@ impl UefiRuntime {
         if !self.available {
             return None;
         }
-        // Year, month, day, hour, minute, second
-        Some((2026, 2, 18, 12, 0, 0))
+        crate::rtc::uefi_get_time()
     }
 
-    pub fn set_variable(&self, _name: &str, _guid: &[u8; 16], _data: &[u8]) -> bool {
-        self.available
+    pub fn set_variable(&self, name: &str, guid: &[u8; 16], data: &[u8]) -> bool {
+        crate::rtc::uefi_set_variable(name, guid, data)
     }
 
-    pub fn get_variable(&self, _name: &str, _guid: &[u8; 16]) -> Option<Vec<u8>> {
-        if !self.available {
-            return None;
-        }
-        None
+    pub fn get_variable(&self, name: &str, guid: &[u8; 16]) -> Option<Vec<u8>> {
+        crate::rtc::uefi_get_variable(name, guid)
     }
 }
 

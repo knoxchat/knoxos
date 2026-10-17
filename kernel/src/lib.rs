@@ -125,6 +125,7 @@ pub mod inotify;
 pub mod interrupts;
 pub mod io_uring;
 pub mod ipc;
+pub mod kaslr;
 #[cfg(feature = "stub-drivers")]
 pub mod kcov;
 pub mod kobject;
@@ -482,7 +483,6 @@ pub mod font_viewer;
 #[cfg(feature = "stub-drivers")]
 pub mod js_engine;
 pub mod media_player;
-#[cfg(feature = "stub-drivers")]
 pub mod shell_startup;
 #[cfg(feature = "stub-drivers")]
 pub mod task_manager;
@@ -542,9 +542,7 @@ pub mod lvm;
 pub mod md_raid;
 #[cfg(feature = "stub-drivers")]
 pub mod mdns;
-#[cfg(feature = "stub-drivers")]
 pub mod network_manager;
-#[cfg(feature = "stub-drivers")]
 pub mod ntfs;
 #[cfg(feature = "stub-drivers")]
 pub mod test_images;
@@ -623,7 +621,6 @@ pub mod dm_verity;
 pub mod firejail;
 #[cfg(feature = "stub-drivers")]
 pub mod home_encryption;
-#[cfg(feature = "stub-drivers")]
 pub mod ima;
 #[cfg(feature = "stub-drivers")]
 pub mod sandbox_data;

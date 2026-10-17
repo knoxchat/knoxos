@@ -127,10 +127,33 @@ lazy_static::lazy_static! {
 // INITIALIZATION
 // ═══════════════════════════════════════════════════════════════════════
 
+pub const GATE_THP_MARKER: &str = "GATE_THP hugepage";
+
 /// Initialize THP subsystem
 pub fn init() {
     set_mode(ThpMode::Madvise);
     serial_println!("[THP] Transparent Huge Pages initialized (mode: madvise)");
+    let _ = hugepage_self_test();
+}
+
+fn hugepage_self_test() -> bool {
+    madvise_hugepage(0x0000_0000_4000_0000, 0x0000_0000_4020_0000, 1);
+    match try_alloc_hugepage(0x0000_0000_4000_0000, 1) {
+        Some(phys) if phys & (PAGE_SIZE_2M as u64 - 1) == 0 => {
+            crate::vmm::free_contiguous_frames(phys, PAGES_PER_HUGE);
+            serial_println!("[THP] {} (2MiB @ {:#x})", GATE_THP_MARKER, phys);
+            true
+        }
+        Some(phys) => {
+            crate::vmm::free_contiguous_frames(phys, PAGES_PER_HUGE);
+            serial_println!("[THP] GATE_THP FAILED: unaligned {:#x}", phys);
+            false
+        }
+        None => {
+            serial_println!("[THP] GATE_THP FAILED: no contiguous 2MiB");
+            false
+        }
+    }
 }
 
 /// Set THP mode
@@ -224,13 +247,12 @@ pub fn try_alloc_hugepage(virt_addr: u64, pid: u32) -> Option<u64> {
     }
 }
 
-/// Allocate contiguous physical frames for a huge page
+/// Allocate contiguous physical frames for a huge page from the buddy.
 fn allocate_contiguous_frames(count: usize) -> Option<u64> {
-    // In a real implementation, this would call into the physical frame allocator
-    // to find `count` contiguous free frames aligned to 2MiB boundary.
-    // For now, we log the attempt.
-    serial_println!("[THP] Attempting to allocate {} contiguous frames", count);
-    None // Frame allocator integration needed
+    crate::vmm::allocate_contiguous_frames(count).filter(|phys| {
+        // 2 MiB pages must be 2 MiB aligned.
+        count != PAGES_PER_HUGE || phys & (PAGE_SIZE_2M as u64 - 1) == 0
+    })
 }
 
 // ═══════════════════════════════════════════════════════════════════════

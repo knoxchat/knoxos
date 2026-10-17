@@ -2,12 +2,12 @@
 
 # 16. Testing & Quality
 
-**Grade: Wired (96%)**
+**Grade: Wired (97%)**
 
 ### Exists
 - [x] `#[test_case]` framework + QEMU exit ports
 - [x] Real tests: VFS read/write, allocator Box/Vec, some path tests (~subset of 103 `#[test_case]`)
-- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C9 / D1–D6 / E1–E4 / F1–F8 / H1–H4 / I1–I4 / J–BL / BM1–BM4 / G3–G5 / USB HID URB / XHCI MMIO / no-PS/2 cursor / udev / quota / cron / vsync / TERM / WL / GPU markers (**296/296**)
+- [x] `tests/run_integration.sh` waits for serial `Desktop Environment ready` plus C1–C9 / D1–D6 / E1–E4 / F1–F8 / H1–H4 / I1–I4 / J–BL / BM1–BM4 / G3–G5 / USB HID URB / XHCI MMIO / no-PS/2 cursor / udev / quota / cron / vsync / TERM / WL / GPU / cgroup / job / IMA / lockdown / UEFI / wipe / NM / NTFS / heredoc / profile / VT100 / HDA / PA / IOMMU / THP / KASLR / AML / KO markers (**315/315**)
 
 ### Harmful
 - [x] **`assert!(true)` tests removed** — widgets, VFS stress, DNS, TCP flags, creds, buddy, path normalize are real assertions

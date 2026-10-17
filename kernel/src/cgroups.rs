@@ -276,6 +276,69 @@ pub fn list_all() -> Vec<String> {
     result
 }
 
+/// Charge `bytes` against every cgroup that contains `pid`.
+/// Unlimited groups succeed; a hard limit returns `-ENOMEM`.
+pub fn try_charge(pid: u32, bytes: u64) -> Result<(), i32> {
+    {
+        let mut cgroups = CGROUPS.lock();
+        if let Some(cg) = cgroups.values_mut().find(|c| c.pids.contains(&pid)) {
+            if !cg.can_allocate(bytes) {
+                return Err(-12);
+            }
+            cg.record_alloc(bytes);
+        }
+    }
+    if crate::cgroup2::charge_memory(pid as u64, bytes).is_err() {
+        uncharge(pid, bytes);
+        return Err(-12);
+    }
+    Ok(())
+}
+
+/// Undo a successful `try_charge`.
+pub fn uncharge(pid: u32, bytes: u64) {
+    {
+        let mut cgroups = CGROUPS.lock();
+        if let Some(cg) = cgroups.values_mut().find(|c| c.pids.contains(&pid)) {
+            cg.record_free(bytes);
+        }
+    }
+    crate::cgroup2::uncharge_memory(pid as u64, bytes);
+}
+
+pub const GATE_CGROUP_MARKER: &str = "GATE_CGROUP memory";
+
+pub fn enforce_self_test() -> bool {
+    const GATE_PID: u32 = 424_242;
+    let _ = create("/gate.memory");
+    if set_memory_limit("/gate.memory", 4096).is_err() {
+        crate::serial_println!("[cgroup] GATE_CGROUP FAILED: set limit");
+        return false;
+    }
+    if attach_pid("/gate.memory", GATE_PID).is_err() {
+        crate::serial_println!("[cgroup] GATE_CGROUP FAILED: attach");
+        return false;
+    }
+    let denied_over = try_charge(GATE_PID, 8192).is_err();
+    let allowed = try_charge(GATE_PID, 4096).is_ok();
+    let denied_next = try_charge(GATE_PID, 1).is_err();
+    uncharge(GATE_PID, 4096);
+    let _ = attach_pid("/", GATE_PID);
+    let _ = delete("/gate.memory");
+    if denied_over && allowed && denied_next {
+        crate::serial_println!("[cgroup] {} (ENOMEM on 8KiB > 4KiB)", GATE_CGROUP_MARKER);
+        true
+    } else {
+        crate::serial_println!(
+            "[cgroup] GATE_CGROUP FAILED: over={} ok4k={} next={}",
+            denied_over,
+            allowed,
+            denied_next
+        );
+        false
+    }
+}
+
 /// Initialize the cgroup subsystem
 pub fn init() {
     let mut cgroups = CGROUPS.lock();

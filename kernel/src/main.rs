@@ -48,8 +48,8 @@ use knoxos_kernel::{
     help_system, hw_bringup, io_sched, io_uring_advanced, js_engine, k8s, kcov, kdb, keyring,
     kpanic, ktrace, live_usb, man_pages, memory_pool, multimon, netns, nfs, nfs_server, p9fs,
     partition, pkg_dist, posix_tests, posix2024, power_events, quic, riscv64_boot, rust_std,
-    rwlock, sched_debug, sctp, secure_boot, security_cert, selfhost, shell_startup, tablet_mode,
-    tokenizer, touchscreen, verify, video_codec, voice, vulkan, webcam, xdp, zfs,
+    rwlock, sched_debug, sctp, secure_boot, security_cert, selfhost, tablet_mode, tokenizer,
+    touchscreen, verify, video_codec, voice, vulkan, webcam, xdp, zfs,
 };
 use knoxos_kernel::{
     acpi, acpi_tables, ahci, ai, allocator, alsa, apic_timer, arch, audit, battery, bcache,
@@ -58,21 +58,21 @@ use knoxos_kernel::{
     crypto, dbus, desktop_apps, devfs, dmesg, dpkg, drm, dynlink, e1000, ebpf, elf, epoll, eventfd,
     ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
     glibc_compat, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http, huge_pages,
-    hwtest, i18n, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring, iommu,
-    ipc, journal_replay, kcmp, kobject, kpm, kvm, landlock, ldknoxos, libc_funcs, llm,
-    media_player, membarrier, memfd, memory, midi, mmap, modules, mount, mount_api, mqueue,
-    multiboot, musl, namespaces, nested_irq, net_production, ntp, numa, nvme, onnx, oom,
-    ota_update, overlayfs, package_manager, path, pci, pcie_ecam, perf, persist, pgo, pgrp, pidfd,
-    pidns, pipe, posix_ext, posix_timer, power, preempt_rt, println, process, procfs,
-    procfs_extended, procfs_full, ptrace, pty, pulseaudio, quota, random, recovery, release_sign,
-    repo_server, rlimit, rseq, rtc, rtl8139, sched_ext, scheduler, screen_record, seccomp,
-    security, selinux, serial_println, service_manager, session, shell, shm, signalfd, signals,
-    slab, smp, socket_activation, soloader, sound, splice, ssp, stack_guard, strace, stress_test,
-    suspend, swap, sysctl, sysfs, sysinfo, syslog,
+    hwtest, i18n, ima, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring,
+    iommu, ipc, journal_replay, kaslr, kcmp, kobject, kpm, kvm, landlock, ldknoxos, libc_funcs,
+    llm, media_player, membarrier, memfd, memory, midi, mmap, modules, mount, mount_api, mqueue,
+    multiboot, musl, namespaces, nested_irq, net_production, network_manager, ntfs, ntp, numa,
+    nvme, onnx, oom, ota_update, overlayfs, package_manager, path, pci, pcie_ecam, perf, persist,
+    pgo, pgrp, pidfd, pidns, pipe, posix_ext, posix_timer, power, preempt_rt, println, process,
+    procfs, procfs_extended, procfs_full, ptrace, pty, pulseaudio, quota, random, recovery,
+    release_sign, repo_server, rlimit, rseq, rtc, rtl8139, sched_ext, scheduler, screen_record,
+    seccomp, security, selinux, serial_println, service_manager, session, shell, shell_startup,
+    shm, signalfd, signals, slab, smp, socket_activation, soloader, sound, splice, ssp,
+    stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs, sysinfo, syslog,
     task::{Task, executor::Executor, keyboard},
-    terminal, thermal, threads, timerfd, tls, tmpfs, tty, uds, usb, usb_hid, userfaultfd, usermode,
-    users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input, virtio_tablet, visual_test,
-    vivaldi, vmm, vterm, wayland, wifi, workqueue, xattr, xdg,
+    terminal, thermal, thp, threads, timerfd, tls, tmpfs, tty, uds, usb, usb_hid, userfaultfd,
+    usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input, virtio_tablet,
+    visual_test, vivaldi, vmm, vterm, wayland, wifi, workqueue, xattr, xdg,
 };
 #[cfg(feature = "net")]
 use knoxos_kernel::{dhcp, dns, firewall, ipv6, net, netfilter, netint, virtio_net};
@@ -389,6 +389,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "net")]
     #[cfg(feature = "net")]
     dhcp::init();
+    network_manager::init();
 
     // Initialize DNS resolver (needs dhcp)
     #[cfg(feature = "net")]
@@ -415,6 +416,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize FAT32 filesystem (needs virtio_blk)
     fat32::init();
+    ntfs::init();
 
     // Initialize ext4 filesystem (journal + extents)
     #[cfg(feature = "fs-ext4")]
@@ -518,6 +520,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize kernel random number generator
     random::init();
+    kaslr::init();
 
     // Initialize sysctl (/proc/sys parameters)
     sysctl::init();
@@ -804,6 +807,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize ACPI table parsing (RSDP/RSDT/XSDT/MADT/FADT/HPET/MCFG)
     acpi_tables::init(phys_mem_offset.as_u64());
+    acpi::interpret_dsdt();
     if !cmdline::has_flag("noapic") {
         smp::apply_madt_ioapic();
     }
@@ -1033,6 +1037,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize security hardening (ASLR, DEP/W^X, lockdown, fuzzer, unsafe audit)
     hardening::init();
+    ima::init();
 
     // Initialize stress testing framework (leak detector, lockdep, test suite)
     stress_test::init();
@@ -1064,6 +1069,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     slab::init();
     serial_println!("[KnoxOS] Phase 30: huge_pages::init...");
     huge_pages::init();
+    thp::init();
+    kaslr::self_test();
+    modules::ko_self_test();
     serial_println!("[KnoxOS] Phase 30: stack_guard::init...");
     stack_guard::init();
     serial_println!("[KnoxOS] Phase 30: memory_pool::init...");
@@ -1139,8 +1147,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stub-drivers")]
     #[cfg(feature = "stub-drivers")]
     desktop_apps_ext::init();
-    #[cfg(feature = "stub-drivers")]
-    #[cfg(feature = "stub-drivers")]
     shell_startup::init();
     media_player::init();
     #[cfg(feature = "stub-drivers")]

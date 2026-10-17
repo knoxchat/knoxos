@@ -34,8 +34,9 @@ mod user;
 
 pub use frame::{
     FRAME_POOL, GATE_J2_MARKER, PhysicalFramePool, allocate_contiguous_frames,
-    allocate_physical_frame, allocate_physical_frame_raw, free_physical_frame, get_stats,
-    ingest_remaining_ram, populate_frame_pool, restore_frame_pool, steal_frame_pool,
+    allocate_physical_frame, allocate_physical_frame_raw, free_contiguous_frames,
+    free_physical_frame, get_stats, ingest_remaining_ram, populate_frame_pool, restore_frame_pool,
+    steal_frame_pool,
 };
 pub use layout::{
     ASLR_ENABLED, ASLR_HEAP_RANGE, ASLR_MMAP_RANGE, ASLR_PROGRAM_RANGE, ASLR_STACK_RANGE, HEAP_MAX,

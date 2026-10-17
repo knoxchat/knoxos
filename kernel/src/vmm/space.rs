@@ -904,6 +904,9 @@ pub fn mmap(pid: Pid, addr: u64, size: u64, prot: u64, flags: u64) -> i64 {
     }) {
         return -13; // EACCES
     }
+    if crate::cgroups::try_charge(pid, size).is_err() {
+        return -12; // ENOMEM
+    }
     let mmap_flags = MmapFlags::from_linux(flags);
 
     let mut spaces = ADDRESS_SPACES.lock();
@@ -912,6 +915,7 @@ pub fn mmap(pid: Pid, addr: u64, size: u64, prot: u64, flags: u64) -> i64 {
             return mapped_addr as i64;
         }
     }
+    crate::cgroups::uncharge(pid, size);
     -12 // ENOMEM
 }
 
@@ -933,6 +937,9 @@ pub fn mmap_file(
     }) {
         return -13; // EACCES
     }
+    if crate::cgroups::try_charge(pid, size).is_err() {
+        return -12; // ENOMEM
+    }
     let mmap_flags = MmapFlags::from_linux(flags);
 
     let mut spaces = ADDRESS_SPACES.lock();
@@ -943,6 +950,7 @@ pub fn mmap_file(
             return mapped_addr as i64;
         }
     }
+    crate::cgroups::uncharge(pid, size);
     -12 // ENOMEM
 }
 
@@ -951,6 +959,8 @@ pub fn munmap(pid: Pid, addr: u64, size: u64) -> i64 {
     let mut spaces = ADDRESS_SPACES.lock();
     if let Some(addr_space) = spaces.get_mut(&pid) {
         if addr_space.munmap(addr, size) {
+            drop(spaces);
+            crate::cgroups::uncharge(pid, size);
             return 0;
         }
     }
@@ -959,12 +969,37 @@ pub fn munmap(pid: Pid, addr: u64, size: u64) -> i64 {
 
 /// Perform brk for a process
 pub fn brk(pid: Pid, new_brk: u64) -> i64 {
-    let mut spaces = ADDRESS_SPACES.lock();
-    if let Some(addr_space) = spaces.get_mut(&pid) {
-        addr_space.brk(new_brk) as i64
-    } else {
-        -12 // ENOMEM
+    let old = {
+        let spaces = ADDRESS_SPACES.lock();
+        match spaces.get(&pid) {
+            Some(s) => s.brk,
+            None => return -12,
+        }
+    };
+    if new_brk != 0 && new_brk > old && crate::cgroups::try_charge(pid, new_brk - old).is_err() {
+        return old as i64;
     }
+    let result = {
+        let mut spaces = ADDRESS_SPACES.lock();
+        if let Some(addr_space) = spaces.get_mut(&pid) {
+            addr_space.brk(new_brk) as i64
+        } else {
+            -12
+        }
+    };
+    if result < 0 {
+        if new_brk != 0 && new_brk > old {
+            crate::cgroups::uncharge(pid, new_brk - old);
+        }
+        return result;
+    }
+    let now = result as u64;
+    if new_brk != 0 && new_brk > old && now <= old {
+        crate::cgroups::uncharge(pid, new_brk - old);
+    } else if now < old {
+        crate::cgroups::uncharge(pid, old - now);
+    }
+    result
 }
 
 /// Memory region info for /proc/[pid]/maps

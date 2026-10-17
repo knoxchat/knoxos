@@ -3,7 +3,7 @@
 > **Last updated**: 2026-10-18
 > **Version**: 0.2.3 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.3)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
-> **Codebase**: 609 Rust files in `kernel/src` · ~347,000 lines · 407 `pub mod` entries
+> **Codebase**: 610 Rust files in `kernel/src` · ~347,000 lines · 408 `pub mod` entries
 > **Honesty rule**: a module that compiles is not a feature. Only **Live** work counts toward production.
 
 **Start here:** [next.md](next.md) — what to do first, in order.
@@ -66,21 +66,21 @@ Read top to bottom if you are choosing work. Skip the archives unless you need e
 
 | # | File | Grade | Priority |
 |---|------|-------|----------|
-| 1 | [01-kernel-core.md](subsystems/01-kernel-core.md) | Wired 82% | High |
-| 2 | [02-memory.md](subsystems/02-memory.md) | Wired 74% | Critical |
+| 1 | [01-kernel-core.md](subsystems/01-kernel-core.md) | Wired 86% | High |
+| 2 | [02-memory.md](subsystems/02-memory.md) | Wired 78% | Critical |
 | 3 | [03-process.md](subsystems/03-process.md) | Wired 99% | Critical |
 | 4 | [04-filesystem.md](subsystems/04-filesystem.md) | Wired 99% | Critical |
 | 5 | [05-networking.md](subsystems/05-networking.md) | Wired 72% | Critical |
 | 6 | [06-drivers.md](subsystems/06-drivers.md) | Wired 58% | Critical |
 | 7 | [07-gui.md](subsystems/07-gui.md) | Live 98% | Medium |
-| 8 | [08-shell.md](subsystems/08-shell.md) | Live 82% | Medium |
-| 9 | [09-security.md](subsystems/09-security.md) | Wired 80% | Critical |
-| 10 | [10-services.md](subsystems/10-services.md) | Wired 42% | High |
-| 11 | [11-virt.md](subsystems/11-virt.md) | Stub 30% | Low — later |
+| 8 | [08-shell.md](subsystems/08-shell.md) | Live 86% | Medium |
+| 9 | [09-security.md](subsystems/09-security.md) | Wired 86% | Critical |
+| 10 | [10-services.md](subsystems/10-services.md) | Wired 60% | High |
+| 11 | [11-virt.md](subsystems/11-virt.md) | Stub 32% | Low — later |
 | 12 | [12-ai.md](subsystems/12-ai.md) | Wired 22% | Low — later |
 | 13 | [13-binary-compat.md](subsystems/13-binary-compat.md) | Wired 99% | High |
 | 14 | [14-i18n.md](subsystems/14-i18n.md) | Live 68% | Low |
 | 15 | [15-build.md](subsystems/15-build.md) | Live 95% | Medium |
-| 16 | [16-testing.md](subsystems/16-testing.md) | Wired 96% | Critical |
+| 16 | [16-testing.md](subsystems/16-testing.md) | Wired 97% | Critical |
 | 17 | [17-docs.md](subsystems/17-docs.md) | Wired 70% | Critical |
 | 18 | [18-ci.md](subsystems/18-ci.md) | Wired 55% | High |

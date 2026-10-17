@@ -128,6 +128,16 @@ impl PhysicalFramePool {
         }
     }
 
+    /// Free a `2^order` block allocated by [`Self::allocate_order`].
+    pub fn free_order(&mut self, phys_addr: u64, order: usize) {
+        if order > BUDDY_MAX_ORDER {
+            return;
+        }
+        let mask = Self::block_size(order) - 1;
+        self.free_block(phys_addr & !mask, order);
+        self.allocated_frames = self.allocated_frames.saturating_sub(1u64 << order);
+    }
+
     /// Free 4 KiB pages currently sitting on free lists
     pub fn available(&self) -> u64 {
         let mut n = 0u64;
@@ -207,9 +217,58 @@ pub fn allocate_contiguous_frames(count: usize) -> Option<u64> {
     FRAME_POOL.lock().allocate_order(order)
 }
 
-/// Free a physical frame back to the global pool
+/// Free a contiguous run previously returned by [`allocate_contiguous_frames`].
+pub fn free_contiguous_frames(phys_addr: u64, count: usize) {
+    if count == 0 {
+        return;
+    }
+    let mut order = 0;
+    while (1usize << order) < count {
+        order += 1;
+        if order > BUDDY_MAX_ORDER {
+            return;
+        }
+    }
+    FRAME_POOL.lock().free_order(phys_addr, order);
+}
+
+/// Free a physical frame back to the global pool after wiping its contents.
 pub fn free_physical_frame(phys_addr: u64) {
+    // SAFETY: the frame was allocated from this pool and is still mapped via
+    // the physical-memory offset; callers must not use it after this returns.
+    unsafe {
+        super::page_table::zero_physical_frame(phys_addr);
+    }
     FRAME_POOL.lock().free(phys_addr);
+}
+
+pub const GATE_WIPE_MARKER: &str = "GATE_WIPE free";
+
+/// Allocate, stamp a pattern, free (wipe), and prove the frame is zeros.
+pub fn wipe_self_test() -> bool {
+    let Some(phys) = allocate_physical_frame() else {
+        serial_println!("[vmm] GATE_WIPE FAILED: no frame");
+        return false;
+    };
+    let virt = super::page_table::phys_to_virt(phys);
+    // SAFETY: `phys` is an allocated pool frame mapped through the offset.
+    unsafe {
+        core::ptr::write_bytes(virt as *mut u8, 0xA5, PAGE_SIZE as usize);
+    }
+    free_physical_frame(phys);
+    let mut nonzero = false;
+    // SAFETY: the just-freed frame is still identity-mapped; we only read.
+    unsafe {
+        let slice = core::slice::from_raw_parts(virt as *const u8, PAGE_SIZE as usize);
+        nonzero = slice.iter().any(|&b| b != 0);
+    }
+    if !nonzero {
+        serial_println!("[vmm] {} (freed frame is zeros)", GATE_WIPE_MARKER);
+        true
+    } else {
+        serial_println!("[vmm] GATE_WIPE FAILED: leftover pattern");
+        false
+    }
 }
 
 /// Drain the buddy free lists (Gate H4 OOM self-test). Caller must restore.
@@ -273,6 +332,7 @@ pub fn ingest_remaining_ram(frame_allocator: &mut crate::memory::BootInfoFrameAl
         );
     }
     let _ = buddy_ram_self_test();
+    let _ = wipe_self_test();
 }
 
 /// Get VMM statistics

@@ -251,7 +251,7 @@ impl ProcessTable {
         }
     }
 
-    /// waitpid with options — WNOHANG support
+    /// waitpid with options — WNOHANG / WUNTRACED support
     /// Returns Ok(Some((pid, status))) on success, Ok(None) for WNOHANG with no ready child,
     /// Err(-10) if no children exist (ECHILD)
     pub fn waitpid_options(
@@ -259,6 +259,7 @@ impl ProcessTable {
         target_pid: i32,
         parent_pid: Pid,
         wnohang: bool,
+        wuntraced: bool,
     ) -> Result<Option<(Pid, i32)>, i32> {
         // Check if any matching children exist
         let has_children = self
@@ -285,16 +286,18 @@ impl ProcessTable {
         }
 
         // Look for stopped children (for WUNTRACED)
-        let stopped_pos = self.processes.iter().position(|p| {
-            p.ppid == parent_pid
-                && (target_pid <= 0 || p.pid == target_pid as u32)
-                && p.state == ProcessState::Stopped
-        });
+        if wuntraced {
+            let stopped_pos = self.processes.iter().position(|p| {
+                p.ppid == parent_pid
+                    && (target_pid <= 0 || p.pid == target_pid as u32)
+                    && p.state == ProcessState::Stopped
+            });
 
-        if let Some(pos) = stopped_pos {
-            let child_pid = self.processes[pos].pid;
-            // Report stopped status: 0x7F for stopped (signal in upper byte)
-            return Ok(Some((child_pid, 0x137F))); // SIGTSTP (19) << 8 | 0x7F
+            if let Some(pos) = stopped_pos {
+                let child_pid = self.processes[pos].pid;
+                // Report stopped status: 0x7F for stopped (signal in upper byte)
+                return Ok(Some((child_pid, 0x137F))); // SIGTSTP (19) << 8 | 0x7F
+            }
         }
 
         if wnohang {

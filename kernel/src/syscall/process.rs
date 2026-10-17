@@ -184,6 +184,19 @@ fn execve_path(filename: &str, _argv: u64, _envp: u64) -> SyscallResult {
         data.to_vec()
     };
 
+    let uid = crate::process::PROCESS_TABLE
+        .lock()
+        .get_process(pid)
+        .map(|p| p.uid)
+        .unwrap_or(0);
+    crate::ima::on_file_access(
+        crate::ima::ImaHook::FileExec,
+        filename,
+        &data_copy,
+        uid,
+        crate::rtc::unix_time() as u64,
+    );
+
     // Build the new page tables and switch onto them *before* dropping the
     // old ones. The syscall is still running on the dying CR3; freeing that
     // L4 is what stopped Gate B3 at "Destroyed address space for PID 3".
@@ -275,18 +288,21 @@ pub fn sys_exit(status: i32) -> SyscallResult {
 
 pub fn sys_wait4(pid: i32, wstatus_ptr: u64, options: i32) -> SyscallResult {
     const WNOHANG: i32 = 1;
+    const WUNTRACED: i32 = 2;
     let self_pid = crate::scheduler::current_pid().unwrap_or(1);
+    let target = if pid > 0 { pid } else { -1 };
 
     let reaped = {
         let mut table = crate::process::PROCESS_TABLE.lock();
-        if pid > 0 {
-            table.waitpid(pid as u32)
-        } else {
-            table
-                .waitpid_options(-1, self_pid, options & WNOHANG != 0)
-                .ok()
-                .flatten()
-        }
+        table
+            .waitpid_options(
+                target,
+                self_pid,
+                options & WNOHANG != 0,
+                options & WUNTRACED != 0,
+            )
+            .ok()
+            .flatten()
     };
 
     match reaped {
@@ -295,7 +311,10 @@ pub fn sys_wait4(pid: i32, wstatus_ptr: u64, options: i32) -> SyscallResult {
             if wstatus_ptr != 0 {
                 crate::vmm::write_user_memory(self_pid, wstatus_ptr, &packed.to_ne_bytes());
             }
-            crate::signals::destroy_process_signals(child_pid);
+            // Stopped children stay in the table; only zombies lose signal state.
+            if status & 0xFF != 0x7F {
+                crate::signals::destroy_process_signals(child_pid);
+            }
             Ok(child_pid as u64)
         }
         None => {

@@ -2,7 +2,7 @@
 
 # 8. Shell & Terminal
 
-**Grade: Live (82%)** · `shell/`, `terminal/`, `pty.rs`, `tty.rs`
+**Grade: Live (86%)** · `shell/`, `terminal/`, `pty.rs`, `tty.rs`
 
 ### Live
 - [x] Parser: pipes, redirects, background, quoting
@@ -15,8 +15,8 @@
 ### Remaining (userspace-shaped)
 - [x] Shell as `/bin/sh` in Ring 3 attached to a PTY slave
 - [x] Live `sigreturn` for a custom SIGINT handler (B7)
-- [ ] Full VT100/xterm-256
-- [ ] Here-docs, functions, `~/.profile` once a real home exists on disk
-- [ ] Job control against **processes**, not kernel windows. Ring 3 `pipe()` is live (M2).
+- [x] Full VT100/xterm-256 — CUP + SGR 256-color + ED (`GATE_VT100 xterm`)
+- [x] Here-docs, functions, `~/.profile` (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`)
+- [x] Job control against **processes** — SIGTSTP stops; `waitpid(WUNTRACED)` reports `0x137F`; SIGCONT resumes (`GATE_JOB stop`). Ring 3 `pipe()` is live (M2).
 
 ---

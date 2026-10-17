@@ -78,7 +78,7 @@
 - [x] `mknodat` — dirfd-relative create succeeds; missing parent is ENOENT; bad dirfd is EBADF (`GATE_AU1 mknodat`)
 - [x] `fchmodat` — dirfd-relative chmod 0400 succeeds; missing child is ENOENT; bad dirfd is EBADF (`GATE_AV1 fchmodat`)
 - [x] `execveat` — dirfd-relative exec succeeds; missing child is ENOENT; bad dirfd is EBADF (`GATE_BE1 execveat`)
-- [ ] NTFS — parses MFT from a provided buffer; **never calls the block layer**
+- [x] NTFS — boot + MFT `$DATA` through the ramdisk block layer (`GATE_NTFS block`)
 - [x] `fsync`/`fdatasync` — flush dirty page-cache pages, re-persist the fd's VFS file through the WAL, and issue VirtIO-blk FLUSH
 
 ### Stub

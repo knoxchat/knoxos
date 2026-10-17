@@ -142,6 +142,55 @@ impl CronField {
     }
 }
 
+/// NTFS boot OEM at offset 3 must be `NTFS`.
+pub fn ntfs_oem_ok(sector: &[u8]) -> bool {
+    sector.len() >= 11 && &sector[3..7] == b"NTFS"
+}
+
+/// MFT FILE record magic.
+pub fn ntfs_mft_magic_ok(record: &[u8]) -> bool {
+    record.len() >= 4 && record[0..4] == [b'F', b'I', b'L', b'E']
+}
+
+fn parse_aml_s5_package_at(aml: &[u8], mut p: usize) -> Option<u8> {
+    if aml.get(p).copied() != Some(0x12) {
+        return None;
+    }
+    p += 1;
+    let pkg0 = *aml.get(p)?;
+    let extra = (pkg0 >> 6) as usize;
+    p += 1 + extra;
+    let _n = *aml.get(p)?;
+    p += 1;
+    Some(match *aml.get(p)? {
+        0x0A => *aml.get(p + 1).unwrap_or(&0),
+        0x00 => 0,
+        0x01 => 1,
+        b => b,
+    })
+}
+
+/// Scan AML for `Name(_S5, Package(){...})` and return SLP_TYPa.
+pub fn parse_aml_s5_slp_typ(aml: &[u8]) -> Option<u8> {
+    const NEEDLES: [&[u8]; 3] = [
+        &[0x08, b'_', b'S', b'5', b'_'],
+        &[0x08, 0x5C, b'_', b'S', b'5', b'_'],
+        &[0x08, b'_', b'S', b'5', 0],
+    ];
+    for needle in NEEDLES {
+        let mut i = 0;
+        while i + needle.len() + 3 < aml.len() {
+            if &aml[i..i + needle.len()] == needle {
+                if let Some(typ) = parse_aml_s5_package_at(aml, i + needle.len()) {
+                    return Some(typ);
+                }
+            }
+            i += 1;
+        }
+    }
+    None
+}
+
 /// ext4 superblock magic is at byte 0x38 of the superblock (LBA 2).
 pub const EXT4_SUPER_MAGIC: u16 = 0xEF53;
 
@@ -345,6 +394,31 @@ mod tests {
         let mut zpg = minimal_ext4_sb();
         zpg[0x20..0x24].copy_from_slice(&0u32.to_le_bytes());
         assert!(parse_ext4_superblock(&zpg).is_err());
+    }
+
+    #[test]
+    fn ntfs_oem_and_mft_magic() {
+        let mut boot = vec![0u8; 512];
+        boot[3..11].copy_from_slice(b"NTFS    ");
+        assert!(ntfs_oem_ok(&boot));
+        boot[3] = b'X';
+        assert!(!ntfs_oem_ok(&boot));
+        assert!(ntfs_mft_magic_ok(b"FILE...."));
+        assert!(!ntfs_mft_magic_ok(b"BAAD"));
+    }
+
+    #[test]
+    fn aml_s5_package() {
+        let aml = [
+            0x08, b'_', b'S', b'5', 0x00, 0x12, 0x06, 0x04, 0x0A, 0x07, 0x00, 0x00, 0x00,
+        ];
+        assert_eq!(parse_aml_s5_slp_typ(&aml), Some(7));
+        // Firmware NameSeg `_S5_` and QEMU `Name(\_S5, Package(){Zero,...})`.
+        let qemu = [
+            0x08, 0x5C, b'_', b'S', b'5', b'_', 0x12, 0x06, 0x04, 0x00, 0x00, 0x00, 0x00,
+        ];
+        assert_eq!(parse_aml_s5_slp_typ(&qemu), Some(0));
+        assert!(parse_aml_s5_slp_typ(&[0x00, 0x01]).is_none());
     }
 
     #[test]

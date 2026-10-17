@@ -2,7 +2,7 @@
 
 # 9. Security & Cryptography
 
-**Grade: Wired (80%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
+**Grade: Wired (86%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
 
 ### Wired
 - [x] AES-128/256 block + CBC (software)
@@ -22,7 +22,7 @@
 - [ ] AES-GCM, Poly1305, TLS 1.3 key schedule, X.509 chain verify
 - [ ] RSA / ECDSA / Ed25519 / X25519 production-quality
 - [x] **Landlock** hooked on VFS (`GATE_K4 landlock vfs`). SELinux / AppArmor still unused.
-- [ ] Kernel lockdown, secure wipe on free, IMA
+- [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); freed buddy frames are zeros (`GATE_WIPE free`); exec SHA-256 measure (`GATE_IMA exec`)
 
 ### Perfect-OS next steps
 1. ~~Replace xorshift userspace RNG with ChaCha20 from a real entropy pool (RDRAND + jitter + timings).~~ **E2 done.**

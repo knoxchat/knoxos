@@ -145,7 +145,7 @@ impl ImaSubsystem {
     /// Measure a file (compute hash and log)
     pub fn measure_file(&mut self, path: &str, data: &[u8], timestamp: u64) {
         // Compute SHA-256 hash of file content
-        let file_hash = simple_sha256(data);
+        let file_hash = crate::crypto::sha256(data);
 
         // Check if already measured with same hash
         if self
@@ -160,7 +160,7 @@ impl ImaSubsystem {
         let mut template_data = Vec::new();
         template_data.extend_from_slice(path.as_bytes());
         template_data.extend_from_slice(&file_hash);
-        let template_hash = simple_sha256(&template_data);
+        let template_hash = crate::crypto::sha256(&template_data);
 
         let entry = MeasurementEntry {
             pcr_index: self.pcr_index,
@@ -184,7 +184,7 @@ impl ImaSubsystem {
 
     /// Appraise a file against stored hash
     pub fn appraise_file(&self, path: &str, data: &[u8]) -> Result<(), &'static str> {
-        let hash = simple_sha256(data);
+        let hash = crate::crypto::sha256(data);
         if let Some(entry) = self.measurements.iter().find(|m| m.file_path == path) {
             if entry.file_hash == hash {
                 Ok(())
@@ -195,17 +195,6 @@ impl ImaSubsystem {
             Err("No measurement found for file")
         }
     }
-}
-
-/// Simplified SHA-256 placeholder (real impl would use proper crypto)
-fn simple_sha256(data: &[u8]) -> [u8; 32] {
-    let mut hash = [0u8; 32];
-    for (i, chunk) in data.chunks(32).enumerate() {
-        for (j, &byte) in chunk.iter().enumerate() {
-            hash[j] ^= byte.wrapping_add(i as u8);
-        }
-    }
-    hash
 }
 
 /// Hook called on file access
@@ -228,9 +217,36 @@ pub fn on_file_access(hook: ImaHook, path: &str, data: &[u8], uid: u32, timestam
     }
 }
 
+pub const GATE_IMA_MARKER: &str = "GATE_IMA exec";
+
+fn exec_self_test() -> bool {
+    {
+        let mut ima = IMA.lock();
+        ima.load_default_policy();
+        ima.enabled = true;
+    }
+    on_file_access(
+        ImaHook::FileExec,
+        "/bin/ima-gate",
+        b"\x7fELF-ima-gate",
+        0,
+        1,
+    );
+    let measured = IMA
+        .lock()
+        .measurements
+        .iter()
+        .any(|m| m.file_path == "/bin/ima-gate");
+    if measured {
+        serial_println!("[IMA] {} (exec hash logged)", GATE_IMA_MARKER);
+        true
+    } else {
+        serial_println!("[IMA] GATE_IMA FAILED: no measurement");
+        false
+    }
+}
+
 pub fn init() {
-    let mut ima = IMA.lock();
-    ima.load_default_policy();
-    ima.enabled = true;
     serial_println!("[IMA] Integrity Measurement Architecture loaded");
+    let _ = exec_self_test();
 }

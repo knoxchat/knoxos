@@ -2,7 +2,7 @@
 
 ← [Status index](README.md)
 
-Gates **A–F, H–I**, syscall gates **J–BL**, **BM1–BM4** (userspace `ld.so` + musl static/dynamic), **F5** (Wayland AF_UNIX), **C7–C8** (`/bin` persist + JBD2), **G3** (feature flags), **G4** (syscall audit), **F6–F8** (calculator + Files userspace + VirtIO-GPU scanout/cursor), **I4** (SMP balance onto an idle AP), USB HID URB completion, **D6** (IPv6 echo TX), udev `/dev` hotplug, service restart, quota `EDQUOT`, cron `@reboot` + timer, VSync pacing, and Ring 3 `openpty`+SHM (`GATE_TERM`) are done on QEMU. Adding another `GATE_xx` ENOSYS is **not** the critical path.
+Gates **A–F, H–I**, syscall gates **J–BL**, **BM1–BM4** (userspace `ld.so` + musl static/dynamic), **F5** (Wayland AF_UNIX), **C7–C8** (`/bin` persist + JBD2), **G3** (feature flags), **G4** (syscall audit), **F6–F8** (calculator + Files userspace + VirtIO-GPU scanout/cursor), **I4** (SMP balance onto an idle AP), USB HID URB completion, **D6** (IPv6 echo TX), udev `/dev` hotplug, service restart, quota `EDQUOT`, cron `@reboot` + timer, VSync pacing, Ring 3 `openpty`+SHM (`GATE_TERM`), memory cgroups, job control, IMA, lockdown, wipe-on-free, UEFI time, and NetworkManager DHCP are done on QEMU. Adding another `GATE_xx` ENOSYS is **not** the critical path.
 
 Work top to bottom. Skip anything marked later.
 
@@ -19,6 +19,8 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 | G5 | `unsafe` SAFETY comments + size budget | **Done** — 16 MB size gate holds; every `unsafe {` has a `// SAFETY:` comment; `undocumented_unsafe_blocks = deny` in `kernel/Cargo.toml` (`GATE_G5 safety comments`) | same |
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
+
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **304/304**.
 
 ---
 
@@ -42,6 +44,22 @@ A dynamically linked musl binary runs (BM4). VirtIO-GPU scanout + hardware curso
 - **GPU compositor for the desktop** — **Done**: desktop `present_rect` flushes the software FB through the live VirtIO-GPU scanout (`GATE_GPU desktop scanout`). VGA blit remains for `-vga std`.
 - Host fuzz of ELF/ext4/packet parsers — **Done** (`cargo test -p knoxos-host-tests` mutates malformed inputs; parsers must not panic).
 - Cargo workspace that includes `kernel` + `boot` — **Done**: root workspace members; `default-members` stay host tools; kernel builds via `./scripts/kernel-cargo.sh`.
+- Memory cgroup hard limit on mmap/brk (`GATE_CGROUP memory`, `GATE_CGROUP2 memory`).
+- SIGTSTP / `waitpid(WUNTRACED)` / SIGCONT against a process (`GATE_JOB stop`).
+- IMA SHA-256 measure on `execve` / spawn (`GATE_IMA exec`).
+- Lockdown denies unsigned `insert_module` (`GATE_LOCKDOWN module`); buddy free zeros the frame (`GATE_WIPE free`).
+- UEFI `GetTime` from RTC + variable round-trip (`GATE_UEFI time`).
+- NetworkManager `activate` copies live `eth0` (`GATE_NM dhcp`).
+
+---
+
+## 4. Still production (not the later list)
+
+Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md](remaining.md) from this section are **done**:
+
+- NTFS through the block layer (`GATE_NTFS block`); here-docs / `~/.profile` (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`); VT100 CUP+SGR256 (`GATE_VT100 xterm`)
+- HDA DMA + PulseAudio mix (`GATE_HDA dma`, `GATE_PA mix`); IOMMU `enable_translation` (`GATE_IOMMU translation`)
+- THP / KASLR (`GATE_THP hugepage`, `GATE_KASLR slide`); ACPI AML `_S5` (`GATE_AML dsdt`); kernel `.ko` load (`GATE_KO load`)
 
 ---
 

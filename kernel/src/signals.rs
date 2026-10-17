@@ -273,6 +273,36 @@ lazy_static::lazy_static! {
     };
 }
 
+/// Stop a process (SIGSTOP / SIGTSTP). Kernel/init/desktop stay running.
+pub fn stop_process(pid: Pid) {
+    if pid <= crate::context::DESKTOP_PID {
+        return;
+    }
+    crate::process::PROCESS_TABLE
+        .lock()
+        .set_state(pid, crate::process::ProcessState::Stopped);
+    crate::scheduler::SCHEDULER.lock().block_process(pid);
+}
+
+/// Continue a stopped process (SIGCONT).
+pub fn continue_process(pid: Pid) {
+    if pid <= crate::context::DESKTOP_PID {
+        return;
+    }
+    let stopped = crate::process::PROCESS_TABLE
+        .lock()
+        .get_process(pid)
+        .map(|p| p.state == crate::process::ProcessState::Stopped)
+        .unwrap_or(false);
+    if stopped {
+        crate::process::PROCESS_TABLE
+            .lock()
+            .set_state(pid, crate::process::ProcessState::Ready);
+        crate::scheduler::wake_process(pid);
+        crate::user_task::wake(pid);
+    }
+}
+
 /// Send a signal to a process
 pub fn kill(target_pid: Pid, sig: Signal, sender_pid: Pid) -> Result<(), i32> {
     let mut signals = PROCESS_SIGNALS.lock();
@@ -296,7 +326,15 @@ pub fn kill(target_pid: Pid, sig: Signal, sender_pid: Pid) -> Result<(), i32> {
         }
         Signal::SIGSTOP => {
             serial_println!("[KnoxOS] SIGSTOP -> PID {}", target_pid);
-            // Would suspend the process
+            drop(signals);
+            stop_process(target_pid);
+            return Ok(());
+        }
+        Signal::SIGCONT => {
+            serial_println!("[KnoxOS] SIGCONT -> PID {}", target_pid);
+            drop(signals);
+            continue_process(target_pid);
+            return Ok(());
         }
         _ => {}
     }
@@ -376,11 +414,15 @@ pub fn deliver_signals(pid: Pid) {
                 }
                 SignalAction::Stop => {
                     serial_println!("[KnoxOS] Signal {:?} stops PID {}", pending.signal, pid);
-                    // Would change process state to Stopped
+                    drop(signals);
+                    stop_process(pid);
+                    return;
                 }
                 SignalAction::Continue => {
                     serial_println!("[KnoxOS] Signal {:?} continues PID {}", pending.signal, pid);
-                    // Would resume a stopped process
+                    drop(signals);
+                    continue_process(pid);
+                    return;
                 }
                 SignalAction::Ignore => {}
                 SignalAction::Handler(addr) => {
@@ -587,7 +629,48 @@ pub fn sigreturn(pid: Pid) -> Option<(u64, u64)> {
     Some((frame.saved_rip, frame.saved_rsp))
 }
 
+pub const GATE_JOB_MARKER: &str = "GATE_JOB stop";
+
+/// SIGTSTP stops a child; waitpid(WUNTRACED) reports it; SIGCONT resumes.
+pub fn job_control_self_test() -> bool {
+    let child = crate::process::PROCESS_TABLE.lock().spawn("job-gate", 1);
+    create_process_signals(child);
+    let _ = kill(child, Signal::SIGTSTP, 0);
+    deliver_signals(child);
+    let stopped = crate::process::PROCESS_TABLE
+        .lock()
+        .get_process(child)
+        .map(|p| p.state == crate::process::ProcessState::Stopped)
+        .unwrap_or(false);
+    let waited = crate::process::PROCESS_TABLE
+        .lock()
+        .waitpid_options(child as i32, 1, true, true);
+    let reported = matches!(waited, Ok(Some((pid, status))) if pid == child && status == 0x137F);
+    let _ = kill(child, Signal::SIGCONT, 0);
+    let continued = crate::process::PROCESS_TABLE
+        .lock()
+        .get_process(child)
+        .map(|p| p.state == crate::process::ProcessState::Ready)
+        .unwrap_or(false);
+    crate::process::PROCESS_TABLE.lock().exit_process(child, 0);
+    let _ = crate::process::PROCESS_TABLE.lock().waitpid(child);
+    destroy_process_signals(child);
+    if stopped && reported && continued {
+        serial_println!("[job] {} (SIGTSTP then SIGCONT)", GATE_JOB_MARKER);
+        true
+    } else {
+        serial_println!(
+            "[job] GATE_JOB FAILED: stopped={} reported={} continued={}",
+            stopped,
+            reported,
+            continued
+        );
+        false
+    }
+}
+
 /// Initialize signal subsystem
 pub fn init() {
     serial_println!("[KnoxOS] Signal handling initialized (31 POSIX signals)");
+    let _ = job_control_self_test();
 }

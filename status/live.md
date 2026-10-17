@@ -61,5 +61,20 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 50. **Gate TERM** — Ring 3 `openpty` + SHM present as Empty (`GATE_TERM pty userspace`). Start-menu Terminal is that client; master fd + slave I/O (`GATE_TERM pty interactive`).
 51. **Gate WL** — `wl_display` object protocol on `/run/wayland-0` (`GATE_WL display protocol`).
 52. **Gate GPU** — desktop `present_rect` flushes through VirtIO-GPU (`GATE_GPU desktop scanout`).
+53. **Memory cgroups** — mmap/brk charge; 8 KiB over a 4 KiB hard limit is ENOMEM (`GATE_CGROUP memory`, `GATE_CGROUP2 memory`).
+54. **Job control** — SIGTSTP stops a child; `waitpid(WUNTRACED)` reports stopped; SIGCONT resumes (`GATE_JOB stop`).
+55. **IMA** — exec/spawn SHA-256 measurement list (`GATE_IMA exec`).
+56. **Lockdown** — Integrity denies unsigned `insert_module` (`GATE_LOCKDOWN module`).
+57. **UEFI runtime** — `GetTime` from CMOS RTC; variable round-trip (`GATE_UEFI time`).
+58. **Secure wipe** — buddy `free_physical_frame` zeros the page (`GATE_WIPE free`).
+59. **NetworkManager** — `activate` copies live `eth0` DHCP into the profile (`GATE_NM dhcp`).
+60. **NTFS** — ramdisk boot + MFT `$DATA` (`GATE_NTFS block`).
+61. **Here-docs / profile** — `cat <<EOF` stdin + `~/.profile` (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`).
+62. **VT100** — CUP + xterm-256 SGR + ED (`GATE_VT100 xterm`).
+63. **HDA + PulseAudio** — buddy DMA + stream mix (`GATE_HDA dma`, `GATE_PA mix`).
+64. **IOMMU** — `enable_translation` + IOVA map (`GATE_IOMMU translation`).
+65. **THP / KASLR** — 2 MiB hugepage + module slide (`GATE_THP hugepage`, `GATE_KASLR slide`).
+66. **ACPI AML** — DSDT `_S5` (`GATE_AML dsdt`).
+67. **`.ko` loader** — ET_REL `init_module` (`GATE_KO load`).
 
-Integration: `./tests/run_integration.sh` **296/296** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **315/315** on QEMU (2026-10-18).

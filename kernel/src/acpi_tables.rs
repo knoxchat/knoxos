@@ -171,6 +171,7 @@ pub struct MadtLocalApicNmi {
 // ─── FADT (Fixed ACPI Description Table) ─────────────────────────────
 
 /// FADT — provides fixed hardware register addresses
+#[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct Fadt {
@@ -329,12 +330,20 @@ pub struct FadtInfo {
     pub reset_value: u8,
     pub century_register: u8,
     pub boot_arch_flags: u16,
+    pub dsdt_address: u64,
 }
 
 // ─── Global ACPI State ──────────────────────────────────────────────
 
 lazy_static::lazy_static! {
     pub static ref ACPI_INFO: Mutex<Option<AcpiInfo>> = Mutex::new(None);
+}
+
+static PHYS_OFFSET: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Physical-memory offset used when the ACPI tables were parsed.
+pub fn phys_offset() -> u64 {
+    PHYS_OFFSET.load(core::sync::atomic::Ordering::Relaxed)
 }
 
 /// Get a copy of the parsed ACPI information (if available)
@@ -501,24 +510,104 @@ fn parse_madt(phys_offset: u64, madt_phys: u64, info: &mut AcpiInfo) {
     }
 }
 
+fn read_u8_at(base: *const u8, off: usize) -> u8 {
+    // SAFETY: caller passes a mapped ACPI table and an in-bounds offset.
+    unsafe { core::ptr::read_unaligned(base.add(off)) }
+}
+
+fn read_u16_at(base: *const u8, off: usize) -> u16 {
+    let mut b = [0u8; 2];
+    // SAFETY: caller passes a mapped ACPI table and an in-bounds offset.
+    unsafe {
+        core::ptr::copy_nonoverlapping(base.add(off), b.as_mut_ptr(), 2);
+    }
+    u16::from_le_bytes(b)
+}
+
+fn read_u32_at(base: *const u8, off: usize) -> u32 {
+    let mut b = [0u8; 4];
+    // SAFETY: caller passes a mapped ACPI table and an in-bounds offset.
+    unsafe {
+        core::ptr::copy_nonoverlapping(base.add(off), b.as_mut_ptr(), 4);
+    }
+    u32::from_le_bytes(b)
+}
+
+fn read_u64_at(base: *const u8, off: usize) -> u64 {
+    let mut b = [0u8; 8];
+    // SAFETY: caller passes a mapped ACPI table and an in-bounds offset.
+    unsafe {
+        core::ptr::copy_nonoverlapping(base.add(off), b.as_mut_ptr(), 8);
+    }
+    u64::from_le_bytes(b)
+}
+
+/// Physical addresses firmware uses for ACPI tables stay below 4 GiB on QEMU.
+const ACPI_PHYS_LIMIT: u64 = 0x1_0000_0000;
+
 /// Parse FADT
 fn parse_fadt(phys_offset: u64, fadt_phys: u64, info: &mut AcpiInfo) {
     let fadt_virt = phys_offset + fadt_phys;
-    // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
-    let fadt = unsafe { &*(fadt_virt as *const Fadt) };
+    let base = fadt_virt as *const u8;
+    let fadt_len = read_u32_at(base, 4) as usize;
+    if fadt_len < 76 {
+        serial_println!("[KnoxOS] ACPI: FADT too short ({})", fadt_len);
+        return;
+    }
+
+    let dsdt32 = read_u32_at(base, 40);
+    let x_dsdt = if fadt_len >= 148 {
+        read_u64_at(base, 140)
+    } else {
+        0
+    };
+    // Prefer the 32-bit DSDT field (present in ACPI 1.0). X_DSDT is only used
+    // when DSDT is zero and the 64-bit pointer still looks like a physical addr.
+    // Reading X_DSDT from a short table produced non-canonical VAs and #GP.
+    let dsdt = if dsdt32 != 0 {
+        dsdt32 as u64
+    } else if x_dsdt != 0 && x_dsdt < ACPI_PHYS_LIMIT {
+        x_dsdt
+    } else {
+        0
+    };
+    serial_println!(
+        "[KnoxOS] ACPI: DSDT phys {:#x} (dsdt32={:#x} x_dsdt={:#x} fadt_len={})",
+        dsdt,
+        dsdt32,
+        x_dsdt,
+        fadt_len
+    );
 
     info.fadt = Some(FadtInfo {
-        pm1a_control_block: fadt.pm1a_control_block,
-        pm1b_control_block: fadt.pm1b_control_block,
-        pm_timer_block: fadt.pm_timer_block,
-        sci_interrupt: fadt.sci_interrupt,
-        smi_command_port: fadt.smi_command_port,
-        acpi_enable: fadt.acpi_enable,
-        acpi_disable: fadt.acpi_disable,
-        reset_reg_address: fadt.reset_reg_address,
-        reset_value: fadt.reset_value,
-        century_register: fadt.century,
-        boot_arch_flags: fadt.boot_arch_flags,
+        pm1a_control_block: read_u32_at(base, 64),
+        pm1b_control_block: read_u32_at(base, 68),
+        pm_timer_block: read_u32_at(base, 76),
+        sci_interrupt: read_u16_at(base, 46),
+        smi_command_port: read_u32_at(base, 48),
+        acpi_enable: read_u8_at(base, 52),
+        acpi_disable: read_u8_at(base, 53),
+        reset_reg_address: if fadt_len >= 128 {
+            read_u64_at(base, 120)
+        } else {
+            0
+        },
+        reset_value: if fadt_len >= 129 {
+            read_u8_at(base, 128)
+        } else {
+            0
+        },
+        century_register: if fadt_len >= 109 {
+            read_u8_at(base, 108)
+        } else {
+            0
+        },
+        boot_arch_flags: if fadt_len >= 111 {
+            read_u16_at(base, 109)
+        } else {
+            0
+        },
+        dsdt_address: dsdt,
     });
 }
 
@@ -554,6 +643,7 @@ fn parse_mcfg(phys_offset: u64, mcfg_phys: u64, info: &mut AcpiInfo) {
 /// Initialize ACPI table parsing
 /// Call with physical memory offset from bootloader
 pub fn init(phys_offset: u64) {
+    PHYS_OFFSET.store(phys_offset, core::sync::atomic::Ordering::Relaxed);
     serial_println!("[KnoxOS] ACPI: Searching for RSDP...");
 
     let mut info = AcpiInfo {

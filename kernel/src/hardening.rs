@@ -1203,6 +1203,39 @@ pub fn get_lockdown_level() -> LockdownLevel {
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+pub const GATE_LOCKDOWN_MARKER: &str = "GATE_LOCKDOWN module";
+
+fn lockdown_self_test() -> bool {
+    let denied_op = !check_lockdown("load_unsigned_module");
+    let module = crate::modules::KernelModule {
+        name: String::from("gate-lockdown"),
+        description: String::from("unsigned self-test"),
+        author: String::from("knoxos"),
+        version: String::from("0"),
+        license: String::from("MIT"),
+        state: crate::modules::ModuleState::Live,
+        size_bytes: 0,
+        dependencies: alloc::vec::Vec::new(),
+        ref_count: 0,
+        parameters: alloc::collections::BTreeMap::new(),
+    };
+    let insert_denied = crate::modules::insert_module(module).is_err();
+    if denied_op && insert_denied {
+        serial_println!(
+            "[hardening] {} (unsigned insert denied)",
+            GATE_LOCKDOWN_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[hardening] GATE_LOCKDOWN FAILED: check={} insert_denied={}",
+            denied_op,
+            insert_denied
+        );
+        false
+    }
+}
+
 /// Initialize the production hardening subsystem
 pub fn init() {
     if INITIALIZED.swap(true, Ordering::SeqCst) {
@@ -1247,6 +1280,7 @@ pub fn init() {
     // 6. Seed fuzzer
     FUZZER.lock().seed_corpus();
 
+    let _ = lockdown_self_test();
     serial_println!("[hardening] Production hardening initialized ✓");
     serial_println!("[hardening]   ASLR: {:?}", *ASLR_MODE.lock());
     serial_println!("[hardening]   W^X: {:?}", *WX_POLICY.lock());

@@ -113,10 +113,16 @@ pub fn execute_script(script: &str) -> ShellResult {
     execute_lines(&lines, 0, lines.len()).into_result()
 }
 
+fn collect_result(last: &mut ShellResult, collected: &mut String, r: ShellResult) {
+    collected.push_str(&r.output);
+    *last = r;
+}
+
 /// Execute a range of lines, handling control flow structures
 fn execute_lines(lines: &[&str], start: usize, end: usize) -> FlowControl {
     let mut i = start;
     let mut last_result = ShellResult::ok("");
+    let mut collected = String::new();
 
     while i < end && i < lines.len() {
         let line = lines[i].trim();
@@ -131,7 +137,7 @@ fn execute_lines(lines: &[&str], start: usize, end: usize) -> FlowControl {
         if line.starts_with("if ") || line == "if" {
             let (result, next_i) = execute_if(lines, i, end);
             match result {
-                FlowControl::Normal(r) => last_result = r,
+                FlowControl::Normal(r) => collect_result(&mut last_result, &mut collected, r),
                 other => return other,
             }
             i = next_i;
@@ -141,7 +147,7 @@ fn execute_lines(lines: &[&str], start: usize, end: usize) -> FlowControl {
         if line.starts_with("for ") {
             let (result, next_i) = execute_for(lines, i, end);
             match result {
-                FlowControl::Normal(r) => last_result = r,
+                FlowControl::Normal(r) => collect_result(&mut last_result, &mut collected, r),
                 FlowControl::Break(n) if n > 1 => return FlowControl::Break(n - 1),
                 FlowControl::Continue(n) if n > 1 => return FlowControl::Continue(n - 1),
                 FlowControl::Break(_) | FlowControl::Continue(_) => {}
@@ -154,7 +160,7 @@ fn execute_lines(lines: &[&str], start: usize, end: usize) -> FlowControl {
         if line.starts_with("while ") {
             let (result, next_i) = execute_while(lines, i, end, false);
             match result {
-                FlowControl::Normal(r) => last_result = r,
+                FlowControl::Normal(r) => collect_result(&mut last_result, &mut collected, r),
                 FlowControl::Break(n) if n > 1 => return FlowControl::Break(n - 1),
                 FlowControl::Continue(n) if n > 1 => return FlowControl::Continue(n - 1),
                 FlowControl::Break(_) | FlowControl::Continue(_) => {}
@@ -167,7 +173,7 @@ fn execute_lines(lines: &[&str], start: usize, end: usize) -> FlowControl {
         if line.starts_with("until ") {
             let (result, next_i) = execute_while(lines, i, end, true);
             match result {
-                FlowControl::Normal(r) => last_result = r,
+                FlowControl::Normal(r) => collect_result(&mut last_result, &mut collected, r),
                 FlowControl::Break(n) if n > 1 => return FlowControl::Break(n - 1),
                 FlowControl::Continue(n) if n > 1 => return FlowControl::Continue(n - 1),
                 FlowControl::Break(_) | FlowControl::Continue(_) => {}
@@ -180,7 +186,7 @@ fn execute_lines(lines: &[&str], start: usize, end: usize) -> FlowControl {
         if line.starts_with("case ") {
             let (result, next_i) = execute_case(lines, i, end);
             match result {
-                FlowControl::Normal(r) => last_result = r,
+                FlowControl::Normal(r) => collect_result(&mut last_result, &mut collected, r),
                 other => return other,
             }
             i = next_i;
@@ -245,17 +251,22 @@ fn execute_lines(lines: &[&str], start: usize, end: usize) -> FlowControl {
         }
 
         if line.contains("<<") && !line.contains("<<<") {
-            let (expanded_line, consumed) = expand_heredoc(lines, i);
-            last_result = super::execute(&expanded_line);
+            let (expanded_line, content, consumed) = expand_heredoc(lines, i);
+            collect_result(
+                &mut last_result,
+                &mut collected,
+                super::execute_with_stdin(&expanded_line, &content),
+            );
             i += consumed;
             continue;
         }
 
         // Regular command execution
-        last_result = super::execute(line);
+        collect_result(&mut last_result, &mut collected, super::execute(line));
         i += 1;
     }
 
+    last_result.output = collected;
     FlowControl::Normal(last_result)
 }
 
@@ -1020,8 +1031,8 @@ fn find_op_right(expr: &str, ops: &[char]) -> Option<usize> {
 // ═══════════════════════════════════════════════════════════════
 
 /// Expand here-document in a command line
-/// Returns (modified_line_with_heredoc_replaced, lines_consumed)
-pub fn expand_heredoc(lines: &[&str], line_index: usize) -> (String, usize) {
+/// Returns (command without `<<`, body, lines_consumed)
+pub fn expand_heredoc(lines: &[&str], line_index: usize) -> (String, String, usize) {
     let line = lines[line_index];
 
     // Find <<DELIMITER or <<-DELIMITER or <<'DELIMITER'
@@ -1035,7 +1046,7 @@ pub fn expand_heredoc(lines: &[&str], line_index: usize) -> (String, usize) {
             .trim_matches('"');
 
         if delim.is_empty() {
-            return (String::from(line), 1);
+            return (String::from(line), String::new(), 1);
         }
 
         // Collect lines until delimiter
@@ -1061,17 +1072,14 @@ pub fn expand_heredoc(lines: &[&str], line_index: usize) -> (String, usize) {
             consumed = i - line_index;
         }
 
-        // Replace the heredoc with a temporary file or inline the content
-        let cmd_before = &line[..pos];
-        let modified = format!("{} /dev/stdin", cmd_before.trim());
-        // Store heredoc content for the command to use
+        let cmd_before = line[..pos].trim();
         env::ENV_VARS
             .lock()
-            .insert(String::from("__HEREDOC__"), content);
+            .insert(String::from("__HEREDOC__"), content.clone());
 
-        (modified, consumed)
+        (String::from(cmd_before), content, consumed)
     } else {
-        (String::from(line), 1)
+        (String::from(line), String::new(), 1)
     }
 }
 

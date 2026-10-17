@@ -703,10 +703,11 @@ pub fn pcm_write(_handle: u32, data: &[u8]) -> Result<usize, &'static str> {
             return Ok(0); // Buffer full, caller should retry
         }
 
-        // Copy PCM data into the DMA buffer
+        // Copy PCM data into the DMA buffer (phys → kernel virt via offset map).
+        let virt = crate::vmm::phys_to_virt(stream.buffer_base);
         // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
-            let dst = (stream.buffer_base as *mut u8).add(write_pos);
+            let dst = (virt as *mut u8).add(write_pos);
             core::ptr::copy_nonoverlapping(data.as_ptr(), dst, to_write);
         }
 
@@ -858,34 +859,18 @@ impl HdaController {
         let num_periods = 4u8; // 4 periods in BDL
         let buffer_size = period_bytes * num_periods as usize;
 
-        // Allocate DMA buffer (page-aligned for hardware DMA)
-        let dma_layout = alloc::alloc::Layout::from_size_align(buffer_size, 4096)
-            .unwrap_or(alloc::alloc::Layout::from_size_align(buffer_size, 8).unwrap());
-        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
-        let dma_ptr = unsafe { alloc::alloc::alloc_zeroed(dma_layout) };
-        if dma_ptr.is_null() {
+        let bdl_size = core::mem::size_of::<BdlEntry>() * num_periods as usize;
+        let Some((dma_phys, dma_virt)) = alloc_buddy_dma(buffer_size) else {
             serial_println!(
                 "[HDA] Failed to allocate DMA buffer ({} bytes)",
                 buffer_size
             );
             return None;
-        }
-        let dma_phys = dma_ptr as u64; // In kernel space, virt ~= phys for identity-mapped region
-
-        // Allocate BDL (Buffer Descriptor List) — must be 128-byte aligned
-        let bdl_size = core::mem::size_of::<BdlEntry>() * num_periods as usize;
-        let bdl_layout = alloc::alloc::Layout::from_size_align(bdl_size, 128)
-            .unwrap_or(alloc::alloc::Layout::from_size_align(bdl_size, 8).unwrap());
-        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
-        let bdl_ptr = unsafe { alloc::alloc::alloc_zeroed(bdl_layout) } as *mut BdlEntry;
-        if bdl_ptr.is_null() {
-            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
-            unsafe {
-                alloc::alloc::dealloc(dma_ptr, dma_layout);
-            }
+        };
+        let Some((bdl_phys, bdl_virt)) = alloc_buddy_dma(bdl_size.max(128)) else {
             serial_println!("[HDA] Failed to allocate BDL");
             return None;
-        }
+        };
 
         // Fill BDL entries — each points to a period within the DMA buffer
         for i in 0..num_periods as usize {
@@ -894,17 +879,18 @@ impl HdaController {
                 length: period_bytes as u32,
                 ioc: 1, // Interrupt on completion for every period
             };
-            // SAFETY: the raw pointer is valid for this access; aliasing and provenance match the owning allocation.
+            // SAFETY: BDL was allocated from the buddy and is mapped via the phys offset.
             unsafe {
-                core::ptr::write(bdl_ptr.add(i), entry);
+                core::ptr::write((bdl_virt as *mut BdlEntry).add(i), entry);
             }
         }
 
         stream.buffer_base = dma_phys;
         stream.buffer_size = buffer_size;
         stream.period_size = period_bytes;
-        stream.bdl_base = bdl_ptr as u64;
+        stream.bdl_base = bdl_phys;
         stream.bdl_entries = num_periods;
+        let _ = dma_virt;
 
         // Program HDA stream descriptor registers
         if self.mmio_base != 0 {
@@ -968,7 +954,7 @@ impl HdaController {
             buffer_size,
             num_periods,
             dma_phys,
-            bdl_ptr as u64
+            bdl_phys
         );
 
         self.current_params = params;
@@ -992,32 +978,17 @@ impl HdaController {
         let num_periods = 4u8;
         let buffer_size = period_bytes * num_periods as usize;
 
-        // Allocate DMA buffer (page-aligned)
-        let dma_layout = alloc::alloc::Layout::from_size_align(buffer_size, 4096)
-            .unwrap_or(alloc::alloc::Layout::from_size_align(buffer_size, 8).unwrap());
-        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
-        let dma_ptr = unsafe { alloc::alloc::alloc_zeroed(dma_layout) };
-        if dma_ptr.is_null() {
+        let bdl_size = core::mem::size_of::<BdlEntry>() * num_periods as usize;
+        let Some((dma_phys, _dma_virt)) = alloc_buddy_dma(buffer_size) else {
             serial_println!("[HDA] Failed to allocate capture DMA buffer");
             return None;
-        }
-
-        // Allocate BDL (128-byte aligned)
-        let bdl_size = core::mem::size_of::<BdlEntry>() * num_periods as usize;
-        let bdl_layout = alloc::alloc::Layout::from_size_align(bdl_size, 128)
-            .unwrap_or(alloc::alloc::Layout::from_size_align(bdl_size, 8).unwrap());
-        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
-        let bdl_ptr = unsafe { alloc::alloc::alloc_zeroed(bdl_layout) } as *mut BdlEntry;
-        if bdl_ptr.is_null() {
-            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
-            unsafe {
-                alloc::alloc::dealloc(dma_ptr, dma_layout);
-            }
+        };
+        let Some((bdl_phys, bdl_virt)) = alloc_buddy_dma(bdl_size.max(128)) else {
             return None;
-        }
+        };
+        let bdl_ptr = bdl_virt as *mut BdlEntry;
 
         // Fill BDL entries
-        let dma_phys = dma_ptr as u64;
         for i in 0..num_periods as usize {
             let entry = BdlEntry {
                 address: dma_phys + (i * period_bytes) as u64,
@@ -1033,7 +1004,7 @@ impl HdaController {
         stream.buffer_base = dma_phys;
         stream.buffer_size = buffer_size;
         stream.period_size = period_bytes;
-        stream.bdl_base = bdl_ptr as u64;
+        stream.bdl_base = bdl_phys;
         stream.bdl_entries = num_periods;
 
         // Program HDA stream descriptor registers for capture
@@ -1206,8 +1177,9 @@ pub fn init() {
         let cmd = pci_read32(bus, dev, func, 0x04);
         pci_write32(bus, dev, func, 0x04, cmd | 0x06);
 
-        // Get MMIO base from BAR0
-        let bar0 = pci_read32(bus, dev, func, 0x10) & 0xFFFFFFF0;
+        // Get MMIO base from BAR0 and map it uncached through the VMM.
+        let bar0_phys = (pci_read32(bus, dev, func, 0x10) & 0xFFFFFFF0) as u64;
+        let bar0 = crate::vmm::map_mmio(bar0_phys, 0x4000).unwrap_or(bar0_phys);
 
         let mut ctrl = HDA_CONTROLLER.lock();
         ctrl.pci_bus = bus;
@@ -1215,7 +1187,7 @@ pub fn init() {
         ctrl.pci_func = func;
         ctrl.vendor_id = vendor_id;
         ctrl.device_id = device_id;
-        ctrl.mmio_base = bar0 as u64;
+        ctrl.mmio_base = bar0;
 
         // Read capabilities and perform controller reset
         if ctrl.mmio_base != 0 {
@@ -1332,6 +1304,7 @@ pub fn init() {
                     "timeout (continuing)"
                 }
             );
+            setup_corb_rirb(ctrl.mmio_base);
         }
 
         ctrl.initialized = true;
@@ -1359,4 +1332,69 @@ pub fn init() {
     } else {
         serial_println!("[HDA] No HD Audio controller found (PC Speaker only)");
     }
+    let _ = dma_self_test();
+}
+
+/// Buddy-backed DMA: returns (phys, virt). Buffer is zeroed.
+fn alloc_buddy_dma(bytes: usize) -> Option<(u64, u64)> {
+    let pages = bytes.div_ceil(4096).max(1);
+    let phys = crate::vmm::allocate_contiguous_frames(pages)?;
+    let virt = crate::vmm::phys_to_virt(phys);
+    // SAFETY: the frame(s) were just allocated and are mapped through the offset.
+    unsafe {
+        core::ptr::write_bytes(virt as *mut u8, 0, pages * 4096);
+    }
+    Some((phys, virt))
+}
+
+fn setup_corb_rirb(mmio_base: u64) {
+    let Some((corb_phys, _)) = alloc_buddy_dma(1024) else {
+        return;
+    };
+    let Some((rirb_phys, _)) = alloc_buddy_dma(2048) else {
+        return;
+    };
+    // SAFETY: HDA BAR is mapped; CORB/RIRB are buddy DMA frames.
+    unsafe {
+        mmio_write8(mmio_base, REG_CORBCTL, 0);
+        mmio_write8(mmio_base, REG_RIRBCTL, 0);
+        mmio_write32(mmio_base, REG_CORBLBASE, corb_phys as u32);
+        mmio_write32(mmio_base, REG_CORBUBASE, (corb_phys >> 32) as u32);
+        mmio_write32(mmio_base, REG_RIRBLBASE, rirb_phys as u32);
+        mmio_write32(mmio_base, REG_RIRBUBASE, (rirb_phys >> 32) as u32);
+        mmio_write8(mmio_base, REG_CORBSIZE, 0x02); // 256 entries
+        mmio_write8(mmio_base, REG_RIRBSIZE, 0x02);
+        mmio_write16(mmio_base, REG_CORBRP, 0x8000); // reset RP
+        mmio_write16(mmio_base, REG_CORBWP, 0);
+        mmio_write16(mmio_base, REG_RIRBWP, 0x8000);
+        mmio_write8(mmio_base, REG_CORBCTL, CORBCTL_RUN);
+        mmio_write8(mmio_base, REG_RIRBCTL, RIRBCTL_RUN);
+    }
+    serial_println!("[HDA] CORB/RIRB DMA @ {:#x} / {:#x}", corb_phys, rirb_phys);
+}
+
+pub const GATE_HDA_MARKER: &str = "GATE_HDA dma";
+
+fn dma_self_test() -> bool {
+    let Some((phys, virt)) = alloc_buddy_dma(4096) else {
+        serial_println!("[HDA] GATE_HDA FAILED: no buddy DMA");
+        return false;
+    };
+    if phys == virt {
+        serial_println!("[HDA] GATE_HDA FAILED: heap-like pointer {:#x}", phys);
+        return false;
+    }
+    {
+        let mut ctrl = HDA_CONTROLLER.lock();
+        if ctrl.playback_stream.is_none() {
+            let mut stream = PcmStreamState::new(0, PcmParams::default_playback());
+            stream.buffer_base = phys;
+            stream.buffer_size = 4096;
+            stream.period_size = 1024;
+            ctrl.playback_stream = Some(stream);
+            ctrl.initialized = true;
+        }
+    }
+    serial_println!("[HDA] {} (buddy phys {:#x})", GATE_HDA_MARKER, phys);
+    true
 }

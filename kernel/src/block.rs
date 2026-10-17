@@ -427,12 +427,18 @@ pub fn read_blocks(
             }
         }
         BlockDeviceType::RamDisk => {
+            let ram_idx = devices
+                .iter()
+                .take(device_index + 1)
+                .filter(|d| d.device_type == BlockDeviceType::RamDisk)
+                .count()
+                .saturating_sub(1);
+            drop(devices);
             let disks = RAM_DISKS.lock();
-            if let Some(disk) = disks.first() {
-                disk.read(lba, count, buf)
-            } else {
-                Err(BlockError::NotFound)
-            }
+            disks
+                .get(ram_idx)
+                .ok_or(BlockError::NotFound)?
+                .read(lba, count, buf)
         }
         BlockDeviceType::Virtio => {
             let virtio_idx = devices
@@ -482,12 +488,18 @@ pub fn write_blocks(
             }
         }
         BlockDeviceType::RamDisk => {
+            let ram_idx = devices
+                .iter()
+                .take(device_index + 1)
+                .filter(|d| d.device_type == BlockDeviceType::RamDisk)
+                .count()
+                .saturating_sub(1);
+            drop(devices);
             let mut disks = RAM_DISKS.lock();
-            if let Some(disk) = disks.first_mut() {
-                disk.write(lba, count, buf)
-            } else {
-                Err(BlockError::NotFound)
-            }
+            disks
+                .get_mut(ram_idx)
+                .ok_or(BlockError::NotFound)?
+                .write(lba, count, buf)
         }
         BlockDeviceType::Virtio => {
             let virtio_idx = devices

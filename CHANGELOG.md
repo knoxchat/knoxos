@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **NTFS** — boot + MFT `$DATA` read through the block layer (`GATE_NTFS block`).
+- **Shell** — here-docs feed stdin; `name() { }` runs; `~/.profile` is sourced (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`).
+- **VT100** — CUP + xterm-256 SGR + ED on the live emulator (`GATE_VT100 xterm`).
+- **HDA + PulseAudio** — buddy DMA buffers (not heap pointers); two streams mix into the HDA ring (`GATE_HDA dma`, `GATE_PA mix`).
+- **IOMMU** — root table from the buddy; `enable_translation` is called (`GATE_IOMMU translation`).
+- **THP / KASLR** — 2 MiB hugepage from buddy order 9; kernel module slide is non-zero (`GATE_THP hugepage`, `GATE_KASLR slide`).
+- **ACPI AML** — DSDT scan for `Name(_S5_)` / `Name(\_S5)` SLP_TYP (`GATE_AML dsdt`). FADT uses the 32-bit DSDT pointer so a short table cannot produce a non-canonical VA (#GP).
+- **Kernel `.ko`** — ELF ET_REL load, relocate, call `init_module` (`GATE_KO load`).
+- **Memory cgroups** — mmap/brk charge against v1 + v2 hard limits; over-limit is ENOMEM (`GATE_CGROUP memory`, `GATE_CGROUP2 memory`).
+- **Job control** — SIGTSTP stops a process; `waitpid(WUNTRACED)` reports it; SIGCONT resumes (`GATE_JOB stop`).
+- **IMA** — SHA-256 measure on `execve` / Ring 3 spawn (`GATE_IMA exec`).
+- **Lockdown** — Integrity blocks unsigned `insert_module` (`GATE_LOCKDOWN module`).
+- **Secure wipe** — buddy free zeros the physical frame (`GATE_WIPE free`).
+- **UEFI runtime** — `GetTime` from CMOS RTC; `SetVariable`/`GetVariable` round-trip (`GATE_UEFI time`).
+- **NetworkManager** — `activate` copies live `eth0` DHCP (`GATE_NM dhcp`).
 - **Gate D6** — IPv6 echo actually TXes: loopback `::1` injects ICMPv6 Echo Request, reply is sent (`GATE_D6 ipv6 echo`). VirtIO-net RX `0x86DD` feeds `process_ipv6_packet`.
 - **Service restart** — failed units with `OnFailure`/`Always` are brought back (`GATE_SVC restart`).
 - **udev hotplug** — PCI scan creates `/dev` nodes and drains kobject ADD uevents (`GATE_UDEV hotplug`).

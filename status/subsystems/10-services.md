@@ -2,7 +2,7 @@
 
 # 10. System Services
 
-**Grade: Wired (55%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`
+**Grade: Wired (60%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`
 
 ### Wired
 - [x] Init searches standard paths; can map a built-in ELF blob
@@ -21,7 +21,8 @@
 - [x] D-Bus listens on `AF_UNIX` `/run/dbus/system_bus_socket` (L3); not a full bus daemon
 - [x] Cron `@reboot` + PIT/APIC due-flag (`GATE_CRON reboot`)
 - [x] udev-style hotplug → `/dev` from PCI (`GATE_UDEV hotplug`)
-- [ ] Suspend/hibernate, logind, NetworkManager (activate logs “Starting DHCP”)
-- [ ] PulseAudio/PipeWire mixing to HDA
+- [x] NetworkManager `activate` copies live `eth0` DHCP (`GATE_NM dhcp`)
+- [ ] Suspend/hibernate, logind
+- [x] PulseAudio mixing to HDA (`GATE_PA mix`)
 
 ---

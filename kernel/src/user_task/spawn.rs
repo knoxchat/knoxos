@@ -29,6 +29,14 @@ pub fn spawn_elf(
         return SpawnOutcome::NoElf;
     }
 
+    crate::ima::on_file_access(
+        crate::ima::ImaHook::FileExec,
+        name,
+        elf_data,
+        0,
+        crate::rtc::unix_time() as u64,
+    );
+
     let parent = {
         let ctx = crate::context::current_pid();
         if ctx == 0 {

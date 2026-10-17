@@ -164,6 +164,132 @@ pub fn battery_info() -> Option<BatteryInfo> {
     }
 }
 
+/// SLP_TYPa extracted from DSDT `Name(_S5, Package(){...})`.
+static S5_SLP_TYP: spin::Mutex<Option<u8>> = spin::Mutex::new(None);
+
+/// AML NameOp
+const AML_NAME_OP: u8 = 0x08;
+/// AML PackageOp
+const AML_PACKAGE_OP: u8 = 0x12;
+const AML_BYTE_PREFIX: u8 = 0x0A;
+const AML_ZERO_OP: u8 = 0x00;
+const AML_ONE_OP: u8 = 0x01;
+
+fn parse_s5_package_at(aml: &[u8], mut p: usize) -> Option<u8> {
+    if aml.get(p).copied() != Some(AML_PACKAGE_OP) {
+        return None;
+    }
+    p += 1;
+    // PkgLength: bits 7-6 of the first byte are the extra-byte count.
+    let pkg0 = *aml.get(p)?;
+    let extra = (pkg0 >> 6) as usize;
+    p += 1 + extra;
+    let _num_elements = *aml.get(p)?;
+    p += 1;
+    Some(match *aml.get(p)? {
+        AML_BYTE_PREFIX => *aml.get(p + 1).unwrap_or(&0),
+        AML_ZERO_OP => 0,
+        AML_ONE_OP => 1,
+        b => b,
+    })
+}
+
+/// Scan DSDT AML for `Name(_S5, Package(...))` and return the first integer (SLP_TYPa).
+///
+/// ACPI NameSegs are 4 characters padded with `_`, so firmware encodes `_S5_`.
+/// QEMU also emits `Name(\_S5, ...)` (RootChar + NameSeg). The NUL-padded form
+/// is accepted for host-side unit tests.
+pub fn parse_s5_slp_typ(aml: &[u8]) -> Option<u8> {
+    const NEEDLES: [&[u8]; 3] = [
+        &[AML_NAME_OP, b'_', b'S', b'5', b'_'],
+        &[AML_NAME_OP, 0x5C, b'_', b'S', b'5', b'_'],
+        &[AML_NAME_OP, b'_', b'S', b'5', 0],
+    ];
+    for needle in NEEDLES {
+        let mut i = 0;
+        while i + needle.len() + 3 < aml.len() {
+            if &aml[i..i + needle.len()] == needle {
+                if let Some(typ) = parse_s5_package_at(aml, i + needle.len()) {
+                    return Some(typ);
+                }
+            }
+            i += 1;
+        }
+    }
+    None
+}
+
+fn is_canonical_va(va: u64) -> bool {
+    let sign_ext = ((va as i64) << 16) >> 16;
+    sign_ext as u64 == va
+}
+
+fn dsdt_bytes() -> Option<alloc::vec::Vec<u8>> {
+    let info = crate::acpi_tables::get_info()?;
+    let fadt = info.fadt.as_ref()?;
+    let phys = fadt.dsdt_address;
+    if phys == 0 || phys >= 0x1_0000_0000 {
+        return None;
+    }
+    let offset = crate::acpi_tables::phys_offset();
+    let virt = if crate::vmm::ready() {
+        crate::vmm::phys_to_virt(phys)
+    } else {
+        offset.wrapping_add(phys)
+    };
+    if virt == 0 || !is_canonical_va(virt) {
+        crate::serial_println!(
+            "[KnoxOS] ACPI: DSDT phys {:#x} virt {:#x} not canonical",
+            phys,
+            virt
+        );
+        return None;
+    }
+    let mut header = [0u8; 8];
+    // SAFETY: virt is a canonical offset-map of a firmware table below 4 GiB.
+    unsafe {
+        core::ptr::copy_nonoverlapping(virt as *const u8, header.as_mut_ptr(), 8);
+    }
+    if &header[0..4] != b"DSDT" {
+        return None;
+    }
+    let len = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+    if !(36..256 * 1024).contains(&len) {
+        return None;
+    }
+    let mut buf = alloc::vec![0u8; len];
+    // SAFETY: length was taken from the DSDT header and capped at 256 KiB.
+    unsafe {
+        core::ptr::copy_nonoverlapping(virt as *const u8, buf.as_mut_ptr(), len);
+    }
+    Some(buf)
+}
+
+pub const GATE_AML_MARKER: &str = "GATE_AML dsdt";
+
+fn aml_self_test() -> bool {
+    let Some(dsdt) = dsdt_bytes() else {
+        crate::serial_println!("[KnoxOS] GATE_AML FAILED: no DSDT");
+        return false;
+    };
+    if &dsdt[0..4] != b"DSDT" {
+        crate::serial_println!("[KnoxOS] GATE_AML FAILED: signature");
+        return false;
+    }
+    let aml = &dsdt[36..];
+    match parse_s5_slp_typ(aml) {
+        Some(typ) => {
+            *S5_SLP_TYP.lock() = Some(typ);
+            crate::serial_println!("[KnoxOS] {} (_S5 SLP_TYP={})", GATE_AML_MARKER, typ);
+            true
+        }
+        None => {
+            crate::serial_println!("[KnoxOS] GATE_AML FAILED: no _S5");
+            false
+        }
+    }
+}
+
 /// Initialize ACPI subsystem
 ///
 /// Note: Full ACPI table parsing (RSDP/RSDT/XSDT/MADT/FADT/HPET/MCFG)
@@ -172,18 +298,16 @@ pub fn battery_info() -> Option<BatteryInfo> {
 /// management state machine and wires up to the thermal + battery monitors.
 pub fn init() {
     *POWER_STATE.lock() = PowerState::S0Working;
+    crate::serial_println!("[KnoxOS] ACPI power management initialized");
+}
 
-    // Wire FADT PM registers into the suspend subsystem if available
+/// Parse DSDT AML after `acpi_tables::init` has mapped firmware tables.
+pub fn interpret_dsdt() {
+    let _ = aml_self_test();
+    let slp_s5 = (*S5_SLP_TYP.lock()).unwrap_or(7);
     if let Some(info) = crate::acpi_tables::get_info() {
         if let Some(ref fadt) = info.fadt {
-            crate::suspend::set_pm_registers(
-                fadt.pm1a_control_block as u64,
-                5, // SLP_TYPa for S3 (typical PIIX4/ICH value)
-                6, // SLP_TYPa for S4
-                7, // SLP_TYPa for S5
-            );
+            crate::suspend::set_pm_registers(fadt.pm1a_control_block as u64, 5, 6, slp_s5);
         }
     }
-
-    crate::serial_println!("[KnoxOS] ACPI power management initialized");
 }

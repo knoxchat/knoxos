@@ -16,7 +16,7 @@ QEMU is the hardware. Tick a driver only when the virtqueue, DMA, or IRQ path ro
 | NVMe | Admin + I/O queues, PRP bounce (`GATE_C5 nvme dma complete`) |
 | VGA/BGA FB | Bootloader framebuffer; software present |
 
-QEMU flags used by `./run.sh` and `tests/run_integration.sh`: `-drive if=virtio`, `-device ahci`, `-device nvme`, `-device virtio-net-pci,disable-modern=on`, `-device virtio-gpu-pci`, `-device qemu-xhci`, `-vga std`.
+QEMU flags used by `./run.sh` and `tests/run_integration.sh`: `-drive if=virtio`, `-device ahci`, `-device nvme`, `-device virtio-net-pci,disable-modern=on`, `-device virtio-gpu-pci`, `-device qemu-xhci`, `-device intel-hda`, `-vga std`.
 
 ## Wired, not the live input/display path
 

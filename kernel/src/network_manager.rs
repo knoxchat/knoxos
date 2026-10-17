@@ -154,6 +154,15 @@ pub fn activate(id: u64) -> Result<(), &'static str> {
     match profile.ipv4.method {
         Ipv4Method::Auto => {
             serial_println!("[nm] Starting DHCP on {}", profile.interface);
+            if profile.interface == "eth0" {
+                let (ip, _up, gw) = crate::net::eth0_config();
+                let addr = ip.to_u32();
+                if addr != 0 {
+                    profile.ipv4.address = Some(addr);
+                    profile.ipv4.gateway = Some(gw.to_u32());
+                    serial_println!("[nm] Applied live eth0 {:08X} gw {:08X}", addr, gw.to_u32());
+                }
+            }
         }
         Ipv4Method::Manual => {
             if let Some(addr) = profile.ipv4.address {
@@ -221,6 +230,33 @@ pub fn stop() {
     NM_RUNNING.store(false, Ordering::SeqCst);
 }
 
+pub const GATE_NM_MARKER: &str = "GATE_NM dhcp";
+
+fn activate_self_test() -> bool {
+    let id = add_profile(ConnectionProfile::new_ethernet(
+        "Wired connection 1",
+        "eth0",
+    ));
+    if activate(id).is_err() {
+        serial_println!("[nm] GATE_NM FAILED: activate");
+        return false;
+    }
+    let profiles = PROFILES.lock();
+    let some = profiles.iter().find(|p| p.id == id);
+    let ok = some
+        .map(|p| p.state == ConnectionState::Connected && p.ipv4.address.unwrap_or(0) != 0)
+        .unwrap_or(false);
+    drop(profiles);
+    if ok {
+        serial_println!("[nm] {} (eth0 address copied)", GATE_NM_MARKER);
+        true
+    } else {
+        serial_println!("[nm] GATE_NM FAILED: no live address");
+        false
+    }
+}
+
 pub fn init() {
     serial_println!("[nm] Network Manager initialized");
+    let _ = activate_self_test();
 }

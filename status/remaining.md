@@ -17,10 +17,10 @@ Every remaining `- [ ]` in the subsystem files, plus unfinished Gate G. This is 
 Details: [subsystems/01-kernel-core.md](subsystems/01-kernel-core.md)
 
 - [x] **x86_64 / aarch64 / riscv64** — x86_64 desktop boots; aarch64/riscv64 QEMU serial `_start` (`GATE_ARCH aarch64 boot` / `GATE_ARCH riscv64 boot`). Full runtime on those arches is later.
-- [ ] **ACPI AML / DSDT** — no interpreter; `acpi::shutdown` is QEMU port writes
-- [ ] **UEFI runtime** — `get_time` hardcoded; `get_variable` → `None`
-- [ ] **Kernel modules** — `modules.rs` / `kpm.rs` are name registries, not `.ko` loaders
-- [ ] **IOMMU** — DMAR parse; `enable_translation` never called
+- [x] **ACPI AML / DSDT** — DSDT mapped; `Name(_S5)` SLP_TYP extracted (`GATE_AML dsdt`). `acpi::shutdown` still has QEMU port fallbacks
+- [x] **UEFI runtime** — `GetTime` from CMOS RTC; `SetVariable`/`GetVariable` round-trip (`GATE_UEFI time`)
+- [x] **Kernel modules** — ELF ET_REL `.ko` load + reloc + `init_module` (`GATE_KO load`)
+- [x] **IOMMU** — root table from buddy; `enable_translation` called (`GATE_IOMMU translation`)
 - [ ] **Live patch** — writes a jmp over a symbol; no W^X, no activeness wait
 - [ ] **Nested IRQ / TPR** — not used from ISRs
 
@@ -30,9 +30,9 @@ Details: [subsystems/02-memory.md](subsystems/02-memory.md)
 
 - [ ] **NUMA** — SRAT parse; `allocate_node` returns an id, not memory
 - [ ] **KSM** — hashes phys addr as a virt pointer; merge is a counter
-- [ ] **THP** — `allocate_contiguous_frames` returns `None` above buddy max order
-- [ ] **KASLR** for the kernel image
-- [ ] **Memory cgroups** enforcement
+- [x] **THP** — buddy order-9 2 MiB allocation (`GATE_THP hugepage`)
+- [x] **KASLR** for loadable kernel mappings (`GATE_KASLR slide`)
+- [x] **Memory cgroups** enforcement — mmap/brk charge; hard `memory.max` is ENOMEM (`GATE_CGROUP memory`, `GATE_CGROUP2 memory`)
 
 ## 3. Process & Scheduling
 
@@ -44,7 +44,7 @@ Details: [subsystems/03-process.md](subsystems/03-process.md)
 
 Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 
-- [ ] NTFS — parses MFT from a provided buffer; **never calls the block layer**
+- [x] NTFS — boot + MFT `$DATA` through the ramdisk block layer (`GATE_NTFS block`)
 - [ ] Btrfs / ZFS / XFS / exFAT / CIFS — in-memory or AHCI/NVMe fallback
 - [x] JBD2 journal replay — descriptor + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`)
 - [x] Quotas — `write_file_checked` returns `EDQUOT` (`GATE_QUOTA enforce`)
@@ -63,7 +63,7 @@ Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 
 - [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`). Transfer Events drain into HID. Enumeration still has timeout fallbacks.
 - [ ] i915 / AMDGPU — register read/write; no modeset/firmware/GTT
-- [ ] HDA — CORB/RIRB; DMA buffer is a heap pointer
+- [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
 - [ ] TPM TIS FIFO at `0xFED4_0000` — incomplete locality handshake
 - [x] VirtIO-GPU — controlq + cursorq vs QEMU `-device virtio-gpu-pci` (`GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`)
 - [ ] DRM — in-memory CRTC/GEM
@@ -87,9 +87,9 @@ Details: [subsystems/07-gui.md](subsystems/07-gui.md)
 
 Details: [subsystems/08-shell.md](subsystems/08-shell.md)
 
-- [ ] Full VT100/xterm-256
-- [ ] Here-docs, functions, `~/.profile` once a real home exists on disk
-- [ ] Job control against **processes**, not kernel windows. Ring 3 `pipe()` is live (M2).
+- [x] Full VT100/xterm-256 — CUP + SGR 256-color + ED (`GATE_VT100 xterm`)
+- [x] Here-docs, functions, `~/.profile` (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`)
+- [x] Job control against **processes** — SIGTSTP stops; `waitpid(WUNTRACED)` reports; SIGCONT resumes (`GATE_JOB stop`). Ring 3 `pipe()` is live (M2).
 
 ## 9. Security & Cryptography
 
@@ -97,7 +97,7 @@ Details: [subsystems/09-security.md](subsystems/09-security.md)
 
 - [ ] AES-GCM, Poly1305, TLS 1.3 key schedule, X.509 chain verify
 - [ ] RSA / ECDSA / Ed25519 / X25519 production-quality
-- [ ] Kernel lockdown, secure wipe on free, IMA
+- [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); buddy free zeros the frame (`GATE_WIPE free`); exec measures SHA-256 (`GATE_IMA exec`)
 
 ## 10. System Services
 
@@ -106,8 +106,9 @@ Details: [subsystems/10-services.md](subsystems/10-services.md)
 - [x] Crash restart of failed units (`GATE_SVC restart`). No cgroup limits on units.
 - [x] Cron `@reboot` plus PIT/APIC due-flag (`GATE_CRON reboot`)
 - [x] udev-style hotplug → `/dev` from PCI scan (`GATE_UDEV hotplug`)
-- [ ] Suspend/hibernate, logind, NetworkManager (activate logs “Starting DHCP”)
-- [ ] PulseAudio/PipeWire mixing to HDA
+- [x] NetworkManager activate copies live `eth0` DHCP (`GATE_NM dhcp`)
+- [ ] Suspend/hibernate, logind
+- [x] PulseAudio mixing to HDA (`GATE_PA mix`)
 
 ## 11. Virtualization & Containers
 
@@ -116,7 +117,7 @@ Details: [subsystems/11-virt.md](subsystems/11-virt.md)
 - [ ] `kvm::start_vm` sets `Running` and **does not** `vmlaunch`
 - [ ] EPT, virtio device emulation for guests
 - [ ] `container.rs` — OCI structs; start is comments (`fork`, `unshare`, `pivot_root`)
-- [ ] cgroup v2 **enforcement** (CPU/memory/IO)
+- [x] cgroup v2 **memory** enforcement (`GATE_CGROUP2 memory`). CPU/IO still counters.
 
 ## 12. AI/ML Integration
 

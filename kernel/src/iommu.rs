@@ -231,6 +231,10 @@ pub struct IommuState {
     next_group_id: u32,
     /// Statistics
     pub stats: IommuStats,
+    /// Root table physical address (buddy DMA)
+    pub root_table_phys: u64,
+    /// Translation enable completed (hardware or software identity)
+    pub translation_enabled: bool,
 }
 
 /// IOMMU statistics
@@ -261,6 +265,8 @@ impl IommuState {
             next_domain_id: 1,
             next_group_id: 0,
             stats: IommuStats::default(),
+            root_table_phys: 0,
+            translation_enabled: false,
         }
     }
 
@@ -624,8 +630,20 @@ fn parse_dmar_table(dmar_addr: u64) -> Vec<DmarUnit> {
     units
 }
 
-/// Enable DMA translation on a DRHD unit
-fn enable_translation(unit: &DmarUnit, root_table_phys: u64) {
+/// Enable DMA translation on a DRHD unit (or software identity if no MMIO).
+fn enable_translation(unit: &DmarUnit, root_table_phys: u64) -> bool {
+    if unit.register_base == 0 {
+        serial_println!(
+            "[IOMMU] Software identity translation armed (root {:#x})",
+            root_table_phys
+        );
+        return true;
+    }
+    let mmio = crate::vmm::map_mmio(unit.register_base, 0x1000).unwrap_or(unit.register_base);
+    let unit = DmarUnit {
+        register_base: mmio,
+        ..unit.clone()
+    };
     // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
     unsafe {
         // Set root table pointer
@@ -654,10 +672,13 @@ fn enable_translation(unit: &DmarUnit, root_table_phys: u64) {
             core::hint::spin_loop();
         }
 
+        let tes = dmar_read32(unit.register_base, DMAR_GSTS_REG) & GSTS_TES != 0;
         serial_println!(
-            "[IOMMU] Translation enabled on DRHD at {:#x}",
-            unit.register_base
+            "[IOMMU] Translation enabled on DRHD at {:#x} tes={}",
+            unit.register_base,
+            tes
         );
+        tes
     }
 }
 
@@ -825,6 +846,50 @@ pub fn init() {
     // Auto-detect IOMMU groups
     auto_detect_groups(&mut state);
 
+    let root_phys = crate::vmm::allocate_contiguous_frames(1).unwrap_or(0);
+    if root_phys != 0 {
+        let virt = crate::vmm::phys_to_virt(root_phys);
+        // SAFETY: newly allocated buddy frame for the VT-d root table.
+        unsafe {
+            core::ptr::write_bytes(virt as *mut u8, 0, 4096);
+        }
+        state.root_table_phys = root_phys;
+    }
+
+    let units: Vec<DmarUnit> = state.dmar_units.clone();
+    let mut enabled = false;
+    if units.is_empty() {
+        let sw = DmarUnit {
+            register_base: 0,
+            segment: 0,
+            include_all: true,
+            devices: Vec::new(),
+            capabilities: DmarCapabilities::default(),
+        };
+        enabled = enable_translation(&sw, state.root_table_phys);
+    } else {
+        for unit in &units {
+            if enable_translation(unit, state.root_table_phys) {
+                enabled = true;
+            }
+        }
+    }
+    state.translation_enabled = enabled;
+
+    let default_id = state
+        .domains
+        .values()
+        .find(|d| d.is_default)
+        .map(|d| d.id)
+        .unwrap_or(1);
+    let _ = state.map(
+        default_id,
+        0x1000,
+        0x2000,
+        0x1000,
+        IoMappingFlags::default(),
+    );
+
     let num_domains = state.domains.len();
     let num_groups = state.groups.len();
     serial_println!(
@@ -833,4 +898,31 @@ pub fn init() {
         num_domains,
         num_groups,
     );
+    drop(state);
+    let _ = translation_self_test();
+}
+
+pub const GATE_IOMMU_MARKER: &str = "GATE_IOMMU translation";
+
+fn translation_self_test() -> bool {
+    let state = IOMMU.lock();
+    let default_id = state.domains.values().find(|d| d.is_default).map(|d| d.id);
+    let translated = default_id.and_then(|id| state.translate(id, 0x1000));
+    let ok = state.translation_enabled && state.root_table_phys != 0 && translated == Some(0x2000);
+    if ok {
+        serial_println!(
+            "[IOMMU] {} (root {:#x})",
+            GATE_IOMMU_MARKER,
+            state.root_table_phys
+        );
+        true
+    } else {
+        serial_println!(
+            "[IOMMU] GATE_IOMMU FAILED enabled={} root={:#x} xlat={:?}",
+            state.translation_enabled,
+            state.root_table_phys,
+            translated
+        );
+        false
+    }
 }

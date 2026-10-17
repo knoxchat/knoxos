@@ -109,6 +109,8 @@ QEMU_CMD=(qemu-system-x86_64
     -device qemu-xhci,id=xhci
     -device usb-kbd,bus=xhci.0
     -device usb-tablet,bus=xhci.0
+    -device intel-hda,id=hda0
+    -device hda-duplex,bus=hda0.0
     -serial file:"$SERIAL_LOG"
     -display none
     -device isa-debug-exit,iobase=0xf4,iosize=0x04
@@ -471,6 +473,25 @@ check_marker "GATE_TERM pty userspace"
 check_marker "GATE_TERM pty interactive"
 check_marker "GATE_WL display protocol"
 check_marker "GATE_GPU desktop scanout"
+check_marker "GATE_CGROUP memory"
+check_marker "GATE_CGROUP2 memory"
+check_marker "GATE_JOB stop"
+check_marker "GATE_IMA exec"
+check_marker "GATE_LOCKDOWN module"
+check_marker "GATE_UEFI time"
+check_marker "GATE_WIPE free"
+check_marker "GATE_NM dhcp"
+check_marker "GATE_NTFS block"
+check_marker "GATE_HEREDOC expand"
+check_marker "GATE_PROFILE sourced"
+check_marker "GATE_VT100 xterm"
+check_marker "GATE_HDA dma"
+check_marker "GATE_PA mix"
+check_marker "GATE_IOMMU translation"
+check_marker "GATE_THP hugepage"
+check_marker "GATE_KASLR slide"
+check_marker "GATE_AML dsdt"
+check_marker "GATE_KO load"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

@@ -18,7 +18,7 @@
 
 ### Partial MMIO (not a full driver)
 - [ ] i915 / AMDGPU — register read/write; no modeset/firmware/GTT
-- [ ] HDA — CORB/RIRB; DMA buffer is a heap pointer
+- [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
 - [ ] TPM TIS FIFO at `0xFED4_0000` — incomplete locality handshake
 
 ### Stub

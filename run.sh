@@ -344,6 +344,8 @@ run_qemu_bios() {
         -device qemu-xhci,id=xhci \
         -device usb-kbd,bus=xhci.0 \
         -device usb-tablet,bus=xhci.0 \
+        -device intel-hda,id=hda0 \
+        -device hda-duplex,bus=hda0.0 \
         -monitor tcp:127.0.0.1:44444,server,nowait \
         -no-reboot \
         -no-shutdown \
@@ -413,6 +415,8 @@ run_qemu_uefi() {
         -device qemu-xhci,id=xhci \
         -device usb-kbd,bus=xhci.0 \
         -device usb-tablet,bus=xhci.0 \
+        -device intel-hda,id=hda0 \
+        -device hda-duplex,bus=hda0.0 \
         -no-reboot \
         -no-shutdown
 }
@@ -455,6 +459,8 @@ run_qemu_debug() {
         -global VGA.xres=1920 \
         -global VGA.yres=1080 \
         -display $QEMU_DISPLAY \
+        -device intel-hda,id=hda0 \
+        -device hda-duplex,bus=hda0.0 \
         -s -S \
         -no-reboot \
         -no-shutdown

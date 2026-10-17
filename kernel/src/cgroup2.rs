@@ -523,6 +523,64 @@ fn parent_of(path: &str) -> String {
     }
 }
 
+/// Charge `bytes` against the v2 cgroup that contains `pid`.
+/// A process not in the tree is unlimited. Hard `memory.max` is ENOMEM.
+pub fn charge_memory(pid: u64, bytes: u64) -> Result<(), Cgroup2Error> {
+    let mut table = CGROUPS.lock();
+    let Some(cg) = table
+        .cgroups
+        .values_mut()
+        .find(|c| c.processes.contains(&pid))
+    else {
+        return Ok(());
+    };
+    if cg.memory.max >= 0 {
+        let new_current = cg.memory.current.saturating_add(bytes);
+        if new_current > cg.memory.max as u64 {
+            return Err(Cgroup2Error::LimitExceeded);
+        }
+        cg.memory.current = new_current;
+    } else {
+        cg.memory.current = cg.memory.current.saturating_add(bytes);
+    }
+    Ok(())
+}
+
+/// Undo a v2 memory charge.
+pub fn uncharge_memory(pid: u64, bytes: u64) {
+    let mut table = CGROUPS.lock();
+    if let Some(cg) = table
+        .cgroups
+        .values_mut()
+        .find(|c| c.processes.contains(&pid))
+    {
+        cg.memory.current = cg.memory.current.saturating_sub(bytes);
+    }
+}
+
+fn memory_self_test() -> bool {
+    const GATE_PID: u64 = 424_243;
+    if mkdir("/gate.memory").is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP2 FAILED: mkdir");
+        return false;
+    }
+    if set_memory_max("/gate.memory", 4096).is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP2 FAILED: set max");
+        return false;
+    }
+    if attach_process("/gate.memory", GATE_PID).is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP2 FAILED: attach");
+        return false;
+    }
+    let denied_over = charge_memory(GATE_PID, 8192).is_err();
+    let allowed = charge_memory(GATE_PID, 4096).is_ok();
+    let denied_next = charge_memory(GATE_PID, 1).is_err();
+    uncharge_memory(GATE_PID, 4096);
+    let _ = attach_process("/", GATE_PID);
+    let _ = rmdir("/gate.memory");
+    denied_over && allowed && denied_next
+}
+
 /// Initialize cgroup v2 subsystem
 pub fn init() {
     // Create default system cgroups
@@ -545,4 +603,10 @@ pub fn init() {
     crate::serial_println!(
         "  cgroup v2 initialized (unified hierarchy, PSI, cpu/memory/io/pids controllers)"
     );
+    if memory_self_test() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP2 memory (ENOMEM on 8KiB > 4KiB)");
+    } else {
+        crate::serial_println!("[cgroup2] GATE_CGROUP2 FAILED");
+    }
+    crate::cgroups::enforce_self_test();
 }

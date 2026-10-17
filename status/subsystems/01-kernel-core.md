@@ -2,7 +2,7 @@
 
 # 1. Kernel Core
 
-**Grade: Wired (82%)** · `gdt.rs`, `interrupts.rs`, `smp.rs`, `apic_timer.rs`, `acpi_tables.rs`, `cmdline.rs`
+**Grade: Wired (86%)** · `gdt.rs`, `interrupts.rs`, `smp.rs`, `apic_timer.rs`, `acpi_tables.rs`, `cmdline.rs`
 
 ### Live
 - [x] GDT + TSS load on BSP (`gdt::init`)
@@ -27,10 +27,10 @@
 ### Stub / unused
 - [x] **NMI** — IDT handler logs and returns
 - [x] **MCE** — IDT handler logs and panics
-- [ ] **ACPI AML / DSDT** — no interpreter; `acpi::shutdown` is QEMU port writes
-- [ ] **UEFI runtime** — `get_time` hardcoded; `get_variable` → `None`
-- [ ] **Kernel modules** — `modules.rs` / `kpm.rs` are name registries, not `.ko` loaders
-- [ ] **IOMMU** — DMAR parse; `enable_translation` never called
+- [x] **ACPI AML / DSDT** — DSDT mapped; `Name(_S5)` SLP_TYP extracted (`GATE_AML dsdt`)
+- [x] **UEFI runtime** — `GetTime` from CMOS RTC; `SetVariable`/`GetVariable` round-trip (`GATE_UEFI time`)
+- [x] **Kernel modules** — ELF ET_REL `.ko` load + reloc + `init_module` (`GATE_KO load`)
+- [x] **IOMMU** — root table from buddy; `enable_translation` called (`GATE_IOMMU translation`)
 - [ ] **Live patch** — writes a jmp over a symbol; no W^X, no activeness wait
 - [ ] **Nested IRQ / TPR** — not used from ISRs
 

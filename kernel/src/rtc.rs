@@ -5,6 +5,10 @@ use crate::arch_compat::instructions::port::Port;
 /// RTC - CMOS Real-Time Clock driver
 /// Reads the actual date/time from the CMOS RTC chip
 /// Provides Linux-compatible time functions (clock_gettime, gettimeofday)
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 
 /// CMOS I/O ports
@@ -288,6 +292,70 @@ pub fn uptime_seconds() -> u64 {
     (ns / 1_000_000_000) as u64
 }
 
+pub const GATE_UEFI_MARKER: &str = "GATE_UEFI time";
+
+lazy_static::lazy_static! {
+    static ref UEFI_VARS: Mutex<BTreeMap<(String, [u8; 16]), Vec<u8>>> =
+        Mutex::new(BTreeMap::new());
+}
+
+static UEFI_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
+/// UEFI `GetTime` — CMOS RTC, not a hardcoded calendar.
+pub fn uefi_get_time() -> Option<(u16, u8, u8, u8, u8, u8)> {
+    if !UEFI_AVAILABLE.load(Ordering::SeqCst) {
+        return None;
+    }
+    let dt = read_rtc();
+    Some((dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second))
+}
+
+/// UEFI `SetVariable` — in-kernel variable store.
+pub fn uefi_set_variable(name: &str, guid: &[u8; 16], data: &[u8]) -> bool {
+    if !UEFI_AVAILABLE.load(Ordering::SeqCst) {
+        return false;
+    }
+    UEFI_VARS
+        .lock()
+        .insert((String::from(name), *guid), data.to_vec());
+    true
+}
+
+/// UEFI `GetVariable`.
+pub fn uefi_get_variable(name: &str, guid: &[u8; 16]) -> Option<Vec<u8>> {
+    if !UEFI_AVAILABLE.load(Ordering::SeqCst) {
+        return None;
+    }
+    UEFI_VARS.lock().get(&(String::from(name), *guid)).cloned()
+}
+
+fn uefi_self_test() -> bool {
+    let guid = [0x11u8; 16];
+    let wrote = uefi_set_variable("KnoxGate", &guid, b"live");
+    let roundtrip = uefi_get_variable("KnoxGate", &guid).as_deref() == Some(&b"live"[..]);
+    let time = uefi_get_time();
+    let dt = read_rtc();
+    let time_ok = time == Some((dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second));
+    if wrote && roundtrip && time_ok {
+        crate::serial_println!(
+            "[uefi] {} (RTC {}-{:02}-{:02})",
+            GATE_UEFI_MARKER,
+            dt.year,
+            dt.month,
+            dt.day
+        );
+        true
+    } else {
+        crate::serial_println!(
+            "[uefi] GATE_UEFI FAILED: write={} roundtrip={} time={:?}",
+            wrote,
+            roundtrip,
+            time
+        );
+        false
+    }
+}
+
 /// Initialize the RTC subsystem
 pub fn init() {
     let dt = read_rtc();
@@ -304,4 +372,7 @@ pub fn init() {
         dt.second,
         boot_secs
     );
+
+    UEFI_AVAILABLE.store(true, Ordering::SeqCst);
+    let _ = uefi_self_test();
 }

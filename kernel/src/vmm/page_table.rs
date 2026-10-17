@@ -351,7 +351,7 @@ pub fn activate_kernel_cr3() {
 }
 
 /// Zero a physical frame (accessed via physical memory mapping)
-pub(super) unsafe fn zero_physical_frame(phys_addr: u64) {
+pub(crate) unsafe fn zero_physical_frame(phys_addr: u64) {
     let offset = PHYS_MEM_OFFSET.load(Ordering::Relaxed);
     if offset == 0 {
         return;

@@ -169,15 +169,20 @@ pub fn free_1g(phys_addr: u64) -> bool {
 pub fn reserve_pool(num_2m: usize, num_1g: usize) {
     let mut pool = POOL.lock();
 
-    // In a real implementation, we'd reserve contiguous physical frames
-    // For now, create placeholder entries that track the state
-    for i in 0..num_2m {
-        pool.pages_2m.push(HugePage {
-            phys_addr: 0x1_0000_0000 + (i as u64) * HUGE_PAGE_2M, // Placeholder
-            size: HugePageSize::Size2M,
-            in_use: false,
-            owner_pid: None,
-        });
+    let want_2m = num_2m.min(2);
+    for _ in 0..want_2m {
+        match crate::vmm::allocate_contiguous_frames(512) {
+            Some(phys) if phys & (HUGE_PAGE_2M - 1) == 0 => {
+                pool.pages_2m.push(HugePage {
+                    phys_addr: phys,
+                    size: HugePageSize::Size2M,
+                    in_use: false,
+                    owner_pid: None,
+                });
+            }
+            Some(phys) => crate::vmm::free_contiguous_frames(phys, 512),
+            None => break,
+        }
     }
 
     for i in 0..num_1g {

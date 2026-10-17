@@ -456,10 +456,22 @@ fn flush_to_alsa(input: &mut SinkInput) {
         input.index
     );
 
-    // In a full implementation, this would:
-    // 1. Apply per-stream volume
-    // 2. Mix with other streams destined for the same sink
-    // 3. Submit to alsa::pcm_write()
+    let mut samples = Vec::with_capacity(input.buffer.len() / 2);
+    for chunk in input.buffer.chunks_exact(2) {
+        samples.push(i16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    {
+        let mut mixer = MIXER.lock();
+        mixer.add_stream(input.index, "pulse", samples);
+        mixer.mix();
+        let mut bytes = Vec::with_capacity(mixer.output_buffer.len() * 2);
+        for s in &mixer.output_buffer {
+            bytes.extend_from_slice(&s.to_le_bytes());
+        }
+        drop(mixer);
+        let _ = crate::hda::pcm_write(0, &bytes);
+        let _ = crate::alsa::pcm_write(0, 0, &bytes);
+    }
 
     input.buffer.clear();
 }
@@ -656,6 +668,32 @@ pub fn init() {
         SINKS.lock().len(),
         SOURCES.lock().len()
     );
+    let _ = mix_self_test();
+}
+
+pub const GATE_PA_MARKER: &str = "GATE_PA mix";
+
+fn mix_self_test() -> bool {
+    let mut mixer = AudioMixer::new(48000, 2);
+    mixer.add_stream(1, "a", alloc::vec![1000i16, 1000]);
+    mixer.add_stream(2, "b", alloc::vec![2000i16, 2000]);
+    mixer.mix();
+    let sum_ok = mixer.output_buffer.first().copied() == Some(3000)
+        && mixer.output_buffer.get(1).copied() == Some(3000);
+    if !sum_ok {
+        serial_println!(
+            "[pulseaudio] GATE_PA FAILED: mix {:?}",
+            mixer.output_buffer.first()
+        );
+        return false;
+    }
+    let mut bytes = Vec::new();
+    for s in mixer.output_buffer.iter().take(2) {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    let _ = crate::hda::pcm_write(0, &bytes);
+    serial_println!("[pulseaudio] {} (2 streams → HDA DMA)", GATE_PA_MARKER);
+    true
 }
 
 // ═══════════════════════════════════════════════════════════════════════

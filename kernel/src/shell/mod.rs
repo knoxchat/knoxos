@@ -34,6 +34,19 @@ use crate::serial_println;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+/// Execute a simple command with an explicit stdin buffer (here-docs).
+pub fn execute_with_stdin(line: &str, stdin: &str) -> ShellResult {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return ShellResult::ok("");
+    }
+    let cmd_line = parser::parse_command_line(line);
+    if cmd_line.first.commands.len() == 1 && cmd_line.rest.is_empty() {
+        return execute_command_with_stdin(&cmd_line.first.commands[0], Some(stdin));
+    }
+    execute(line)
+}
+
 /// Execute a command line (the primary entry point called from the terminal)
 ///
 /// Supports:

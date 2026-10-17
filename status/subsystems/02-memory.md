@@ -2,7 +2,7 @@
 
 # 2. Memory Management
 
-**Grade: Wired (74%)** · `memory.rs`, `allocator.rs`, `vmm.rs`, `mmap.rs`, `slab.rs`, `page_cache.rs`
+**Grade: Wired (78%)** · `memory.rs`, `allocator.rs`, `vmm.rs`, `mmap.rs`, `slab.rs`, `page_cache.rs`
 
 The real MMU work is in **`vmm.rs`**, not a buddy allocator.
 
@@ -28,10 +28,10 @@ The real MMU work is in **`vmm.rs`**, not a buddy allocator.
 - [x] **OOM killer** — scoring + `trigger_oom` from failed `allocate_physical_frame` (H4)
 - [ ] **NUMA** — SRAT parse; `allocate_node` returns an id, not memory
 - [ ] **KSM** — hashes phys addr as a virt pointer; merge is a counter
-- [ ] **THP** — `allocate_contiguous_frames` returns `None` above buddy max order
+- [x] **THP** — buddy order-9 2 MiB allocation (`GATE_THP hugepage`)
 - [x] **Kernel stack guards** — `stack_guard::alloc_guarded_stack` on the live path (H4)
-- [ ] **KASLR** for the kernel image
-- [ ] **Memory cgroups** enforcement
+- [x] **KASLR** for loadable kernel mappings (`GATE_KASLR slide`)
+- [x] **Memory cgroups** enforcement — mmap/brk `try_charge`; hard limit is ENOMEM (`GATE_CGROUP memory`, `GATE_CGROUP2 memory`)
 
 ### Perfect-OS next steps
 1. ~~Physical buddy (or equivalent) with free, orders, and a real page inventory.~~ **Done** (J2) for leftover usable RAM after the heap; reserved/firmware holes stay out of the pool.

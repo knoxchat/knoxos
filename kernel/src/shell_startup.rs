@@ -235,6 +235,7 @@ export PATH=\"/bin:/usr/bin:/usr/local/bin:$HOME/bin\"
 export EDITOR=kedit
 export PAGER=less
 export LANG=en_US.UTF-8
+export KNOX_PROFILE=live
 
 # Aliases
 alias ll='ls -la'
@@ -260,9 +261,59 @@ pub fn stats() -> u64 {
     HEREDOCS_PROCESSED.load(Ordering::Relaxed)
 }
 
+pub const GATE_PROFILE_MARKER: &str = "GATE_PROFILE sourced";
+pub const GATE_HEREDOC_MARKER: &str = "GATE_HEREDOC expand";
+
+fn profile_self_test() -> bool {
+    create_default_profile();
+    PROFILE_LOADED.store(false, Ordering::Release);
+    load_startup_scripts();
+    let loaded = crate::shell::env::ENV_VARS
+        .lock()
+        .get("KNOX_PROFILE")
+        .map(|v| v == "live")
+        .unwrap_or(false);
+    if loaded && is_profile_loaded() {
+        crate::serial_println!("[shell_startup] {} (~/.profile)", GATE_PROFILE_MARKER);
+        true
+    } else {
+        crate::serial_println!("[shell_startup] GATE_PROFILE FAILED");
+        false
+    }
+}
+
+fn heredoc_function_self_test() -> bool {
+    let script = "\
+greet() {
+echo knox-fn
+}
+greet
+cat <<EOF
+knox-here
+EOF
+";
+    let result = crate::shell::scripting::execute_script(script);
+    let fn_ok = crate::shell::scripting::is_function("greet") && result.output.contains("knox-fn");
+    let here_ok = result.output.contains("knox-here");
+    if fn_ok && here_ok {
+        crate::serial_println!("[shell_startup] {} (function+heredoc)", GATE_HEREDOC_MARKER);
+        true
+    } else {
+        crate::serial_println!(
+            "[shell_startup] GATE_HEREDOC FAILED fn={} here={} out={:?}",
+            fn_ok,
+            here_ok,
+            result.output
+        );
+        false
+    }
+}
+
 /// Initialize the shell startup subsystem
 pub fn init() {
     create_default_profile();
     load_startup_scripts();
     crate::serial_println!("[shell_startup] initialized");
+    let _ = profile_self_test();
+    let _ = heredoc_function_self_test();
 }
