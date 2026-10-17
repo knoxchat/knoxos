@@ -12,8 +12,5 @@
   "panic-strategy": "abort",
   "disable-redzone": true,
   "features": "+strict-align,+neon,+fp-armv8",
-  "code-model": "small",
-  "pre-link-args": {
-    "gnu-lld": ["-Taarch64-knoxos.ld"]
-  }
+  "code-model": "small"
 }

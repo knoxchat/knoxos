@@ -16,9 +16,20 @@ if [[ "$CMD" == "clean" ]]; then
   exec cargo clean -p knoxos-kernel --target-dir "$TARGET_DIR"
 fi
 
+# rust-lld resolves -T relative to cargo's CWD (workspace root), not the
+# JSON spec directory. Pass an absolute script so aarch64/riscv64 link in CI.
+case "$TARGET" in
+  *aarch64-knoxos.json)
+    export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=-T${ROOT}/kernel/aarch64-knoxos.ld"
+    ;;
+  *riscv64-knoxos.json)
+    export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=-T${ROOT}/kernel/riscv64-knoxos.ld"
+    ;;
+esac
+
 exec cargo "$CMD" -p knoxos-kernel \
-  --target "$TARGET" \
-  -Zbuild-std=core,alloc,compiler_builtins \
-  -Zbuild-std-features=compiler-builtins-mem \
-  --target-dir "$TARGET_DIR" \
-  "$@"
+    --target "$TARGET" \
+    -Zbuild-std=core,alloc,compiler_builtins \
+    -Zbuild-std-features=compiler-builtins-mem \
+    --target-dir "$TARGET_DIR" \
+    "$@"

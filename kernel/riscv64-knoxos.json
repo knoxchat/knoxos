@@ -13,8 +13,5 @@
   "code-model": "medium",
   "features": "+m,+a,+c",
   "llvm-abiname": "lp64",
-  "max-atomic-width": 64,
-  "pre-link-args": {
-    "gnu-lld": ["-Triscv64-knoxos.ld"]
-  }
+  "max-atomic-width": 64
 }
