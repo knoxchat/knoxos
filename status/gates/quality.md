@@ -14,7 +14,7 @@
 
 ### Explicitly later (after Gates A–E)
 
-KVM, containers/k8s, Btrfs/ZFS, Wi-Fi, TLS 1.3, GPU compute, AI inference, package formats, Chromium/Vivaldi, aarch64/riscv64 **runtime**, Thunderbolt, TPM measured boot.
+KVM, containers/k8s, ZFS, WPA3/bridge, TLS 1.3 handshake/X.509 chain, GPU compute, AI inference, package formats, Chromium/Vivaldi, aarch64/riscv64 **runtime**, Thunderbolt, TPM measured boot.
 
 Shipping these before Gate B **increases** the distance to a perfect OS.
 

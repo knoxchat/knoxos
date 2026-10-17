@@ -214,9 +214,88 @@ pub fn xfs_magic_ok(sb: &[u8]) -> bool {
     sb.len() >= 4 && sb[0..4] == [0x58, 0x46, 0x53, 0x42]
 }
 
+/// Btrfs superblock magic `"_BHRfS_M"` at offset 0x40.
+pub fn btrfs_magic_ok(sb: &[u8]) -> bool {
+    sb.len() >= 0x48 && &sb[0x40..0x48] == b"_BHRfS_M"
+}
+
+/// 802.1Q TPID is 0x8100 after the two MAC addresses.
+pub fn vlan_tpid(frame: &[u8]) -> Option<u16> {
+    if frame.len() < 16 {
+        return None;
+    }
+    Some(u16::from_be_bytes([frame[12], frame[13]]))
+}
+
+/// 802.11 Beacon SSID IE (offset 36).
+pub fn parse_beacon_ssid(frame: &[u8]) -> Option<&[u8]> {
+    if frame.len() < 38 {
+        return None;
+    }
+    let fc = u16::from_le_bytes([frame[0], frame[1]]);
+    if (fc >> 2) & 0x03 != 0 || (fc >> 4) & 0x0F != 8 {
+        return None;
+    }
+    let mut off = 36usize;
+    while off + 2 <= frame.len() {
+        let id = frame[off];
+        let len = frame[off + 1] as usize;
+        if off + 2 + len > frame.len() {
+            return None;
+        }
+        if id == 0 {
+            return Some(&frame[off + 2..off + 2 + len]);
+        }
+        off += 2 + len;
+    }
+    None
+}
+
 /// GNU .mo little-endian magic.
 pub fn mo_magic_ok(data: &[u8]) -> bool {
     data.len() >= 4 && data[0..4] == [0xDE, 0x12, 0x04, 0x95]
+}
+
+/// USB 2.0 hub descriptor type 0x29; returns port count.
+pub fn parse_hub_num_ports(data: &[u8]) -> Option<u8> {
+    if data.len() < 7 || data[1] != 0x29 {
+        return None;
+    }
+    Some(data[2])
+}
+
+/// USB 2.0 GetPortStatus: connected bit of wPortStatus.
+pub fn hub_port_connected(data: &[u8]) -> Option<bool> {
+    if data.len() < 4 {
+        return None;
+    }
+    Some(u16::from_le_bytes([data[0], data[1]]) & 1 != 0)
+}
+
+/// Generic HID gamepad report: buttons in byte 0, left X in byte 2 (0x80 center).
+pub fn hid_gamepad_a_pressed(report: &[u8]) -> Option<bool> {
+    if report.len() < 8 {
+        return None;
+    }
+    Some(report[0] & 1 != 0)
+}
+
+/// TrueType 26.6 round-to-grid.
+pub fn round_26_6(v: i32) -> i32 {
+    if v >= 0 {
+        (v + 32) & !63
+    } else {
+        -(((-v) + 32) & !63)
+    }
+}
+
+/// TIS ACCESS after REQUEST_USE: VALID | ACTIVE_LOCALITY.
+pub fn tis_grant_locality(request_use: u8) -> u8 {
+    if request_use & 0x02 != 0 {
+        0xA0
+    } else {
+        0x81
+    }
 }
 
 /// SCSI READ(10) opcode 0x28, LBA at bytes 2..6, count at 7..9.
@@ -567,6 +646,28 @@ mod tests {
     }
 
     #[test]
+    fn btrfs_vlan_beacon_parsers() {
+        let mut sb = vec![0u8; 0x48];
+        sb[0x40..0x48].copy_from_slice(b"_BHRfS_M");
+        assert!(btrfs_magic_ok(&sb));
+        sb[0x40] = 0;
+        assert!(!btrfs_magic_ok(&sb));
+        let tagged = [
+            0xFFu8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x81, 0x00,
+            0x00, 0x64,
+        ];
+        assert_eq!(vlan_tpid(&tagged), Some(0x8100));
+        assert!(vlan_tpid(&[0u8; 12]).is_none());
+        let mut beacon = vec![0u8; 36];
+        beacon[0] = 0x80;
+        beacon.push(0);
+        beacon.push(4);
+        beacon.extend_from_slice(b"IEEE");
+        assert_eq!(parse_beacon_ssid(&beacon), Some(&b"IEEE"[..]));
+        assert!(parse_beacon_ssid(&[0u8; 10]).is_none());
+    }
+
+    #[test]
     fn mo_magic_and_scsi_read10() {
         assert!(mo_magic_ok(&[0xDE, 0x12, 0x04, 0x95, 0, 0, 0, 0]));
         assert!(!mo_magic_ok(&[0, 1, 2, 3]));
@@ -576,6 +677,24 @@ mod tests {
         cdb[8] = 2;
         assert_eq!(scsi_read10_lba(&cdb), Some((7, 2)));
         assert!(scsi_read10_lba(&[0x00u8; 10]).is_none());
+    }
+
+    #[test]
+    fn hub_gamepad_hint_tis_parsers() {
+        let desc = [9u8, 0x29, 4, 0, 0, 50, 100];
+        assert_eq!(parse_hub_num_ports(&desc), Some(4));
+        assert!(parse_hub_num_ports(&[9u8, 0x00, 4]).is_none());
+        assert_eq!(hub_port_connected(&[0x03, 0x01, 0, 0]), Some(true));
+        assert_eq!(hub_port_connected(&[0x00, 0x00, 0, 0]), Some(false));
+        assert!(hub_port_connected(&[0x01]).is_none());
+        let report = [1u8, 8, 255, 128, 128, 128, 0, 0];
+        assert_eq!(hid_gamepad_a_pressed(&report), Some(true));
+        assert_eq!(hid_gamepad_a_pressed(&[0u8; 8]), Some(false));
+        assert!(hid_gamepad_a_pressed(&[0u8; 2]).is_none());
+        assert_eq!(round_26_6(33 * 64 + 20), 33 * 64);
+        assert_eq!(round_26_6(10 * 64), 10 * 64);
+        assert_eq!(tis_grant_locality(0x02), 0xA0);
+        assert_eq!(tis_grant_locality(0x00), 0x81);
     }
 
     #[test]

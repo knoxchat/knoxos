@@ -90,3 +90,30 @@ pub fn tonemap_reinhard(luminance: f32, max_luminance: f32) -> f32 {
 lazy_static::lazy_static! {
     pub static ref HDR_STATE: Mutex<HdrMetadata> = Mutex::new(HdrMetadata::default());
 }
+
+pub const GATE_HDR_MARKER: &str = "GATE_HDR pq";
+
+/// Enable HDR10 (BT.2020 + PQ) and prove ST 2084 EOTF known-answers.
+pub fn enable_hdr10() -> bool {
+    let mut hdr = HDR_STATE.lock();
+    hdr.enabled = true;
+    hdr.color_space = ColorSpace::Bt2020;
+    hdr.eotf = TransferFunction::Pq;
+    hdr.max_luminance = 10000.0;
+    hdr.min_luminance = 0.0;
+    drop(hdr);
+    // ST 2084: 0 maps to 0 nits; 1.0 maps to 10_000 nits.
+    let zero = pq_eotf(0.0);
+    let peak = pq_eotf(1.0);
+    let ok = zero.abs() < 0.01 && (peak - 10000.0).abs() < 1.0;
+    if ok {
+        crate::serial_println!(
+            "[hdr] {} (PQ 1.0 → {:.0} nits, BT.2020)",
+            GATE_HDR_MARKER,
+            peak
+        );
+    } else {
+        crate::serial_println!("[hdr] GATE_HDR FAILED zero={} peak={}", zero, peak);
+    }
+    ok
+}

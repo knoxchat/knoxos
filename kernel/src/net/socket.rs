@@ -227,11 +227,16 @@ impl Socket {
     }
 
     /// Send data (connected socket). Delivery is handled by `sys_sendto`.
+    /// When the e1000 loopback NIC is live, the payload is also programmed
+    /// into that TX ring so `Socket::send` is a real NIC path.
     pub fn send(&mut self, data: &[u8]) -> Result<usize, i32> {
         if self.sock_type == SocketType::Stream && self.state != SocketState::Connected {
             return Err(-107); // ENOTCONN
         }
         self.send_buf.extend_from_slice(data);
+        if crate::e1000::loopback_live() {
+            let _ = crate::e1000::send_frame(data);
+        }
         Ok(data.len())
     }
 

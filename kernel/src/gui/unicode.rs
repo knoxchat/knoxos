@@ -192,7 +192,76 @@ fn get_emoji_bitmap(codepoint: u32) -> Vec<Pixel> {
     };
 
     draw_emoji_shape(&mut bitmap, 16, base_color, shape);
+    if (0x1F600..=0x1F64F).contains(&codepoint) {
+        paint_color_face(&mut bitmap, 16);
+    }
     bitmap
+}
+
+/// Paint eyes + mouth so a smiley is a real color bitmap, not a solid circle.
+fn paint_color_face(bitmap: &mut [Pixel], size: usize) {
+    let dark = Pixel::new(32, 24, 16, 255);
+    let mouth = Pixel::new(180, 60, 40, 255);
+    // Eyes
+    for (ex, ey) in [(5usize, 5usize), (10usize, 5usize)] {
+        for dy in 0..2 {
+            for dx in 0..2 {
+                let x = ex + dx;
+                let y = ey + dy;
+                if x < size && y < size {
+                    bitmap[y * size + x] = dark;
+                }
+            }
+        }
+    }
+    // Smile
+    for x in 5..11 {
+        let y = 11 + ((x as i32 - 8).unsigned_abs() as usize) / 3;
+        if y < size {
+            bitmap[y * size + x] = mouth;
+        }
+    }
+}
+
+pub const GATE_EMOJI_MARKER: &str = "GATE_EMOJI color";
+
+/// Grinning face U+1F600 is a multi-color bitmap (yellow + dark features).
+pub fn emoji_self_test() -> bool {
+    let bitmap = get_emoji_bitmap(0x1F600);
+    let mut yellow = 0usize;
+    let mut dark = 0usize;
+    let mut colors = 0u32;
+    for px in &bitmap {
+        if px.a == 0 {
+            continue;
+        }
+        if px.r > 200 && px.g > 180 && px.b < 100 {
+            yellow += 1;
+            colors |= 1;
+        } else if (px.r as u16) + (px.g as u16) + (px.b as u16) < 120 {
+            dark += 1;
+            colors |= 2;
+        } else {
+            colors |= 4;
+        }
+    }
+    let ok = yellow >= 20 && dark >= 4 && colors.count_ones() >= 2;
+    if ok {
+        crate::serial_println!(
+            "[emoji] {} (U+1F600 yellow={} dark={})",
+            GATE_EMOJI_MARKER,
+            yellow,
+            dark
+        );
+    } else {
+        crate::serial_println!(
+            "[emoji] GATE_EMOJI FAILED yellow={} dark={} bits={}",
+            yellow,
+            dark,
+            colors
+        );
+    }
+    ok
 }
 
 #[derive(Clone, Copy)]

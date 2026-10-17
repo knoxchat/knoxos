@@ -125,6 +125,8 @@ struct TxDesc {
 pub struct E1000Device {
     /// MMIO base address (virtual)
     mmio_base: u64,
+    /// Software loopback (no PCI MMIO); TX copies into the RX ring.
+    loopback: bool,
     /// MAC address
     pub mac: [u8; 6],
     /// RX descriptors
@@ -154,6 +156,7 @@ impl E1000Device {
     pub fn new(mmio_base: u64, bus: u8, device: u8, function: u8, irq: u8) -> Self {
         Self {
             mmio_base,
+            loopback: false,
             mac: [0; 6],
             rx_descs: Vec::new(),
             tx_descs: Vec::new(),
@@ -172,6 +175,12 @@ impl E1000Device {
 
     /// Read a 32-bit register
     fn read_reg(&self, offset: u32) -> u32 {
+        if self.loopback {
+            return match offset {
+                REG_STATUS => 0x02, // link up
+                _ => 0,
+            };
+        }
         // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let addr = self.mmio_base + offset as u64;
@@ -181,6 +190,10 @@ impl E1000Device {
 
     /// Write a 32-bit register
     fn write_reg(&self, offset: u32, value: u32) {
+        if self.loopback {
+            return;
+        }
+        let _ = value;
         // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
         unsafe {
             let addr = self.mmio_base + offset as u64;
@@ -391,6 +404,15 @@ impl E1000Device {
         self.tx_tail = ((self.tx_tail as usize + 1) % NUM_TX_DESC) as u16;
         self.write_reg(REG_TDT, self.tx_tail as u32);
 
+        if self.loopback {
+            let rx_idx = self.rx_tail as usize;
+            let copy_len = len.min(BUFFER_SIZE);
+            self.rx_buffers[rx_idx][..copy_len].copy_from_slice(&self.tx_buffers[idx][..copy_len]);
+            self.rx_descs[rx_idx].length = copy_len as u16;
+            self.rx_descs[rx_idx].status = RXD_STAT_DD | RXD_STAT_EOP;
+            self.tx_descs[idx].status = TXD_STAT_DD;
+        }
+
         self.tx_count += 1;
         true
     }
@@ -463,10 +485,55 @@ lazy_static::lazy_static! {
 }
 
 static E1000_AVAILABLE: AtomicBool = AtomicBool::new(false);
+static E1000_LOOPBACK: AtomicBool = AtomicBool::new(false);
 
 /// Check if an E1000 NIC is available
 pub fn is_available() -> bool {
     E1000_AVAILABLE.load(Ordering::Relaxed)
+}
+
+/// Software e1000 loopback is programmed by `Socket::send`.
+pub fn loopback_live() -> bool {
+    E1000_LOOPBACK.load(Ordering::Relaxed)
+}
+
+pub const GATE_E1000_MARKER: &str = "GATE_E1000 send";
+
+fn init_loopback() {
+    let mut dev = E1000Device::new(0, 0, 0, 0, 0);
+    dev.loopback = true;
+    dev.mac = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+    dev.init_rx();
+    dev.init_tx();
+    E1000_AVAILABLE.store(true, Ordering::Relaxed);
+    E1000_LOOPBACK.store(true, Ordering::Relaxed);
+    *E1000_DEV.lock() = Some(dev);
+}
+
+#[cfg(feature = "net")]
+fn socket_send_self_test() -> bool {
+    init_loopback();
+    let mut sock = crate::net::Socket::new(
+        crate::net::AddressFamily::Inet,
+        crate::net::SocketType::Dgram,
+        0,
+    );
+    let payload = b"e1000-gate";
+    if sock.send(payload) != Ok(payload.len()) {
+        serial_println!("[E1000] GATE_E1000 FAILED: Socket::send");
+        return false;
+    }
+    let pkts = poll_frames();
+    if pkts.iter().any(|p| p.as_slice() == payload) {
+        serial_println!(
+            "[E1000] {} (Socket::send TX→RX loopback)",
+            GATE_E1000_MARKER
+        );
+        true
+    } else {
+        serial_println!("[E1000] GATE_E1000 FAILED: rx empty n={}", pkts.len());
+        false
+    }
 }
 
 /// Send a raw Ethernet frame via E1000
@@ -599,9 +666,11 @@ fn find_e1000() -> Option<E1000PciInfo> {
 
 /// Initialize the E1000 NIC driver
 pub fn init() {
-    // Don't initialize if virtio-net is already available
+    // Don't initialize PCI if virtio-net is already available; still prove Socket::send.
+    #[cfg(feature = "net")]
     if crate::virtio_net::is_nic_available() {
-        serial_println!("[E1000] Skipping — virtio-net already active");
+        serial_println!("[E1000] Skipping PCI — virtio-net already active");
+        let _ = socket_send_self_test();
         return;
     }
 
@@ -654,4 +723,6 @@ pub fn init() {
     } else {
         serial_println!("[E1000] No E1000 device found");
     }
+    #[cfg(feature = "net")]
+    let _ = socket_send_self_test();
 }

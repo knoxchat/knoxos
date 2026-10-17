@@ -75,3 +75,85 @@ pub fn gamepad_poll(index: usize) -> Option<GamepadState> {
 pub fn gamepad_count() -> usize {
     GAMEPADS.lock().iter().filter(|g| g.connected).count()
 }
+
+/// Generic 8-byte HID gamepad report:
+/// `[buttons, hat, lx, ly, rx, ry, lt, rt]` with 0x80 stick center.
+pub fn parse_hid_report(report: &[u8]) -> Option<GamepadState> {
+    if report.len() < 8 {
+        return None;
+    }
+    let buttons = report[0] as u32;
+    let lx = (report[2] as i16 - 128) * 256;
+    let ly = (report[3] as i16 - 128) * 256;
+    let rx = (report[4] as i16 - 128) * 256;
+    let ry = (report[5] as i16 - 128) * 256;
+    Some(GamepadState {
+        connected: true,
+        vendor_id: 0,
+        product_id: 0,
+        name: String::from("HID Gamepad"),
+        buttons,
+        left_x: lx,
+        left_y: ly,
+        right_x: rx,
+        right_y: ry,
+        left_trigger: report[6],
+        right_trigger: report[7],
+        dpad: report[1],
+    })
+}
+
+/// Apply a HID report to a connected gamepad slot.
+pub fn gamepad_handle_report(index: usize, report: &[u8]) -> bool {
+    let parsed = match parse_hid_report(report) {
+        Some(p) => p,
+        None => return false,
+    };
+    let mut gamepads = GAMEPADS.lock();
+    if let Some(slot) = gamepads.get_mut(index) {
+        slot.buttons = parsed.buttons;
+        slot.left_x = parsed.left_x;
+        slot.left_y = parsed.left_y;
+        slot.right_x = parsed.right_x;
+        slot.right_y = parsed.right_y;
+        slot.left_trigger = parsed.left_trigger;
+        slot.right_trigger = parsed.right_trigger;
+        slot.dpad = parsed.dpad;
+        true
+    } else {
+        false
+    }
+}
+
+pub const GATE_USB_GAMEPAD_MARKER: &str = "GATE_USB gamepad";
+
+pub fn gamepad_self_test() -> bool {
+    let _ = gamepad_probe(1, 0x045E, 0x028E);
+    // A button + left stick right + LT half-pressed
+    let report = [BTN_A as u8, 8, 255, 128, 128, 128, 128, 0];
+    if !gamepad_handle_report(0, &report) {
+        serial_println!("[USB-Gamepad] GATE_USB FAILED: handle");
+        return false;
+    }
+    let Some(st) = gamepad_poll(0) else {
+        serial_println!("[USB-Gamepad] GATE_USB FAILED: poll");
+        return false;
+    };
+    let ok = st.buttons & BTN_A != 0 && st.left_x > 10000 && st.left_trigger == 128;
+    if ok {
+        serial_println!(
+            "[USB-Gamepad] {} (A + LX={} LT={})",
+            GATE_USB_GAMEPAD_MARKER,
+            st.left_x,
+            st.left_trigger
+        );
+    } else {
+        serial_println!(
+            "[USB-Gamepad] GATE_USB FAILED buttons={:#x} lx={} lt={}",
+            st.buttons,
+            st.left_x,
+            st.left_trigger
+        );
+    }
+    ok
+}

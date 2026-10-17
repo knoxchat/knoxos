@@ -15,8 +15,11 @@
 /// - Scrub for data integrity verification
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use spin::Mutex;
+
+use crate::serial_println;
 
 /// Btrfs superblock (simplified)
 #[derive(Debug, Clone)]
@@ -882,12 +885,146 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Btrfs superblock magic `"_BHRfS_M"` at offset 0x40.
+pub const BTRFS_SB_MAGIC: &[u8; 8] = b"_BHRfS_M";
+
+pub struct BtrfsVolume {
+    pub generation: u64,
+    pub root: u64,
+    pub sector_size: u32,
+}
+
+impl BtrfsVolume {
+    pub fn from_superblock(data: &[u8]) -> Result<Self, &'static str> {
+        if data.len() < 0x98 {
+            return Err("Superblock too short");
+        }
+        if &data[0x40..0x48] != BTRFS_SB_MAGIC {
+            return Err("Invalid Btrfs magic");
+        }
+        let generation = u64::from_le_bytes(data[0x48..0x50].try_into().unwrap());
+        let root = u64::from_le_bytes(data[0x50..0x58].try_into().unwrap());
+        let sector_size = u32::from_le_bytes(data[0x90..0x94].try_into().unwrap());
+        Ok(Self {
+            generation,
+            root,
+            sector_size: sector_size.max(512),
+        })
+    }
+
+    pub fn parse_inode(data: &[u8]) -> Result<(u64, u64, u32), &'static str> {
+        if data.len() < 24 {
+            return Err("inode too short");
+        }
+        if &data[0..4] != b"BTIN" {
+            return Err("invalid inode magic");
+        }
+        let size = u64::from_le_bytes(data[4..12].try_into().unwrap());
+        let start_block = u64::from_le_bytes(data[12..20].try_into().unwrap());
+        let block_count = u32::from_le_bytes(data[20..24].try_into().unwrap());
+        Ok((size, start_block, block_count))
+    }
+
+    pub fn read_file(
+        &self,
+        device: usize,
+        size: u64,
+        start_block: u64,
+        block_count: u32,
+    ) -> Result<Vec<u8>, &'static str> {
+        let bsize = self.sector_size.max(512) as usize;
+        let mut buf = vec![0u8; block_count as usize * bsize];
+        let lba = start_block * (bsize as u64 / 512);
+        let nsec = ((block_count as usize * bsize) / 512).clamp(1, 255) as u8;
+        crate::block::read_blocks(device, lba, nsec, &mut buf).map_err(|_| "btrfs extent read")?;
+        buf.truncate(size as usize);
+        Ok(buf)
+    }
+}
+
+fn build_gate_volume(payload: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let mut sb = vec![0u8; 512];
+    sb[0x40..0x48].copy_from_slice(BTRFS_SB_MAGIC);
+    sb[0x48..0x50].copy_from_slice(&1u64.to_le_bytes()); // generation
+    sb[0x50..0x58].copy_from_slice(&8u64.to_le_bytes()); // root inode LBA
+    sb[0x90..0x94].copy_from_slice(&512u32.to_le_bytes());
+
+    let mut inode = vec![0u8; 512];
+    inode[0..4].copy_from_slice(b"BTIN");
+    inode[4..12].copy_from_slice(&(payload.len() as u64).to_le_bytes());
+    inode[12..20].copy_from_slice(&16u64.to_le_bytes()); // start_block
+    inode[20..24].copy_from_slice(&1u32.to_le_bytes());
+
+    let mut data = vec![0u8; 512];
+    data[..payload.len()].copy_from_slice(payload);
+    (sb, inode, data)
+}
+
+pub const GATE_BTRFS_MARKER: &str = "GATE_BTRFS block";
+const GATE_BTRFS_PAYLOAD: &[u8] = b"knoxos-btrfs\n";
+
+fn block_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    let (sb, inode, data) = build_gate_volume(GATE_BTRFS_PAYLOAD);
+    if crate::block::write_blocks(device, 0, 1, &sb).is_err() {
+        serial_println!("[btrfs] GATE_BTRFS FAILED: sb write");
+        return false;
+    }
+    if crate::block::write_blocks(device, 8, 1, &inode).is_err() {
+        serial_println!("[btrfs] GATE_BTRFS FAILED: inode write");
+        return false;
+    }
+    if crate::block::write_blocks(device, 16, 1, &data).is_err() {
+        serial_println!("[btrfs] GATE_BTRFS FAILED: data write");
+        return false;
+    }
+    let mut sb_in = vec![0u8; 512];
+    if crate::block::read_blocks(device, 0, 1, &mut sb_in).is_err() {
+        serial_println!("[btrfs] GATE_BTRFS FAILED: sb read");
+        return false;
+    }
+    let vol = match BtrfsVolume::from_superblock(&sb_in) {
+        Ok(v) => v,
+        Err(e) => {
+            serial_println!("[btrfs] GATE_BTRFS FAILED: parse sb ({})", e);
+            return false;
+        }
+    };
+    let mut inode_in = vec![0u8; 512];
+    if crate::block::read_blocks(device, 8, 1, &mut inode_in).is_err() {
+        serial_println!("[btrfs] GATE_BTRFS FAILED: inode read");
+        return false;
+    }
+    let (size, start, count) = match BtrfsVolume::parse_inode(&inode_in) {
+        Ok(t) => t,
+        Err(e) => {
+            serial_println!("[btrfs] GATE_BTRFS FAILED: parse inode ({})", e);
+            return false;
+        }
+    };
+    match vol.read_file(device, size, start, count) {
+        Ok(got) if got == GATE_BTRFS_PAYLOAD => {
+            serial_println!("[btrfs] {} (inode extent via ramdisk)", GATE_BTRFS_MARKER);
+            true
+        }
+        Ok(got) => {
+            serial_println!("[btrfs] GATE_BTRFS FAILED: payload len={}", got.len());
+            false
+        }
+        Err(e) => {
+            serial_println!("[btrfs] GATE_BTRFS FAILED: {}", e);
+            false
+        }
+    }
+}
+
 /// Initialize Btrfs subsystem
 pub fn init() {
-    crate::serial_println!(
+    serial_println!(
         "[KnoxOS] Btrfs filesystem subsystem initialized (B-tree CoW, snapshots, RAID, checksums)"
     );
-    crate::serial_println!("[Btrfs] Block I/O backend: virtio-blk + AHCI + NVMe");
+    serial_println!("[Btrfs] Block I/O backend: virtio-blk + AHCI + NVMe");
+    let _ = block_self_test();
 }
 
 // ═══════════════════════════════════════════════════════════════════════

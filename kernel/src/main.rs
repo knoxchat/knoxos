@@ -42,38 +42,39 @@ use knoxos_kernel::ext4;
 use knoxos_kernel::gui;
 #[cfg(feature = "stub-drivers")]
 use knoxos_kernel::{
-    aarch64_boot, ai_suggest, aio, app_store, apparmor, binfmt, btrfs, cgroup_psi,
-    cgroup_v2_controllers, cgroups_v2_advanced, cluster, compiler, coredump, css_engine,
-    deployment, depthcharge, desktop_apps_ext, desktop_ops, dm_crypt, federated, fuzz, gamepad,
-    help_system, hw_bringup, io_sched, io_uring_advanced, js_engine, k8s, kcov, kdb, keyring,
-    kpanic, ktrace, live_usb, man_pages, memory_pool, multimon, netns, nfs, nfs_server, p9fs,
-    partition, pkg_dist, posix_tests, posix2024, power_events, quic, riscv64_boot, rust_std,
-    rwlock, sched_debug, sctp, secure_boot, security_cert, selfhost, tablet_mode, tokenizer,
-    touchscreen, verify, video_codec, voice, vulkan, webcam, xdp, zfs,
+    aarch64_boot, ai_suggest, aio, app_store, apparmor, binfmt, cgroup_psi, cgroup_v2_controllers,
+    cgroups_v2_advanced, cluster, compiler, coredump, css_engine, deployment, depthcharge,
+    desktop_apps_ext, desktop_ops, dm_crypt, federated, fuzz, gamepad, help_system, hw_bringup,
+    io_sched, io_uring_advanced, js_engine, k8s, kcov, kdb, keyring, kpanic, ktrace, live_usb,
+    man_pages, memory_pool, multimon, netns, nfs, nfs_server, p9fs, partition, pkg_dist,
+    posix_tests, posix2024, power_events, quic, riscv64_boot, rust_std, rwlock, sched_debug, sctp,
+    secure_boot, security_cert, selfhost, tablet_mode, tokenizer, touchscreen, verify, video_codec,
+    voice, vulkan, webcam, xdp, zfs,
 };
 use knoxos_kernel::{
     acpi, acpi_tables, ahci, ai, allocator, alsa, apic_timer, arch, audit, battery, bcache,
-    benchmark, block, bluetooth, boot_splash, cabi, capabilities, cgroup2, cgroups,
+    benchmark, block, bluetooth, boot_splash, btrfs, cabi, capabilities, cgroup2, cgroups,
     chromium_sandbox, clock, close_range, cmdline, container, context, cpio, cpufreq, cred, cron,
     crypto, dbus, desktop_apps, devfs, dmesg, dpkg, drm, dynlink, e1000, ebpf, elf, epoll, eventfd,
     exfat, ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
     gettext, glibc_compat, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http,
-    huge_pages, hwtest, i18n, ima, inference_api, init, inotify, input_event, interrupts, io_prio,
-    io_uring, iommu, ipc, journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm, landlock, ldknoxos,
-    libc_funcs, livepatch, llm, media_player, membarrier, memfd, memory, midi, mmap, modules,
-    mount, mount_api, mqueue, multiboot, musl, namespaces, nested_irq, net_production,
-    network_manager, ntfs, ntp, numa, nvme, onnx, oom, ota_update, overlayfs, package_manager,
-    path, pci, pcie_ecam, perf, persist, pgo, pgrp, pidfd, pidns, pipe, posix_ext, posix_timer,
-    power, preempt_rt, println, process, procfs, procfs_extended, procfs_full, ptrace, pty,
-    pulseaudio, quota, random, recovery, release_sign, repo_server, rlimit, rseq, rtc, rtl8139,
-    sched_ext, scheduler, screen_record, seccomp, security, selinux, serial_println,
+    huge_pages, hwtest, i2c, i18n, i915, ima, inference_api, init, inotify, input_event,
+    interrupts, io_prio, io_uring, iommu, ipc, journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm,
+    landlock, ldknoxos, libc_funcs, livepatch, llm, media_player, membarrier, memfd, memory, midi,
+    mmap, modules, mount, mount_api, mqueue, multiboot, musl, namespaces, nested_irq,
+    net_production, network_manager, ntfs, ntp, numa, nvme, onnx, oom, ota_update, overlayfs,
+    package_manager, path, pci, pcie_ecam, perf, persist, pgo, pgrp, pidfd, pidns, pipe, posix_ext,
+    posix_timer, power, preempt_rt, println, process, procfs, procfs_extended, procfs_full, ptrace,
+    pty, pulseaudio, quota, random, recovery, release_sign, repo_server, rlimit, rseq, rtc,
+    rtl8139, sched_ext, scheduler, screen_record, seccomp, security, selinux, serial_println,
     service_manager, session, shell, shell_startup, shm, signalfd, signals, slab, smp,
     socket_activation, soloader, sound, splice, ssp, stack_guard, strace, stress_test, suspend,
     swap, sysctl, sysfs, sysinfo, syslog,
     task::{Task, executor::Executor, keyboard},
-    terminal, thermal, thp, threads, timerfd, tls, tmpfs, tty, uds, usb, usb_hid, userfaultfd,
-    usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input, virtio_tablet,
-    visual_test, vivaldi, vmm, vterm, wayland, wifi, workqueue, xattr, xdg, xfs,
+    terminal, thermal, thp, threads, timerfd, tls, tmpfs, tpm2, tty, uds, usb, usb_hid,
+    userfaultfd, usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input,
+    virtio_tablet, visual_test, vivaldi, vlan, vmm, vterm, wayland, wifi, workqueue, xattr, xdg,
+    xfs,
 };
 #[cfg(feature = "net")]
 use knoxos_kernel::{dhcp, dns, firewall, ipv6, net, netfilter, netint, virtio_net};
@@ -420,6 +421,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     ntfs::init();
     exfat::init();
     xfs::init();
+    btrfs::init();
 
     // Initialize ext4 filesystem (journal + extents)
     #[cfg(feature = "fs-ext4")]
@@ -607,6 +609,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize eBPF subsystem
     ebpf::init();
+    wifi::init();
+    vlan::init();
 
     // ─── Phase 7: Hardware Drivers & Security Hardening ─────────────
     serial_println!("[KnoxOS] Phase 7: Hardware drivers & security hardening...");
@@ -632,6 +636,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize USB (XHCI) host controller
     usb::init();
 
+    // TPM TIS locality + I2C SMBus EEPROM (software path when no hardware)
+    tpm2::init();
+    i2c::init();
+
     // Initialize virtual memory swapping
     swap::init();
 
@@ -640,6 +648,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize DRM (Direct Rendering Manager)
     drm::init();
+    i915::init();
 
     // Initialize Wayland compositor layer
     wayland::init();
@@ -943,11 +952,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     #[cfg(feature = "stub-drivers")]
     #[cfg(feature = "stub-drivers")]
     zfs::init();
-
-    // Initialize Btrfs copy-on-write filesystem (subvolumes, snapshots, RAID)
-    #[cfg(feature = "stub-drivers")]
-    #[cfg(feature = "stub-drivers")]
-    btrfs::init();
 
     // Initialize formal verification subsystem (invariants, contracts, state machines)
     #[cfg(feature = "stub-drivers")]

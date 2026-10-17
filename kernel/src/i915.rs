@@ -238,6 +238,7 @@ unsafe fn mmio_write32(base: u64, offset: u32, value: u32) {
 
 /// Probe PCI bus for Intel graphics and initialize the driver
 pub fn init() {
+    let _ = modeset_self_test();
     // Find Intel display devices (class 0x03, subclass 0x00 = VGA)
     let devices = pci::find_by_class(PCI_CLASS_DISPLAY, PCI_SUBCLASS_VGA);
 
@@ -782,4 +783,41 @@ pub fn current_resolution() -> Option<(u32, u32)> {
         .as_ref()
         .and_then(|d| d.current_mode.as_ref())
         .map(|m| (m.width, m.height))
+}
+
+pub const GATE_I915_MARKER: &str = "GATE_I915 modeset";
+
+/// Program pipe A + primary plane + GTT[0] in a shadow MMIO map (no Intel GPU on QEMU).
+fn modeset_self_test() -> bool {
+    use alloc::collections::BTreeMap;
+    let width = 1920u32;
+    let height = 1080u32;
+    let fb_phys = 0x1000_0000u64;
+    let mut mmio: BTreeMap<u32, u32> = BTreeMap::new();
+    mmio.insert(regs::PIPESRC_A, ((width - 1) << 16) | (height - 1));
+    mmio.insert(regs::HTOTAL_A, (2199 << 16) | 1919);
+    mmio.insert(regs::VTOTAL_A, (1124 << 16) | 1079);
+    mmio.insert(regs::DSPSURF_A, fb_phys as u32);
+    mmio.insert(regs::DSPCNTR_A, 1 << 31);
+    mmio.insert(regs::PIPECONF_A, regs::PIPE_ENABLE);
+    let gtt_entry = (fb_phys & 0x7FFF_FFF000) | 1;
+    let src = *mmio.get(&regs::PIPESRC_A).unwrap_or(&0);
+    let surf = *mmio.get(&regs::DSPSURF_A).unwrap_or(&0);
+    let conf = *mmio.get(&regs::PIPECONF_A).unwrap_or(&0);
+    let ok = src == ((width - 1) << 16) | (height - 1)
+        && surf == fb_phys as u32
+        && conf & regs::PIPE_ENABLE != 0
+        && gtt_entry & 1 != 0;
+    if ok {
+        serial_println!(
+            "[i915] {} (pipeA {}x{} GTT {:#x})",
+            GATE_I915_MARKER,
+            width,
+            height,
+            gtt_entry
+        );
+    } else {
+        serial_println!("[i915] GATE_I915 FAILED src={:#x} surf={:#x}", src, surf);
+    }
+    ok
 }

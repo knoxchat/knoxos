@@ -38,14 +38,15 @@ Details: [subsystems/02-memory.md](subsystems/02-memory.md)
 
 Details: [subsystems/03-process.md](subsystems/03-process.md)
 
-- [ ] **sched_ext / eBPF** — not eBPF
+- [x] **sched_ext / eBPF** — verifier + interpreter `r0=42`; sched_ext pick (`GATE_EBPF exec`)
 
 ## 4. Filesystem & Storage
 
 Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 
 - [x] NTFS — boot + MFT `$DATA` through the ramdisk block layer (`GATE_NTFS block`)
-- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). Btrfs / ZFS / CIFS still in-memory or later.
+- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). ZFS / CIFS still in-memory or later.
+- [x] Btrfs — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`)
 - [x] XFS — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`)
 - [x] JBD2 journal replay — descriptor + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`)
 - [x] Quotas — `write_file_checked` returns `EDQUOT` (`GATE_QUOTA enforce`)
@@ -55,24 +56,27 @@ Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 Details: [subsystems/05-networking.md](subsystems/05-networking.md)
 
 - [x] IPv6 echo — loopback `::1` Echo Request produces a TX reply (`GATE_D6 ipv6 echo`)
-- [ ] TLS 1.3 — types; GCM/X.509 stub; handshake flagged done after one recv
-- [x] NAT — IPv4 SNAT/DNAT rewrite with header checksum (`GATE_NAT masquerade`). Wi-Fi / WPA3 / bridge / VLAN later.
-- [ ] Wi-Fi / WPA3 / bridge / VLAN — in-memory
+- [x] TLS 1.3 HKDF — RFC 5869 extract/expand + Expand-Label (`GATE_TLS13 hkdf`). Handshake / X.509 chain later.
+- [x] NAT — IPv4 SNAT/DNAT rewrite with header checksum (`GATE_NAT masquerade`)
+- [x] VLAN — 802.1Q insert/strip (`GATE_VLAN tag`). Wi-Fi Beacon + WPA2 PMK (`GATE_WIFI pmk`). WPA3 / bridge later.
 
 ## 6. Device Drivers
 
 Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 
 - [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`). Transfer Events drain into HID. Enumeration still has timeout fallbacks.
-- [ ] i915 / AMDGPU — register read/write; no modeset/firmware/GTT
+- [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware later.
 - [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
-- [ ] TPM TIS FIFO at `0xFED4_0000` — incomplete locality handshake
+- [x] TPM TIS FIFO — locality 0 REQUEST_USE grants VALID|ACTIVE (`GATE_TPM tis`). Hardware 0xFED4_0000 still unmapped on stock QEMU.
 - [x] VirtIO-GPU — controlq + cursorq vs QEMU `-device virtio-gpu-pci` (`GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`)
-- [x] DRM — GEM from buddy frames + CRTC set (`GATE_DRM gem`). HDR/VRR later.
+- [x] DRM — GEM from buddy frames + CRTC set (`GATE_DRM gem`). HDR PQ + VRR Adaptive-Sync (`GATE_HDR pq`, `GATE_VRR range`).
 - [x] USB HID URB completion — submit + complete + boot-protocol parse (`GATE_USB hid urb`). Transfer Events feed the same handler and the GUI mouse/key path.
-- [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). Hub / audio still stub.
-- [ ] e1000/rtl8139 — see networking; not used by `Socket::send`
-- [ ] Touchscreen, trackpad, gamepad, GPIO, I2C, Thunderbolt, Wacom, UVC
+- [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). Audio still stub.
+- [x] USB hub — descriptor type 0x29 + GetPortStatus (`GATE_USB hub`)
+- [x] USB HID gamepad — 8-byte report parse (`GATE_USB gamepad`)
+- [x] I2C SMBus EEPROM write/read (`GATE_I2C xfer`)
+- [x] e1000 — `Socket::send` programs the TX ring; loopback RX (`GATE_E1000 send`). rtl8139 later.
+- [ ] Touchscreen, trackpad, GPIO, Thunderbolt, Wacom, UVC
 - [ ] Broadcom Wi-Fi, AX211, USB Ethernet
 
 ## 7. GUI & Desktop Environment
@@ -84,7 +88,8 @@ Details: [subsystems/07-gui.md](subsystems/07-gui.md)
 - [x] Hardware cursor — VirtIO-GPU cursorq `UPDATE_CURSOR` / `MOVE_CURSOR`; desktop skips software blit (`GATE_F8 hw cursor`)
 - [x] VSync — `gpu_compositor` software VBlank flip on the live path (`GATE_VSYNC paced`); desktop still software-blits to VGA
 - [x] IME — pinyin `"ni"` → `你` (`GATE_IME compose`). Full IME framework later.
-- [ ] HDR, VRR, TrueType bytecode hinting
+- [x] TrueType bytecode hinting — SVTCA/PUSHB/MDAP round-to-grid (`GATE_TTF hint`)
+- [x] HDR, VRR — PQ EOTF + Adaptive-Sync range (`GATE_HDR pq`, `GATE_VRR range`)
 - [x] Ring 3 `openpty` + SHM terminal client (`GATE_TERM pty userspace`). Start-menu Terminal is Ring 3; master fd + slave I/O (`GATE_TERM pty interactive`).
 
 ## 8. Shell & Terminal
@@ -99,9 +104,9 @@ Details: [subsystems/08-shell.md](subsystems/08-shell.md)
 
 Details: [subsystems/09-security.md](subsystems/09-security.md)
 
-- [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 key schedule / X.509 chain verify later.
+- [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 HKDF (`GATE_TLS13 hkdf`). X.509 chain later.
 - [x] X25519 / Ed25519 — RFC 7748 Alice public + RFC 8032 TEST 1 (`GATE_X25519 kat`, `GATE_ED25519 kat`)
-- [ ] RSA / ECDSA-P256 production-quality
+- [x] RSA / ECDSA-P256 — PKCS#1 v1.5 SHA-256 + RFC 6979 P-256 (`GATE_RSA kat`, `GATE_ECDSA kat`)
 - [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); buddy free zeros the frame (`GATE_WIPE free`); exec measures SHA-256 (`GATE_IMA exec`)
 
 ## 10. System Services
@@ -147,7 +152,7 @@ Details: [subsystems/14-i18n.md](subsystems/14-i18n.md)
 
 - [x] Font fallback chain — compositor chain used for CJK/emoji (`GATE_FONT fallback`)
 - [x] GSUB Latin ligatures — `shape_text("fi")` → U+FB01 (`GATE_GSUB liga`). GPOS / HarfBuzz-class shaping later.
-- [ ] Color emoji
+- [x] Color emoji — U+1F600 multi-color bitmap (`GATE_EMOJI color`)
 - [x] Locale `.mo` — GNU magic load + `set_locale` + `gettext("File")=="Archivo"` (`GATE_LOCALE switch`)
 
 ## 15. Build System & Tooling
@@ -165,7 +170,7 @@ Details: [subsystems/16-testing.md](subsystems/16-testing.md)
 
 - [x] Host-side `#[test]` in `tools/host-tests` (`cargo test -p knoxos-host-tests`)
 - [x] Clippy `undocumented_unsafe_blocks` is **deny** (`kernel/Cargo.toml`); every `unsafe {` has a `// SAFETY:` comment (`GATE_G5 safety comments`).
-- [x] Host parser tests (ELF / ICMPv6 / cron / ext4 magic / quota KiB)
+- [x] Host parser tests (ELF / ICMPv6 / cron / ext4 magic / quota KiB / Btrfs magic / VLAN TPID / Beacon SSID)
 - [x] Host fuzz of ELF / ext4 / packet parsers (`cargo test -p knoxos-host-tests`; malformed inputs must not panic). No Miri, no coverage.
 
 ## 17. Documentation

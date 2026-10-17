@@ -70,7 +70,7 @@ Kernel threads can switch RIP. Gate B2 enters Ring 3 for a one-shot hello. Gate 
 - [x] **`timer_gettime`** — Ring 3 `timer_create`/`timer_settime` then remaining nsec (`GATE_BE3 timer_gettime`).
 - [x] **`clone3`** — Ring 3 zeroed `clone_args` forks; parent `wait4`s (`GATE_BL3 clone3`).
 - [x] **futex wait/wake** — Ring 3 `FUTEX_WAIT` parks; `FUTEX_WAKE` resumes (`GATE_M3 futex`).
-- [ ] **sched_ext / eBPF** — not eBPF
+- [x] **sched_ext / eBPF** — verifier + interpreter `r0=42`; sched_ext pick (`GATE_EBPF exec`)
 
 ### Perfect-OS next steps (this is the critical path)
 1. ~~Save/restore full `iretq` frame + `fxsave`/`fxrstor` in `context.rs`.~~ (kernel threads done)

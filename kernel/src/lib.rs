@@ -355,7 +355,6 @@ pub mod security_cert;
 // Phase 17+ modules — Formal verification, POSIX.1-2024, enterprise storage, app store
 #[cfg(feature = "stub-drivers")]
 pub mod app_store;
-#[cfg(feature = "stub-drivers")]
 pub mod btrfs;
 #[cfg(feature = "stub-drivers")]
 pub mod posix2024;
@@ -547,7 +546,6 @@ pub mod ntfs;
 pub mod test_images;
 #[cfg(feature = "stub-drivers")]
 pub mod traffic_shaping;
-#[cfg(feature = "stub-drivers")]
 pub mod vlan;
 #[cfg(feature = "stub-drivers")]
 pub mod vpn;
@@ -571,7 +569,6 @@ pub mod floppy;
 pub mod gpio;
 #[cfg(feature = "stub-drivers")]
 pub mod hdmi_cec;
-#[cfg(feature = "stub-drivers")]
 pub mod i2c;
 #[cfg(feature = "stub-drivers")]
 pub mod nouveau;

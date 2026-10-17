@@ -1208,38 +1208,184 @@ pub struct RsaKeyPair {
     pub private_key: RsaPrivateKey,
 }
 
-/// Big-number modular exponentiation: base^exp mod modulus
-/// Using square-and-multiply method with big integers stored as byte arrays (big-endian)
-fn mod_pow_bytes(base: &[u8], exp: &[u8], modulus: &[u8]) -> Vec<u8> {
-    // Simple big-integer modular exponentiation
-    // For production, use Montgomery multiplication
-    let mod_val = bytes_to_u128(modulus);
-    if mod_val == 0 {
-        return alloc::vec![0];
+/// Little-endian u64 limbs. Limb 0 is the least-significant 64 bits.
+fn bn_normalize(mut a: Vec<u64>) -> Vec<u64> {
+    while a.len() > 1 && a.last() == Some(&0) {
+        a.pop();
     }
-    let base_val = bytes_to_u128(base) % mod_val;
-    let exp_val = bytes_to_u128(exp);
-
-    let mut result: u128 = 1;
-    let mut b = base_val;
-    let mut e = exp_val;
-
-    while e > 0 {
-        if e & 1 == 1 {
-            result = mul_mod(result, b, mod_val);
-        }
-        b = mul_mod(b, b, mod_val);
-        e >>= 1;
+    if a.is_empty() {
+        a.push(0);
     }
-    u128_to_bytes(result)
+    a
 }
 
-fn bytes_to_u128(bytes: &[u8]) -> u128 {
-    let mut val: u128 = 0;
-    for &b in bytes.iter().take(16) {
-        val = (val << 8) | b as u128;
+fn bn_from_be(bytes: &[u8]) -> Vec<u64> {
+    let mut limbs = Vec::new();
+    let mut i = bytes.len();
+    while i > 0 {
+        let start = i.saturating_sub(8);
+        let mut v = 0u64;
+        for &b in &bytes[start..i] {
+            v = (v << 8) | b as u64;
+        }
+        limbs.push(v);
+        i = start;
     }
-    val
+    bn_normalize(limbs)
+}
+
+fn bn_to_be(n: &[u64], out_len: usize) -> Vec<u8> {
+    let mut out = alloc::vec![0u8; out_len];
+    let mut pos = out_len;
+    for &limb in n {
+        for j in 0..8 {
+            if pos == 0 {
+                break;
+            }
+            pos -= 1;
+            out[pos] = (limb >> (8 * j)) as u8;
+        }
+    }
+    out
+}
+
+fn bn_cmp(a: &[u64], b: &[u64]) -> core::cmp::Ordering {
+    let na = a.iter().rposition(|&x| x != 0).map(|i| i + 1).unwrap_or(0);
+    let nb = b.iter().rposition(|&x| x != 0).map(|i| i + 1).unwrap_or(0);
+    if na != nb {
+        return na.cmp(&nb);
+    }
+    for i in (0..na).rev() {
+        if a[i] != b[i] {
+            return a[i].cmp(&b[i]);
+        }
+    }
+    core::cmp::Ordering::Equal
+}
+
+fn bn_bitlen(a: &[u64]) -> usize {
+    match a.iter().rposition(|&x| x != 0) {
+        None => 0,
+        Some(i) => i * 64 + (64 - a[i].leading_zeros() as usize),
+    }
+}
+
+fn bn_shl(a: &[u64], bits: usize) -> Vec<u64> {
+    if bits == 0 {
+        return bn_normalize(a.to_vec());
+    }
+    let limb_shift = bits / 64;
+    let b = bits % 64;
+    let mut out = alloc::vec![0u64; a.len() + limb_shift + 1];
+    if b == 0 {
+        out[limb_shift..(a.len() + limb_shift)].copy_from_slice(a);
+    } else {
+        let mut carry = 0u64;
+        for i in 0..a.len() {
+            out[i + limb_shift] = (a[i] << b) | carry;
+            carry = a[i] >> (64 - b);
+        }
+        out[a.len() + limb_shift] = carry;
+    }
+    bn_normalize(out)
+}
+
+fn bn_add_u64(a: &[u64], x: u64) -> Vec<u64> {
+    let mut out = a.to_vec();
+    let mut carry = x as u128;
+    let mut i = 0;
+    while carry > 0 {
+        if i == out.len() {
+            out.push(0);
+        }
+        carry += out[i] as u128;
+        out[i] = carry as u64;
+        carry >>= 64;
+        i += 1;
+    }
+    bn_normalize(out)
+}
+
+fn bn_sub(a: &[u64], b: &[u64]) -> Vec<u64> {
+    let mut out = alloc::vec![0u64; a.len()];
+    let mut borrow = 0u64;
+    for i in 0..a.len() {
+        let bv = if i < b.len() { b[i] } else { 0 };
+        let (t1, br1) = a[i].overflowing_sub(bv);
+        let (t2, br2) = t1.overflowing_sub(borrow);
+        out[i] = t2;
+        borrow = u64::from(br1 || br2);
+    }
+    bn_normalize(out)
+}
+
+fn bn_mul(a: &[u64], b: &[u64]) -> Vec<u64> {
+    let mut out = alloc::vec![0u64; a.len() + b.len() + 1];
+    for i in 0..a.len() {
+        let mut carry = 0u128;
+        for j in 0..b.len() {
+            carry += out[i + j] as u128 + (a[i] as u128) * (b[j] as u128);
+            out[i + j] = carry as u64;
+            carry >>= 64;
+        }
+        let mut k = i + b.len();
+        while carry > 0 {
+            if k == out.len() {
+                out.push(0);
+            }
+            carry += out[k] as u128;
+            out[k] = carry as u64;
+            carry >>= 64;
+            k += 1;
+        }
+    }
+    bn_normalize(out)
+}
+
+fn bn_mod(a: &[u64], m: &[u64]) -> Vec<u64> {
+    if m.len() == 1 && m[0] == 0 {
+        return alloc::vec![0];
+    }
+    let bits = bn_bitlen(a);
+    let mut r = alloc::vec![0u64];
+    for i in (0..bits).rev() {
+        r = bn_shl(&r, 1);
+        let limb = i / 64;
+        let bit = i % 64;
+        if a.get(limb).copied().unwrap_or(0) & (1u64 << bit) != 0 {
+            r = bn_add_u64(&r, 1);
+        }
+        if bn_cmp(&r, m) != core::cmp::Ordering::Less {
+            r = bn_sub(&r, m);
+        }
+    }
+    bn_normalize(r)
+}
+
+fn bn_modexp(base: &[u64], exp: &[u64], modulus: &[u64]) -> Vec<u64> {
+    let mut result = alloc::vec![1u64];
+    let mut b = bn_mod(base, modulus);
+    let bits = bn_bitlen(exp);
+    for i in 0..bits {
+        let limb = i / 64;
+        let bit = i % 64;
+        if exp.get(limb).copied().unwrap_or(0) & (1u64 << bit) != 0 {
+            result = bn_mod(&bn_mul(&result, &b), modulus);
+        }
+        b = bn_mod(&bn_mul(&b, &b), modulus);
+    }
+    result
+}
+
+/// Big-number modular exponentiation: base^exp mod modulus (big-endian bytes).
+fn mod_pow_bytes(base: &[u8], exp: &[u8], modulus: &[u8]) -> Vec<u8> {
+    let m = bn_from_be(modulus);
+    if m.len() == 1 && m[0] == 0 {
+        return alloc::vec![0];
+    }
+    let r = bn_modexp(&bn_from_be(base), &bn_from_be(exp), &m);
+    let k = modulus.len().max(bn_bitlen(&m).div_ceil(8)).max(1);
+    bn_to_be(&r, k)
 }
 
 fn u128_to_bytes(val: u128) -> Vec<u8> {
@@ -1424,21 +1570,68 @@ pub fn rsa_decrypt(ciphertext: &[u8], key: &RsaPrivateKey) -> Vec<u8> {
     mod_pow_bytes(ciphertext, &key.d, &key.public.n)
 }
 
-/// RSA sign (hash then private-key encrypt)
+/// SHA-256 DigestInfo prefix (RFC 8017, EMSA-PKCS1-v1_5).
+const PKCS1_SHA256_DIGESTINFO: [u8; 19] = [
+    0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+    0x00, 0x04, 0x20,
+];
+
+/// RSA PKCS#1 v1.5 sign (SHA-256 DigestInfo).
 pub fn rsa_sign(message: &[u8], key: &RsaPrivateKey) -> Vec<u8> {
     let hash = sha256(message);
-    mod_pow_bytes(&hash, &key.d, &key.public.n)
+    let k = key.public.n.len().max(1);
+    if k < PKCS1_SHA256_DIGESTINFO.len() + 32 + 11 {
+        return Vec::new();
+    }
+    let mut em = alloc::vec![0xFFu8; k];
+    em[0] = 0x00;
+    em[1] = 0x01;
+    let t_off = k - PKCS1_SHA256_DIGESTINFO.len() - 32;
+    em[t_off - 1] = 0x00;
+    em[t_off..t_off + PKCS1_SHA256_DIGESTINFO.len()].copy_from_slice(&PKCS1_SHA256_DIGESTINFO);
+    em[t_off + PKCS1_SHA256_DIGESTINFO.len()..].copy_from_slice(&hash);
+    mod_pow_bytes(&em, &key.d, &key.public.n)
 }
 
-/// RSA verify signature
+/// RSA PKCS#1 v1.5 verify (SHA-256 DigestInfo).
 pub fn rsa_verify(message: &[u8], signature: &[u8], key: &RsaPublicKey) -> bool {
     let hash = sha256(message);
-    let decrypted = rsa_encrypt(signature, key); // "encrypt" with public key = verify
-    decrypted == hash
+    let k = key.n.len().max(1);
+    if signature.is_empty() || k < PKCS1_SHA256_DIGESTINFO.len() + 32 + 11 {
+        return false;
+    }
+    let em = {
+        let mut raw = rsa_encrypt(signature, key);
+        if raw.len() < k {
+            let mut pad = alloc::vec![0u8; k - raw.len()];
+            pad.extend_from_slice(&raw);
+            raw = pad;
+        } else if raw.len() > k {
+            raw = raw[raw.len() - k..].to_vec();
+        }
+        raw
+    };
+    if em.len() != k || em[0] != 0x00 || em[1] != 0x01 {
+        return false;
+    }
+    let mut i = 2;
+    while i < k && em[i] == 0xFF {
+        i += 1;
+    }
+    if i < 10 || i >= k || em[i] != 0x00 {
+        return false;
+    }
+    i += 1;
+    let t_len = PKCS1_SHA256_DIGESTINFO.len() + 32;
+    if k - i != t_len {
+        return false;
+    }
+    em[i..i + PKCS1_SHA256_DIGESTINFO.len()] == PKCS1_SHA256_DIGESTINFO
+        && em[i + PKCS1_SHA256_DIGESTINFO.len()..] == hash
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// ECDSA P-256 KEY GENERATION (STUB — uses simplified curve)
+// ECDSA P-256 (NIST SECP256R1)
 // ═══════════════════════════════════════════════════════════════════════
 
 /// ECDSA P-256 public key
@@ -1455,26 +1648,286 @@ pub struct EcdsaPrivateKey {
     pub public: EcdsaPublicKey,
 }
 
-/// Generate an ECDSA P-256 key pair
+type Fp = [u64; 4];
+
+/// p = 2^256 - 2^224 + 2^192 + 2^96 - 1 (little-endian limbs)
+const P256_P: Fp = [
+    0xFFFFFFFFFFFFFFFF,
+    0x00000000FFFFFFFF,
+    0x0000000000000000,
+    0xFFFFFFFF00000001,
+];
+/// n = order of G
+const P256_N: Fp = [
+    0xF3B9CAC2FC632551,
+    0xBCE6FAADA7179E84,
+    0xFFFFFFFFFFFFFFFF,
+    0xFFFFFFFF00000000,
+];
+const P256_GX: Fp = [
+    0xF4A13945D898C296,
+    0x77037D812DEB33A0,
+    0xF8BCE6E563A440F2,
+    0x6B17D1F2E12C4247,
+];
+const P256_GY: Fp = [
+    0xCBB6406837BF51F5,
+    0x2BCE33576B315ECE,
+    0x8EE7EB4A7C0F9E16,
+    0x4FE342E2FE1A7F9B,
+];
+
+fn fp_from_bn(a: &[u64]) -> Fp {
+    let mut o = [0u64; 4];
+    let n = a.len().min(4);
+    o[..n].copy_from_slice(&a[..n]);
+    o
+}
+
+fn fp_from_be(b: &[u8; 32]) -> Fp {
+    fp_from_bn(&bn_from_be(b))
+}
+
+fn fp_to_be(a: &Fp) -> [u8; 32] {
+    let v = bn_to_be(a, 32);
+    let mut o = [0u8; 32];
+    o.copy_from_slice(&v);
+    o
+}
+
+fn fp_is_zero(a: &Fp) -> bool {
+    a.iter().all(|&x| x == 0)
+}
+
+fn fp_eq(a: &Fp, b: &Fp) -> bool {
+    a == b
+}
+
+fn fp_add(a: &Fp, b: &Fp) -> Fp {
+    fp_from_bn(&bn_mod(&bn_add_limbs(a, b), &P256_P))
+}
+
+fn bn_add_limbs(a: &[u64], b: &[u64]) -> Vec<u64> {
+    let n = a.len().max(b.len());
+    let mut out = alloc::vec![0u64; n + 1];
+    let mut carry = 0u128;
+    for i in 0..n {
+        carry += a.get(i).copied().unwrap_or(0) as u128 + b.get(i).copied().unwrap_or(0) as u128;
+        out[i] = carry as u64;
+        carry >>= 64;
+    }
+    out[n] = carry as u64;
+    bn_normalize(out)
+}
+
+fn fp_sub(a: &Fp, b: &Fp) -> Fp {
+    if bn_cmp(a, b) == core::cmp::Ordering::Less {
+        fp_from_bn(&bn_sub(&bn_add_limbs(a, &P256_P), b))
+    } else {
+        fp_from_bn(&bn_sub(a, b))
+    }
+}
+
+fn fp_mul(a: &Fp, b: &Fp) -> Fp {
+    fp_from_bn(&bn_mod(&bn_mul(a, b), &P256_P))
+}
+
+fn fp_dbl(a: &Fp) -> Fp {
+    fp_add(a, a)
+}
+
+fn fp_inv(a: &Fp) -> Fp {
+    // a^{p-2} mod p
+    let mut e = P256_P;
+    // p-2
+    let p2 = bn_sub(&e, &[2]);
+    fp_from_bn(&bn_modexp(a, &p2, &P256_P))
+}
+
+fn fn_mod(a: &[u64]) -> Fp {
+    fp_from_bn(&bn_mod(a, &P256_N))
+}
+
+fn fn_inv(a: &Fp) -> Fp {
+    let n2 = bn_sub(&P256_N, &[2]);
+    fp_from_bn(&bn_modexp(a, &n2, &P256_N))
+}
+
+#[derive(Clone, Copy)]
+struct P256Pt {
+    x: Fp,
+    y: Fp,
+    z: Fp,
+}
+
+fn p256_inf() -> P256Pt {
+    P256Pt {
+        x: [1, 0, 0, 0],
+        y: [1, 0, 0, 0],
+        z: [0, 0, 0, 0],
+    }
+}
+
+fn p256_is_inf(p: &P256Pt) -> bool {
+    fp_is_zero(&p.z)
+}
+
+fn p256_affine(p: &P256Pt) -> Option<(Fp, Fp)> {
+    if p256_is_inf(p) {
+        return None;
+    }
+    let iz = fp_inv(&p.z);
+    let iz2 = fp_mul(&iz, &iz);
+    let iz3 = fp_mul(&iz2, &iz);
+    Some((fp_mul(&p.x, &iz2), fp_mul(&p.y, &iz3)))
+}
+
+fn p256_double(p: &P256Pt) -> P256Pt {
+    if p256_is_inf(p) || fp_is_zero(&p.y) {
+        return p256_inf();
+    }
+    let xx = fp_mul(&p.x, &p.x);
+    let yy = fp_mul(&p.y, &p.y);
+    let zz = fp_mul(&p.z, &p.z);
+    let yyyy = fp_mul(&yy, &yy);
+    let s = fp_dbl(&fp_sub(
+        &fp_sub(&fp_mul(&fp_add(&p.x, &yy), &fp_add(&p.x, &yy)), &xx),
+        &yyyy,
+    ));
+    // a = -3: M = 3*(XX - ZZ^2)
+    let m = {
+        let t = fp_sub(&xx, &fp_mul(&zz, &zz));
+        fp_add(&fp_dbl(&t), &t)
+    };
+    let t = fp_sub(&fp_mul(&m, &m), &fp_dbl(&s));
+    let x3 = t;
+    let eight_yyyy = {
+        let mut e = yyyy;
+        for _ in 0..3 {
+            e = fp_dbl(&e);
+        }
+        e
+    };
+    let y3 = fp_sub(&fp_mul(&m, &fp_sub(&s, &t)), &eight_yyyy);
+    let z3 = fp_sub(
+        &fp_sub(&fp_mul(&fp_add(&p.y, &p.z), &fp_add(&p.y, &p.z)), &yy),
+        &zz,
+    );
+    P256Pt {
+        x: x3,
+        y: y3,
+        z: z3,
+    }
+}
+
+fn p256_add(p: &P256Pt, q: &P256Pt) -> P256Pt {
+    if p256_is_inf(p) {
+        return *q;
+    }
+    if p256_is_inf(q) {
+        return *p;
+    }
+    let z1z1 = fp_mul(&p.z, &p.z);
+    let z2z2 = fp_mul(&q.z, &q.z);
+    let u1 = fp_mul(&p.x, &z2z2);
+    let u2 = fp_mul(&q.x, &z1z1);
+    let s1 = fp_mul(&p.y, &fp_mul(&q.z, &z2z2));
+    let s2 = fp_mul(&q.y, &fp_mul(&p.z, &z1z1));
+    if fp_eq(&u1, &u2) {
+        if fp_eq(&s1, &s2) {
+            return p256_double(p);
+        }
+        return p256_inf();
+    }
+    let h = fp_sub(&u2, &u1);
+    let hh = fp_mul(&h, &h);
+    let hhh = fp_mul(&h, &hh);
+    let r = fp_sub(&s2, &s1);
+    let v = fp_mul(&u1, &hh);
+    let x3 = fp_sub(&fp_sub(&fp_mul(&r, &r), &hhh), &fp_dbl(&v));
+    let y3 = fp_sub(&fp_mul(&r, &fp_sub(&v, &x3)), &fp_mul(&s1, &hhh));
+    let z3 = fp_mul(&fp_mul(&p.z, &q.z), &h);
+    P256Pt {
+        x: x3,
+        y: y3,
+        z: z3,
+    }
+}
+
+fn p256_from_affine(x: Fp, y: Fp) -> P256Pt {
+    P256Pt {
+        x,
+        y,
+        z: [1, 0, 0, 0],
+    }
+}
+
+fn p256_mul(k: &Fp, p: &P256Pt) -> P256Pt {
+    let mut r = p256_inf();
+    let bits = bn_bitlen(k);
+    for i in (0..bits).rev() {
+        r = p256_double(&r);
+        let limb = i / 64;
+        let bit = i % 64;
+        if k[limb] & (1u64 << bit) != 0 {
+            r = p256_add(&r, p);
+        }
+    }
+    r
+}
+
+fn p256_mul_g(d: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let k = fn_mod(&bn_from_be(d));
+    let g = p256_from_affine(P256_GX, P256_GY);
+    let p = p256_mul(&k, &g);
+    match p256_affine(&p) {
+        Some((x, y)) => (fp_to_be(&x), fp_to_be(&y)),
+        None => ([0u8; 32], [0u8; 32]),
+    }
+}
+
+/// Generate an ECDSA P-256 key pair (Q = d·G on secp256r1).
 pub fn ecdsa_generate_keypair() -> EcdsaPrivateKey {
     let mut d = [0u8; 32];
     crate::random::fill_random(&mut d);
-    // Ensure d is in valid range [1, n-1] for P-256
-    d[0] &= 0x7F; // Clear high bit to keep < n
-
-    // Compute public key Q = d * G (simplified)
-    let mut x = [0u8; 32];
-    let mut y = [0u8; 32];
-    // In a real implementation: perform EC point multiplication on P-256 curve
-    // For now, derive from d using hash
-    let hash = sha256(&d);
-    x.copy_from_slice(&hash);
-    let hash2 = sha256(&x);
-    y.copy_from_slice(&hash2);
-
+    let reduced = bn_to_be(&bn_mod(&bn_from_be(&d), &P256_N), 32);
+    d.copy_from_slice(&reduced);
+    if d.iter().all(|&b| b == 0) {
+        d[31] = 1;
+    }
+    let (x, y) = p256_mul_g(&d);
     EcdsaPrivateKey {
         d,
         public: EcdsaPublicKey { x, y },
+    }
+}
+
+/// ECDSA-SHA256 verify on P-256.
+pub fn ecdsa_p256_verify(pk: &EcdsaPublicKey, msg: &[u8], r: &[u8; 32], s: &[u8; 32]) -> bool {
+    let r_bn = bn_from_be(r);
+    let s_bn = bn_from_be(s);
+    if bn_cmp(&r_bn, &[1]) == core::cmp::Ordering::Less
+        || bn_cmp(&s_bn, &[1]) == core::cmp::Ordering::Less
+        || bn_cmp(&r_bn, &P256_N) != core::cmp::Ordering::Less
+        || bn_cmp(&s_bn, &P256_N) != core::cmp::Ordering::Less
+    {
+        return false;
+    }
+    let z = fp_from_be(&sha256(msg));
+    let s_fp = fp_from_bn(&s_bn);
+    let r_fp = fp_from_bn(&r_bn);
+    let w = fn_inv(&s_fp);
+    let u1 = fn_mod(&bn_mul(&z, &w));
+    let u2 = fn_mod(&bn_mul(&r_fp, &w));
+    let g = p256_from_affine(P256_GX, P256_GY);
+    let q = p256_from_affine(fp_from_be(&pk.x), fp_from_be(&pk.y));
+    let sum = p256_add(&p256_mul(&u1, &g), &p256_mul(&u2, &q));
+    match p256_affine(&sum) {
+        Some((x, _)) => {
+            let rx = fn_mod(&x);
+            fp_eq(&rx, &r_fp)
+        }
+        None => false,
     }
 }
 
@@ -2288,5 +2741,86 @@ fn curve_self_test() -> bool {
             &sig[..4]
         );
     }
-    x_ok && e_ok
+    let rsa_ok = rsa_self_test();
+    let ecdsa_ok = ecdsa_self_test();
+    x_ok && e_ok && rsa_ok && ecdsa_ok
+}
+
+pub const GATE_RSA_MARKER: &str = "GATE_RSA kat";
+pub const GATE_ECDSA_MARKER: &str = "GATE_ECDSA kat";
+
+fn rsa_self_test() -> bool {
+    // 512-bit RSA PKCS#1 v1.5 SHA-256 of "KnoxOS"
+    let n = [
+        0xb4, 0x33, 0x49, 0x39, 0x25, 0x77, 0x3d, 0x35, 0xf0, 0xfb, 0x6e, 0x3c, 0xbc, 0xf6, 0x1a,
+        0x2a, 0xfa, 0x7a, 0x53, 0x22, 0x3c, 0x30, 0x5d, 0x6a, 0x66, 0x71, 0x4b, 0xec, 0xd3, 0x6f,
+        0xab, 0x9e, 0x93, 0x09, 0x08, 0xf6, 0xf5, 0x43, 0xa0, 0xe9, 0xb8, 0x10, 0x61, 0xf1, 0x2f,
+        0xc4, 0xde, 0x3f, 0xb7, 0x9f, 0x21, 0x58, 0xbb, 0x4c, 0x4f, 0xcc, 0x22, 0x3b, 0x8f, 0x84,
+        0xda, 0x7a, 0x8b, 0xf9,
+    ];
+    let sig = [
+        0x7d, 0x40, 0xd1, 0xa9, 0x40, 0x33, 0x80, 0x7f, 0x6c, 0x7a, 0xaa, 0x1c, 0x8f, 0xbc, 0x03,
+        0xf3, 0xaa, 0x3d, 0x48, 0xe4, 0x78, 0x41, 0x4c, 0x66, 0x91, 0xe6, 0x95, 0x85, 0xfe, 0x39,
+        0x29, 0xe7, 0xbd, 0x19, 0xaf, 0x37, 0x14, 0xe0, 0x8f, 0x23, 0x36, 0x95, 0xe9, 0x38, 0xbe,
+        0x5c, 0xfe, 0x2a, 0x8e, 0xa1, 0xdf, 0x66, 0x3a, 0x7f, 0xf6, 0xc2, 0x40, 0x91, 0x77, 0x84,
+        0x36, 0x31, 0x63, 0x50,
+    ];
+    let key = RsaPublicKey {
+        n: n.to_vec(),
+        e: 65537,
+        bits: 512,
+    };
+    let ok = rsa_verify(b"KnoxOS", &sig, &key) && !rsa_verify(b"knoxos", &sig, &key);
+    if ok {
+        serial_println!("[CRYPTO] {} (PKCS#1 v1.5 SHA-256)", GATE_RSA_MARKER);
+    } else {
+        serial_println!("[CRYPTO] GATE_RSA FAILED");
+    }
+    ok
+}
+
+fn ecdsa_self_test() -> bool {
+    // RFC 6979 A.2.5: P-256 SHA-256, message = "sample"
+    let d = [
+        0xC9, 0xAF, 0xA9, 0xD8, 0x45, 0xBA, 0x75, 0x16, 0x6B, 0x5C, 0x21, 0x57, 0x67, 0xB1, 0xD6,
+        0x93, 0x4E, 0x50, 0xC3, 0xDB, 0x36, 0xE8, 0x9B, 0x12, 0x7B, 0x8A, 0x62, 0x2B, 0x12, 0x0F,
+        0x67, 0x21,
+    ];
+    let ux = [
+        0x60, 0xFE, 0xD4, 0xBA, 0x25, 0x5A, 0x9D, 0x31, 0xC9, 0x61, 0xEB, 0x74, 0xC6, 0x35, 0x6D,
+        0x68, 0xC0, 0x49, 0xB8, 0x92, 0x3B, 0x61, 0xFA, 0x6C, 0xE6, 0x69, 0x62, 0x2E, 0x60, 0xF2,
+        0x9F, 0xB6,
+    ];
+    let uy = [
+        0x79, 0x03, 0xFE, 0x10, 0x08, 0xB8, 0xBC, 0x99, 0xA4, 0x1A, 0xE9, 0xE9, 0x56, 0x28, 0xBC,
+        0x64, 0xF2, 0xF1, 0xB2, 0x0C, 0x2D, 0x7E, 0x9F, 0x51, 0x77, 0xA3, 0xC2, 0x94, 0xD4, 0x46,
+        0x22, 0x99,
+    ];
+    let r = [
+        0xEF, 0xD4, 0x8B, 0x2A, 0xAC, 0xB6, 0xA8, 0xFD, 0x11, 0x40, 0xDD, 0x9C, 0xD4, 0x5E, 0x81,
+        0xD6, 0x9D, 0x2C, 0x87, 0x7B, 0x56, 0xAA, 0xF9, 0x91, 0xC3, 0x4D, 0x0E, 0xA8, 0x4E, 0xAF,
+        0x37, 0x16,
+    ];
+    let s = [
+        0xF7, 0xCB, 0x1C, 0x94, 0x2D, 0x65, 0x7C, 0x41, 0xD4, 0x36, 0xC7, 0xA1, 0xB6, 0xE2, 0x9F,
+        0x65, 0xF3, 0xE9, 0x00, 0xDB, 0xB9, 0xAF, 0xF4, 0x06, 0x4D, 0xC4, 0xAB, 0x2F, 0x84, 0x3A,
+        0xCD, 0xA8,
+    ];
+    let (gx, gy) = p256_mul_g(&d);
+    let pk_ok = gx == ux && gy == uy;
+    let pk = EcdsaPublicKey { x: ux, y: uy };
+    let ver_ok = ecdsa_p256_verify(&pk, b"sample", &r, &s);
+    let neg_ok = !ecdsa_p256_verify(&pk, b"SAMPLE", &r, &s);
+    let ok = pk_ok && ver_ok && neg_ok;
+    if ok {
+        serial_println!("[CRYPTO] {} (RFC 6979 P-256)", GATE_ECDSA_MARKER);
+    } else {
+        serial_println!(
+            "[CRYPTO] GATE_ECDSA FAILED pk={} ver={} gx={:02x?}",
+            pk_ok,
+            ver_ok,
+            &gx[..4]
+        );
+    }
+    ok
 }

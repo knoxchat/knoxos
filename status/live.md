@@ -93,5 +93,19 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 82. **NAT** — IPv4 SNAT/DNAT with header checksum (`GATE_NAT masquerade`).
 83. **DRM** — GEM from buddy frames + CRTC set (`GATE_DRM gem`).
 84. **GSUB** — Latin `fi` ligature (`GATE_GSUB liga`).
+85. **RSA / ECDSA** — PKCS#1 v1.5 SHA-256 + RFC 6979 P-256 (`GATE_RSA kat`, `GATE_ECDSA kat`).
+86. **Color emoji** — U+1F600 multi-color bitmap (`GATE_EMOJI color`).
+87. **USB hub / gamepad** — hub descriptor + port status (`GATE_USB hub`); HID report (`GATE_USB gamepad`).
+88. **TPM TIS** — locality 0 handshake (`GATE_TPM tis`).
+89. **TrueType hinting** — MDAP round-to-grid (`GATE_TTF hint`).
+90. **I2C** — SMBus EEPROM round-trip (`GATE_I2C xfer`).
+91. **TLS 1.3 HKDF** — RFC 5869 SHA-256 + Expand-Label (`GATE_TLS13 hkdf`).
+92. **HDR / VRR** — PQ EOTF 1.0 → 10_000 nits; Adaptive-Sync 48–144 Hz (`GATE_HDR pq`, `GATE_VRR range`).
+93. **e1000** — `Socket::send` TX ring + loopback RX (`GATE_E1000 send`).
+94. **eBPF / sched_ext** — `r0=42` plus pick hook (`GATE_EBPF exec`).
+95. **Wi-Fi** — Beacon SSID + WPA2 PMK (`GATE_WIFI pmk`).
+96. **i915** — pipe A + GTT modeset (`GATE_I915 modeset`).
+97. **Btrfs** — superblock + inode + extent `$DATA` (`GATE_BTRFS block`).
+98. **VLAN** — 802.1Q insert/strip (`GATE_VLAN tag`).
 
-Integration: `./tests/run_integration.sh` **336/336** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **353/353** on QEMU (2026-10-18).

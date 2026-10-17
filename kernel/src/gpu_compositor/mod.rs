@@ -98,4 +98,6 @@ pub fn init() {
     );
     drop(comp);
     pace_frame();
+    let _ = enable_hdr10();
+    let _ = enable_adaptive_sync(48, 144, 90);
 }

@@ -2,11 +2,11 @@
 
 # 5. Networking Stack
 
-**Grade: Wired (78%)** · `net.rs`, `netint.rs`, `virtio_net.rs`, `ipv6.rs`, `e1000.rs`, `rtl8139.rs`, `dhcp.rs`, `dns.rs`, `net_production.rs`
+**Grade: Wired (82%)** · `net.rs`, `netint.rs`, `virtio_net.rs`, `ipv6.rs`, `e1000.rs`, `rtl8139.rs`, `dhcp.rs`, `dns.rs`, `net_production.rs`
 
 ### Wired (builders / closest-to-real NICs)
 - [x] Ethernet / ARP / IPv4 / UDP / TCP **header** construction
-- [x] `e1000`: reset, MAC, RX/TX rings, TDT/RDT poll (heap-as-DMA caveat)
+- [x] `e1000`: reset, MAC, RX/TX rings; `Socket::send` TX + loopback RX (`GATE_E1000 send`)
 - [x] `rtl8139`: PIO TX, RX ring poll
 - [x] DHCP DISCOVER/REQUEST **can be sent**; OFFER/ACK parse
 - [x] DNS A-query **can be sent**; response parse
@@ -25,9 +25,9 @@
 - [x] **VirtIO-net RX** — walks the used ring and re-arms buffers
 - [x] **DHCP apply** — writes interface IP + DNS + default route
 - [x] IPv6 echo — loopback TX reply (`GATE_D6 ipv6 echo`); off-box 0x86DD uses VirtIO-net
-- [ ] TLS 1.3 — types; GCM/X.509 stub; handshake flagged done after one recv
+- [x] TLS 1.3 HKDF — RFC 5869 extract/expand + Expand-Label (`GATE_TLS13 hkdf`). Handshake / X.509 chain later.
 - [x] NAT — IPv4 SNAT/DNAT rewrite with header checksum (`GATE_NAT masquerade`)
-- [ ] Wi-Fi / WPA3 / bridge / VLAN — in-memory
+- [x] VLAN — 802.1Q insert/strip (`GATE_VLAN tag`). Wi-Fi Beacon + WPA2 PMK (`GATE_WIFI pmk`). WPA3 / bridge later.
 
 ### Perfect-OS next steps
 1. ~~Loopback: `send` → peer `recv_buf`.~~ **D1 done** — kernel self-test + Ring 3 `sendto`/`recvfrom`.

@@ -106,6 +106,21 @@ struct ProcessSchedData {
 
 lazy_static::lazy_static! {
     static ref SCHED_DATA: Mutex<BTreeMap<u32, ProcessSchedData>> = Mutex::new(BTreeMap::new());
+    static ref EXT_PROG: Mutex<Option<u64>> = Mutex::new(None);
+}
+
+/// Attach a loaded eBPF program as the sched_ext pick hook.
+pub fn attach_bpf(prog_id: u64) {
+    *EXT_PROG.lock() = Some(prog_id);
+}
+
+/// Run the attached sched_ext program (returns r0, or 0 if none).
+pub fn pick_next(ctx: u64) -> u64 {
+    let id = *EXT_PROG.lock();
+    match id {
+        Some(prog_id) => crate::ebpf::run_program(prog_id, ctx).unwrap_or(0),
+        None => 0,
+    }
 }
 
 /// Set scheduling policy and parameters

@@ -10,6 +10,7 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 use spin::Mutex;
@@ -1276,6 +1277,78 @@ pub fn init() {
     serial_println!("[TLS]   X.509 certificate parsing: ASN.1 DER + PEM + Base64");
     serial_println!("[TLS]   Certificate chain verification: issuer/subject, CA, validity");
     serial_println!("[TLS]   SHA-256 hash + HMAC-SHA256: implemented");
+    let _ = hkdf_self_test();
+}
+
+/// HKDF-Extract (SHA-256): PRK = HMAC-Hash(salt, IKM). RFC 5869.
+pub fn hkdf_extract(salt: &[u8], ikm: &[u8]) -> [u8; 32] {
+    crate::crypto::hmac_sha256(salt, ikm)
+}
+
+/// HKDF-Expand (SHA-256) to `len` bytes. RFC 5869.
+pub fn hkdf_expand(prk: &[u8], info: &[u8], len: usize) -> Vec<u8> {
+    let n = len.div_ceil(32);
+    let mut okm = Vec::with_capacity(n * 32);
+    let mut prev: Vec<u8> = Vec::new();
+    for i in 1..=n {
+        let mut data = Vec::with_capacity(prev.len() + info.len() + 1);
+        data.extend_from_slice(&prev);
+        data.extend_from_slice(info);
+        data.push(i as u8);
+        prev = crate::crypto::hmac_sha256(prk, &data).to_vec();
+        okm.extend_from_slice(&prev);
+    }
+    okm.truncate(len);
+    okm
+}
+
+/// TLS 1.3 HKDF-Expand-Label (RFC 8446 §7.1). Label is prefixed with `"tls13 "`.
+pub fn hkdf_expand_label(secret: &[u8], label: &[u8], context: &[u8], len: u16) -> Vec<u8> {
+    let mut full_label = Vec::from(&b"tls13 "[..]);
+    full_label.extend_from_slice(label);
+    let mut hkdf_label = Vec::new();
+    hkdf_label.extend_from_slice(&len.to_be_bytes());
+    hkdf_label.push(full_label.len() as u8);
+    hkdf_label.extend_from_slice(&full_label);
+    hkdf_label.push(context.len() as u8);
+    hkdf_label.extend_from_slice(context);
+    hkdf_expand(secret, &hkdf_label, len as usize)
+}
+
+pub const GATE_TLS13_MARKER: &str = "GATE_TLS13 hkdf";
+
+fn hkdf_self_test() -> bool {
+    // RFC 5869 Test Case 1 (SHA-256).
+    let ikm = [0x0bu8; 22];
+    let salt = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
+    ];
+    let info = [0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9];
+    let prk = hkdf_extract(&salt, &ikm);
+    const EXP_PRK: [u8; 32] = [
+        0x07, 0x77, 0x09, 0x36, 0x2c, 0x2e, 0x32, 0xdf, 0x0d, 0xdc, 0x3f, 0x0d, 0xc4, 0x7b, 0xba,
+        0x63, 0x90, 0xb6, 0xc7, 0x3b, 0xb5, 0x0f, 0x9c, 0x31, 0x22, 0xec, 0x84, 0x4a, 0xd7, 0xc2,
+        0xb3, 0xe5,
+    ];
+    const EXP_OKM: [u8; 42] = [
+        0x3c, 0xb2, 0x5f, 0x25, 0xfa, 0xac, 0xd5, 0x7a, 0x90, 0x43, 0x4f, 0x64, 0xd0, 0x36, 0x2f,
+        0x2a, 0x2d, 0x2d, 0x0a, 0x90, 0xcf, 0x1a, 0x5a, 0x4c, 0x5d, 0xb0, 0x2d, 0x56, 0xec, 0xc4,
+        0xc5, 0xbf, 0x34, 0x00, 0x72, 0x08, 0xd5, 0xb8, 0x87, 0x18, 0x58, 0x65,
+    ];
+    let okm = hkdf_expand(&prk, &info, 42);
+    let derived = hkdf_expand_label(&prk, b"key", &[], 32);
+    let ok = prk == EXP_PRK && okm.as_slice() == EXP_OKM.as_slice() && derived.len() == 32;
+    if ok {
+        serial_println!("[TLS] {} (RFC 5869 + Expand-Label)", GATE_TLS13_MARKER);
+        true
+    } else {
+        serial_println!(
+            "[TLS] GATE_TLS13 FAILED prk={:02x?} okm_len={}",
+            &prk[..4],
+            okm.len()
+        );
+        false
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

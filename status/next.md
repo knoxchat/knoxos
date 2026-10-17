@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **336/336**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **353/353**.
 
 ---
 
@@ -57,10 +57,11 @@ A dynamically linked musl binary runs (BM4). VirtIO-GPU scanout + hardware curso
 
 Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md](remaining.md) from this section are **done**, including this batch:
 
-- XFS through the block layer (`GATE_XFS block`); X25519/Ed25519 RFC KATs (`GATE_X25519 kat`, `GATE_ED25519 kat`); locale `.mo` (`GATE_LOCALE switch`); pinyin IME (`GATE_IME compose`); USB MSC READ(10) (`GATE_USB msc`); IPv4 NAT checksum (`GATE_NAT masquerade`); DRM GEM+CRTC (`GATE_DRM gem`); GSUB Latin liga (`GATE_GSUB liga`)
+- TLS 1.3 HKDF (`GATE_TLS13 hkdf`); HDR/VRR (`GATE_HDR pq`, `GATE_VRR range`); e1000 `Socket::send` (`GATE_E1000 send`); eBPF/sched_ext (`GATE_EBPF exec`); Wi-Fi Beacon+PMK (`GATE_WIFI pmk`); i915 modeset (`GATE_I915 modeset`); Btrfs ramdisk (`GATE_BTRFS block`); VLAN 802.1Q (`GATE_VLAN tag`)
 
 Earlier in this section:
 
+- XFS through the block layer (`GATE_XFS block`); X25519/Ed25519 RFC KATs (`GATE_X25519 kat`, `GATE_ED25519 kat`); locale `.mo` (`GATE_LOCALE switch`); pinyin IME (`GATE_IME compose`); USB MSC READ(10) (`GATE_USB msc`); IPv4 NAT checksum (`GATE_NAT masquerade`); DRM GEM+CRTC (`GATE_DRM gem`); GSUB Latin liga (`GATE_GSUB liga`)
 - NTFS through the block layer (`GATE_NTFS block`); here-docs / `~/.profile` (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`); VT100 CUP+SGR256 (`GATE_VT100 xterm`)
 - HDA DMA + PulseAudio mix (`GATE_HDA dma`, `GATE_PA mix`); IOMMU `enable_translation` (`GATE_IOMMU translation`)
 - THP / KASLR (`GATE_THP hugepage`, `GATE_KASLR slide`); ACPI AML `_S5` (`GATE_AML dsdt`); kernel `.ko` load (`GATE_KO load`)
@@ -74,7 +75,7 @@ Earlier in this section:
 
 These increase the distance to a perfect OS. Full list: [gates/quality.md](gates/quality.md).
 
-KVM / `vmlaunch`, containers/k8s, Btrfs/ZFS, Wi-Fi, TLS 1.3, GPU compute, AI inference, package formats, Chromium/Vivaldi, aarch64/riscv64 **runtime**, Thunderbolt, TPM measured boot, sched_ext/eBPF, another unused `pub mod`.
+KVM / `vmlaunch`, containers/k8s, ZFS, WPA3/bridge, TLS 1.3 handshake/X.509 chain, GPU compute, AI inference, package formats, Chromium/Vivaldi, aarch64/riscv64 **runtime**, Thunderbolt, TPM measured boot, another unused `pub mod`.
 
 Open checkboxes for those live in [remaining.md](remaining.md) so they are not forgotten — they are not next.
 

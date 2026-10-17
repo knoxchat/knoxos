@@ -113,4 +113,6 @@ pub fn init() {
         serial_println!("[XHCI] No XHCI controller found (USB not available)");
     }
     msc::init();
+    let _ = ports::hub_self_test();
+    let _ = gamepad::gamepad_self_test();
 }

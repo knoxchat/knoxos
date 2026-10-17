@@ -568,9 +568,57 @@ pub fn list_maps() -> Vec<(u64, BpfMapType, u32)> {
         .collect()
 }
 
+pub const GATE_EBPF_MARKER: &str = "GATE_EBPF exec";
+
+/// Load `r0 = 42; exit` and run it. sched_ext uses the same program as pick.
+fn exec_self_test() -> bool {
+    let insns = [
+        BpfInsn {
+            code: BPF_ALU64 | BPF_MOV | BPF_K,
+            regs: 0, // dst r0
+            off: 0,
+            imm: 42,
+        },
+        BpfInsn {
+            code: BPF_JMP | BPF_EXIT,
+            regs: 0,
+            off: 0,
+            imm: 0,
+        },
+    ];
+    match sys_bpf_prog_load(BpfProgType::StructOps, &insns, "GPL") {
+        Ok(id) => match run_program(id, 0) {
+            Ok(42) => {
+                crate::sched_ext::attach_bpf(id);
+                let picked = crate::sched_ext::pick_next(0);
+                if picked == 42 {
+                    crate::serial_println!("[ebpf] {} (r0=42 + sched_ext pick)", GATE_EBPF_MARKER);
+                    true
+                } else {
+                    crate::serial_println!("[ebpf] GATE_EBPF FAILED pick={}", picked);
+                    false
+                }
+            }
+            Ok(other) => {
+                crate::serial_println!("[ebpf] GATE_EBPF FAILED r0={}", other);
+                false
+            }
+            Err(_) => {
+                crate::serial_println!("[ebpf] GATE_EBPF FAILED: run");
+                false
+            }
+        },
+        Err(_) => {
+            crate::serial_println!("[ebpf] GATE_EBPF FAILED: load");
+            false
+        }
+    }
+}
+
 /// Initialize eBPF subsystem
 pub fn init() {
     crate::serial_println!(
         "  eBPF subsystem initialized (32 prog types, 31 map types, verifier, interpreter)"
     );
+    let _ = exec_self_test();
 }

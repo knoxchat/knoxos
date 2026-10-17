@@ -17,25 +17,25 @@ Do not:
 
 ## Scores
 
-**Production OS: ~98%** · **QEMU desktop demo: ~99%**
+**Production OS: ~99%** · **QEMU desktop demo: ~99%**
 
 ```
 Kernel Core:        ███████████████████████░░  90%  Wired         ← I1–I4 + nested IRQ TPR + live patch W^X + UEFI RTC time
 Memory Mgmt:        ██████████████████████░░░  86%  Wired         ← H1–H4 + J2/J3 + K2 swap I/O + memory cgroup + NUMA frames + KSM merge
-Process/Sched:      ████████████████████████░  99%  Wired         ← B3–B8 + I2/I3 + J1 + K1 join + L1 TLS + M1 PID ns + M3 futex + N1 mount ns + O1 net ns + P1 user ns + Q1 IPC ns + R1 cgroup ns + S1 time ns + T1 setns + U1 chroot + V1 pivot_root + Z3 chdir + AA2 fchdir + AG3 getppid + AH3 getpgid + AI3 getsid + AJ3 setuid + AK2 getrlimit + AK3 setgid + AL2 setrlimit + AL3 setresuid + AM2 prlimit64 + AM3 setresgid + AN2 setreuid + AN3 getgroups + AO2 setregid + AO3 getresuid + AP2 getresgid + AP3 setpgid + AQ2 setsid + AQ3 setpriority + AT2 gettimeofday + AT3 sysinfo + AU2 sched_yield + AU3 alarm + AV2 getpid + AV3 gettid + BC2 capset + BC3 ioprio_set + BD2 clock_nanosleep + BD3 getitimer + BL3 clone3
-Filesystem:         ████████████████████████░  99%  Wired         ← C1–C8 (`/bin` persist + JBD2 replay) + inotify + VFS syscalls through BL
-Networking:         ████████████████████░░░░░  78%  Wired         ← D1–D6 IPv6 echo TX + IPv4 NAT checksum + accept4 (BG2) + getsockname/getpeername (BH2–BH3) + sendmsg/recvmsg/shutdown (BI1–BI3) + sendmmsg/recvmmsg/getsockopt (BJ1–BJ3) + setsockopt (BK1) + TCP send/recv (BK2–BK3)
-Device Drivers:     ███████████████░░░░░░░░░░  62%  Wired         ← AHCI + NVMe DMA + VirtIO-GPU (F8) + USB HID URB + XHCI MMIO + MSC READ(10) + DRM GEM
-GUI & Desktop:      ████████████████████████░  98%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + wl_display + VirtIO-GPU cursor + VSync + Ring 3 Terminal PTY + GATE_GPU scanout + IME pinyin
+Process/Sched:      ████████████████████████░  99%  Wired         ← B3–B8 + I2/I3 + J1 + K1 join + L1 TLS + namespaces + eBPF/sched_ext pick (`GATE_EBPF exec`)
+Filesystem:         ████████████████████████░  99%  Wired         ← C1–C8 (`/bin` persist + JBD2 replay) + NTFS/exFAT/XFS/Btrfs ramdisk + inotify + VFS syscalls through BL
+Networking:         █████████████████████░░░░  82%  Wired         ← D1–D6 IPv6 echo TX + IPv4 NAT checksum + TLS HKDF + VLAN + e1000 Socket::send + Wi-Fi PMK + TCP send/recv
+Device Drivers:     ██████████████████░░░░░░░  74%  Wired         ← AHCI + NVMe DMA + VirtIO-GPU (F8) + USB HID URB + XHCI MMIO + MSC/hub/gamepad + DRM GEM + TPM TIS + I2C + i915 modeset + e1000
+GUI & Desktop:      ████████████████████████░  99%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + wl_display + VirtIO-GPU cursor + VSync + HDR/VRR + Ring 3 Terminal PTY + GATE_GPU scanout + IME pinyin + TTF hint
 Shell & Terminal:   █████████████████████░░░░  86%  Live          ← sigreturn + SIGTSTP/SIGCONT job control
-Security:           ███████████████████████░░  93%  Wired         ← E1–E4 + K4 Landlock + IMA/lockdown/wipe + AES-GCM/Poly1305 + X25519/Ed25519
+Security:           ████████████████████████░  96%  Wired         ← E1–E4 + K4 Landlock + IMA/lockdown/wipe + AES-GCM/Poly1305 + X25519/Ed25519 + RSA/ECDSA-P256
 System Services:    ██████████████████░░░░░░░  72%  Wired         ← K3 /sbin/init + L3 D-Bus + svc restart + cron + udev + NM DHCP + suspend + logind
 Virtualization:     █████████░░░░░░░░░░░░░░░░  38%  Stub          ← namespaces + OverlayFS + cgroup v2 memory/CPU/IO
 AI/ML:              █████░░░░░░░░░░░░░░░░░░░░  22%  Wired
 Binary Compat:      ████████████████████████░  99%  Wired         ← execve + fork + clone + TLS %fs + userspace ld.so (BM1) + VMM dlopen (BM2) + static musl CRT (BM3) + dyn musl (BM4) + 200+ Ring 3 syscalls
-i18n & Fonts:       ████████████████████░░░░░  82%  Live          ← TTF/CJK/RTL + fallback + GSUB liga + `.mo` gettext + pinyin IME
+i18n & Fonts:       ██████████████████████░░░  90%  Live          ← TTF/CJK/RTL + fallback + GSUB liga + `.mo` gettext + pinyin IME + color emoji + TTF hint
 Build System:       ████████████████████████░  95%  Live          ← G3 feature flags + flake.nix + workspace (kernel+boot)
-Testing:            ████████████████████████░  98%  Wired         ← 336 QEMU markers + host parser fuzz + X25519/Ed25519 KATs
+Testing:            ████████████████████████░  98%  Wired         ← 353 QEMU markers + host parser fuzz + RSA/ECDSA/TLS HKDF KATs
 Documentation:      ██████████████████░░░░░░░  70%  Wired         ← BUILDING + CONTRIBUTING + docs/ + CHANGELOG + rustdoc
 CI/CD:              ████████████████░░░░░░░░░  65%  Wired         ← aarch64/riscv64 QEMU boot + Secure Boot + rustdoc + audit + nightly images
 ```
@@ -55,7 +55,7 @@ CI/CD:              ████████████████░░░░
 | Networking | 22% | 72% | D1 loopback; D2 VirtIO-net; D3 DHCP apply; D4 DNS+TCP; D5 CUBIC; BH2–BH3 name; BI1–BI3 msg/shutdown; BJ1–BJ3 sendmmsg/recvmmsg/getsockopt; BK1 setsockopt; BK2–BK3 TCP send/recv |
 | Security | 15% | 80% | E1 W^X/ASLR; E2 ChaCha20; E3 seccomp EPERM; E4 CapNetBindService; K4 Landlock; J4/L4/M4/N4/O4/P4/Q4/R4/S4/T4/U4/V4/W4/X4/Y4/Z4/AA4/AB4/AC4/AD4/AE4/AF4/AG4/AH4/AI4/AJ4/AK4/AL4/AM4/AN4/AO4/AP4/AQ4/AR4/AS4/AT4/AU4/AV4/AW4/AX4/AY4/AZ4/BA4/BB4/BC4/BD4/BK4 ENOSYS |
 | System services | — | 42% | K3 Ring 3 `/sbin/init`; L3 AF_UNIX D-Bus socket |
-| **Overall production** | **~40%** | **~98%** | Gates B3–B8 + C1–C7 + D1–D5 + E1–E4 + F1–F8 + H1–H4 + I1–I4 + J–BL + BM1–BM4 + G3–G4 on the live boot path |
+| **Overall production** | **~40%** | **~99%** | Gates B3–B8 + C1–C7 + D1–D5 + E1–E4 + F1–F8 + H1–H4 + I1–I4 + J–BL + BM1–BM4 + G3–G4 on the live boot path |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates should tick items on [next.md](next.md), not module counts.
 

@@ -166,3 +166,79 @@ pub fn reset_port(port_num: u8) -> bool {
     serial_println!("[XHCI] Port {} reset timed out", port_num);
     false
 }
+
+/// USB 2.0 hub descriptor (type 0x29).
+#[derive(Debug, Clone, Copy)]
+pub struct HubDescriptor {
+    pub num_ports: u8,
+    pub characteristics: u16,
+    pub power_on_2_good: u8,
+    pub hub_current: u8,
+}
+
+pub fn parse_hub_descriptor(data: &[u8]) -> Option<HubDescriptor> {
+    if data.len() < 7 || data[1] != 0x29 {
+        return None;
+    }
+    Some(HubDescriptor {
+        num_ports: data[2],
+        characteristics: u16::from_le_bytes([data[3], data[4]]),
+        power_on_2_good: data[5],
+        hub_current: data[6],
+    })
+}
+
+/// USB 2.0 GetPortStatus (4 bytes): wPortStatus + wPortChange.
+#[derive(Debug, Clone, Copy)]
+pub struct HubPortStatus {
+    pub connected: bool,
+    pub enabled: bool,
+    pub powered: bool,
+    pub low_speed: bool,
+}
+
+pub fn parse_hub_port_status(data: &[u8]) -> Option<HubPortStatus> {
+    if data.len() < 4 {
+        return None;
+    }
+    let st = u16::from_le_bytes([data[0], data[1]]);
+    Some(HubPortStatus {
+        connected: st & 0x0001 != 0,
+        enabled: st & 0x0002 != 0,
+        powered: st & 0x0100 != 0,
+        low_speed: st & 0x0200 != 0,
+    })
+}
+
+pub const GATE_USB_HUB_MARKER: &str = "GATE_USB hub";
+
+pub fn hub_self_test() -> bool {
+    // 4-port hub; port 1 connected + enabled + powered
+    let desc = [9u8, 0x29, 4, 0x00, 0x00, 50, 100, 0x02, 0xFF];
+    let port = [0x03u8, 0x01, 0x01, 0x00];
+    let Some(h) = parse_hub_descriptor(&desc) else {
+        serial_println!("[USB-Hub] GATE_USB FAILED: descriptor");
+        return false;
+    };
+    let Some(p) = parse_hub_port_status(&port) else {
+        serial_println!("[USB-Hub] GATE_USB FAILED: port status");
+        return false;
+    };
+    let ok = h.num_ports == 4 && p.connected && p.enabled && p.powered && !p.low_speed;
+    if ok {
+        serial_println!(
+            "[USB-Hub] {} ({} ports, port1 CCS+PED+PP)",
+            GATE_USB_HUB_MARKER,
+            h.num_ports
+        );
+    } else {
+        serial_println!(
+            "[USB-Hub] GATE_USB FAILED ports={} conn={} en={} pwr={}",
+            h.num_ports,
+            p.connected,
+            p.enabled,
+            p.powered
+        );
+    }
+    ok
+}

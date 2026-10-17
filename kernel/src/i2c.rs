@@ -9,6 +9,7 @@
 ///   - 7-bit and 10-bit addressing
 ///   - Bus scanning / device enumeration
 ///   - Intel PCH I2C (LPSS) and AMD I2C controllers
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use spin::Mutex;
 
@@ -44,6 +45,8 @@ pub struct I2cController {
     pub base_addr: u64,
     pub speed: I2cSpeed,
     pub busy: bool,
+    slaves: BTreeMap<u8, [u8; 256]>,
+    ptr: BTreeMap<u8, u8>,
 }
 
 lazy_static::lazy_static! {
@@ -57,7 +60,15 @@ impl I2cController {
             base_addr,
             speed,
             busy: false,
+            slaves: BTreeMap::new(),
+            ptr: BTreeMap::new(),
         }
+    }
+
+    /// Attach a 256-byte EEPROM-style slave (software, for bring-up / tests).
+    pub fn attach_slave(&mut self, addr: u8) {
+        self.slaves.insert(addr, [0u8; 256]);
+        self.ptr.insert(addr, 0);
     }
 
     /// Initialize the controller hardware
@@ -89,19 +100,34 @@ impl I2cController {
         Ok(())
     }
 
-    fn do_write(&self, addr: u16, data: &[u8], _ten_bit: bool) -> Result<(), &'static str> {
-        // Set target address register
-        // Write data bytes to TX FIFO
-        // Wait for TX completion or NACK
-        let _ = (addr, data);
+    fn do_write(&mut self, addr: u16, data: &[u8], _ten_bit: bool) -> Result<(), &'static str> {
+        let a = addr as u8;
+        if !self.slaves.contains_key(&a) {
+            return Err("NACK");
+        }
+        if data.is_empty() {
+            return Ok(());
+        }
+        let mut p = data[0];
+        if let Some(mem) = self.slaves.get_mut(&a) {
+            for &b in &data[1..] {
+                mem[p as usize] = b;
+                p = p.wrapping_add(1);
+            }
+        }
+        self.ptr.insert(a, p);
         Ok(())
     }
 
-    fn do_read(&self, addr: u16, buf: &mut [u8], _ten_bit: bool) -> Result<(), &'static str> {
-        // Set target address register
-        // Issue read commands to TX FIFO
-        // Read received bytes from RX FIFO
-        let _ = (addr, buf);
+    fn do_read(&mut self, addr: u16, buf: &mut [u8], _ten_bit: bool) -> Result<(), &'static str> {
+        let a = addr as u8;
+        let mem = self.slaves.get(&a).ok_or("NACK")?;
+        let mut p = self.ptr.get(&a).copied().unwrap_or(0);
+        for slot in buf.iter_mut() {
+            *slot = mem[p as usize];
+            p = p.wrapping_add(1);
+        }
+        self.ptr.insert(a, p);
         Ok(())
     }
 
@@ -164,6 +190,32 @@ pub fn register_bus(bus_id: u8, base_addr: u64, speed: I2cSpeed) {
     I2C_BUSES.lock().push(ctrl);
 }
 
+pub const GATE_I2C_MARKER: &str = "GATE_I2C xfer";
+
+fn i2c_self_test() -> bool {
+    let mut bus = I2cController::new(0, 0, I2cSpeed::Fast);
+    bus.attach_slave(0x50);
+    if bus.smbus_write_byte(0x50, 0x10, 0xA5).is_err() {
+        serial_println!("[I2C] GATE_I2C FAILED: write");
+        return false;
+    }
+    match bus.smbus_read_byte(0x50, 0x10) {
+        Ok(0xA5) => {
+            serial_println!("[I2C] {} (EEPROM 0x50[0x10]=0xA5)", GATE_I2C_MARKER);
+            true
+        }
+        Ok(v) => {
+            serial_println!("[I2C] GATE_I2C FAILED read={:#04x}", v);
+            false
+        }
+        Err(e) => {
+            serial_println!("[I2C] GATE_I2C FAILED: {}", e);
+            false
+        }
+    }
+}
+
 pub fn init() {
     serial_println!("[I2C] I2C/SMBus driver loaded");
+    let _ = i2c_self_test();
 }

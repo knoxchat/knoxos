@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **TLS 1.3 HKDF** — RFC 5869 SHA-256 extract/expand plus RFC 8446 Expand-Label (`GATE_TLS13 hkdf`).
+- **HDR / VRR** — ST 2084 PQ EOTF known-answer and Adaptive-Sync range retargets VBlank (`GATE_HDR pq`, `GATE_VRR range`).
+- **e1000** — `Socket::send` programs the TX ring; software loopback delivers RX (`GATE_E1000 send`).
+- **eBPF / sched_ext** — verifier + interpreter `r0=42`; sched_ext pick runs the same program (`GATE_EBPF exec`).
+- **Wi-Fi** — 802.11 Beacon SSID parse + WPA2-PSK PBKDF2-SHA1 PMK (`GATE_WIFI pmk`).
+- **i915 modeset** — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`).
+- **Btrfs** — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`).
+- **VLAN** — 802.1Q insert/strip round-trip (`GATE_VLAN tag`).
+- **RSA / ECDSA-P256** — 512-bit PKCS#1 v1.5 SHA-256 verify and RFC 6979 P-256 (`GATE_RSA kat`, `GATE_ECDSA kat`).
+- **Color emoji** — U+1F600 is a multi-color bitmap, not a solid placeholder (`GATE_EMOJI color`).
+- **USB hub / gamepad** — hub descriptor + GetPortStatus (`GATE_USB hub`); HID gamepad report parse (`GATE_USB gamepad`).
+- **TPM TIS** — locality 0 REQUEST_USE → VALID|ACTIVE (`GATE_TPM tis`). Hardware MMIO skipped without a mapped TIS.
+- **TrueType hinting** — SVTCA/PUSHB/MDAP round-to-grid (`GATE_TTF hint`).
+- **I2C** — SMBus EEPROM write/read on a software slave (`GATE_I2C xfer`).
 - **XFS** — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`).
 - **X25519 / Ed25519** — RFC 7748 Alice public and RFC 8032 TEST 1 (`GATE_X25519 kat`, `GATE_ED25519 kat`).
 - **Locale** — GNU `.mo` load + `set_locale` + gettext (`GATE_LOCALE switch`).

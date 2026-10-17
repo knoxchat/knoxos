@@ -139,6 +139,27 @@ pub fn list() -> Vec<(String, VlanId, bool)> {
         .collect()
 }
 
+pub const GATE_VLAN_MARKER: &str = "GATE_VLAN tag";
+
+fn vlan_self_test() -> bool {
+    let frame = [
+        0xFFu8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x00, 0x45,
+        0x00,
+    ];
+    let tagged = tag_frame(&frame, 100, 3);
+    match untag_frame(&tagged) {
+        Some((100, untagged)) if untagged.as_slice() == frame => {
+            serial_println!("[vlan] {} (VID 100 PCP 3)", GATE_VLAN_MARKER);
+            true
+        }
+        other => {
+            serial_println!("[vlan] GATE_VLAN FAILED {:?}", other.map(|(v, _)| v));
+            false
+        }
+    }
+}
+
 pub fn init() {
     serial_println!("[vlan] 802.1Q VLAN tagging initialized");
+    let _ = vlan_self_test();
 }

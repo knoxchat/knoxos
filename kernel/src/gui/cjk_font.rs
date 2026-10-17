@@ -533,6 +533,8 @@ pub fn init() {
 
     serial_println!("[KnoxOS] CJK font subsystem initialized (fallback + runtime loading)");
     let _ = fallback_self_test();
+    let _ = crate::gui::unicode::emoji_self_test();
+    let _ = crate::gui::truetype::hint_self_test();
 }
 
 pub const GATE_FONT_MARKER: &str = "GATE_FONT fallback";

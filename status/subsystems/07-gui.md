@@ -2,7 +2,7 @@
 
 # 7. GUI & Desktop Environment
 
-**Grade: Live (98%)** · `gui/` 162 files, ~91,700 lines
+**Grade: Live (99%)** · `gui/` 162 files, ~91,700 lines
 
 The compositor is the most complete **product** in the tree. It is not a Unix display server.
 
@@ -28,7 +28,8 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 - [x] VSync software VBlank on the live present path (`GATE_VSYNC paced`); desktop present also flushes VirtIO-GPU (`GATE_GPU desktop scanout`)
 - [x] Start-menu **Paint / Video Player / Webamp / Doom / ClassiCube / Quake III** removed; Paint is a Ring 3 SHM client (F4)
 - [x] IME — pinyin `"ni"` → `你` (`GATE_IME compose`)
-- [ ] HDR, VRR, TrueType bytecode hinting, full IME framework
+- [x] TrueType bytecode hinting — SVTCA/PUSHB/MDAP round-to-grid (`GATE_TTF hint`)
+- [x] HDR, VRR — PQ EOTF + Adaptive-Sync range (`GATE_HDR pq`, `GATE_VRR range`). Full IME framework later.
 
 ### Perfect-OS next steps
 1. Freeze new in-kernel apps. Calculator (F6), Files (F7), and Terminal (`GATE_TERM`) are Ring 3. Every new app should be a userspace binary.

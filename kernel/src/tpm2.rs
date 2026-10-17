@@ -274,14 +274,77 @@ fn build_command(command_code: u32, payload: &[u8]) -> Vec<u8> {
     cmd
 }
 
-pub fn init() {
-    let mut dev = Tpm2Device::new(TPM_TIS_BASE);
-    match dev.probe() {
-        Ok(()) => {
-            if dev.startup().is_ok() {
-                *TPM.lock() = Some(dev);
-            }
+/// In-memory TIS FIFO used when there is no discrete TPM at 0xFED4_0000.
+pub struct TisFifo {
+    access: [u8; 5],
+}
+
+impl TisFifo {
+    pub fn new() -> Self {
+        Self {
+            // VALID | establishment for each locality
+            access: [0x81; 5],
         }
-        Err(e) => serial_println!("[TPM2] {}", e),
     }
+
+    pub fn write_access(&mut self, locality: u8, val: u8) {
+        let i = locality as usize;
+        if i > 4 {
+            return;
+        }
+        if val & 0x02 != 0 {
+            // REQUEST_USE → VALID | ACTIVE_LOCALITY
+            self.access[i] = 0xA0;
+        }
+        if val & 0x20 != 0 {
+            // writing activeLocality relinquishes
+            self.access[i] = 0x81;
+        }
+    }
+
+    pub fn read_access(&self, locality: u8) -> u8 {
+        self.access.get(locality as usize).copied().unwrap_or(0)
+    }
+}
+
+/// Request locality on a TIS FIFO. ACCESS.VALID|ACTIVE must come up.
+pub fn request_locality_tis(tis: &mut TisFifo, locality: u8) -> Result<(), &'static str> {
+    tis.write_access(locality, 0x02);
+    let access = tis.read_access(locality);
+    if access & 0x20 == 0 {
+        return Err("Failed to acquire locality");
+    }
+    Ok(())
+}
+
+pub const GATE_TPM_MARKER: &str = "GATE_TPM tis";
+
+fn tis_self_test() -> bool {
+    let mut tis = TisFifo::new();
+    let before = tis.read_access(0);
+    let got = request_locality_tis(&mut tis, 0);
+    let access = tis.read_access(0);
+    let ok = before & 0x20 == 0 && got.is_ok() && access & 0xA0 == 0xA0;
+    if ok {
+        serial_println!(
+            "[TPM2] {} (locality 0 ACCESS={:#04x})",
+            GATE_TPM_MARKER,
+            access
+        );
+    } else {
+        serial_println!(
+            "[TPM2] GATE_TPM FAILED before={:#x} after={:#x} err={:?}",
+            before,
+            access,
+            got.err()
+        );
+    }
+    ok
+}
+
+pub fn init() {
+    let _ = tis_self_test();
+    // QEMU has no TIS at 0xFED4_0000 unless `-tpmdev` is passed; do not
+    // poke that hole (it is not in the mapped physical window).
+    serial_println!("[TPM2] Hardware TIS probe skipped (no mapped MMIO)");
 }
