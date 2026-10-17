@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **304/304**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **336/336**.
 
 ---
 
@@ -55,7 +55,11 @@ A dynamically linked musl binary runs (BM4). VirtIO-GPU scanout + hardware curso
 
 ## 4. Still production (not the later list)
 
-Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md](remaining.md) from this section are **done**:
+Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md](remaining.md) from this section are **done**, including this batch:
+
+- XFS through the block layer (`GATE_XFS block`); X25519/Ed25519 RFC KATs (`GATE_X25519 kat`, `GATE_ED25519 kat`); locale `.mo` (`GATE_LOCALE switch`); pinyin IME (`GATE_IME compose`); USB MSC READ(10) (`GATE_USB msc`); IPv4 NAT checksum (`GATE_NAT masquerade`); DRM GEM+CRTC (`GATE_DRM gem`); GSUB Latin liga (`GATE_GSUB liga`)
+
+Earlier in this section:
 
 - NTFS through the block layer (`GATE_NTFS block`); here-docs / `~/.profile` (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`); VT100 CUP+SGR256 (`GATE_VT100 xterm`)
 - HDA DMA + PulseAudio mix (`GATE_HDA dma`, `GATE_PA mix`); IOMMU `enable_translation` (`GATE_IOMMU translation`)

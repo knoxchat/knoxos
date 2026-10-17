@@ -24,18 +24,18 @@ Kernel Core:        ████████████████████
 Memory Mgmt:        ██████████████████████░░░  86%  Wired         ← H1–H4 + J2/J3 + K2 swap I/O + memory cgroup + NUMA frames + KSM merge
 Process/Sched:      ████████████████████████░  99%  Wired         ← B3–B8 + I2/I3 + J1 + K1 join + L1 TLS + M1 PID ns + M3 futex + N1 mount ns + O1 net ns + P1 user ns + Q1 IPC ns + R1 cgroup ns + S1 time ns + T1 setns + U1 chroot + V1 pivot_root + Z3 chdir + AA2 fchdir + AG3 getppid + AH3 getpgid + AI3 getsid + AJ3 setuid + AK2 getrlimit + AK3 setgid + AL2 setrlimit + AL3 setresuid + AM2 prlimit64 + AM3 setresgid + AN2 setreuid + AN3 getgroups + AO2 setregid + AO3 getresuid + AP2 getresgid + AP3 setpgid + AQ2 setsid + AQ3 setpriority + AT2 gettimeofday + AT3 sysinfo + AU2 sched_yield + AU3 alarm + AV2 getpid + AV3 gettid + BC2 capset + BC3 ioprio_set + BD2 clock_nanosleep + BD3 getitimer + BL3 clone3
 Filesystem:         ████████████████████████░  99%  Wired         ← C1–C8 (`/bin` persist + JBD2 replay) + inotify + VFS syscalls through BL
-Networking:         ███████████████████░░░░░░  76%  Wired         ← D1–D6 IPv6 echo TX + accept4 (BG2) + getsockname/getpeername (BH2–BH3) + sendmsg/recvmsg/shutdown (BI1–BI3) + sendmmsg/recvmmsg/getsockopt (BJ1–BJ3) + setsockopt (BK1) + TCP send/recv (BK2–BK3)
-Device Drivers:     ██████████████░░░░░░░░░░░  58%  Wired         ← AHCI + NVMe DMA + VirtIO-GPU (F8) + USB HID URB + XHCI MMIO
-GUI & Desktop:      ████████████████████████░  98%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + wl_display + VirtIO-GPU cursor + VSync + Ring 3 Terminal PTY + GATE_GPU scanout
+Networking:         ████████████████████░░░░░  78%  Wired         ← D1–D6 IPv6 echo TX + IPv4 NAT checksum + accept4 (BG2) + getsockname/getpeername (BH2–BH3) + sendmsg/recvmsg/shutdown (BI1–BI3) + sendmmsg/recvmmsg/getsockopt (BJ1–BJ3) + setsockopt (BK1) + TCP send/recv (BK2–BK3)
+Device Drivers:     ███████████████░░░░░░░░░░  62%  Wired         ← AHCI + NVMe DMA + VirtIO-GPU (F8) + USB HID URB + XHCI MMIO + MSC READ(10) + DRM GEM
+GUI & Desktop:      ████████████████████████░  98%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + wl_display + VirtIO-GPU cursor + VSync + Ring 3 Terminal PTY + GATE_GPU scanout + IME pinyin
 Shell & Terminal:   █████████████████████░░░░  86%  Live          ← sigreturn + SIGTSTP/SIGCONT job control
-Security:           ██████████████████████░░░  90%  Wired         ← E1–E4 + K4 Landlock + IMA/lockdown/wipe + AES-GCM/Poly1305
+Security:           ███████████████████████░░  93%  Wired         ← E1–E4 + K4 Landlock + IMA/lockdown/wipe + AES-GCM/Poly1305 + X25519/Ed25519
 System Services:    ██████████████████░░░░░░░  72%  Wired         ← K3 /sbin/init + L3 D-Bus + svc restart + cron + udev + NM DHCP + suspend + logind
 Virtualization:     █████████░░░░░░░░░░░░░░░░  38%  Stub          ← namespaces + OverlayFS + cgroup v2 memory/CPU/IO
 AI/ML:              █████░░░░░░░░░░░░░░░░░░░░  22%  Wired
 Binary Compat:      ████████████████████████░  99%  Wired         ← execve + fork + clone + TLS %fs + userspace ld.so (BM1) + VMM dlopen (BM2) + static musl CRT (BM3) + dyn musl (BM4) + 200+ Ring 3 syscalls
-i18n & Fonts:       ███████████████████░░░░░░  75%  Live          ← TTF/CJK/RTL + fallback chain
+i18n & Fonts:       ████████████████████░░░░░  82%  Live          ← TTF/CJK/RTL + fallback + GSUB liga + `.mo` gettext + pinyin IME
 Build System:       ████████████████████████░  95%  Live          ← G3 feature flags + flake.nix + workspace (kernel+boot)
-Testing:            ████████████████████████░  97%  Wired         ← 327 QEMU markers + host parser fuzz
+Testing:            ████████████████████████░  98%  Wired         ← 336 QEMU markers + host parser fuzz + X25519/Ed25519 KATs
 Documentation:      ██████████████████░░░░░░░  70%  Wired         ← BUILDING + CONTRIBUTING + docs/ + CHANGELOG + rustdoc
 CI/CD:              ████████████████░░░░░░░░░  65%  Wired         ← aarch64/riscv64 QEMU boot + Secure Boot + rustdoc + audit + nightly images
 ```

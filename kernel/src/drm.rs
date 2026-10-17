@@ -309,11 +309,22 @@ impl DrmDevice {
 
     pub fn gem_create(&mut self, size: usize, owner_pid: u32) -> u32 {
         let handle = alloc_id();
+        let pages = size.div_ceil(4096).max(1);
+        let (phys, virt) = if let Some(phys) = crate::vmm::allocate_contiguous_frames(pages) {
+            let virt = crate::vmm::phys_to_virt(phys);
+            // SAFETY: freshly allocated buddy frames, mapped through the offset.
+            unsafe {
+                core::ptr::write_bytes(virt as *mut u8, 0, pages * 4096);
+            }
+            (phys, virt)
+        } else {
+            (0, 0)
+        };
         let obj = GemObject {
             handle,
             size,
-            phys_addr: 0, // would allocate from frame allocator
-            virt_addr: 0,
+            phys_addr: phys,
+            virt_addr: virt,
             name: 0,
             refcount: 1,
             owner_pid,
@@ -481,4 +492,35 @@ pub fn init() {
 
     serial_println!("[DRM] Direct Rendering Manager initialized");
     serial_println!("[DRM]   1 CRTC, 1 encoder, 1 connector, 1 plane");
+    let _ = gem_crtc_self_test();
+}
+
+pub const GATE_DRM_MARKER: &str = "GATE_DRM gem";
+
+fn gem_crtc_self_test() -> bool {
+    let gem = create_gem(4096, 1);
+    let fb = create_fb(64, 16, 64 * 4, 32, gem);
+    let (crtc_id, conn_id, phys) = {
+        let mut dev = DRM_DEVICE.lock();
+        let crtc_id = *dev.crtcs.keys().next().unwrap_or(&0);
+        let conn_id = *dev.connectors.keys().next().unwrap_or(&0);
+        let mode = DisplayMode::default_1024x768();
+        let ok = dev.set_crtc(crtc_id, fb, 0, 0, &[conn_id], &mode);
+        let enabled = dev.crtcs.get(&crtc_id).map(|c| c.enabled).unwrap_or(false);
+        let fb_match = dev.crtcs.get(&crtc_id).and_then(|c| c.fb_id) == Some(fb);
+        let phys = dev.gem_objects.get(&gem).map(|g| g.phys_addr).unwrap_or(0);
+        (ok && enabled && fb_match, conn_id, phys)
+    };
+    if crtc_id && phys != 0 {
+        serial_println!("[DRM] {} (buddy GEM {:#x} + CRTC)", GATE_DRM_MARKER, phys);
+        true
+    } else {
+        serial_println!(
+            "[DRM] GATE_DRM FAILED crtc={} gem_phys={:#x} conn={}",
+            crtc_id,
+            phys,
+            conn_id
+        );
+        false
+    }
 }

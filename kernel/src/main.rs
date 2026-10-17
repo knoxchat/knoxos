@@ -57,9 +57,9 @@ use knoxos_kernel::{
     chromium_sandbox, clock, close_range, cmdline, container, context, cpio, cpufreq, cred, cron,
     crypto, dbus, desktop_apps, devfs, dmesg, dpkg, drm, dynlink, e1000, ebpf, elf, epoll, eventfd,
     exfat, ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
-    glibc_compat, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http, huge_pages,
-    hwtest, i18n, ima, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring,
-    iommu, ipc, journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm, landlock, ldknoxos,
+    gettext, glibc_compat, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http,
+    huge_pages, hwtest, i18n, ima, inference_api, init, inotify, input_event, interrupts, io_prio,
+    io_uring, iommu, ipc, journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm, landlock, ldknoxos,
     libc_funcs, livepatch, llm, media_player, membarrier, memfd, memory, midi, mmap, modules,
     mount, mount_api, mqueue, multiboot, musl, namespaces, nested_irq, net_production,
     network_manager, ntfs, ntp, numa, nvme, onnx, oom, ota_update, overlayfs, package_manager,
@@ -73,7 +73,7 @@ use knoxos_kernel::{
     task::{Task, executor::Executor, keyboard},
     terminal, thermal, thp, threads, timerfd, tls, tmpfs, tty, uds, usb, usb_hid, userfaultfd,
     usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input, virtio_tablet,
-    visual_test, vivaldi, vmm, vterm, wayland, wifi, workqueue, xattr, xdg,
+    visual_test, vivaldi, vmm, vterm, wayland, wifi, workqueue, xattr, xdg, xfs,
 };
 #[cfg(feature = "net")]
 use knoxos_kernel::{dhcp, dns, firewall, ipv6, net, netfilter, netint, virtio_net};
@@ -419,6 +419,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     fat32::init();
     ntfs::init();
     exfat::init();
+    xfs::init();
 
     // Initialize ext4 filesystem (journal + extents)
     #[cfg(feature = "fs-ext4")]
@@ -1002,6 +1003,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Font discovery and configuration
     fontconfig::init();
     gui::cjk_font::init();
+    gui::complex_text::init();
+    gui::ime::init();
+    i18n::init();
+    gettext::init();
 
     // XDG desktop integration (Base Directory, MIME, .desktop files)
     xdg::init();

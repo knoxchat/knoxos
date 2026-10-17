@@ -551,7 +551,6 @@ pub mod traffic_shaping;
 pub mod vlan;
 #[cfg(feature = "stub-drivers")]
 pub mod vpn;
-#[cfg(feature = "stub-drivers")]
 pub mod xfs;
 
 // Phase 32+ modules — Production completeness (device drivers, desktop, security, AI, services)
@@ -654,7 +653,6 @@ pub mod onnx_ops;
 // Internationalization
 #[cfg(feature = "stub-drivers")]
 pub mod date_format;
-#[cfg(feature = "stub-drivers")]
 pub mod gettext;
 #[cfg(feature = "stub-drivers")]
 pub mod spell_check;

@@ -470,12 +470,15 @@ pub fn shape_text(text: &str, font_size_px: u32) -> Vec<ShapedGlyph> {
         return glyphs;
     }
 
-    // For now, produce one glyph per character with simple metrics
+    // GSUB ligature pass (Latin liga) before per-character metrics.
+    let shaped = apply_ligatures(text);
+
+    // For now, produce one glyph per (possibly ligated) character with simple metrics
     // A real implementation would index into the cmap table
     let scale = font_size_px as i32;
     let advance = scale * 10 / 16; // approximate monospace advance
 
-    for (i, ch) in text.chars().enumerate() {
+    for (i, ch) in shaped.chars().enumerate() {
         let glyph_id = ch as u16; // simplified: use codepoint as glyph ID
 
         glyphs.push(ShapedGlyph {
@@ -550,10 +553,30 @@ pub fn build_clusters(text: &str, glyphs: &[ShapedGlyph]) -> Vec<TextCluster> {
 // PUBLIC INIT
 // ═══════════════════════════════════════════════════════════════════════
 
+pub const GATE_GSUB_MARKER: &str = "GATE_GSUB liga";
+
+fn gsub_self_test() -> bool {
+    set_enabled(true);
+    let lig = apply_ligatures("fi");
+    let glyphs = shape_text("fi", 16);
+    let ok = lig == "\u{FB01}" && glyphs.len() == 1 && glyphs[0].glyph_id == 0xFB01;
+    if ok {
+        crate::serial_println!("[ComplexText] {} (fi → U+FB01)", GATE_GSUB_MARKER);
+    } else {
+        crate::serial_println!(
+            "[ComplexText] GATE_GSUB FAILED liga={} glyphs={}",
+            lig.chars().count(),
+            glyphs.len()
+        );
+    }
+    ok
+}
+
 /// Initialize complex text layout engine
 pub fn init() {
     COMPLEX_TEXT_INITIALIZED.store(true, Ordering::Relaxed);
     crate::serial_println!("[ComplexText] Initialized (BiDi + ligatures + kerning)");
+    let _ = gsub_self_test();
 }
 
 /// Enable or disable text shaping

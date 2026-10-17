@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **XFS** — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`).
+- **X25519 / Ed25519** — RFC 7748 Alice public and RFC 8032 TEST 1 (`GATE_X25519 kat`, `GATE_ED25519 kat`).
+- **Locale** — GNU `.mo` load + `set_locale` + gettext (`GATE_LOCALE switch`).
+- **IME** — pinyin `"ni"` → `你` (`GATE_IME compose`).
+- **USB MSC** — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`).
+- **NAT** — IPv4 SNAT/DNAT rewrite with header checksum (`GATE_NAT masquerade`).
+- **DRM** — GEM from buddy frames + CRTC set (`GATE_DRM gem`).
+- **GSUB** — Latin `fi` ligature via `shape_text` (`GATE_GSUB liga`).
 - **NUMA** — `allocate_node` returns a buddy frame charged to the node (`GATE_NUMA frame`).
 - **KSM** — hashes through `phys_to_virt`; identical pages collapse and the victim is freed (`GATE_KSM merge`).
 - **Nested IRQ / TPR** — ISRs raise LAPIC TPR; nested enter is proven (`GATE_NIRQ tpr`).

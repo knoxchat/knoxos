@@ -85,5 +85,13 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 74. **Suspend / logind** — S3 save/restore hooks (`GATE_SUSPEND resume`); session create/list/terminate (`GATE_LOGIND session`).
 75. **AES-GCM / Poly1305** — NIST AES-128-GCM and RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`).
 76. **Font fallback** — compositor chain used for CJK/emoji (`GATE_FONT fallback`).
+77. **XFS** — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`).
+78. **X25519 / Ed25519** — RFC 7748 Alice public + RFC 8032 TEST 1 (`GATE_X25519 kat`, `GATE_ED25519 kat`).
+79. **Locale** — GNU `.mo` load + `set_locale` + gettext (`GATE_LOCALE switch`).
+80. **IME** — pinyin `"ni"` → `你` (`GATE_IME compose`).
+81. **USB MSC** — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`).
+82. **NAT** — IPv4 SNAT/DNAT with header checksum (`GATE_NAT masquerade`).
+83. **DRM** — GEM from buddy frames + CRTC set (`GATE_DRM gem`).
+84. **GSUB** — Latin `fi` ligature (`GATE_GSUB liga`).
 
-Integration: `./tests/run_integration.sh` **327/327** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **336/336** on QEMU (2026-10-18).

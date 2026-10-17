@@ -2,7 +2,7 @@
 
 # 9. Security & Cryptography
 
-**Grade: Wired (86%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
+**Grade: Wired (93%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
 
 ### Wired
 - [x] AES-128/256 block + CBC (software)
@@ -20,7 +20,8 @@
 
 ### Stub / unused
 - [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 / X.509 later.
-- [ ] RSA / ECDSA / Ed25519 / X25519 production-quality
+- [x] X25519 / Ed25519 — RFC 7748 Alice public + RFC 8032 TEST 1 (`GATE_X25519 kat`, `GATE_ED25519 kat`)
+- [ ] RSA / ECDSA-P256 production-quality
 - [x] **Landlock** hooked on VFS (`GATE_K4 landlock vfs`). SELinux / AppArmor still unused.
 - [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); freed buddy frames are zeros (`GATE_WIPE free`); exec SHA-256 measure (`GATE_IMA exec`)
 

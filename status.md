@@ -19,4 +19,4 @@ The full status tree lives in [`status/`](status/README.md). This file is the st
 | [status/gates/](status/gates/README.md) | Gates A–BL + BM1–BM4 + F5–F8 + C7–C9 + G3–G5 + I4 + D6 + USB HID URB + XHCI MMIO + no-PS/2 cursor + Secure Boot + cross-arch boot + udev/quota/cron/vsync/TERM + cgroup/job/IMA/lockdown/UEFI/wipe/NM |
 | [status/progress.md](status/progress.md) | Score bars and anti-goals |
 
-Integration: `./tests/run_integration.sh` **327/327** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **336/336** on QEMU (2026-10-18).

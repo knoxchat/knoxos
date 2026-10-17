@@ -2,7 +2,7 @@
 
 # 6. Device Drivers
 
-**Grade: Wired (58%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `virtio_gpu.rs`, `i915.rs`, …
+**Grade: Wired (62%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `virtio_gpu.rs`, `i915.rs`, …
 
 ### Live
 - [x] PCI config `0xCF8`/`0xCFC`, BDF scan, BAR decode
@@ -23,8 +23,9 @@
 
 ### Stub
 - [x] VirtIO-GPU — controlq + cursorq vs QEMU `-device virtio-gpu-pci` (F8). 3D/Virgl not negotiated.
-- [ ] DRM — in-memory CRTC/GEM
-- [x] USB HID URB completion — submit + complete + boot-protocol parse → evdev (`GATE_USB hid urb`). Transfer Events feed the same handler and the GUI mouse/key path. Hub / MSC / audio still stub.
+- [x] DRM — GEM from buddy frames + CRTC set (`GATE_DRM gem`)
+- [x] USB HID URB completion — submit + complete + boot-protocol parse → evdev (`GATE_USB hid urb`). Transfer Events feed the same handler and the GUI mouse/key path.
+- [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). Hub / audio still stub.
 - [ ] e1000/rtl8139 — see networking; not used by `Socket::send`
 - [ ] Touchscreen, trackpad, gamepad, GPIO, I2C, Thunderbolt, Wacom, UVC
 - [ ] Broadcom Wi-Fi, AX211, USB Ethernet

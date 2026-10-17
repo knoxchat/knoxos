@@ -112,4 +112,5 @@ pub fn init() {
     } else {
         serial_println!("[XHCI] No XHCI controller found (USB not available)");
     }
+    msc::init();
 }

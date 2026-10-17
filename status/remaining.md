@@ -45,7 +45,8 @@ Details: [subsystems/03-process.md](subsystems/03-process.md)
 Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 
 - [x] NTFS — boot + MFT `$DATA` through the ramdisk block layer (`GATE_NTFS block`)
-- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). Btrfs / ZFS / XFS / CIFS still in-memory or later.
+- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). Btrfs / ZFS / CIFS still in-memory or later.
+- [x] XFS — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`)
 - [x] JBD2 journal replay — descriptor + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`)
 - [x] Quotas — `write_file_checked` returns `EDQUOT` (`GATE_QUOTA enforce`)
 
@@ -55,7 +56,8 @@ Details: [subsystems/05-networking.md](subsystems/05-networking.md)
 
 - [x] IPv6 echo — loopback `::1` Echo Request produces a TX reply (`GATE_D6 ipv6 echo`)
 - [ ] TLS 1.3 — types; GCM/X.509 stub; handshake flagged done after one recv
-- [ ] Wi-Fi / WPA3 / bridge / VLAN / NAT — in-memory
+- [x] NAT — IPv4 SNAT/DNAT rewrite with header checksum (`GATE_NAT masquerade`). Wi-Fi / WPA3 / bridge / VLAN later.
+- [ ] Wi-Fi / WPA3 / bridge / VLAN — in-memory
 
 ## 6. Device Drivers
 
@@ -66,8 +68,9 @@ Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 - [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
 - [ ] TPM TIS FIFO at `0xFED4_0000` — incomplete locality handshake
 - [x] VirtIO-GPU — controlq + cursorq vs QEMU `-device virtio-gpu-pci` (`GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`)
-- [ ] DRM — in-memory CRTC/GEM
-- [x] USB HID URB completion — submit + complete + boot-protocol parse (`GATE_USB hid urb`). Transfer Events feed the same handler and the GUI mouse/key path. Hub / MSC / audio still stub.
+- [x] DRM — GEM from buddy frames + CRTC set (`GATE_DRM gem`). HDR/VRR later.
+- [x] USB HID URB completion — submit + complete + boot-protocol parse (`GATE_USB hid urb`). Transfer Events feed the same handler and the GUI mouse/key path.
+- [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). Hub / audio still stub.
 - [ ] e1000/rtl8139 — see networking; not used by `Socket::send`
 - [ ] Touchscreen, trackpad, gamepad, GPIO, I2C, Thunderbolt, Wacom, UVC
 - [ ] Broadcom Wi-Fi, AX211, USB Ethernet
@@ -80,7 +83,8 @@ Details: [subsystems/07-gui.md](subsystems/07-gui.md)
 - [x] **GPU compositor** — `gpu_compositor` init + VSync; desktop `present_rect` flushes through VirtIO-GPU (`GATE_GPU desktop scanout`). VGA blit remains for `-vga std`.
 - [x] Hardware cursor — VirtIO-GPU cursorq `UPDATE_CURSOR` / `MOVE_CURSOR`; desktop skips software blit (`GATE_F8 hw cursor`)
 - [x] VSync — `gpu_compositor` software VBlank flip on the live path (`GATE_VSYNC paced`); desktop still software-blits to VGA
-- [ ] HDR, VRR, TrueType bytecode hinting, full IME framework
+- [x] IME — pinyin `"ni"` → `你` (`GATE_IME compose`). Full IME framework later.
+- [ ] HDR, VRR, TrueType bytecode hinting
 - [x] Ring 3 `openpty` + SHM terminal client (`GATE_TERM pty userspace`). Start-menu Terminal is Ring 3; master fd + slave I/O (`GATE_TERM pty interactive`).
 
 ## 8. Shell & Terminal
@@ -96,7 +100,8 @@ Details: [subsystems/08-shell.md](subsystems/08-shell.md)
 Details: [subsystems/09-security.md](subsystems/09-security.md)
 
 - [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 key schedule / X.509 chain verify later.
-- [ ] RSA / ECDSA / Ed25519 / X25519 production-quality
+- [x] X25519 / Ed25519 — RFC 7748 Alice public + RFC 8032 TEST 1 (`GATE_X25519 kat`, `GATE_ED25519 kat`)
+- [ ] RSA / ECDSA-P256 production-quality
 - [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); buddy free zeros the frame (`GATE_WIPE free`); exec measures SHA-256 (`GATE_IMA exec`)
 
 ## 10. System Services
@@ -141,9 +146,9 @@ Details: [subsystems/13-binary-compat.md](subsystems/13-binary-compat.md)
 Details: [subsystems/14-i18n.md](subsystems/14-i18n.md)
 
 - [x] Font fallback chain — compositor chain used for CJK/emoji (`GATE_FONT fallback`)
-- [ ] Real GSUB/GPOS / HarfBuzz-class shaping (Latin ligatures hardcoded)
+- [x] GSUB Latin ligatures — `shape_text("fi")` → U+FB01 (`GATE_GSUB liga`). GPOS / HarfBuzz-class shaping later.
 - [ ] Color emoji
-- [ ] `.mo` parser exists; runtime locale switch incomplete
+- [x] Locale `.mo` — GNU magic load + `set_locale` + `gettext("File")=="Archivo"` (`GATE_LOCALE switch`)
 
 ## 15. Build System & Tooling
 

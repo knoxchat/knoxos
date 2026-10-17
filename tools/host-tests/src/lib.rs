@@ -1,6 +1,9 @@
 //! Host-side parsers used by KnoxOS. These tests run on the build machine
 //! without QEMU so ELF / IPv6 / cron / ext4 / packet parsing can fail in CI.
 
+mod curve25519;
+mod sha512;
+
 pub fn elf_magic_ok(bytes: &[u8]) -> bool {
     bytes.len() >= 4 && bytes[0] == 0x7F && bytes[1] == b'E' && bytes[2] == b'L' && bytes[3] == b'F'
 }
@@ -204,6 +207,43 @@ pub fn ext4_magic_ok(superblock: &[u8]) -> bool {
 /// exFAT VBR signature is `"EXFAT   "` at offset 3.
 pub fn exfat_magic_ok(boot: &[u8]) -> bool {
     boot.len() >= 11 && &boot[3..11] == b"EXFAT   "
+}
+
+/// XFS superblock magic is big-endian `"XFSB"`.
+pub fn xfs_magic_ok(sb: &[u8]) -> bool {
+    sb.len() >= 4 && sb[0..4] == [0x58, 0x46, 0x53, 0x42]
+}
+
+/// GNU .mo little-endian magic.
+pub fn mo_magic_ok(data: &[u8]) -> bool {
+    data.len() >= 4 && data[0..4] == [0xDE, 0x12, 0x04, 0x95]
+}
+
+/// SCSI READ(10) opcode 0x28, LBA at bytes 2..6, count at 7..9.
+pub fn scsi_read10_lba(cdb: &[u8]) -> Option<(u32, u16)> {
+    if cdb.len() < 10 || cdb[0] != 0x28 {
+        return None;
+    }
+    let lba = u32::from_be_bytes([cdb[2], cdb[3], cdb[4], cdb[5]]);
+    let count = u16::from_be_bytes([cdb[7], cdb[8]]);
+    Some((lba, count))
+}
+
+/// RFC 1071 IPv4 header checksum over a zeroed checksum field.
+pub fn ipv4_header_checksum(hdr: &[u8]) -> u16 {
+    let mut sum: u32 = 0;
+    let mut i = 0;
+    while i + 1 < hdr.len() {
+        sum += u16::from_be_bytes([hdr[i], hdr[i + 1]]) as u32;
+        i += 2;
+    }
+    if i < hdr.len() {
+        sum += (hdr[i] as u32) << 8;
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    !(sum as u16)
 }
 
 /// Reject truncated or internally inconsistent ext4 superblocks.
@@ -514,6 +554,41 @@ mod tests {
         boot[3] = b'X';
         assert!(!exfat_magic_ok(&boot));
         assert!(!exfat_magic_ok(&[0u8; 4]));
+    }
+
+    #[test]
+    fn xfs_sb_magic() {
+        let mut sb = vec![0u8; 16];
+        sb[0..4].copy_from_slice(&0x5846_5342u32.to_be_bytes());
+        assert!(xfs_magic_ok(&sb));
+        sb[0] = 0;
+        assert!(!xfs_magic_ok(&sb));
+        assert!(!xfs_magic_ok(&[0u8; 2]));
+    }
+
+    #[test]
+    fn mo_magic_and_scsi_read10() {
+        assert!(mo_magic_ok(&[0xDE, 0x12, 0x04, 0x95, 0, 0, 0, 0]));
+        assert!(!mo_magic_ok(&[0, 1, 2, 3]));
+        let mut cdb = [0u8; 10];
+        cdb[0] = 0x28;
+        cdb[5] = 7;
+        cdb[8] = 2;
+        assert_eq!(scsi_read10_lba(&cdb), Some((7, 2)));
+        assert!(scsi_read10_lba(&[0x00u8; 10]).is_none());
+    }
+
+    #[test]
+    fn ipv4_checksum_zero_header() {
+        let mut hdr = [0u8; 20];
+        hdr[0] = 0x45;
+        let c = ipv4_header_checksum(&hdr);
+        hdr[10] = (c >> 8) as u8;
+        hdr[11] = c as u8;
+        let mut chk = hdr;
+        chk[10] = 0;
+        chk[11] = 0;
+        assert_eq!(ipv4_header_checksum(&chk), c);
     }
 
     #[test]

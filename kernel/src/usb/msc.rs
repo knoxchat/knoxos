@@ -633,3 +633,113 @@ pub fn list_msc_devices() -> Vec<UsbMassStorageDevice> {
 pub fn msc_device_count() -> usize {
     MSC_DEVICES.lock().len()
 }
+
+/// Encode SCSI READ(10).
+pub fn encode_read10(lba: u32, count: u16) -> [u8; 10] {
+    let mut cmd = [0u8; 10];
+    cmd[0] = 0x28;
+    cmd[2] = (lba >> 24) as u8;
+    cmd[3] = (lba >> 16) as u8;
+    cmd[4] = (lba >> 8) as u8;
+    cmd[5] = lba as u8;
+    cmd[7] = (count >> 8) as u8;
+    cmd[8] = count as u8;
+    cmd
+}
+
+/// Parse a READ(10) CDB into (lba, block count).
+pub fn parse_read10(cdb: &[u8]) -> Option<(u32, u16)> {
+    if cdb.len() < 10 || cdb[0] != 0x28 {
+        return None;
+    }
+    let lba = u32::from_be_bytes([cdb[2], cdb[3], cdb[4], cdb[5]]);
+    let count = u16::from_be_bytes([cdb[7], cdb[8]]);
+    Some((lba, count))
+}
+
+/// Execute SCSI READ(10) against a ramdisk (software LUN, no XHCI required).
+pub fn scsi_read10_ramdisk(
+    device: usize,
+    cdb: &[u8],
+    buf: &mut [u8],
+) -> Result<CommandStatusWrapper, &'static str> {
+    let (lba, count) = parse_read10(cdb).ok_or("not READ(10)")?;
+    if count == 0 {
+        return Err("zero count");
+    }
+    let bytes = count as usize * 512;
+    if buf.len() < bytes {
+        return Err("buffer too small");
+    }
+    crate::block::read_blocks(device, lba as u64, count.min(255) as u8, &mut buf[..bytes])
+        .map_err(|_| "ramdisk read")?;
+    Ok(CommandStatusWrapper {
+        signature: 0x5342_5355,
+        tag: 1,
+        residue: 0,
+        status: 0,
+    })
+}
+
+pub const GATE_USB_MSC_MARKER: &str = "GATE_USB msc";
+const GATE_USB_MSC_PAYLOAD: &[u8] = b"knoxos-msc\n";
+
+fn scsi_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    let mut sector = [0u8; 512];
+    sector[..GATE_USB_MSC_PAYLOAD.len()].copy_from_slice(GATE_USB_MSC_PAYLOAD);
+    if crate::block::write_blocks(device, 0, 1, &sector).is_err() {
+        serial_println!("[USB-MSC] GATE_USB FAILED: write");
+        return false;
+    }
+    let cdb = encode_read10(0, 1);
+    let cbw = CommandBlockWrapper {
+        signature: 0x4342_5355,
+        tag: 1,
+        data_transfer_length: 512,
+        flags: 0x80,
+        lun: 0,
+        command_length: 10,
+        command: {
+            let mut cmd = [0u8; 16];
+            cmd[..10].copy_from_slice(&cdb);
+            cmd
+        },
+    };
+    let mut buf = [0u8; 512];
+    match scsi_read10_ramdisk(device, &cbw.command[..10], &mut buf) {
+        Ok(csw)
+            if csw.signature == 0x5342_5355
+                && csw.status == 0
+                && buf.starts_with(GATE_USB_MSC_PAYLOAD) =>
+        {
+            serial_println!(
+                "[USB-MSC] {} (SCSI READ(10) via ramdisk LUN)",
+                GATE_USB_MSC_MARKER
+            );
+            true
+        }
+        Ok(csw) => {
+            serial_println!(
+                "[USB-MSC] GATE_USB FAILED csw={:#x} status={}",
+                {
+                    let s = csw.signature;
+                    s
+                },
+                {
+                    let st = csw.status;
+                    st
+                }
+            );
+            false
+        }
+        Err(e) => {
+            serial_println!("[USB-MSC] GATE_USB FAILED: {}", e);
+            false
+        }
+    }
+}
+
+pub fn init() {
+    let _ = scsi_self_test();
+}

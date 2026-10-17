@@ -613,7 +613,25 @@ pub fn is_overlay_visible() -> bool {
     ime.visible && ime.mode != ImeMode::Off
 }
 
+pub const GATE_IME_MARKER: &str = "GATE_IME compose";
+
+fn compose_self_test() -> bool {
+    let mut ime = ImeState::new();
+    ime.mode = ImeMode::Pinyin;
+    let _ = ime.process_key('n');
+    let _ = ime.process_key('i');
+    let committed = ime.select_candidate(1);
+    if committed.as_deref() == Some("你") {
+        serial_println!("[IME] {} (pinyin ni → 你)", GATE_IME_MARKER);
+        true
+    } else {
+        serial_println!("[IME] GATE_IME FAILED {:?}", committed);
+        false
+    }
+}
+
 /// Initialize IME subsystem
 pub fn init() {
     serial_println!("[KnoxOS] IME subsystem initialized");
+    let _ = compose_self_test();
 }

@@ -184,6 +184,77 @@ pub fn load_catalog(catalog: Catalog) {
     CATALOGS.lock().push(catalog);
 }
 
+/// Build a little-endian GNU .mo with one msgid/msgstr pair (plus an empty header).
+pub fn build_mo(msgid: &str, msgstr: &str) -> Vec<u8> {
+    let nstrings = 2u32;
+    let orig_table = 28u32;
+    let trans_table = orig_table + nstrings * 8;
+    let mut strings = Vec::new();
+    // Header: empty msgid, trivial header msgstr.
+    let header = b"Content-Type: text/plain; charset=UTF-8\n";
+    let o0 = 0u32;
+    let t0_off = 0u32;
+    strings.extend_from_slice(header);
+    strings.push(0);
+    let o1_off = strings.len() as u32;
+    strings.extend_from_slice(msgid.as_bytes());
+    strings.push(0);
+    let t1_off = strings.len() as u32;
+    strings.extend_from_slice(msgstr.as_bytes());
+    strings.push(0);
+    let str_base = trans_table + nstrings * 8;
+    let mut out = Vec::new();
+    out.extend_from_slice(&0x9504_12DEu32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&nstrings.to_le_bytes());
+    out.extend_from_slice(&orig_table.to_le_bytes());
+    out.extend_from_slice(&trans_table.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    // orig table
+    out.extend_from_slice(&o0.to_le_bytes());
+    out.extend_from_slice(&(str_base + t0_off).to_le_bytes());
+    out.extend_from_slice(&(msgid.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(str_base + o1_off).to_le_bytes());
+    // trans table
+    out.extend_from_slice(&(header.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(str_base + t0_off).to_le_bytes());
+    out.extend_from_slice(&(msgstr.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(str_base + t1_off).to_le_bytes());
+    out.extend_from_slice(&strings);
+    out
+}
+
+pub const GATE_LOCALE_MARKER: &str = "GATE_LOCALE switch";
+
+fn locale_self_test() -> bool {
+    let mo = build_mo("Hello", "Hola");
+    let mut cat = Catalog::new("knoxos", "es_ES");
+    if cat.load_mo(&mo).is_err() {
+        serial_println!("[GETTEXT] GATE_LOCALE FAILED: parse .mo");
+        return false;
+    }
+    if cat.gettext("Hello") != "Hola" {
+        serial_println!("[GETTEXT] GATE_LOCALE FAILED: msgstr");
+        return false;
+    }
+    load_catalog(cat);
+    set_locale("es_ES");
+    let got = translate("knoxos", "Hello");
+    set_locale("en_US");
+    crate::i18n::set_locale("es_ES");
+    let gui = crate::i18n::gettext("File");
+    crate::i18n::set_locale("en_US");
+    if got == "Hola" && gui == "Archivo" {
+        serial_println!("[GETTEXT] {} (.mo + i18n catalog)", GATE_LOCALE_MARKER);
+        true
+    } else {
+        serial_println!("[GETTEXT] GATE_LOCALE FAILED got={} gui={}", got, gui);
+        false
+    }
+}
+
 pub fn init() {
     serial_println!("[GETTEXT] Translation framework loaded");
+    let _ = locale_self_test();
 }

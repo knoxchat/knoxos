@@ -927,4 +927,5 @@ pub fn init() {
     load_builtin_translations();
 
     crate::serial_println!("[KnoxOS] i18n subsystem initialized (gettext, IME, RTL, spell)");
+    // Locale switch is proven in gettext::init (GATE_LOCALE) after catalogs exist.
 }

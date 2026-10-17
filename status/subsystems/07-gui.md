@@ -27,6 +27,7 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 - [x] Hardware cursor — VirtIO-GPU cursorq; desktop skips software blit (`GATE_F8 hw cursor`)
 - [x] VSync software VBlank on the live present path (`GATE_VSYNC paced`); desktop present also flushes VirtIO-GPU (`GATE_GPU desktop scanout`)
 - [x] Start-menu **Paint / Video Player / Webamp / Doom / ClassiCube / Quake III** removed; Paint is a Ring 3 SHM client (F4)
+- [x] IME — pinyin `"ni"` → `你` (`GATE_IME compose`)
 - [ ] HDR, VRR, TrueType bytecode hinting, full IME framework
 
 ### Perfect-OS next steps

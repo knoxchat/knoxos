@@ -206,13 +206,46 @@ pub fn add_nat_rule(rule: NatRule) {
     NAT_RULES.lock().push(rule);
 }
 
-/// Apply SNAT (masquerade) — rewrite source address
+/// IPv4 header checksum (RFC 1071). `hdr` is the header with checksum field zeroed.
+pub fn ipv4_checksum(hdr: &[u8]) -> u16 {
+    let mut sum: u32 = 0;
+    let mut i = 0;
+    while i + 1 < hdr.len() {
+        sum += u16::from_be_bytes([hdr[i], hdr[i + 1]]) as u32;
+        i += 2;
+    }
+    if i < hdr.len() {
+        sum += (hdr[i] as u32) << 8;
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    !(sum as u16)
+}
+
+fn rewrite_ipv4_checksum(packet: &mut [u8]) {
+    if packet.len() < 20 {
+        return;
+    }
+    let ihl = ((packet[0] & 0x0f) as usize) * 4;
+    if ihl < 20 || packet.len() < ihl {
+        return;
+    }
+    packet[10] = 0;
+    packet[11] = 0;
+    let csum = ipv4_checksum(&packet[..ihl]);
+    packet[10] = (csum >> 8) as u8;
+    packet[11] = (csum & 0xff) as u8;
+}
+
+/// Apply SNAT (masquerade) — rewrite source address and refresh the IPv4 checksum.
 pub fn apply_snat(packet: &mut [u8], nat_ip: [u8; 4]) -> bool {
     if packet.len() < 20 {
         return false;
     }
     // Rewrite source IP in IP header (bytes 12-15)
     packet[12..16].copy_from_slice(&nat_ip);
+    rewrite_ipv4_checksum(packet);
     true
 }
 
@@ -262,6 +295,7 @@ pub fn process_nat(hook: NfHook, packet: &mut [u8]) -> NfVerdict {
                 }
                 NatType::Dnat => {
                     apply_dnat(packet, rule.nat_ip, rule.nat_port);
+                    rewrite_ipv4_checksum(packet);
                 }
             }
             return NfVerdict::Accept;
@@ -338,4 +372,42 @@ pub fn init() {
     });
 
     serial_println!("[KnoxOS] Netfilter framework initialized (conntrack + NAT)");
+    let _ = nat_self_test();
+}
+
+pub const GATE_NAT_MARKER: &str = "GATE_NAT masquerade";
+
+fn nat_self_test() -> bool {
+    add_nat_rule(NatRule {
+        hook: NfHook::PostRouting,
+        match_src_ip: Some([10, 0, 0, 2]),
+        match_dst_ip: None,
+        match_dst_port: None,
+        nat_type: NatType::Snat,
+        nat_ip: [10, 0, 2, 15],
+        nat_port: None,
+    });
+    let mut pkt = [
+        0x45u8, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x40, 0x01, 0x00, 0x00, 10, 0, 0, 2, 1,
+        1, 1, 1,
+    ];
+    rewrite_ipv4_checksum(&mut pkt);
+    let _ = process_nat(NfHook::PostRouting, &mut pkt);
+    let src = [pkt[12], pkt[13], pkt[14], pkt[15]];
+    let mut chk = pkt;
+    chk[10] = 0;
+    chk[11] = 0;
+    let expect = ipv4_checksum(&chk[..20]);
+    let got = u16::from_be_bytes([pkt[10], pkt[11]]);
+    if src == [10, 0, 2, 15] && got == expect {
+        serial_println!("[netfilter] {} (10.0.0.2 → 10.0.2.15)", GATE_NAT_MARKER);
+        true
+    } else {
+        serial_println!(
+            "[netfilter] GATE_NAT FAILED src={:?} csum={:#06x}",
+            src,
+            got
+        );
+        false
+    }
 }
