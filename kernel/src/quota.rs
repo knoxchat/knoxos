@@ -267,6 +267,65 @@ pub fn quotactl(cmd: i32, device: &str, id: u32, addr: u64) -> Result<i32, i32> 
     }
 }
 
+pub const GATE_QUOTA_MARKER: &str = "GATE_QUOTA enforce";
+
+fn kib_for(bytes: usize) -> u64 {
+    (bytes as u64).div_ceil(1024).max(1)
+}
+
+/// Deny a write that would exceed the hard block limit.
+pub fn check_write(uid: u32, gid: u32, bytes: usize) -> Result<(), i32> {
+    check_block_quota("/", uid, gid, kib_for(bytes))
+}
+
+/// Charge usage after a successful write.
+pub fn commit_write(uid: u32, gid: u32, bytes: usize) {
+    charge_blocks("/", uid, gid, kib_for(bytes));
+}
+
+fn kernel_enable_user_quota(device: &str, id: u32, dqblk: DqBlk) {
+    let mut state = QUOTA_STATE.lock();
+    state.enabled.insert(String::from(device), true);
+    state.user_quotas.insert((String::from(device), id), dqblk);
+}
+
+fn kernel_disable_quota(device: &str) {
+    let mut state = QUOTA_STATE.lock();
+    state.enabled.insert(String::from(device), false);
+}
+
+fn enforce_self_test() -> bool {
+    kernel_enable_user_quota(
+        "/",
+        1000,
+        DqBlk {
+            dqb_bhardlimit: 1,
+            dqb_bsoftlimit: 1,
+            dqb_curspace: 0,
+            ..DqBlk::default()
+        },
+    );
+    let denied = check_write(1000, 1000, 2048).is_err();
+    let mut vfs = crate::vfs::VFS.lock();
+    let write_err = vfs
+        .write_file_checked("/tmp/quota-gate", &[0u8; 2048], 1000, 1000)
+        .err();
+    drop(vfs);
+    kernel_disable_quota("/");
+    if denied && write_err == Some(-122) {
+        serial_println!("[quota] {} (EDQUOT on 2KiB > 1KiB)", GATE_QUOTA_MARKER);
+        true
+    } else {
+        serial_println!(
+            "[quota] GATE_QUOTA FAILED: check={} write={:?}",
+            denied,
+            write_err
+        );
+        false
+    }
+}
+
 pub fn init() {
     serial_println!("[KnoxOS] Disk quota subsystem initialized");
+    let _ = enforce_self_test();
 }

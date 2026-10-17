@@ -676,9 +676,11 @@ impl VirtualFS {
                 // W_OK
                 return Err(-13); // EACCES
             }
+            crate::quota::check_write(uid, gid, data.len())?;
             if let Some(inode) = self.inodes.iter_mut().find(|i| i.ino == ino) {
                 inode.data = Vec::from(data);
                 inode.size = data.len() as u64;
+                crate::quota::commit_write(uid, gid, data.len());
                 return Ok(());
             }
         }
@@ -695,6 +697,8 @@ impl VirtualFS {
                 return Err(-13); // EACCES
             }
         }
+        crate::quota::check_write(uid, gid, data.len())?;
+        crate::quota::check_inode_quota("/", uid, gid)?;
         if self.create_file_at_path(path, FileType::Regular, data, 0o644) {
             // Set the new file's owner
             if let Some(ino) = self.resolve_path(path) {
@@ -703,6 +707,8 @@ impl VirtualFS {
                     inode.gid = gid;
                 }
             }
+            crate::quota::commit_write(uid, gid, data.len());
+            crate::quota::charge_inode("/", uid, gid);
             Ok(())
         } else {
             Err(-5) // EIO
@@ -1334,6 +1340,10 @@ fn install_builtin_binaries() {
     vfs.write_file("/bin/hello", &crate::init::hello_userspace_elf_data());
     vfs.write_file("/bin/paint", &crate::init::launcher_client_elf_data());
     vfs.write_file("/bin/term", &crate::init::terminal_client_elf_data());
+    vfs.write_file(
+        "/bin/term-pty",
+        &crate::init::pty_terminal_client_elf_data(),
+    );
     drop(vfs);
     crate::init::install_dynlink_files();
 

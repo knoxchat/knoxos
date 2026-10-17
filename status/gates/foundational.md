@@ -51,6 +51,7 @@ This **is** becoming an OS.
 | D3 | DHCP applies IP + default route | **Done** — ACK writes `eth0` IPv4 + gateway (`GATE_D3 dhcp applied`) |
 | D4 | DNS + TCP connect/retransmit | **Done** — UDP DNS + SYN/ACK + RTO + HTTP GET (`GATE_D4 dns tcp complete`) |
 | D5 | TCP CUBIC / window | **Done** — cwnd grows on ACK, β=0.7 on loss, send clamped (`GATE_D5 cubic window`) |
+| D6 | IPv6 echo TX | **Done** — loopback `::1` Echo Request produces a sent reply (`GATE_D6 ipv6 echo`) |
 
 ### Gate E — Enforcement (3–6 weeks)
 

@@ -1214,6 +1214,8 @@ const GATE_F9_MAGIC: [u8; 4] = [0x48, 0x32, 0x48, 0xFF];
 const GATE_F10_MAGIC: [u8; 4] = [0x1E, 0x1E, 0x1E, 0xFF];
 const GATE_F11_MAGIC: [u8; 4] = [0x3A, 0x2D, 0x28, 0xFF];
 const GATE_F12_MAGIC: [u8; 4] = [0x26, 0x16, 0x12, 0xFF];
+const GATE_TERM_MAGIC: [u8; 4] = [0x0D, 0x1A, 0x2B, 0xFF];
+pub const GATE_TERM_MARKER: &str = "GATE_TERM pty userspace";
 
 fn shm_title_for_magic(pixels: &[u8]) -> &'static str {
     let Some(head) = pixels.get(0..4) else {
@@ -1237,6 +1239,8 @@ fn shm_title_for_magic(pixels: &[u8]) -> &'static str {
         "Browser"
     } else if head == GATE_F12_MAGIC {
         "AI Assistant"
+    } else if head == GATE_TERM_MAGIC {
+        "Terminal"
     } else {
         "Client"
     }
@@ -1253,6 +1257,7 @@ fn is_known_shm_magic(p: &[u8]) -> bool {
         || p == GATE_F10_MAGIC
         || p == GATE_F11_MAGIC
         || p == GATE_F12_MAGIC
+        || p == GATE_TERM_MAGIC
 }
 
 /// Present a Ring 3 SHM buffer as a compositor surface + desktop window.
@@ -1346,6 +1351,13 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
             serial_println!(
                 "[WL] {} (window={} content=Empty SHM, not WindowContentType::FileExplorer)",
                 GATE_F7_MARKER,
+                wid
+            );
+        }
+        if pixels[0..4] == GATE_TERM_MAGIC {
+            serial_println!(
+                "[WL] {} (window={} content=Empty SHM, openpty live, not WindowContentType::Terminal)",
+                GATE_TERM_MARKER,
                 wid
             );
         }

@@ -247,8 +247,8 @@ pub fn init() {
 /// Serial marker once a VFS write/unlink is visible to an inotify watch.
 pub const GATE_H3_MARKER: &str = "GATE_H3 inotify";
 
-const GATE_H3_DIR: &str = "/var/lib/knoxos";
-const GATE_H3_PATH: &str = "/var/lib/knoxos/gate_h3";
+const GATE_H3_DIR: &str = "/tmp";
+const GATE_H3_PATH: &str = "/tmp/gate_h3";
 const GATE_H3_PAYLOAD: &[u8] = b"knoxos-h3\n";
 
 /// Watch a directory, write and unlink a file, and prove events were queued.

@@ -127,7 +127,6 @@ pub mod io_uring;
 pub mod ipc;
 #[cfg(feature = "stub-drivers")]
 pub mod kcov;
-#[cfg(feature = "stub-drivers")]
 pub mod kobject;
 #[cfg(feature = "stub-drivers")]
 pub mod kpanic;
@@ -256,7 +255,7 @@ pub mod bluetooth;
 pub mod container;
 #[cfg(feature = "stub-drivers")]
 pub mod deployment;
-#[cfg(feature = "stub-drivers")]
+#[cfg(feature = "net")]
 pub mod ipv6;
 pub mod llm;
 pub mod overlayfs;
@@ -534,7 +533,6 @@ pub mod disk_install;
 pub mod exfat;
 #[cfg(feature = "stub-drivers")]
 pub mod fuse;
-#[cfg(feature = "stub-drivers")]
 pub mod gpu_compositor;
 pub mod hw_nic;
 pub mod linux_compat;

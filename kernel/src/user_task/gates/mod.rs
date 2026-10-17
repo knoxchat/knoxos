@@ -286,6 +286,7 @@ extern "C" fn gate_boot_body() {
     run_gate_g4_audit();
     run_gate_f6();
     run_gate_f7();
+    run_gate_term();
     run_gate_i4();
 }
 

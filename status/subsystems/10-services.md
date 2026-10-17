@@ -2,7 +2,7 @@
 
 # 10. System Services
 
-**Grade: Wired (42%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`
+**Grade: Wired (55%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`
 
 ### Wired
 - [x] Init searches standard paths; can map a built-in ELF blob
@@ -16,11 +16,11 @@
 - [x] QEMU shutdown ports
 
 ### Stub
-- [x] Init `iretq`s to `/sbin/init` (K3); supervision/restart still missing
-- [ ] No crash restart / watchdog / cgroup limits on units
+- [x] Init `iretq`s to `/sbin/init` (K3); Failed units restart (`GATE_SVC restart`)
+- [x] Crash restart of Failed units (`GATE_SVC restart`). No cgroup limits on units.
 - [x] D-Bus listens on `AF_UNIX` `/run/dbus/system_bus_socket` (L3); not a full bus daemon
-- [ ] Cron needs a guaranteed timer caller
-- [ ] udev-style hotplug → `/dev`
+- [x] Cron `@reboot` + PIT/APIC due-flag (`GATE_CRON reboot`)
+- [x] udev-style hotplug → `/dev` from PCI (`GATE_UDEV hotplug`)
 - [ ] Suspend/hibernate, logind, NetworkManager (activate logs “Starting DHCP”)
 - [ ] PulseAudio/PipeWire mixing to HDA
 

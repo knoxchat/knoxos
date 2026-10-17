@@ -1,0 +1,12 @@
+[package]
+name = "knoxos-host-tests"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Host-side unit tests for KnoxOS parsers (no QEMU)"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]

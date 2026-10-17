@@ -13,8 +13,8 @@ The compositor is an in-kernel software desktop, not a Unix display server. Prod
 ## What is not
 
 - `wl_display` object protocol (bind/listen + SHM vaddr is not Wayland-the-protocol).
-- GPU compositor (`gpu_compositor`) — unused; desktop still software-blits to VGA, then F8 also scanouts a 64×64 host resource as the virtqueue proof.
-- Interactive terminal — still `WindowContentType::Terminal` for PTY I/O.
+- GPU compositor (`gpu_compositor`) — init + software VBlank (`GATE_VSYNC paced`); desktop still software-blits to VGA, then F8 also scanouts a 64×64 host resource as the virtqueue proof.
+- Interactive start-menu terminal — still `WindowContentType::Terminal` for live PTY I/O. A Ring 3 client `openpty`s and presents SHM (`GATE_TERM pty userspace`).
 - HDR, VRR, TrueType bytecode hinting, full IME.
 
 ## Client rule

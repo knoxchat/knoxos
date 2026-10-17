@@ -30,6 +30,7 @@ pub fn process_packet(data: &[u8]) {
     match eth_hdr.ether_type_value() {
         0x0806 => process_arp(&data[14..]),
         0x0800 => process_ipv4(&data[14..]),
+        0x86DD => crate::ipv6::process_ipv6_packet(&data[14..]),
         _ => {}
     }
 }

@@ -235,6 +235,7 @@ pub fn monotonic_ns() -> i64 {
 /// Update monotonic counter (called from timer interrupt)
 pub fn tick() {
     MONOTONIC_TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    crate::cron::timer_irq_tick();
 }
 
 /// Linux clock_gettime implementation

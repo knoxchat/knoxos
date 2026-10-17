@@ -407,6 +407,32 @@ lazy_static::lazy_static! {
     pub static ref SERVICE_MANAGER: Mutex<ServiceManager> = Mutex::new(ServiceManager::new());
 }
 
+pub const GATE_SVC_MARKER: &str = "GATE_SVC restart";
+
+/// Fail a unit and prove `check_service_health` brings it back.
+pub fn restart_self_test() -> bool {
+    let mut mgr = SERVICE_MANAGER.lock();
+    let mut unit = ServiceUnit::new("gate-svc.service", "Gate SVC restart", "/bin/true");
+    unit.restart_policy = RestartPolicy::OnFailure;
+    unit.state = ServiceState::Failed;
+    mgr.add_service(unit);
+    mgr.check_service_health();
+    match mgr.services.get("gate-svc.service") {
+        Some(svc) if svc.state == ServiceState::Running && svc.restart_count >= 1 => {
+            serial_println!("[svc] {} (restarts={})", GATE_SVC_MARKER, svc.restart_count);
+            true
+        }
+        other => {
+            serial_println!(
+                "[svc] GATE_SVC FAILED: state={:?} count={:?}",
+                other.map(|s| s.state),
+                other.map(|s| s.restart_count)
+            );
+            false
+        }
+    }
+}
+
 /// Register default system services
 fn register_defaults() {
     let mut mgr = SERVICE_MANAGER.lock();

@@ -29,6 +29,104 @@ pub fn files_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF4E_8A26, b"GATE_F7 files userspace\n")
 }
 
+/// Ring 3 `openpty` + SHM present — interactive PTY path is userspace-shaped.
+pub fn pty_terminal_client_elf_data() -> Vec<u8> {
+    let marker = b"GATE_TERM pty userspace\n";
+    let fill = 0xFF2B_1A0Du32.to_le_bytes();
+    let mut code = Vec::new();
+    let mut rels: Vec<(usize, &'static str)> = Vec::new();
+    let mut labels = BTreeMap::new();
+
+    let mut emit = |code: &mut Vec<u8>, bytes: &[u8]| code.extend_from_slice(bytes);
+    let mut js = |code: &mut Vec<u8>, rels: &mut Vec<(usize, &'static str)>, name: &'static str| {
+        emit(code, &[0x0F, 0x88]);
+        rels.push((code.len(), name));
+        emit(code, &[0, 0, 0, 0]);
+    };
+    let mut lea_rdi =
+        |code: &mut Vec<u8>, rels: &mut Vec<(usize, &'static str)>, name: &'static str| {
+            emit(code, &[0x48, 0x8D, 0x3D]);
+            rels.push((code.len(), name));
+            emit(code, &[0, 0, 0, 0]);
+        };
+    let mut lea_rsi =
+        |code: &mut Vec<u8>, rels: &mut Vec<(usize, &'static str)>, name: &'static str| {
+            emit(code, &[0x48, 0x8D, 0x35]);
+            rels.push((code.len(), name));
+            emit(code, &[0, 0, 0, 0]);
+        };
+
+    // mmap(NULL, 0x4000, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x09, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0x31, 0xFF]);
+    emit(&mut code, &[0x48, 0xC7, 0xC6, 0x00, 0x40, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC2, 0x03, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x49, 0xC7, 0xC2, 0x22, 0x80, 0x00, 0x00]);
+    emit(&mut code, &[0x49, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]);
+    emit(&mut code, &[0x4D, 0x31, 0xC9]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    js(&mut code, &mut rels, "fail");
+    emit(&mut code, &[0x49, 0x89, 0xC4]); // r12 = buf
+    emit(&mut code, &[0x4C, 0x89, 0xE7]);
+    emit(&mut code, &[0x48, 0xC7, 0xC1, 0x00, 0x10, 0x00, 0x00]);
+    emit(&mut code, &[0xB8, fill[0], fill[1], fill[2], fill[3]]);
+    emit(&mut code, &[0xF3, 0xAB]);
+
+    // openpty(&master, &name)  syscall 0x3051
+    emit(&mut code, &[0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x51, 0x30, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0x89, 0xE7]);
+    emit(&mut code, &[0x48, 0x8D, 0x74, 0x24, 0x08]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    js(&mut code, &mut rels, "fail");
+
+    // open("/dev/wl0", O_RDWR)
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x02, 0x00, 0x00, 0x00]);
+    lea_rdi(&mut code, &mut rels, "path");
+    emit(&mut code, &[0x48, 0xC7, 0xC6, 0x02, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0x31, 0xD2]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    js(&mut code, &mut rels, "fail");
+    emit(&mut code, &[0x49, 0x89, 0xC5]); // r13 = fd
+
+    // ioctl(fd, 0x574C0001, buf)
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x10, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x4C, 0x89, 0xEF]);
+    emit(&mut code, &[0x48, 0xC7, 0xC6, 0x01, 0x00, 0x4C, 0x57]);
+    emit(&mut code, &[0x4C, 0x89, 0xE2]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    js(&mut code, &mut rels, "fail");
+
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00]);
+    lea_rsi(&mut code, &mut rels, "marker");
+    let n = marker.len() as u32;
+    emit(&mut code, &[0x48, 0xC7, 0xC2]);
+    emit(&mut code, &n.to_le_bytes());
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x31, 0xFF]);
+    emit(&mut code, &[0xEB, 0x07]);
+    labels.insert("fail", code.len());
+    emit(&mut code, &[0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x0F, 0x05]);
+    labels.insert("path", code.len());
+    emit(&mut code, b"/dev/wl0\0");
+    labels.insert("marker", code.len());
+    emit(&mut code, marker);
+
+    for (off, name) in rels {
+        let target = *labels.get(name).expect(name);
+        let disp = (target as i32).wrapping_sub((off as i32) + 4);
+        code[off..off + 4].copy_from_slice(&disp.to_le_bytes());
+    }
+    build_static_user_elf(&code)
+}
+
 /// Settings is a Ring 3 SHM client, not `WindowContentType::Settings`.
 pub fn settings_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF38_3840, b"GATE_F8 settings userspace\n")

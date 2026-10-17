@@ -15,6 +15,10 @@ use spin::Mutex;
 
 use crate::serial_println;
 
+pub const GATE_CRON_MARKER: &str = "GATE_CRON reboot";
+static TIMER_TICKS: AtomicU32 = AtomicU32::new(0);
+static TIMER_DUE: AtomicBool = AtomicBool::new(false);
+
 /// Cron job identifier
 pub type CronJobId = u32;
 static NEXT_JOB_ID: AtomicU32 = AtomicU32::new(1);
@@ -338,7 +342,7 @@ fn execute_cron_command(command: &str) -> i32 {
         "/usr/sbin/fsck" | "fsck" => {
             let force = parts.contains(&"-y");
             serial_println!("[cron] Filesystem check (force={})", force);
-            // Trigger filesystem consistency check
+            serial_println!("[cron] {}", GATE_CRON_MARKER);
             0
         }
         _ => {
@@ -405,4 +409,22 @@ pub fn init() {
         "[KnoxOS] Cron scheduler initialized ({} jobs)",
         cron.jobs.len()
     );
+}
+
+/// Called from the timer interrupt (~18.2 Hz). Sets a flag every second.
+pub fn timer_irq_tick() {
+    let n = TIMER_TICKS.fetch_add(1, Ordering::Relaxed) + 1;
+    if n.is_multiple_of(18) {
+        TIMER_DUE.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Run due jobs if the timer interrupt asked. Safe outside IRQ context.
+pub fn poll_timer() {
+    if !TIMER_DUE.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    let dt = crate::rtc::read_rtc();
+    CRON.lock()
+        .tick(dt.minute, dt.hour, dt.day, dt.month, dt.day_of_week);
 }

@@ -45,9 +45,9 @@ use knoxos_kernel::{
     aarch64_boot, ai_suggest, aio, app_store, apparmor, binfmt, btrfs, cgroup_psi,
     cgroup_v2_controllers, cgroups_v2_advanced, cluster, compiler, coredump, css_engine,
     deployment, depthcharge, desktop_apps_ext, desktop_ops, dm_crypt, federated, fuzz, gamepad,
-    help_system, hw_bringup, io_sched, io_uring_advanced, ipv6, js_engine, k8s, kcov, kdb, keyring,
-    kobject, kpanic, ktrace, live_usb, man_pages, memory_pool, multimon, netns, nfs, nfs_server,
-    p9fs, partition, pkg_dist, posix_tests, posix2024, power_events, quic, riscv64_boot, rust_std,
+    help_system, hw_bringup, io_sched, io_uring_advanced, js_engine, k8s, kcov, kdb, keyring,
+    kpanic, ktrace, live_usb, man_pages, memory_pool, multimon, netns, nfs, nfs_server, p9fs,
+    partition, pkg_dist, posix_tests, posix2024, power_events, quic, riscv64_boot, rust_std,
     rwlock, sched_debug, sctp, secure_boot, security_cert, selfhost, shell_startup, tablet_mode,
     tokenizer, touchscreen, verify, video_codec, voice, vulkan, webcam, xdp, zfs,
 };
@@ -59,23 +59,23 @@ use knoxos_kernel::{
     ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
     glibc_compat, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http, huge_pages,
     hwtest, i18n, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring, iommu,
-    ipc, journal_replay, kcmp, kpm, kvm, landlock, ldknoxos, libc_funcs, llm, media_player,
-    membarrier, memfd, memory, midi, mmap, modules, mount, mount_api, mqueue, multiboot, musl,
-    namespaces, nested_irq, net_production, ntp, numa, nvme, onnx, oom, ota_update, overlayfs,
-    package_manager, path, pci, pcie_ecam, perf, persist, pgo, pgrp, pidfd, pidns, pipe, posix_ext,
-    posix_timer, power, preempt_rt, println, process, procfs, procfs_extended, procfs_full, ptrace,
-    pty, pulseaudio, quota, random, recovery, release_sign, repo_server, rlimit, rseq, rtc,
-    rtl8139, sched_ext, scheduler, screen_record, seccomp, security, selinux, serial_println,
-    service_manager, session, shell, shm, signalfd, signals, slab, smp, socket_activation,
-    soloader, sound, splice, ssp, stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs,
-    sysinfo, syslog,
+    ipc, journal_replay, kcmp, kobject, kpm, kvm, landlock, ldknoxos, libc_funcs, llm,
+    media_player, membarrier, memfd, memory, midi, mmap, modules, mount, mount_api, mqueue,
+    multiboot, musl, namespaces, nested_irq, net_production, ntp, numa, nvme, onnx, oom,
+    ota_update, overlayfs, package_manager, path, pci, pcie_ecam, perf, persist, pgo, pgrp, pidfd,
+    pidns, pipe, posix_ext, posix_timer, power, preempt_rt, println, process, procfs,
+    procfs_extended, procfs_full, ptrace, pty, pulseaudio, quota, random, recovery, release_sign,
+    repo_server, rlimit, rseq, rtc, rtl8139, sched_ext, scheduler, screen_record, seccomp,
+    security, selinux, serial_println, service_manager, session, shell, shm, signalfd, signals,
+    slab, smp, socket_activation, soloader, sound, splice, ssp, stack_guard, strace, stress_test,
+    suspend, swap, sysctl, sysfs, sysinfo, syslog,
     task::{Task, executor::Executor, keyboard},
     terminal, thermal, threads, timerfd, tls, tmpfs, tty, uds, usb, usb_hid, userfaultfd, usermode,
     users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input, virtio_tablet, visual_test,
     vivaldi, vmm, vterm, wayland, wifi, workqueue, xattr, xdg,
 };
 #[cfg(feature = "net")]
-use knoxos_kernel::{dhcp, dns, firewall, net, netfilter, netint, virtio_net};
+use knoxos_kernel::{dhcp, dns, firewall, ipv6, net, netfilter, netint, virtio_net};
 
 /// Configure the bootloader to map all physical memory
 #[cfg(target_arch = "x86_64")]
@@ -267,8 +267,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize networking stack (TCP/IP)
     #[cfg(feature = "net")]
-    #[cfg(feature = "net")]
     net::init();
+    #[cfg(feature = "net")]
+    ipv6::init();
 
     // Initialize shared memory (SysV IPC)
     shm::init();
@@ -410,6 +411,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // VirtIO-GPU 2D scanout + cursor plane (Gate F8)
     virtio_gpu::init();
+    knoxos_kernel::gpu_compositor::init();
 
     // Initialize FAT32 filesystem (needs virtio_blk)
     fat32::init();
@@ -520,10 +522,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize sysctl (/proc/sys parameters)
     sysctl::init();
 
-    // Initialize kernel object model (sysfs backing)
-    #[cfg(feature = "stub-drivers")]
-    #[cfg(feature = "stub-drivers")]
+    // Initialize kernel object model (sysfs backing) + udev /dev nodes
     kobject::init();
+    kobject::hotplug_pci_devices();
 
     // Initialize resource limits (RLIMIT_*)
     rlimit::init();
@@ -1083,6 +1084,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Boot all enabled services (dependency-ordered)
     serial_println!("[KnoxOS] Phase 30: service_manager boot...");
     crate::service_manager::SERVICE_MANAGER.lock().boot();
+    crate::service_manager::restart_self_test();
     serial_println!("[KnoxOS] Phase 30: cron::init...");
     cron::init();
     serial_println!("[KnoxOS] Phase 30: session::init...");
@@ -1323,6 +1325,10 @@ async fn gui_redraw_loop() {
             gui::request_taskbar_redraw();
             gui::request_desktop_widget_redraw();
 
+            cron::poll_timer();
+            crate::service_manager::SERVICE_MANAGER
+                .lock()
+                .check_service_health();
             cron::CRON
                 .lock()
                 .tick(dt.minute, dt.hour, dt.day, dt.month, dt.day_of_week);
@@ -1366,6 +1372,7 @@ async fn gui_redraw_loop() {
                     gui::desktop::draw_desktop_damaged(&damage);
                 }
                 gui::set_last_present_tsc(gui::read_tsc_public());
+                knoxos_kernel::gpu_compositor::pace_frame();
             }
         } else if need_cursor {
             gui::update_cursor_only();

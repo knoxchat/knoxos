@@ -92,6 +92,24 @@ pub(super) fn run_gate_f7() {
     );
 }
 
+pub(super) fn run_gate_term() {
+    serial_println!("[user_task] Gate TERM: Ring 3 openpty + SHM terminal");
+    let elf = crate::init::pty_terminal_client_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "term-pty") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate TERM pid={} reaped={} (marker from userspace)",
+        pid,
+        reaped
+    );
+}
+
 pub(super) fn run_gate_f5() {
     serial_println!("[user_task] Gate F5: Wayland AF_UNIX present");
     let elf = crate::init::wayland_unix_client_elf_data();

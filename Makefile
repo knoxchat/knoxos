@@ -1,7 +1,7 @@
 # KnoxOS - Rust-based AI Operating System
 # Master Makefile for building and managing the complete system
 
-.PHONY: help all kernel boot clean test run-kernel qemu docs status pre-commit pre-commit-quick pre-commit-fix pre-commit-install
+.PHONY: help all kernel boot clean test run-kernel qemu docs status pre-commit pre-commit-quick pre-commit-fix pre-commit-install host-test
 
 # Color output
 RED := \033[0;31m
@@ -303,11 +303,17 @@ nix-build: ## Build using Nix
 nix-shell: ## Enter Nix development shell
 	nix develop
 
+host-test: ## Host-side parser tests (no QEMU)
+	@echo "$(BLUE)[KnoxOS] Host tests...$(NC)"
+	@cargo test -p knoxos-host-tests
+	@echo "$(GREEN)[✓] Host tests passed$(NC)"
+
 ci-all: ## Run all CI checks locally
 	@echo "$(BLUE)[KnoxOS] Running all CI checks...$(NC)"
 	@$(MAKE) -C $(KERNEL_DIR) ci-fmt
 	@$(MAKE) -C $(KERNEL_DIR) ci-clippy
 	@$(MAKE) -C $(KERNEL_DIR) ci-size
+	@$(MAKE) host-test
 	@echo "$(GREEN)[✓] All CI checks passed$(NC)"
 
 pre-commit: ## Run the rustc/cargo quality gate (scripts/pre-commit.sh)

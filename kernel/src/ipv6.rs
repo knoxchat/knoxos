@@ -653,11 +653,48 @@ pub fn icmpv6_checksum(src: &Ipv6Address, dst: &Ipv6Address, icmp_data: &[u8]) -
     !(sum as u16)
 }
 
+/// Transmit an IPv6 packet: loopback delivers locally, otherwise Ethernet 0x86DD.
+pub fn send_ipv6_packet(packet: &[u8]) -> bool {
+    if packet.len() < Ipv6Header::SIZE {
+        return false;
+    }
+    IPV6_STATS.lock().packets_sent += 1;
+
+    // SAFETY: `packet` is a kernel-built IPv6 datagram; the header is 40 bytes.
+    let header = unsafe { &*(packet.as_ptr() as *const Ipv6Header) };
+    let dst = header.dst_addr();
+
+    if dst.is_loopback() || is_local_address(&dst) {
+        process_ipv6_packet(packet);
+        return true;
+    }
+
+    let dst_mac = if dst.is_multicast() {
+        [0x33, 0x33, dst.0[12], dst.0[13], dst.0[14], dst.0[15]]
+    } else {
+        neighbor_mac(&dst).unwrap_or([0xFF; 6])
+    };
+    crate::netint::send_ethernet_frame(dst_mac, 0x86DD, packet)
+}
+
+fn is_local_address(addr: &Ipv6Address) -> bool {
+    let interfaces = IPV6_INTERFACES.lock();
+    interfaces
+        .values()
+        .any(|iface| iface.addresses.iter().any(|e| e.addr == *addr))
+}
+
+fn neighbor_mac(addr: &Ipv6Address) -> Option<[u8; 6]> {
+    neighbor_cache_lookup(addr)
+}
+
 /// Process an incoming IPv6 packet
 pub fn process_ipv6_packet(data: &[u8]) {
     if data.len() < Ipv6Header::SIZE {
         return;
     }
+
+    IPV6_STATS.lock().packets_received += 1;
 
     // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let header = unsafe { &*(data.as_ptr() as *const Ipv6Header) };
@@ -688,6 +725,8 @@ fn process_icmpv6(src: Ipv6Address, dst: Ipv6Address, data: &[u8]) {
 
     let icmp_type = data[0];
     let _code = data[1];
+
+    IPV6_STATS.lock().icmpv6_received += 1;
 
     match Icmpv6Type::from_u8(icmp_type) {
         Some(Icmpv6Type::EchoRequest) => {
@@ -752,7 +791,9 @@ fn send_echo_reply(to: Ipv6Address, from: Ipv6Address, request_data: &[u8]) {
     packet.extend_from_slice(header_bytes);
     packet.extend_from_slice(&reply);
 
-    serial_println!("[ICMPv6] Sent Echo Reply to {}", to);
+    IPV6_STATS.lock().icmpv6_sent += 1;
+    let tx = send_ipv6_packet(&packet);
+    serial_println!("[ICMPv6] Sent Echo Reply to {} tx={}", to, tx);
 }
 
 /// Process Neighbor Solicitation
@@ -1122,12 +1163,62 @@ pub fn get_stats() -> Ipv6Stats {
     IPV6_STATS.lock().clone()
 }
 
+pub const GATE_D6_MARKER: &str = "GATE_D6 ipv6 echo";
+
+/// Build an ICMPv6 Echo Request, inject it, and require a real TX reply.
+pub fn echo_self_test() -> bool {
+    let mut icmp = vec![Icmpv6Type::EchoRequest as u8, 0, 0, 0, 0, 0, 0, 1];
+    icmp.extend_from_slice(b"KNOX");
+    let cksum = icmpv6_checksum(&Ipv6Address::LOOPBACK, &Ipv6Address::LOOPBACK, &icmp);
+    icmp[2] = (cksum >> 8) as u8;
+    icmp[3] = (cksum & 0xFF) as u8;
+
+    let header = Ipv6Header::new(
+        Ipv6Address::LOOPBACK,
+        Ipv6Address::LOOPBACK,
+        58,
+        icmp.len() as u16,
+        64,
+    );
+    // SAFETY: packed IPv6 header is 40 bytes; we only read it as a byte slice.
+    let header_bytes =
+        unsafe { core::slice::from_raw_parts(&header as *const _ as *const u8, Ipv6Header::SIZE) };
+    let mut packet = Vec::with_capacity(Ipv6Header::SIZE + icmp.len());
+    packet.extend_from_slice(header_bytes);
+    packet.extend_from_slice(&icmp);
+
+    let before = get_stats();
+    process_ipv6_packet(&packet);
+    let after = get_stats();
+    if after.icmpv6_sent > before.icmpv6_sent && after.packets_sent > before.packets_sent {
+        serial_println!(
+            "[IPv6] {} (rx {} -> {} tx {} -> {})",
+            GATE_D6_MARKER,
+            before.packets_received,
+            after.packets_received,
+            before.packets_sent,
+            after.packets_sent
+        );
+        true
+    } else {
+        serial_println!(
+            "[IPv6] GATE_D6 FAILED: icmp_sent {} -> {} pkt_sent {} -> {}",
+            before.icmpv6_sent,
+            after.icmpv6_sent,
+            before.packets_sent,
+            after.packets_sent
+        );
+        false
+    }
+}
+
 /// Initialize IPv6 subsystem
 pub fn init() {
     serial_println!("[IPv6] Initializing IPv6 networking stack");
 
     // Add loopback
     configure_interface("lo", [0; 6], 65536);
+    add_address("lo", Ipv6Address::LOOPBACK, 128, u32::MAX, u32::MAX);
     add_route(
         Ipv6Address::LOOPBACK,
         128,
@@ -1137,6 +1228,7 @@ pub fn init() {
     );
 
     serial_println!("[IPv6] IPv6 stack initialized");
+    let _ = echo_self_test();
 }
 
 // ═══════════════════════════════════════════════════════════════════════

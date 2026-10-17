@@ -89,7 +89,7 @@
 - [x] ext4 default root — second virtio-blk (`mkfs.ext4`) mounted at `/` (`GATE_C9 ext4 root`). `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual.
 - [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE / NFS still not registered.
 - [x] inotify — `emit_event` from VFS write/unlink and `open(O_CREAT)`; watch can read (**Gate H3**). Ring 3 `inotify_init1`/`add_watch`/`read` is live (Q3). `fanotify_init` returns ENOSYS (P4).
-- [ ] Quotas — counters, not enforced
+- [x] Quotas — `write_file_checked` returns `EDQUOT` when the hard limit is exceeded (`GATE_QUOTA enforce`)
 
 ### Perfect-OS next steps
 1. ~~Make ext4 the root on VirtIO-blk by default.~~ **Done** (`GATE_C9 ext4 root`). Second virtio-blk is `mkfs.ext4` and mounted at `/`. `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual. Persist blob stays on vda (C1–C7).

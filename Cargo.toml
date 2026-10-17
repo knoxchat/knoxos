@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+# Kernel (`x86_64-unknown-none` + build-std) and boot (UEFI image builder)
+# keep independent manifests and lockfiles.
+members = ["tools/svg2rgba", "tools/host-tests"]
+exclude = ["kernel", "boot"]

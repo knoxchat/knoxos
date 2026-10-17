@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Gate D6** — IPv6 echo actually TXes: loopback `::1` injects ICMPv6 Echo Request, reply is sent (`GATE_D6 ipv6 echo`). VirtIO-net RX `0x86DD` feeds `process_ipv6_packet`.
+- **Service restart** — failed units with `OnFailure`/`Always` are brought back (`GATE_SVC restart`).
+- **udev hotplug** — PCI scan creates `/dev` nodes and drains kobject ADD uevents (`GATE_UDEV hotplug`).
+- **Quota enforcement** — VFS `write_file_checked` returns `EDQUOT` when the hard block limit is exceeded (`GATE_QUOTA enforce`).
+- **Cron timer** — `@reboot` jobs run at init (`GATE_CRON reboot`); the PIT/APIC tick sets a due flag so `tick` is not desktop-loop-only.
+- **VSync pacing** — `gpu_compositor` is on the live path; software VBlank flips a page (`GATE_VSYNC paced`).
+- **Ring 3 PTY terminal** — a userspace client `openpty`s and presents SHM Empty, not `WindowContentType::Terminal` (`GATE_TERM pty userspace`). Interactive start-menu Terminal still uses the in-kernel PTY for live I/O.
+- Host-side parser tests (`cargo test -p knoxos-host-tests`) for ELF magic, ICMPv6 checksum, cron fields, ext4 super magic, quota KiB rounding.
 - **Gate G5** — `// SAFETY:` on every `unsafe {`; `clippy::undocumented_unsafe_blocks = deny` (`GATE_G5 safety comments`).
 - **Gate C9** — ext4 is the default root on a second virtio-blk (`mkfs.ext4`); `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual (`GATE_C9 ext4 root`). `fs-ext4` is a default Cargo feature.
 - **USB HID cursor without PS/2** — i8042 aux is not enabled; a boot-protocol mouse URB moves the GUI cursor (`GATE_USB no ps2 cursor`).

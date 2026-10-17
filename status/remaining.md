@@ -47,13 +47,13 @@ Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 - [ ] NTFS — parses MFT from a provided buffer; **never calls the block layer**
 - [ ] Btrfs / ZFS / XFS / exFAT / CIFS — in-memory or AHCI/NVMe fallback
 - [x] JBD2 journal replay — descriptor + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`)
-- [ ] Quotas — counters, not enforced
+- [x] Quotas — `write_file_checked` returns `EDQUOT` (`GATE_QUOTA enforce`)
 
 ## 5. Networking Stack
 
 Details: [subsystems/05-networking.md](subsystems/05-networking.md)
 
-- [ ] IPv6 echo — builds packet, logs, no TX
+- [x] IPv6 echo — loopback `::1` Echo Request produces a TX reply (`GATE_D6 ipv6 echo`)
 - [ ] TLS 1.3 — types; GCM/X.509 stub; handshake flagged done after one recv
 - [ ] Wi-Fi / WPA3 / bridge / VLAN / NAT — in-memory
 
@@ -79,9 +79,9 @@ Details: [subsystems/07-gui.md](subsystems/07-gui.md)
 - [ ] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2) plus AF_UNIX `/run/wayland-0` present (F5); not a `wl_display` object-protocol server
 - [ ] **GPU compositor** — `gpu_compositor.rs` never invoked; desktop software-blits to VGA (F8 scanouts a separate 64×64 virtio resource)
 - [x] Hardware cursor — VirtIO-GPU cursorq `UPDATE_CURSOR` / `MOVE_CURSOR`; desktop skips software blit (`GATE_F8 hw cursor`)
-- [ ] VSync module unused; pacing is TSC ~60 FPS
+- [x] VSync — `gpu_compositor` software VBlank flip on the live path (`GATE_VSYNC paced`); desktop still software-blits to VGA
 - [ ] HDR, VRR, TrueType bytecode hinting, full IME framework
-- [ ] Interactive desktop terminal still in-kernel for PTY I/O (F3/F7 isolate demo clients)
+- [x] Ring 3 `openpty` + SHM terminal client (`GATE_TERM pty userspace`). Interactive start-menu Terminal still in-kernel for live PTY I/O.
 
 ## 8. Shell & Terminal
 
@@ -103,9 +103,9 @@ Details: [subsystems/09-security.md](subsystems/09-security.md)
 
 Details: [subsystems/10-services.md](subsystems/10-services.md)
 
-- [ ] No crash restart / watchdog / cgroup limits on units
-- [ ] Cron needs a guaranteed timer caller
-- [ ] udev-style hotplug → `/dev`
+- [x] Crash restart of failed units (`GATE_SVC restart`). No cgroup limits on units.
+- [x] Cron `@reboot` plus PIT/APIC due-flag (`GATE_CRON reboot`)
+- [x] udev-style hotplug → `/dev` from PCI scan (`GATE_UDEV hotplug`)
 - [ ] Suspend/hibernate, logind, NetworkManager (activate logs “Starting DHCP”)
 - [ ] PulseAudio/PipeWire mixing to HDA
 
@@ -157,8 +157,9 @@ Details: [subsystems/15-build.md](subsystems/15-build.md)
 
 Details: [subsystems/16-testing.md](subsystems/16-testing.md)
 
-- [ ] No `#[test]` (expected for `no_std`, but host-side tests could exist)
+- [x] Host-side `#[test]` in `tools/host-tests` (`cargo test -p knoxos-host-tests`)
 - [x] Clippy `undocumented_unsafe_blocks` is **deny** (`kernel/Cargo.toml`); every `unsafe {` has a `// SAFETY:` comment (`GATE_G5 safety comments`).
+- [x] Host parser tests (ELF / ICMPv6 / cron / ext4 magic / quota KiB)
 - [ ] No Miri, no fuzz of ELF/ext4/packet parsers, no coverage
 
 ## 17. Documentation

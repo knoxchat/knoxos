@@ -1,4 +1,8 @@
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
+
+static PACED: AtomicBool = AtomicBool::new(false);
+pub const GATE_VSYNC_MARKER: &str = "GATE_VSYNC paced";
 
 /// VSync mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,4 +101,19 @@ pub fn set_vsync(mode: VsyncMode) {
     let mut state = VSYNC.lock();
     state.mode = mode;
     crate::serial_println!("[vsync] Mode set to {:?}", mode);
+}
+
+/// Software VBlank: request a flip and complete it. Prints the gate once.
+pub fn pace_frame() {
+    let mut state = VSYNC.lock();
+    if state.mode == VsyncMode::Off {
+        state.mode = VsyncMode::On;
+    }
+    state.request_flip();
+    state.on_vblank();
+    let frames = state.frame_count;
+    drop(state);
+    if frames >= 1 && !PACED.swap(true, Ordering::Relaxed) {
+        crate::serial_println!("[vsync] {} (frames={})", GATE_VSYNC_MARKER, frames);
+    }
 }

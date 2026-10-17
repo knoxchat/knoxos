@@ -31,6 +31,14 @@ jobs:
       - name: License / SPDX
         run: ./scripts/license-check.sh
 
+  host-tests:
+    name: Host parser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host unit tests
+        run: cargo test -p knoxos-host-tests
+
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest

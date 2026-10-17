@@ -1,4 +1,5 @@
 # Rust build artifacts
+/target/
 kernel/target/
 boot/target/
 backend/target/

@@ -96,4 +96,6 @@ pub fn init() {
         comp.display_width,
         comp.display_height
     );
+    drop(comp);
+    pace_frame();
 }

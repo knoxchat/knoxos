@@ -14,7 +14,7 @@
 
 ### Missing (old status was wrong)
 - [x] **`flake.nix`** — present (devShell + QEMU/Make; kernel still rustup nightly)
-- [ ] Cargo workspace unifying `kernel` + `boot` + `tools`
+- [ ] Cargo workspace unifying `kernel` + `boot` + `tools` — tools workspace exists (`tools/svg2rgba`, `tools/host-tests`); kernel/boot stay independent (`x86_64-unknown-none` + UEFI builder)
 - [x] Feature flags so Unused modules do not compile into the demo kernel (`gui`/`net` default)
 - [x] ISO + SHA256SUMS + optional GPG (`scripts/make-iso.sh`, `scripts/release-checksums.sh`). PK/KEK/db + OVMF Secure Boot QEMU boot (`scripts/qemu-secure-boot.sh`).
 

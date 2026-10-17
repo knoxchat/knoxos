@@ -24,18 +24,18 @@ Kernel Core:        ████████████████████
 Memory Mgmt:        ███████████████████░░░░░░  74%  Wired         ← H1–H4 + J2/J3 + K2 swap I/O
 Process/Sched:      ████████████████████████░  99%  Wired         ← B3–B8 + I2/I3 + J1 + K1 join + L1 TLS + M1 PID ns + M3 futex + N1 mount ns + O1 net ns + P1 user ns + Q1 IPC ns + R1 cgroup ns + S1 time ns + T1 setns + U1 chroot + V1 pivot_root + Z3 chdir + AA2 fchdir + AG3 getppid + AH3 getpgid + AI3 getsid + AJ3 setuid + AK2 getrlimit + AK3 setgid + AL2 setrlimit + AL3 setresuid + AM2 prlimit64 + AM3 setresgid + AN2 setreuid + AN3 getgroups + AO2 setregid + AO3 getresuid + AP2 getresgid + AP3 setpgid + AQ2 setsid + AQ3 setpriority + AT2 gettimeofday + AT3 sysinfo + AU2 sched_yield + AU3 alarm + AV2 getpid + AV3 gettid + BC2 capset + BC3 ioprio_set + BD2 clock_nanosleep + BD3 getitimer + BL3 clone3
 Filesystem:         ████████████████████████░  99%  Wired         ← C1–C8 (`/bin` persist + JBD2 replay) + inotify + VFS syscalls through BL
-Networking:         ██████████████████░░░░░░░  72%  Wired         ← D1–D5 + accept4 (BG2) + getsockname/getpeername (BH2–BH3) + sendmsg/recvmsg/shutdown (BI1–BI3) + sendmmsg/recvmmsg/getsockopt (BJ1–BJ3) + setsockopt (BK1) + TCP send/recv (BK2–BK3)
+Networking:         ███████████████████░░░░░░  76%  Wired         ← D1–D6 IPv6 echo TX + accept4 (BG2) + getsockname/getpeername (BH2–BH3) + sendmsg/recvmsg/shutdown (BI1–BI3) + sendmmsg/recvmmsg/getsockopt (BJ1–BJ3) + setsockopt (BK1) + TCP send/recv (BK2–BK3)
 Device Drivers:     ██████████████░░░░░░░░░░░  58%  Wired         ← AHCI + NVMe DMA + VirtIO-GPU (F8) + USB HID URB + XHCI MMIO
-GUI & Desktop:      ████████████████████████░  95%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + VirtIO-GPU cursor plane
+GUI & Desktop:      ████████████████████████░  96%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + VirtIO-GPU cursor + VSync + GATE_TERM openpty SHM
 Shell & Terminal:   ████████████████████░░░░░  82%  Live          ← sigreturn
 Security:           ████████████████████░░░░░  80%  Wired         ← E1–E4 + K4 Landlock + J4/L4/M4/N4/O4/P4/Q4/R4/S4/T4/U4/V4/W4/X4/Y4/Z4/AA4/AB4/AC4/AD4/AE4/AF4/AG4/AH4/AI4/AJ4/AK4/AL4/AM4/AN4/AO4/AP4/AQ4/AR4/AS4/AT4/AU4/AV4/AW4/AX4/AY4/AZ4/BA4/BB4/BC4/BD4/BK4/BL4 ENOSYS
-System Services:    ███████████░░░░░░░░░░░░░░  42%  Wired         ← K3 /sbin/init + L3 D-Bus AF_UNIX
+System Services:    ██████████████░░░░░░░░░░░  55%  Wired         ← K3 /sbin/init + L3 D-Bus AF_UNIX + svc restart + cron timer + udev /dev
 Virtualization:     ████████░░░░░░░░░░░░░░░░░  30%  Stub          ← L2/M1/N1/O1/P1/Q1/R1/S1 namespaces + T1 setns + U1 chroot + V1 pivot_root + W1 OverlayFS
 AI/ML:              █████░░░░░░░░░░░░░░░░░░░░  22%  Wired
 Binary Compat:      ████████████████████████░  99%  Wired         ← execve + fork + clone + TLS %fs + userspace ld.so (BM1) + VMM dlopen (BM2) + static musl CRT (BM3) + dyn musl (BM4) + 200+ Ring 3 syscalls
 i18n & Fonts:       █████████████████░░░░░░░░  68%  Live
 Build System:       ████████████████████░░░░░  80%  Live          ← G3 feature flags + flake.nix
-Testing:            ███████████████████████░░  90%  Wired         ← 286 QEMU markers (C9 ext4 root + G5 + no-PS/2 cursor)
+Testing:            ███████████████████████░░  92%  Wired         ← 293 QEMU markers + host parser tests
 Documentation:      ██████████████████░░░░░░░  70%  Wired         ← BUILDING + CONTRIBUTING + docs/ + CHANGELOG + rustdoc
 CI/CD:              ████████████████░░░░░░░░░  65%  Wired         ← aarch64/riscv64 QEMU boot + Secure Boot + rustdoc + audit + nightly images
 ```

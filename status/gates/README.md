@@ -12,4 +12,4 @@ Gates **A–F, H–I** made KnoxOS an OS. Gates **J–BL** proved syscalls and n
 | [syscalls.md](syscalls.md) | J–BL | **Done** — clone, namespaces, VFS, sockets, honesty ENOSYS |
 | [quality.md](quality.md) | G + explicitly later | **Done** — G1–G5; KVM/AI/Wi-Fi stay later |
 
-Live-path evidence for A–I, BM1–BM4, F5–F8, C7–C9, G3–G5, I4, USB HID URB, XHCI MMIO, no-PS/2 cursor, Secure Boot, and cross-arch serial boot is summarized in [live.md](../live.md). J–BL tables are the archive of those proofs. Integration: **286/286**.
+Live-path evidence for A–I, BM1–BM4, F5–F8, C7–C9, G3–G5, I4, D6, USB HID URB, XHCI MMIO, no-PS/2 cursor, Secure Boot, cross-arch serial boot, udev/quota/cron/vsync/TERM is summarized in [live.md](../live.md). J–BL tables are the archive of those proofs. Integration: **293/293**.

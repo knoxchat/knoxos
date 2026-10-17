@@ -586,7 +586,7 @@ pub fn init() {
 /// sibling pages unmapped (not a whole-file copy).
 pub const GATE_H2_MARKER: &str = "GATE_H2 mmap fault";
 
-const GATE_H2_PATH: &str = "/var/lib/knoxos/gate_h2";
+const GATE_H2_PATH: &str = "/tmp/gate_h2";
 const GATE_H2_PID: crate::process::Pid = 0x0000_B202;
 
 /// Map a 3-page file without MAP_POPULATE, fault only the middle page, and

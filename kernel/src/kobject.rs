@@ -333,3 +333,78 @@ pub fn init() {
         count()
     );
 }
+
+pub const GATE_UDEV_MARKER: &str = "GATE_UDEV hotplug";
+
+fn unique_dev_path(dev: &crate::pci::PciDevice) -> (&'static str, crate::vfs::FileType) {
+    match dev.class {
+        0x01 => ("/dev/sda", crate::vfs::FileType::BlockDevice),
+        0x02 => ("/dev/eth0", crate::vfs::FileType::CharDevice),
+        0x03 => ("/dev/dri/card0", crate::vfs::FileType::CharDevice),
+        0x0C => ("/dev/usb", crate::vfs::FileType::CharDevice),
+        _ => ("/dev/pci", crate::vfs::FileType::CharDevice),
+    }
+}
+
+/// Create `/dev` nodes for enumerated PCI devices and drain ADD uevents.
+pub fn hotplug_pci_devices() -> bool {
+    let devices = crate::pci::list_devices();
+    if devices.is_empty() {
+        serial_println!("[udev] GATE_UDEV FAILED: no PCI devices");
+        return false;
+    }
+
+    let mut created = 0u32;
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.create_file_at_path("/dev/dri", crate::vfs::FileType::Directory, &[], 0o755);
+        for dev in devices.iter() {
+            let mut kobj = Kobject::new(
+                &alloc::format!("{:02x}:{:02x}.{}", dev.bus, dev.device, dev.function),
+                "pci",
+                0,
+            );
+            kobj.set_property(
+                "PCI_CLASS",
+                &alloc::format!("{:02x}{:02x}", dev.class, dev.subclass),
+            );
+            kobj.set_property(
+                "PCI_ID",
+                &alloc::format!("{:04x}:{:04x}", dev.vendor_id, dev.device_id),
+            );
+            let _ = register(kobj);
+
+            let (path, ftype) = unique_dev_path(dev);
+            if vfs.resolve_path(path).is_none() {
+                vfs.create_file_at_path(path, ftype, &[], 0o666);
+            }
+            created += 1;
+        }
+    }
+
+    process_uevents();
+
+    let has_dev = {
+        let vfs = crate::vfs::VFS.lock();
+        vfs.resolve_path("/dev/sda").is_some()
+            || vfs.resolve_path("/dev/eth0").is_some()
+            || vfs.resolve_path("/dev/dri/card0").is_some()
+            || vfs.resolve_path("/dev/usb").is_some()
+            || vfs.resolve_path("/dev/pci").is_some()
+    };
+    if created > 0 && has_dev {
+        serial_println!(
+            "[udev] {} (pci={} /dev nodes live)",
+            GATE_UDEV_MARKER,
+            created
+        );
+        true
+    } else {
+        serial_println!(
+            "[udev] GATE_UDEV FAILED: created={} has_dev={}",
+            created,
+            has_dev
+        );
+        false
+    }
+}

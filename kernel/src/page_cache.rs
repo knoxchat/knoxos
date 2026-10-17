@@ -690,7 +690,7 @@ pub fn init() {
 /// rest of the file.
 pub const GATE_C3_MARKER: &str = "GATE_C3 writeback complete";
 
-const GATE_C3_PATH: &str = "/var/lib/knoxos/gate_c3";
+const GATE_C3_PATH: &str = "/tmp/gate_c3";
 
 /// Write a 3-page file, dirty only the middle page, flush, and prove the
 /// other pages survived. That is Gate C3: writeback is page-granular, not

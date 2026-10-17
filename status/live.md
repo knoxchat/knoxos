@@ -52,4 +52,12 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 
 Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are proven on the same boot path. They are archived under [gates/syscalls.md](gates/syscalls.md), not repeated here.
 
-Integration: `./tests/run_integration.sh` **286/286** on QEMU (2026-10-16).
+44. **Gate D6 IPv6 echo** — loopback `::1` Echo Request; reply is TXed (`GATE_D6 ipv6 echo`). RX `0x86DD` feeds the IPv6 stack.
+45. **Service restart** — a Failed unit with `OnFailure` is set Running (`GATE_SVC restart`).
+46. **udev hotplug** — PCI devices get `/dev` nodes and kobject ADD uevents (`GATE_UDEV hotplug`).
+47. **Quota enforce** — hard block limit returns `EDQUOT` (`GATE_QUOTA enforce`).
+48. **Cron reboot** — `@reboot` `/usr/sbin/fsck` runs at init (`GATE_CRON reboot`); timer IRQ sets a due flag.
+49. **VSync paced** — software VBlank page flip (`GATE_VSYNC paced`).
+50. **Gate TERM** — Ring 3 `openpty` + SHM present as Empty (`GATE_TERM pty userspace`).
+
+Integration: `./tests/run_integration.sh` **293/293** on QEMU (2026-10-18).

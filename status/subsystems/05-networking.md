@@ -2,7 +2,7 @@
 
 # 5. Networking Stack
 
-**Grade: Wired (72%)** · `net.rs`, `netint.rs`, `virtio_net.rs`, `e1000.rs`, `rtl8139.rs`, `dhcp.rs`, `dns.rs`, `net_production.rs`
+**Grade: Wired (76%)** · `net.rs`, `netint.rs`, `virtio_net.rs`, `ipv6.rs`, `e1000.rs`, `rtl8139.rs`, `dhcp.rs`, `dns.rs`, `net_production.rs`
 
 ### Wired (builders / closest-to-real NICs)
 - [x] Ethernet / ARP / IPv4 / UDP / TCP **header** construction
@@ -24,7 +24,7 @@
 - [x] **VirtIO-net TX** — writes avail ring with guest-physical bounce; waits for used
 - [x] **VirtIO-net RX** — walks the used ring and re-arms buffers
 - [x] **DHCP apply** — writes interface IP + DNS + default route
-- [ ] IPv6 echo — builds packet, logs, no TX
+- [x] IPv6 echo — loopback TX reply (`GATE_D6 ipv6 echo`); off-box 0x86DD uses VirtIO-net
 - [ ] TLS 1.3 — types; GCM/X.509 stub; handshake flagged done after one recv
 - [ ] Wi-Fi / WPA3 / bridge / VLAN / NAT — in-memory
 
