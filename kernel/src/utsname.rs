@@ -50,8 +50,8 @@ impl Default for UtsName {
 
 const SYSNAME: &str = "KnoxOS";
 const DEFAULT_HOSTNAME: &str = "knoxos";
-const RELEASE: &str = "0.1.0-knoxos";
-const VERSION: &str = "#1 SMP PREEMPT_RT KnoxOS 0.1.0";
+const RELEASE: &str = "0.2.4-knoxos";
+const VERSION: &str = "#1 SMP PREEMPT_RT KnoxOS 0.2.4";
 const MACHINE: &str = "x86_64";
 const DOMAIN: &str = "(none)";
 

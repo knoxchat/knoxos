@@ -558,7 +558,7 @@ fn module_env(handle: &mut PamHandle) -> PamResult {
 
 /// pam_motd — Display message of the day
 fn module_motd() -> PamResult {
-    serial_println!("[PAM] motd: Welcome to KnoxOS v0.2.3");
+    serial_println!("[PAM] motd: Welcome to KnoxOS v0.2.4");
     PamResult::Success
 }
 

@@ -24,7 +24,7 @@ pub fn read_proc_file(path: &str) -> Option<Vec<u8>> {
         // /proc/version
         "version" => Some(
             format!(
-                "KnoxOS version 0.1.0 (rustc {}) #1 SMP PREEMPT_DYNAMIC\n",
+                "KnoxOS version 0.2.4 (rustc {}) #1 SMP PREEMPT_DYNAMIC\n",
                 "nightly-2025"
             )
             .into_bytes(),
@@ -310,7 +310,7 @@ pub fn read_sys_file(path: &str) -> Option<Vec<u8>> {
 
         "kernel/hostname" => Some(b"knoxos\n".to_vec()),
         "kernel/ostype" => Some(b"KnoxOS\n".to_vec()),
-        "kernel/osrelease" => Some(b"0.1.0\n".to_vec()),
+        "kernel/osrelease" => Some(b"0.2.4\n".to_vec()),
         "kernel/version" => Some(b"#1 SMP PREEMPT_DYNAMIC\n".to_vec()),
 
         "devices/system/cpu/online" => Some(b"0\n".to_vec()),

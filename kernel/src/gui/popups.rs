@@ -702,7 +702,7 @@ pub fn draw_quick_settings(fb: &mut FrameBuffer) {
         fb,
         panel_x + 16,
         info_y + 10,
-        "KnoxOS v0.1.0",
+        "KnoxOS v0.2.4",
         Pixel::rgb(100, 100, 100),
         1,
     );

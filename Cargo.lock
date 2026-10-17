@@ -438,7 +438,7 @@ version = "0.1.0"
 
 [[package]]
 name = "knoxos-kernel"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "bitflags 2.13.2",
  "bootloader_api",

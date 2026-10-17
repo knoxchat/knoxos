@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.4
+
 - **TLS 1.3 HKDF** — RFC 5869 SHA-256 extract/expand plus RFC 8446 Expand-Label (`GATE_TLS13 hkdf`).
 - **HDR / VRR** — ST 2084 PQ EOTF known-answer and Adaptive-Sync range retargets VBlank (`GATE_HDR pq`, `GATE_VRR range`).
 - **e1000** — `Socket::send` programs the TX ring; software loopback delivers RX (`GATE_E1000 send`).

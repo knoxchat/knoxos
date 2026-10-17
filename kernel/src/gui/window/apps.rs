@@ -108,7 +108,7 @@ files. What would you like to do today?";
             );
             fb.fill_circle_aa(content.x + 8, resp_y + 8, 4, colors::AI_BALANCED_1);
             let info_text = &alloc::format!(
-                "System: KnoxOS v0.1.0\n\
+                "System: KnoxOS v0.2.4\n\
 CPU: {} (QEMU/KVM)\n\
 Memory: 128 MB allocated\n\
 Uptime: Running since boot\n\
