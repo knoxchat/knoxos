@@ -339,6 +339,7 @@ pub fn increment_ticks() {
 
 #[cfg(target_arch = "x86_64")]
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    let _ipl = crate::nested_irq::IrqSection::enter(crate::nested_irq::Ipl::Timer);
     // When the APIC timer is running (100Hz), it handles TICK_COUNT,
     // RTC ticks, cursor redraws, and scheduler ticks. The PIT handler
     // must NOT duplicate that work — just send EOI and return.
@@ -379,6 +380,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
 
 #[cfg(target_arch = "x86_64")]
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    let _ipl = crate::nested_irq::IrqSection::enter(crate::nested_irq::Ipl::Input);
     #[cfg(target_arch = "x86_64")]
     use crate::arch_compat::instructions::port::Port;
     #[cfg(not(target_arch = "x86_64"))]
@@ -403,6 +405,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
 
 #[cfg(target_arch = "x86_64")]
 extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    let _ipl = crate::nested_irq::IrqSection::enter(crate::nested_irq::Ipl::Input);
     #[cfg(target_arch = "x86_64")]
     use crate::arch_compat::instructions::port::Port;
     #[cfg(not(target_arch = "x86_64"))]
@@ -436,6 +439,7 @@ pub fn virtio_irq_count() -> u64 {
 
 #[cfg(target_arch = "x86_64")]
 extern "x86-interrupt" fn virtio_irq_handler(_stack_frame: InterruptStackFrame) {
+    let _ipl = crate::nested_irq::IrqSection::enter(crate::nested_irq::Ipl::Network);
     VIRTIO_IRQ_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
     // Notify both virtio-blk and virtio-net — on shared PCI IRQ lines
@@ -519,6 +523,7 @@ unsafe extern "C" fn apic_timer_interrupt_naked() {
 
 #[cfg(target_arch = "x86_64")]
 extern "C" fn apic_timer_irq_inner(frame: &crate::context::IrqFrame) {
+    let _ipl = crate::nested_irq::IrqSection::enter(crate::nested_irq::Ipl::Timer);
     crate::apic_timer::handle_interrupt();
     if frame.cs & 3 != 3 {
         return;
@@ -539,6 +544,7 @@ pub fn ata_irq_count() -> u64 {
 
 #[cfg(target_arch = "x86_64")]
 extern "x86-interrupt" fn ata_irq_handler(_stack_frame: InterruptStackFrame) {
+    let _ipl = crate::nested_irq::IrqSection::enter(crate::nested_irq::Ipl::Block);
     ATA_IRQ_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
     // Read the ATA status register to acknowledge the interrupt

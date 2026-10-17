@@ -529,7 +529,6 @@ pub mod cifs;
 pub mod device_mapper;
 #[cfg(feature = "stub-drivers")]
 pub mod disk_install;
-#[cfg(feature = "stub-drivers")]
 pub mod exfat;
 #[cfg(feature = "stub-drivers")]
 pub mod fuse;

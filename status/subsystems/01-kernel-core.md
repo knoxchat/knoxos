@@ -31,8 +31,8 @@
 - [x] **UEFI runtime** — `GetTime` from CMOS RTC; `SetVariable`/`GetVariable` round-trip (`GATE_UEFI time`)
 - [x] **Kernel modules** — ELF ET_REL `.ko` load + reloc + `init_module` (`GATE_KO load`)
 - [x] **IOMMU** — root table from buddy; `enable_translation` called (`GATE_IOMMU translation`)
-- [ ] **Live patch** — writes a jmp over a symbol; no W^X, no activeness wait
-- [ ] **Nested IRQ / TPR** — not used from ISRs
+- [x] **Live patch** — dedicated 4K trampoline; W^X (never W+X); activeness wait (`GATE_LPATCH wx`)
+- [x] **Nested IRQ / TPR** — ISRs raise LAPIC TPR; nested enter writes TPR (`GATE_NIRQ tpr`)
 
 ### Perfect-OS next steps
 1. ~~Per-CPU TSS + GS base + exception stacks before SMP is useful.~~ **Done** (I1) — each CPU has TSS + IST stacks; GS points at `CpuLocal`.

@@ -300,8 +300,19 @@ pub fn draw_unicode_char(
 ) -> i32 {
     let gw = hack_font::GLYPH_WIDTH as i32 * scale as i32;
 
-    // 1. ASCII — use Hack font
+    // Consult the compositor fallback chain so CJK/emoji do not stay on Hack.
     let cp = ch as u32;
+    let font = crate::gui::truetype::resolve_font_for_codepoint(cp);
+    if font == "CJK-Bitmap" && is_fullwidth(ch) {
+        if let Some(bitmap) = get_runtime_cjk_glyph(cp) {
+            draw_cjk_bitmap(fb, x, y, &bitmap, gw * 2, color, scale);
+            return gw * 2;
+        }
+        draw_tofu(fb, x, y, ch, color, scale);
+        return gw * 2;
+    }
+
+    // 1. ASCII — use Hack font
     if (0x20..=0x7E).contains(&cp) {
         crate::gui::fonts::draw_char(fb, x, y, ch, color, scale);
         return gw;
@@ -521,4 +532,28 @@ pub fn init() {
     }
 
     serial_println!("[KnoxOS] CJK font subsystem initialized (fallback + runtime loading)");
+    let _ = fallback_self_test();
+}
+
+pub const GATE_FONT_MARKER: &str = "GATE_FONT fallback";
+
+fn fallback_self_test() -> bool {
+    let latin = crate::gui::truetype::resolve_font_for_codepoint(b'A' as u32);
+    let cjk = crate::gui::truetype::resolve_font_for_codepoint(0x4E00);
+    let emoji = crate::gui::truetype::resolve_font_for_codepoint(0x1F600);
+    if latin == "Hack" && cjk == "CJK-Bitmap" && emoji == "Emoji-Color" {
+        serial_println!(
+            "[fonts] {} (Hack / CJK-Bitmap / Emoji-Color)",
+            GATE_FONT_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[fonts] GATE_FONT FAILED latin={} cjk={} emoji={}",
+            latin,
+            cjk,
+            emoji
+        );
+        false
+    }
 }

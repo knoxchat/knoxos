@@ -26,8 +26,8 @@ The real MMU work is in **`vmm.rs`**, not a buddy allocator.
 - [x] **Page reclamation / LRU eviction** — `page_cache::shrink` drops oldest clean pages and keeps dirty (`GATE_J3 lru reclaim`); anonymous pages can swap (K2)
 - [x] **Swap** — ram-backed slots store page bytes; reclaim calls `page_out`; `#PF` swap-in restores (`GATE_K2 swap io`)
 - [x] **OOM killer** — scoring + `trigger_oom` from failed `allocate_physical_frame` (H4)
-- [ ] **NUMA** — SRAT parse; `allocate_node` returns an id, not memory
-- [ ] **KSM** — hashes phys addr as a virt pointer; merge is a counter
+- [x] **NUMA** — `allocate_node` returns a buddy frame charged to the node (`GATE_NUMA frame`)
+- [x] **KSM** — hashes via `phys_to_virt`; identical pages collapse and the victim is freed (`GATE_KSM merge`)
 - [x] **THP** — buddy order-9 2 MiB allocation (`GATE_THP hugepage`)
 - [x] **Kernel stack guards** — `stack_guard::alloc_guarded_stack` on the live path (H4)
 - [x] **KASLR** for loadable kernel mappings (`GATE_KASLR slide`)

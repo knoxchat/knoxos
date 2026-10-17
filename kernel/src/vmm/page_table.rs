@@ -198,6 +198,44 @@ pub(super) unsafe fn unmap_page_in_table(cr3: u64, vaddr: u64) {
     crate::arch_compat::instructions::tlb::flush(VirtAddr::new(vaddr));
 }
 
+/// Read the 4 KiB PTE flags at `vaddr`, if a 4K mapping exists.
+pub(super) unsafe fn get_page_flags_in_table(cr3: u64, vaddr: u64) -> Option<PageTableFlags> {
+    let offset = PHYS_MEM_OFFSET.load(Ordering::Relaxed);
+    if offset == 0 {
+        return None;
+    }
+
+    let l4_table = &*((offset + cr3) as *const PageTable);
+    let l4_idx = ((vaddr >> 39) & 0x1FF) as usize;
+    if l4_table[l4_idx].is_unused() {
+        return None;
+    }
+
+    let l3_phys = l4_table[l4_idx].addr().as_u64();
+    let l3_table = &*((offset + l3_phys) as *const PageTable);
+    let l3_idx = ((vaddr >> 30) & 0x1FF) as usize;
+    if l3_table[l3_idx].is_unused() || l3_table[l3_idx].flags().contains(PageTableFlags::HUGE_PAGE)
+    {
+        return None;
+    }
+
+    let l2_phys = l3_table[l3_idx].addr().as_u64();
+    let l2_table = &*((offset + l2_phys) as *const PageTable);
+    let l2_idx = ((vaddr >> 21) & 0x1FF) as usize;
+    if l2_table[l2_idx].is_unused() || l2_table[l2_idx].flags().contains(PageTableFlags::HUGE_PAGE)
+    {
+        return None;
+    }
+
+    let l1_phys = l2_table[l2_idx].addr().as_u64();
+    let l1_table = &*((offset + l1_phys) as *const PageTable);
+    let l1_idx = ((vaddr >> 12) & 0x1FF) as usize;
+    if l1_table[l1_idx].is_unused() {
+        return None;
+    }
+    Some(l1_table[l1_idx].flags())
+}
+
 /// Update page flags without changing the mapping
 pub(super) unsafe fn update_page_flags_in_table(cr3: u64, vaddr: u64, flags: PageTableFlags) {
     let offset = PHYS_MEM_OFFSET.load(Ordering::Relaxed);
@@ -426,6 +464,67 @@ pub fn ready() -> bool {
 /// Kernel L4 physical address used for kernel-stack mappings.
 pub fn get_kernel_cr3() -> u64 {
     KERNEL_CR3.load(Ordering::Relaxed)
+}
+
+/// Map a dedicated 4 KiB kernel VA. `writable` and `executable` are exclusive
+/// (W^X): an executable page is never writable.
+pub fn map_kernel_page_wx(vaddr: u64, phys: u64, writable: bool, executable: bool) -> bool {
+    if writable && executable {
+        return false;
+    }
+    let cr3 = KERNEL_CR3.load(Ordering::Relaxed);
+    if cr3 == 0 {
+        return false;
+    }
+    let mut flags = PageTableFlags::PRESENT;
+    if writable {
+        flags |= PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;
+    } else if executable {
+        // RX — present, not writable, executable
+    } else {
+        flags |= PageTableFlags::NO_EXECUTE;
+    }
+    // SAFETY: `phys` is a pool frame we own; `vaddr` is a dedicated kernel hole.
+    unsafe {
+        map_page_in_table(cr3, vaddr, phys, flags);
+        #[cfg(target_arch = "x86_64")]
+        core::arch::asm!("invlpg [{}]", in(reg) vaddr, options(nostack, preserves_flags));
+    }
+    true
+}
+
+/// Change W^X flags on an existing 4 KiB kernel mapping.
+pub fn remap_kernel_page_wx(vaddr: u64, writable: bool, executable: bool) -> bool {
+    if writable && executable {
+        return false;
+    }
+    let cr3 = KERNEL_CR3.load(Ordering::Relaxed);
+    if cr3 == 0 {
+        return false;
+    }
+    let mut flags = PageTableFlags::PRESENT;
+    if writable {
+        flags |= PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;
+    } else if !executable {
+        flags |= PageTableFlags::NO_EXECUTE;
+    }
+    // SAFETY: `vaddr` is a 4K kernel mapping we created; flags never combine W+X.
+    unsafe {
+        update_page_flags_in_table(cr3, vaddr, flags);
+        #[cfg(target_arch = "x86_64")]
+        core::arch::asm!("invlpg [{}]", in(reg) vaddr, options(nostack, preserves_flags));
+    }
+    true
+}
+
+/// Whether a 4 KiB kernel PTE is writable. `None` if not a 4K mapping.
+pub fn kernel_page_writable(vaddr: u64) -> Option<bool> {
+    let cr3 = KERNEL_CR3.load(Ordering::Relaxed);
+    if cr3 == 0 {
+        return None;
+    }
+    // SAFETY: read-only walk of the kernel page tables.
+    unsafe { get_page_flags_in_table(cr3, vaddr).map(|f| f.contains(PageTableFlags::WRITABLE)) }
 }
 
 /// Copy the boot L4 into a private template used by [`clone_kernel_mappings`].

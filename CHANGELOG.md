@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **NUMA** — `allocate_node` returns a buddy frame charged to the node (`GATE_NUMA frame`).
+- **KSM** — hashes through `phys_to_virt`; identical pages collapse and the victim is freed (`GATE_KSM merge`).
+- **Nested IRQ / TPR** — ISRs raise LAPIC TPR; nested enter is proven (`GATE_NIRQ tpr`).
+- **Live patch** — dedicated 4K trampoline, never W+X, activeness wait (`GATE_LPATCH wx`).
+- **exFAT** — VBR + FAT + directory `$DATA` through the ramdisk (`GATE_EXFAT block`).
+- **cgroup CPU/IO** — `cpu.max` quota and `io.max` byte cap deny (`GATE_CGROUP cpu`, `GATE_CGROUP io`).
+- **Suspend / logind** — S3 save/restore hooks (`GATE_SUSPEND resume`); session create/list/terminate (`GATE_LOGIND session`).
+- **AES-GCM / Poly1305** — NIST AES-128-GCM and RFC 8439 Poly1305 known-answer (`GATE_AESGCM kat`, `GATE_POLY1305 kat`).
+- **Font fallback** — compositor chain used for CJK/emoji (`GATE_FONT fallback`).
 - **NTFS** — boot + MFT `$DATA` read through the block layer (`GATE_NTFS block`).
 - **Shell** — here-docs feed stdin; `name() { }` runs; `~/.profile` is sourced (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`).
 - **VT100** — CUP + xterm-256 SGR + ED on the live emulator (`GATE_VT100 xterm`).

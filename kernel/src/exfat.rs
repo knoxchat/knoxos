@@ -1,5 +1,6 @@
 /// exFAT — Extended File Allocation Table for USB drives > 32GB
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use spin::Mutex;
 
@@ -247,10 +248,177 @@ impl ExfatVolume {
     }
 }
 
+impl ExfatVolume {
+    fn load_fat(&mut self, device: usize) -> Result<(), &'static str> {
+        let fat_sectors = self.bpb.fat_length.max(1);
+        let bytes = fat_sectors as usize * 512;
+        let mut buf = vec![0u8; bytes];
+        crate::block::read_blocks(
+            device,
+            self.bpb.fat_offset as u64,
+            fat_sectors as u8,
+            &mut buf,
+        )
+        .map_err(|_| "FAT read")?;
+        self.fat = buf
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        Ok(())
+    }
+
+    fn cluster_lba(&self, cluster: u32) -> u64 {
+        self.bpb.cluster_heap_offset as u64
+            + (cluster.saturating_sub(2) as u64) * self.bpb.sectors_per_cluster() as u64
+    }
+
+    fn read_cluster(&self, device: usize, cluster: u32) -> Result<Vec<u8>, &'static str> {
+        let spc = self.bpb.sectors_per_cluster().max(1);
+        let mut buf = vec![0u8; spc as usize * 512];
+        crate::block::read_blocks(device, self.cluster_lba(cluster), spc as u8, &mut buf)
+            .map_err(|_| "cluster read")?;
+        Ok(buf)
+    }
+
+    fn read_file(&self, device: usize, file: &ExfatFile) -> Result<Vec<u8>, &'static str> {
+        if file.first_cluster < 2 {
+            return Err("bad cluster");
+        }
+        let data = self.read_cluster(device, file.first_cluster)?;
+        let n = (file.size as usize).min(data.len());
+        Ok(data[..n].to_vec())
+    }
+}
+
+fn build_gate_volume(payload: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let mut boot = vec![0u8; 512];
+    boot[0] = 0xEB;
+    boot[1] = 0x76;
+    boot[2] = 0x90;
+    boot[3..11].copy_from_slice(b"EXFAT   ");
+    boot[80..84].copy_from_slice(&24u32.to_le_bytes()); // fat_offset
+    boot[84..88].copy_from_slice(&1u32.to_le_bytes()); // fat_length
+    boot[88..92].copy_from_slice(&32u32.to_le_bytes()); // cluster_heap_offset
+    boot[92..96].copy_from_slice(&16u32.to_le_bytes()); // cluster_count
+    boot[96..100].copy_from_slice(&2u32.to_le_bytes()); // root_dir_cluster
+    boot[100..104].copy_from_slice(&0x4B4E4F58u32.to_le_bytes());
+    boot[104] = 0x00;
+    boot[105] = 0x01; // revision 1.00
+    boot[108] = 9; // 512-byte sectors
+    boot[109] = 0; // 1 sector/cluster
+    boot[110] = 1; // one FAT
+    boot[510] = 0x55;
+    boot[511] = 0xAA;
+
+    let mut fat = vec![0u8; 512];
+    fat[0..4].copy_from_slice(&0xFFFFFFF8u32.to_le_bytes());
+    fat[4..8].copy_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+    fat[8..12].copy_from_slice(&EXFAT_CLUSTER_END.to_le_bytes()); // cluster 2 root
+    fat[12..16].copy_from_slice(&EXFAT_CLUSTER_END.to_le_bytes()); // cluster 3 file
+
+    let mut root = vec![0u8; 512];
+    // FileDirectory
+    root[0] = 0x85;
+    root[1] = 2; // two secondary entries
+    root[4] = 0x20; // archive
+    // StreamExtension
+    root[32] = 0xC0;
+    root[33] = 0x03; // allocation + contiguous
+    root[35] = b"GATE.TXT".len() as u8;
+    root[40..48].copy_from_slice(&(payload.len() as u64).to_le_bytes());
+    root[52..56].copy_from_slice(&3u32.to_le_bytes());
+    root[56..64].copy_from_slice(&(payload.len() as u64).to_le_bytes());
+    // FileName
+    root[64] = 0xC1;
+    let name = "GATE.TXT";
+    for (i, ch) in name.encode_utf16().enumerate() {
+        let b = ch.to_le_bytes();
+        root[66 + i * 2] = b[0];
+        root[67 + i * 2] = b[1];
+    }
+
+    let mut data = vec![0u8; 512];
+    data[..payload.len()].copy_from_slice(payload);
+    (boot, fat, {
+        let mut heap = vec![0u8; 1024];
+        heap[..512].copy_from_slice(&root);
+        heap[512..].copy_from_slice(&data);
+        heap
+    })
+}
+
+pub const GATE_EXFAT_MARKER: &str = "GATE_EXFAT block";
+const GATE_EXFAT_PAYLOAD: &[u8] = b"knoxos-exfat\n";
+
+fn block_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    let (boot, fat, heap) = build_gate_volume(GATE_EXFAT_PAYLOAD);
+    if crate::block::write_blocks(device, 0, 1, &boot).is_err() {
+        serial_println!("[exfat] GATE_EXFAT FAILED: boot write");
+        return false;
+    }
+    if crate::block::write_blocks(device, 24, 1, &fat).is_err() {
+        serial_println!("[exfat] GATE_EXFAT FAILED: fat write");
+        return false;
+    }
+    if crate::block::write_blocks(device, 32, 2, &heap).is_err() {
+        serial_println!("[exfat] GATE_EXFAT FAILED: heap write");
+        return false;
+    }
+
+    let mut boot_in = vec![0u8; 512];
+    if crate::block::read_blocks(device, 0, 1, &mut boot_in).is_err() {
+        serial_println!("[exfat] GATE_EXFAT FAILED: boot read");
+        return false;
+    }
+    let mut vol = match ExfatVolume::from_boot_sector(&boot_in) {
+        Ok(v) => v,
+        Err(e) => {
+            serial_println!("[exfat] GATE_EXFAT FAILED: parse boot ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = vol.load_fat(device) {
+        serial_println!("[exfat] GATE_EXFAT FAILED: load fat ({})", e);
+        return false;
+    }
+    let root = match vol.read_cluster(device, vol.bpb.root_dir_cluster) {
+        Ok(d) => d,
+        Err(e) => {
+            serial_println!("[exfat] GATE_EXFAT FAILED: root ({})", e);
+            return false;
+        }
+    };
+    let files = vol.parse_directory(&root);
+    let Some(file) = files.iter().find(|f| f.name == "GATE.TXT") else {
+        serial_println!("[exfat] GATE_EXFAT FAILED: GATE.TXT missing");
+        return false;
+    };
+    match vol.read_file(device, file) {
+        Ok(data) if data == GATE_EXFAT_PAYLOAD => {
+            EXFAT_VOLUMES.lock().push(vol);
+            serial_println!(
+                "[exfat] {} (directory $DATA via ramdisk)",
+                GATE_EXFAT_MARKER
+            );
+            true
+        }
+        Ok(data) => {
+            serial_println!("[exfat] GATE_EXFAT FAILED: payload len={}", data.len());
+            false
+        }
+        Err(e) => {
+            serial_println!("[exfat] GATE_EXFAT FAILED: {}", e);
+            false
+        }
+    }
+}
+
 lazy_static::lazy_static! {
     static ref EXFAT_VOLUMES: Mutex<Vec<ExfatVolume>> = Mutex::new(Vec::new());
 }
 
 pub fn init() {
     serial_println!("[exfat] exFAT filesystem driver initialized");
+    let _ = block_self_test();
 }

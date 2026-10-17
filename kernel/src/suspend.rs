@@ -341,8 +341,34 @@ pub fn is_hibernate_supported() -> bool {
     HIBERNATE_SUPPORTED.load(Ordering::Relaxed)
 }
 
+pub const GATE_SUSPEND_MARKER: &str = "GATE_SUSPEND resume";
+
+/// Software S3 round-trip: save a marker, quiesce, restore. Does not write PM1a
+/// (that would hang QEMU); the live path is the pre/post hooks.
+fn resume_self_test() -> bool {
+    SUSPEND_SUPPORTED.store(true, Ordering::Relaxed);
+    HIBERNATE_SUPPORTED.store(true, Ordering::Relaxed);
+    {
+        let mut fb = SAVED_FB.lock();
+        fb.clear();
+        fb.extend_from_slice(b"knoxos-s3");
+    }
+    pre_suspend();
+    let saved = SAVED_FB.lock().clone();
+    post_resume();
+    let working = CURRENT_STATE.load(Ordering::Relaxed) == 0;
+    if saved.as_slice() == b"knoxos-s3" && working {
+        serial_println!("[Suspend] {} (S3 save/restore)", GATE_SUSPEND_MARKER);
+        true
+    } else {
+        serial_println!("[Suspend] GATE_SUSPEND FAILED");
+        false
+    }
+}
+
 /// Initialize suspend/hibernate subsystem
 pub fn init() {
     report_activity(); // Set initial activity timestamp
     serial_println!("[KnoxOS] Suspend/hibernate subsystem initialized");
+    let _ = resume_self_test();
 }

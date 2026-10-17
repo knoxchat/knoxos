@@ -109,6 +109,8 @@ lazy_static! {
     static ref TOPOLOGY: Mutex<NumaTopology> = Mutex::new(NumaTopology::new());
     static ref PROCESS_POLICIES: Mutex<BTreeMap<u64, ProcessNumaPolicy>> =
         Mutex::new(BTreeMap::new());
+    /// Physical frame → node id for frames handed out by [`allocate_from_node`].
+    static ref FRAME_NODE: Mutex<BTreeMap<u64, u32>> = Mutex::new(BTreeMap::new());
 }
 
 struct NumaTopology {
@@ -260,8 +262,8 @@ pub fn sys_move_pages(
     Ok(())
 }
 
-/// Determine which NUMA node to allocate from based on policy
-pub fn allocate_node(pid: u64, preferred_node: u32) -> u32 {
+/// Pick a node id from the process policy (does not allocate memory).
+pub fn pick_node(pid: u64, preferred_node: u32) -> u32 {
     let policies = PROCESS_POLICIES.lock();
     if let Some(policy) = policies.get(&pid) {
         match policy.policy {
@@ -326,6 +328,76 @@ pub fn allocate_node(pid: u64, preferred_node: u32) -> u32 {
     }
 }
 
+/// Allocate a real buddy frame charged to `node`. Returns physical address.
+pub fn allocate_from_node(node: u32) -> Option<u64> {
+    {
+        let topo = TOPOLOGY.lock();
+        if (node as usize) >= topo.num_nodes {
+            return None;
+        }
+    }
+    let phys = crate::vmm::allocate_physical_frame()?;
+    {
+        let mut topo = TOPOLOGY.lock();
+        if let Some(n) = topo.nodes.get_mut(node as usize) {
+            n.memory_free = n.memory_free.saturating_sub(4096);
+            n.memory_used = n.memory_used.saturating_add(4096);
+        }
+    }
+    FRAME_NODE.lock().insert(phys, node);
+    Some(phys)
+}
+
+/// Free a frame previously returned by [`allocate_from_node`].
+pub fn free_from_node(phys: u64) {
+    let node = FRAME_NODE.lock().remove(&phys);
+    crate::vmm::free_physical_frame(phys);
+    if let Some(node) = node {
+        let mut topo = TOPOLOGY.lock();
+        if let Some(n) = topo.nodes.get_mut(node as usize) {
+            n.memory_used = n.memory_used.saturating_sub(4096);
+            n.memory_free = n.memory_free.saturating_add(4096);
+        }
+    }
+}
+
+/// Which node owns `phys`, if it came from [`allocate_from_node`].
+pub fn frame_node(phys: u64) -> Option<u32> {
+    FRAME_NODE.lock().get(&phys).copied()
+}
+
+/// Allocate a physical frame from the node selected by `pid`'s NUMA policy.
+pub fn allocate_node(pid: u64, preferred_node: u32) -> Option<u64> {
+    allocate_from_node(pick_node(pid, preferred_node))
+}
+
+pub const GATE_NUMA_MARKER: &str = "GATE_NUMA frame";
+
+fn frame_self_test() -> bool {
+    let before = get_node_info(0).map(|n| n.memory_used).unwrap_or(0);
+    let Some(phys) = allocate_node(0, 0) else {
+        crate::serial_println!("[NUMA] GATE_NUMA FAILED: no frame");
+        return false;
+    };
+    let node = frame_node(phys);
+    let after = get_node_info(0).map(|n| n.memory_used).unwrap_or(0);
+    free_from_node(phys);
+    let used_ok = after >= before.saturating_add(4096);
+    if node == Some(0) && used_ok {
+        crate::serial_println!("[NUMA] {} (node 0 phys {:#x})", GATE_NUMA_MARKER, phys);
+        true
+    } else {
+        crate::serial_println!(
+            "[NUMA] GATE_NUMA FAILED: node={:?} used_ok={} before={} after={}",
+            node,
+            used_ok,
+            before,
+            after
+        );
+        false
+    }
+}
+
 /// Generate /proc/buddyinfo-like NUMA memory info
 pub fn proc_numa_info() -> String {
     let topo = TOPOLOGY.lock();
@@ -374,6 +446,8 @@ pub fn init() {
         topo.num_nodes,
         topo.nodes.iter().map(|n| n.memory_total).sum::<u64>() / (1024 * 1024),
     );
+    drop(topo);
+    let _ = frame_self_test();
 }
 
 /// Parse ACPI SRAT (System Resource Affinity Table) for NUMA topology

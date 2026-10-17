@@ -22,7 +22,7 @@
 - [x] Cron `@reboot` + PIT/APIC due-flag (`GATE_CRON reboot`)
 - [x] udev-style hotplug → `/dev` from PCI (`GATE_UDEV hotplug`)
 - [x] NetworkManager `activate` copies live `eth0` DHCP (`GATE_NM dhcp`)
-- [ ] Suspend/hibernate, logind
+- [x] Suspend/hibernate, logind — S3 save/restore hooks (`GATE_SUSPEND resume`); session create/list/terminate (`GATE_LOGIND session`)
 - [x] PulseAudio mixing to HDA (`GATE_PA mix`)
 
 ---

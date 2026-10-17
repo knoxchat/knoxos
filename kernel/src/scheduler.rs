@@ -545,6 +545,8 @@ pub fn maybe_preempt_user(frame: &crate::context::IrqFrame) {
     if current <= crate::context::DESKTOP_PID {
         return;
     }
+    // CPU bandwidth: a quota miss still preempts this Ring 3 task.
+    let _ = crate::cgroup2::charge_cpu(current as u64, 10_000);
 
     let Some(mut contexts) = crate::context::PROCESS_CONTEXTS.try_lock() else {
         return;

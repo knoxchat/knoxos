@@ -347,6 +347,7 @@ pub fn init() {
 
     drop(state);
     crate::serial_println!("[KnoxOS] Security module initialized (mode: Permissive)");
+    let _ = session_self_test();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -807,6 +808,27 @@ pub fn terminate_session(session_id: u64) -> bool {
         );
         true
     } else {
+        false
+    }
+}
+
+pub const GATE_LOGIND_MARKER: &str = "GATE_LOGIND session";
+
+fn session_self_test() -> bool {
+    let id = create_login_session(1000, "knox", "tty1", SessionType::Console);
+    let listed = list_sessions()
+        .iter()
+        .any(|s| s.session_id == id && s.username == "knox" && s.tty == "tty1");
+    let gone = terminate_session(id) && list_sessions().iter().all(|s| s.session_id != id);
+    if listed && gone {
+        crate::serial_println!("[session] {} (create/list/terminate)", GATE_LOGIND_MARKER);
+        true
+    } else {
+        crate::serial_println!(
+            "[session] GATE_LOGIND FAILED: listed={} gone={}",
+            listed,
+            gone
+        );
         false
     }
 }

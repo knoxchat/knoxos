@@ -21,15 +21,15 @@ Details: [subsystems/01-kernel-core.md](subsystems/01-kernel-core.md)
 - [x] **UEFI runtime** — `GetTime` from CMOS RTC; `SetVariable`/`GetVariable` round-trip (`GATE_UEFI time`)
 - [x] **Kernel modules** — ELF ET_REL `.ko` load + reloc + `init_module` (`GATE_KO load`)
 - [x] **IOMMU** — root table from buddy; `enable_translation` called (`GATE_IOMMU translation`)
-- [ ] **Live patch** — writes a jmp over a symbol; no W^X, no activeness wait
-- [ ] **Nested IRQ / TPR** — not used from ISRs
+- [x] **Live patch** — dedicated 4K trampoline, W^X (never W+X), activeness wait (`GATE_LPATCH wx`)
+- [x] **Nested IRQ / TPR** — ISRs raise LAPIC TPR; nested enter writes TPR (`GATE_NIRQ tpr`)
 
 ## 2. Memory Management
 
 Details: [subsystems/02-memory.md](subsystems/02-memory.md)
 
-- [ ] **NUMA** — SRAT parse; `allocate_node` returns an id, not memory
-- [ ] **KSM** — hashes phys addr as a virt pointer; merge is a counter
+- [x] **NUMA** — `allocate_node` returns a buddy frame charged to the node (`GATE_NUMA frame`)
+- [x] **KSM** — hashes via `phys_to_virt`; identical pages collapse and the victim is freed (`GATE_KSM merge`)
 - [x] **THP** — buddy order-9 2 MiB allocation (`GATE_THP hugepage`)
 - [x] **KASLR** for loadable kernel mappings (`GATE_KASLR slide`)
 - [x] **Memory cgroups** enforcement — mmap/brk charge; hard `memory.max` is ENOMEM (`GATE_CGROUP memory`, `GATE_CGROUP2 memory`)
@@ -45,7 +45,7 @@ Details: [subsystems/03-process.md](subsystems/03-process.md)
 Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 
 - [x] NTFS — boot + MFT `$DATA` through the ramdisk block layer (`GATE_NTFS block`)
-- [ ] Btrfs / ZFS / XFS / exFAT / CIFS — in-memory or AHCI/NVMe fallback
+- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). Btrfs / ZFS / XFS / CIFS still in-memory or later.
 - [x] JBD2 journal replay — descriptor + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`)
 - [x] Quotas — `write_file_checked` returns `EDQUOT` (`GATE_QUOTA enforce`)
 
@@ -95,7 +95,7 @@ Details: [subsystems/08-shell.md](subsystems/08-shell.md)
 
 Details: [subsystems/09-security.md](subsystems/09-security.md)
 
-- [ ] AES-GCM, Poly1305, TLS 1.3 key schedule, X.509 chain verify
+- [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 key schedule / X.509 chain verify later.
 - [ ] RSA / ECDSA / Ed25519 / X25519 production-quality
 - [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); buddy free zeros the frame (`GATE_WIPE free`); exec measures SHA-256 (`GATE_IMA exec`)
 
@@ -107,7 +107,7 @@ Details: [subsystems/10-services.md](subsystems/10-services.md)
 - [x] Cron `@reboot` plus PIT/APIC due-flag (`GATE_CRON reboot`)
 - [x] udev-style hotplug → `/dev` from PCI scan (`GATE_UDEV hotplug`)
 - [x] NetworkManager activate copies live `eth0` DHCP (`GATE_NM dhcp`)
-- [ ] Suspend/hibernate, logind
+- [x] Suspend/hibernate, logind — S3 save/restore hooks (`GATE_SUSPEND resume`); session create/list/terminate (`GATE_LOGIND session`)
 - [x] PulseAudio mixing to HDA (`GATE_PA mix`)
 
 ## 11. Virtualization & Containers
@@ -117,7 +117,7 @@ Details: [subsystems/11-virt.md](subsystems/11-virt.md)
 - [ ] `kvm::start_vm` sets `Running` and **does not** `vmlaunch`
 - [ ] EPT, virtio device emulation for guests
 - [ ] `container.rs` — OCI structs; start is comments (`fork`, `unshare`, `pivot_root`)
-- [x] cgroup v2 **memory** enforcement (`GATE_CGROUP2 memory`). CPU/IO still counters.
+- [x] cgroup v2 **memory** enforcement (`GATE_CGROUP2 memory`). CPU quota and IO byte cap deny (`GATE_CGROUP cpu`, `GATE_CGROUP io`).
 
 ## 12. AI/ML Integration
 
@@ -140,7 +140,7 @@ Details: [subsystems/13-binary-compat.md](subsystems/13-binary-compat.md)
 
 Details: [subsystems/14-i18n.md](subsystems/14-i18n.md)
 
-- [ ] Font fallback chain
+- [x] Font fallback chain — compositor chain used for CJK/emoji (`GATE_FONT fallback`)
 - [ ] Real GSUB/GPOS / HarfBuzz-class shaping (Latin ligatures hardcoded)
 - [ ] Color emoji
 - [ ] `.mo` parser exists; runtime locale switch incomplete

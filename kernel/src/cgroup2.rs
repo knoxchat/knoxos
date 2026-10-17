@@ -558,6 +558,76 @@ pub fn uncharge_memory(pid: u64, bytes: u64) {
     }
 }
 
+/// Charge `usec` of CPU time against `cpu.max`. Over quota is LimitExceeded.
+pub fn charge_cpu(pid: u64, usec: u64) -> Result<(), Cgroup2Error> {
+    let mut table = CGROUPS.lock();
+    let Some(cg) = table
+        .cgroups
+        .values_mut()
+        .find(|c| c.processes.contains(&pid))
+    else {
+        return Ok(());
+    };
+    cg.cpu.stat_usage = cg.cpu.stat_usage.saturating_add(usec);
+    let (quota, period) = cg.cpu.max;
+    if quota != u64::MAX && period > 0 && cg.cpu.stat_usage > quota {
+        cg.cpu.nr_throttled = cg.cpu.nr_throttled.saturating_add(1);
+        cg.cpu.throttled_usec = cg.cpu.throttled_usec.saturating_add(usec);
+        return Err(Cgroup2Error::LimitExceeded);
+    }
+    Ok(())
+}
+
+/// Charge write bytes against `io.max` for device 0:0. Over the cap is LimitExceeded.
+pub fn set_io_max_bytes(path: &str, max_bytes: u64) -> Result<(), Cgroup2Error> {
+    let mut table = CGROUPS.lock();
+    let id = *table.path_to_id.get(path).ok_or(Cgroup2Error::NotFound)?;
+    let cg = table.cgroups.get_mut(&id).ok_or(Cgroup2Error::NotFound)?;
+    cg.io.max.insert(
+        (0, 0),
+        IoMax {
+            rbps: None,
+            wbps: Some(max_bytes),
+            riops: None,
+            wiops: None,
+        },
+    );
+    Ok(())
+}
+
+pub fn charge_io(pid: u64, bytes: u64) -> Result<(), Cgroup2Error> {
+    let mut table = CGROUPS.lock();
+    let Some(cg) = table
+        .cgroups
+        .values_mut()
+        .find(|c| c.processes.contains(&pid))
+    else {
+        return Ok(());
+    };
+    if let Some(limit) = cg.io.max.get(&(0, 0)).and_then(|m| m.wbps) {
+        let current = cg.io.stat.first().map(|s| s.wbytes).unwrap_or(0);
+        if current.saturating_add(bytes) > limit {
+            return Err(Cgroup2Error::LimitExceeded);
+        }
+    }
+    if let Some(stat) = cg.io.stat.first_mut() {
+        stat.wbytes = stat.wbytes.saturating_add(bytes);
+        stat.wios = stat.wios.saturating_add(1);
+    } else {
+        cg.io.stat.push(IoStat {
+            major: 0,
+            minor: 0,
+            rbytes: 0,
+            wbytes: bytes,
+            rios: 0,
+            wios: 1,
+            dbytes: 0,
+            dios: 0,
+        });
+    }
+    Ok(())
+}
+
 fn memory_self_test() -> bool {
     const GATE_PID: u64 = 424_243;
     if mkdir("/gate.memory").is_err() {
@@ -579,6 +649,70 @@ fn memory_self_test() -> bool {
     let _ = attach_process("/", GATE_PID);
     let _ = rmdir("/gate.memory");
     denied_over && allowed && denied_next
+}
+
+fn cpu_self_test() -> bool {
+    const GATE_PID: u64 = 424_244;
+    if mkdir("/gate.cpu").is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP cpu FAILED: mkdir");
+        return false;
+    }
+    if set_cpu_max("/gate.cpu", 1000, 100_000).is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP cpu FAILED: set max");
+        return false;
+    }
+    if attach_process("/gate.cpu", GATE_PID).is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP cpu FAILED: attach");
+        return false;
+    }
+    let allowed = charge_cpu(GATE_PID, 1000).is_ok();
+    let denied = charge_cpu(GATE_PID, 1).is_err();
+    let _ = attach_process("/", GATE_PID);
+    let _ = rmdir("/gate.cpu");
+    if allowed && denied {
+        crate::serial_println!("[cgroup2] GATE_CGROUP cpu (throttle over quota)");
+        true
+    } else {
+        crate::serial_println!(
+            "[cgroup2] GATE_CGROUP cpu FAILED: allowed={} denied={}",
+            allowed,
+            denied
+        );
+        false
+    }
+}
+
+fn io_self_test() -> bool {
+    const GATE_PID: u64 = 424_245;
+    if mkdir("/gate.io").is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP io FAILED: mkdir");
+        return false;
+    }
+    if set_io_max_bytes("/gate.io", 4096).is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP io FAILED: set max");
+        return false;
+    }
+    if attach_process("/gate.io", GATE_PID).is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP io FAILED: attach");
+        return false;
+    }
+    let denied_over = charge_io(GATE_PID, 8192).is_err();
+    let allowed = charge_io(GATE_PID, 4096).is_ok();
+    let denied_next = charge_io(GATE_PID, 1).is_err();
+    let _ = attach_process("/", GATE_PID);
+    let _ = rmdir("/gate.io");
+    if denied_over && allowed && denied_next {
+        crate::serial_println!("[cgroup2] GATE_CGROUP io (EIO on 8KiB > 4KiB)");
+        true
+    } else {
+        crate::serial_println!(
+            "[cgroup2] GATE_CGROUP io FAILED: over={} ok4k={} next={}",
+            denied_over,
+            allowed,
+            denied_next
+        );
+        false
+    }
 }
 
 /// Initialize cgroup v2 subsystem
@@ -609,4 +743,6 @@ pub fn init() {
         crate::serial_println!("[cgroup2] GATE_CGROUP2 FAILED");
     }
     crate::cgroups::enforce_self_test();
+    let _ = cpu_self_test();
+    let _ = io_self_test();
 }

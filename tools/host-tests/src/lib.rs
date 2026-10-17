@@ -201,6 +201,11 @@ pub fn ext4_magic_ok(superblock: &[u8]) -> bool {
     u16::from_le_bytes([superblock[0x38], superblock[0x39]]) == EXT4_SUPER_MAGIC
 }
 
+/// exFAT VBR signature is `"EXFAT   "` at offset 3.
+pub fn exfat_magic_ok(boot: &[u8]) -> bool {
+    boot.len() >= 11 && &boot[3..11] == b"EXFAT   "
+}
+
 /// Reject truncated or internally inconsistent ext4 superblocks.
 pub fn parse_ext4_superblock(superblock: &[u8]) -> Result<u32, &'static str> {
     if superblock.len() < 0x5C {
@@ -405,6 +410,110 @@ mod tests {
         assert!(!ntfs_oem_ok(&boot));
         assert!(ntfs_mft_magic_ok(b"FILE...."));
         assert!(!ntfs_mft_magic_ok(b"BAAD"));
+    }
+
+    #[test]
+    fn poly1305_rfc8439() {
+        fn mul_u128(a: u128, b: u128) -> (u128, u128) {
+            let a0 = a as u64 as u128;
+            let a1 = a >> 64;
+            let b0 = b as u64 as u128;
+            let b1 = b >> 64;
+            let p00 = a0 * b0;
+            let p01 = a0 * b1;
+            let p10 = a1 * b0;
+            let p11 = a1 * b1;
+            let mut lo = p00;
+            let (nlo, c1) = lo.overflowing_add(p01 << 64);
+            lo = nlo;
+            let mut hi = (p01 >> 64) + u128::from(c1);
+            let (nlo, c2) = lo.overflowing_add(p10 << 64);
+            lo = nlo;
+            hi += (p10 >> 64) + u128::from(c2);
+            hi += p11;
+            (lo, hi)
+        }
+        fn poly1305_reduce(mut lo: u128, mut hi: u128) -> (u128, u128) {
+            loop {
+                let top = hi >> 2;
+                if top == 0 {
+                    break;
+                }
+                hi &= 3;
+                let (nlo, c) = lo.overflowing_add(top.wrapping_mul(5));
+                lo = nlo;
+                hi += u128::from(c);
+            }
+            (lo, hi)
+        }
+        fn poly1305(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
+            let mut rbytes = [0u8; 16];
+            rbytes.copy_from_slice(&key[0..16]);
+            rbytes[3] &= 15;
+            rbytes[7] &= 15;
+            rbytes[11] &= 15;
+            rbytes[15] &= 15;
+            rbytes[4] &= 252;
+            rbytes[8] &= 252;
+            rbytes[12] &= 252;
+            let r = u128::from_le_bytes(rbytes);
+            let mut sbytes = [0u8; 16];
+            sbytes.copy_from_slice(&key[16..32]);
+            let s = u128::from_le_bytes(sbytes);
+            let mut h_lo = 0u128;
+            let mut h_hi = 0u128;
+            let mut offset = 0;
+            while offset < msg.len() {
+                let n = core::cmp::min(16, msg.len() - offset);
+                let mut block = [0u8; 16];
+                block[..n].copy_from_slice(&msg[offset..offset + n]);
+                let n_lo = u128::from_le_bytes(block);
+                let (sum, c) = h_lo.overflowing_add(n_lo);
+                h_lo = sum;
+                h_hi += u128::from(c);
+                if n == 16 {
+                    h_hi += 1;
+                } else {
+                    let pad = 1u128 << (8 * n);
+                    let (sum2, c2) = h_lo.overflowing_add(pad);
+                    h_lo = sum2;
+                    h_hi += u128::from(c2);
+                }
+                let (p0, p1) = mul_u128(h_lo, r);
+                let p_hi = p1.wrapping_add(h_hi.wrapping_mul(r));
+                let (nlo, nhi) = poly1305_reduce(p0, p_hi);
+                h_lo = nlo;
+                h_hi = nhi;
+                offset += 16;
+            }
+            if h_hi > 3 || (h_hi == 3 && h_lo >= u128::MAX - 4) {
+                h_lo = h_lo.wrapping_add(5);
+            }
+            let (tag, _) = h_lo.overflowing_add(s);
+            tag.to_le_bytes()
+        }
+        let mut pkey = [0u8; 32];
+        pkey.copy_from_slice(&[
+            0x85, 0xd6, 0xbe, 0x78, 0x57, 0x55, 0x6d, 0x33, 0x7f, 0x44, 0x52, 0xfe, 0x42, 0xd5,
+            0x06, 0xa8, 0x01, 0x03, 0x80, 0x8a, 0xfb, 0x0d, 0xb2, 0xfd, 0x4a, 0xbf, 0xf6, 0xaf,
+            0x41, 0x49, 0xf5, 0x1b,
+        ]);
+        let mac = poly1305(&pkey, b"Cryptographic Forum Research Group");
+        let exp = [
+            0xa8, 0x06, 0x1d, 0xc1, 0x30, 0x51, 0x36, 0xc6, 0xc2, 0x2b, 0x8b, 0xaf, 0x0c, 0x01,
+            0x27, 0xa9,
+        ];
+        assert_eq!(mac, exp, "got {:02x?}", mac);
+    }
+
+    #[test]
+    fn exfat_oem_magic() {
+        let mut boot = vec![0u8; 512];
+        boot[3..11].copy_from_slice(b"EXFAT   ");
+        assert!(exfat_magic_ok(&boot));
+        boot[3] = b'X';
+        assert!(!exfat_magic_ok(&boot));
+        assert!(!exfat_magic_ok(&[0u8; 4]));
     }
 
     #[test]

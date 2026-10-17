@@ -56,19 +56,20 @@ use knoxos_kernel::{
     benchmark, block, bluetooth, boot_splash, cabi, capabilities, cgroup2, cgroups,
     chromium_sandbox, clock, close_range, cmdline, container, context, cpio, cpufreq, cred, cron,
     crypto, dbus, desktop_apps, devfs, dmesg, dpkg, drm, dynlink, e1000, ebpf, elf, epoll, eventfd,
-    ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
+    exfat, ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
     glibc_compat, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http, huge_pages,
     hwtest, i18n, ima, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring,
-    iommu, ipc, journal_replay, kaslr, kcmp, kobject, kpm, kvm, landlock, ldknoxos, libc_funcs,
-    llm, media_player, membarrier, memfd, memory, midi, mmap, modules, mount, mount_api, mqueue,
-    multiboot, musl, namespaces, nested_irq, net_production, network_manager, ntfs, ntp, numa,
-    nvme, onnx, oom, ota_update, overlayfs, package_manager, path, pci, pcie_ecam, perf, persist,
-    pgo, pgrp, pidfd, pidns, pipe, posix_ext, posix_timer, power, preempt_rt, println, process,
-    procfs, procfs_extended, procfs_full, ptrace, pty, pulseaudio, quota, random, recovery,
-    release_sign, repo_server, rlimit, rseq, rtc, rtl8139, sched_ext, scheduler, screen_record,
-    seccomp, security, selinux, serial_println, service_manager, session, shell, shell_startup,
-    shm, signalfd, signals, slab, smp, socket_activation, soloader, sound, splice, ssp,
-    stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs, sysinfo, syslog,
+    iommu, ipc, journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm, landlock, ldknoxos,
+    libc_funcs, livepatch, llm, media_player, membarrier, memfd, memory, midi, mmap, modules,
+    mount, mount_api, mqueue, multiboot, musl, namespaces, nested_irq, net_production,
+    network_manager, ntfs, ntp, numa, nvme, onnx, oom, ota_update, overlayfs, package_manager,
+    path, pci, pcie_ecam, perf, persist, pgo, pgrp, pidfd, pidns, pipe, posix_ext, posix_timer,
+    power, preempt_rt, println, process, procfs, procfs_extended, procfs_full, ptrace, pty,
+    pulseaudio, quota, random, recovery, release_sign, repo_server, rlimit, rseq, rtc, rtl8139,
+    sched_ext, scheduler, screen_record, seccomp, security, selinux, serial_println,
+    service_manager, session, shell, shell_startup, shm, signalfd, signals, slab, smp,
+    socket_activation, soloader, sound, splice, ssp, stack_guard, strace, stress_test, suspend,
+    swap, sysctl, sysfs, sysinfo, syslog,
     task::{Task, executor::Executor, keyboard},
     terminal, thermal, thp, threads, timerfd, tls, tmpfs, tty, uds, usb, usb_hid, userfaultfd,
     usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input, virtio_tablet,
@@ -417,6 +418,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize FAT32 filesystem (needs virtio_blk)
     fat32::init();
     ntfs::init();
+    exfat::init();
 
     // Initialize ext4 filesystem (journal + extents)
     #[cfg(feature = "fs-ext4")]
@@ -600,6 +602,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize NUMA subsystem
     numa::init();
+    ksm::init();
 
     // Initialize eBPF subsystem
     ebpf::init();
@@ -998,6 +1001,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Font discovery and configuration
     fontconfig::init();
+    gui::cjk_font::init();
 
     // XDG desktop integration (Base Directory, MIME, .desktop files)
     xdg::init();
@@ -1059,6 +1063,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     cmdline::init();
     multiboot::init();
     nested_irq::init();
+    livepatch::init();
 
     // Disable preemption during remaining init to prevent deadlocks
     // (timer interrupt handler acquires SCHEDULER/PROCESS_TABLE locks)

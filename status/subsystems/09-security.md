@@ -19,7 +19,7 @@
 - [x] Landlock deny-by-default on VFS open/write (K4)
 
 ### Stub / unused
-- [ ] AES-GCM, Poly1305, TLS 1.3 key schedule, X.509 chain verify
+- [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 / X.509 later.
 - [ ] RSA / ECDSA / Ed25519 / X25519 production-quality
 - [x] **Landlock** hooked on VFS (`GATE_K4 landlock vfs`). SELinux / AppArmor still unused.
 - [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); freed buddy frames are zeros (`GATE_WIPE free`); exec SHA-256 measure (`GATE_IMA exec`)

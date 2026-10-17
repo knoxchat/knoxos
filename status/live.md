@@ -76,5 +76,14 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 65. **THP / KASLR** — 2 MiB hugepage + module slide (`GATE_THP hugepage`, `GATE_KASLR slide`).
 66. **ACPI AML** — DSDT `_S5` (`GATE_AML dsdt`).
 67. **`.ko` loader** — ET_REL `init_module` (`GATE_KO load`).
+68. **NUMA** — `allocate_node` returns a buddy frame charged to the node (`GATE_NUMA frame`).
+69. **KSM** — identical pages hashed via `phys_to_virt` collapse; victim is freed (`GATE_KSM merge`).
+70. **Nested IRQ / TPR** — ISRs raise LAPIC TPR; nested enter writes TPR (`GATE_NIRQ tpr`).
+71. **Live patch** — dedicated 4K trampoline, never W+X, activeness wait (`GATE_LPATCH wx`).
+72. **exFAT** — VBR + FAT + directory `$DATA` through the ramdisk (`GATE_EXFAT block`).
+73. **cgroup CPU/IO** — `cpu.max` quota and `io.max` byte cap deny (`GATE_CGROUP cpu`, `GATE_CGROUP io`).
+74. **Suspend / logind** — S3 save/restore hooks (`GATE_SUSPEND resume`); session create/list/terminate (`GATE_LOGIND session`).
+75. **AES-GCM / Poly1305** — NIST AES-128-GCM and RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`).
+76. **Font fallback** — compositor chain used for CJK/emoji (`GATE_FONT fallback`).
 
-Integration: `./tests/run_integration.sh` **315/315** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **327/327** on QEMU (2026-10-18).

@@ -60,6 +60,9 @@ Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md]
 - NTFS through the block layer (`GATE_NTFS block`); here-docs / `~/.profile` (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`); VT100 CUP+SGR256 (`GATE_VT100 xterm`)
 - HDA DMA + PulseAudio mix (`GATE_HDA dma`, `GATE_PA mix`); IOMMU `enable_translation` (`GATE_IOMMU translation`)
 - THP / KASLR (`GATE_THP hugepage`, `GATE_KASLR slide`); ACPI AML `_S5` (`GATE_AML dsdt`); kernel `.ko` load (`GATE_KO load`)
+- NUMA frame alloc (`GATE_NUMA frame`); KSM merge (`GATE_KSM merge`); nested IRQ TPR (`GATE_NIRQ tpr`); live patch W^X (`GATE_LPATCH wx`)
+- exFAT through the block layer (`GATE_EXFAT block`); CPU/IO cgroups (`GATE_CGROUP cpu`, `GATE_CGROUP io`)
+- Suspend/logind (`GATE_SUSPEND resume`, `GATE_LOGIND session`); AES-GCM/Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`); font fallback (`GATE_FONT fallback`)
 
 ---
 

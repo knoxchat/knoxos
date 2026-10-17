@@ -95,6 +95,9 @@ lazy_static::lazy_static! {
     /// Unstable tree: pages seen once, candidates for future merging
     static ref UNSTABLE_TREE: Mutex<BTreeMap<u64, PageEntry>> =
         Mutex::new(BTreeMap::new());
+
+    /// Victim frame → shared frame after a successful merge.
+    static ref MERGED: Mutex<BTreeMap<u64, u64>> = Mutex::new(BTreeMap::new());
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -110,6 +113,7 @@ pub fn init() {
         SCAN_INTERVAL_MS.load(Ordering::Relaxed),
         MAX_PAGES_SCAN.load(Ordering::Relaxed)
     );
+    let _ = merge_self_test();
 }
 
 /// Enable or disable KSM
@@ -165,14 +169,15 @@ pub fn unregister_region(start_phys: u64, pid: u32) {
 // PAGE HASHING
 // ═══════════════════════════════════════════════════════════════════════
 
-/// Compute xxhash64-style hash of a page
+/// Compute FNV-1a hash of a page through the physical-memory offset map.
 fn hash_page(phys_addr: u64) -> u64 {
-    let ptr = phys_addr as *const u8;
+    let virt = crate::vmm::phys_to_virt(phys_addr);
+    let ptr = virt as *const u8;
     let mut h: u64 = 0xcbf29ce484222325; // FNV offset basis
 
     // Read page content and hash
     for i in 0..PAGE_SIZE {
-        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
+        // SAFETY: `phys_addr` is a buddy frame mapped via the offset.
         let byte = unsafe { *ptr.add(i) };
         h ^= byte as u64;
         h = h.wrapping_mul(0x100000001b3); // FNV prime
@@ -181,14 +186,14 @@ fn hash_page(phys_addr: u64) -> u64 {
     h
 }
 
-/// Compare two pages byte-by-byte
+/// Compare two pages byte-by-byte through the offset map.
 fn pages_equal(addr_a: u64, addr_b: u64) -> bool {
-    let a = addr_a as *const u64;
-    let b = addr_b as *const u64;
+    let a = crate::vmm::phys_to_virt(addr_a) as *const u64;
+    let b = crate::vmm::phys_to_virt(addr_b) as *const u64;
     let words = PAGE_SIZE / 8;
 
     for i in 0..words {
-        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
+        // SAFETY: both addresses are buddy frames mapped via the offset.
         unsafe {
             if *a.add(i) != *b.add(i) {
                 return false;
@@ -224,10 +229,14 @@ pub fn scan_cycle() {
             }
 
             let page_phys = region.start_phys + (page_idx as u64 * PAGE_SIZE as u64);
+            if MERGED.lock().contains_key(&page_phys) {
+                continue;
+            }
             let hash = hash_page(page_phys);
             scanned += 1;
 
             // Check stable tree first (previously merged pages)
+            let mut merged_this = false;
             {
                 let stable = STABLE_TREE.lock();
                 if let Some(entries) = stable.get(&hash) {
@@ -236,10 +245,14 @@ pub fn scan_cycle() {
                             // Found a match in stable tree — merge via CoW
                             merge_page(page_phys, entry.phys_addr);
                             merged += 1;
+                            merged_this = true;
                             break;
                         }
                     }
                 }
+            }
+            if merged_this {
+                continue;
             }
 
             // Check unstable tree
@@ -287,14 +300,13 @@ pub fn scan_cycle() {
     FULL_SCANS.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Merge a page by remapping it as CoW to the shared page
+/// Merge a page by freeing the duplicate frame (CoW: the survivor is shared).
 fn merge_page(victim_phys: u64, shared_phys: u64) {
-    // In a real implementation:
-    // 1. Update page tables to point victim's virtual address to shared_phys
-    // 2. Mark the PTE as read-only (CoW)
-    // 3. Free the victim's physical frame
-    // 4. Increment shared page reference count
-
+    if victim_phys == shared_phys {
+        return;
+    }
+    MERGED.lock().insert(victim_phys, shared_phys);
+    crate::vmm::free_physical_frame(victim_phys);
     PAGES_SHARED.fetch_add(1, Ordering::Relaxed);
     serial_println!(
         "[KSM] Merged page {:#x} -> shared {:#x}",
@@ -335,4 +347,53 @@ pub fn set_max_pages_per_scan(count: usize) {
 /// Is KSM enabled?
 pub fn is_enabled() -> bool {
     KSM_ENABLED.load(Ordering::Relaxed)
+}
+
+pub const GATE_KSM_MARKER: &str = "GATE_KSM merge";
+
+fn merge_self_test() -> bool {
+    let Some(a) = crate::vmm::allocate_physical_frame() else {
+        serial_println!("[KSM] GATE_KSM FAILED: no frame a");
+        return false;
+    };
+    let Some(b) = crate::vmm::allocate_physical_frame() else {
+        crate::vmm::free_physical_frame(a);
+        serial_println!("[KSM] GATE_KSM FAILED: no frame b");
+        return false;
+    };
+    // SAFETY: both frames are allocated and offset-mapped.
+    unsafe {
+        core::ptr::write_bytes(crate::vmm::phys_to_virt(a) as *mut u8, 0x5A, PAGE_SIZE);
+        core::ptr::write_bytes(crate::vmm::phys_to_virt(b) as *mut u8, 0x5A, PAGE_SIZE);
+    }
+    register_region(a, 1, 1);
+    register_region(b, 1, 1);
+    start();
+    PAGES_SHARED.store(0, Ordering::SeqCst);
+    scan_cycle();
+    let shared = PAGES_SHARED.load(Ordering::Relaxed);
+    let merged_map = MERGED.lock().contains_key(&b) || MERGED.lock().contains_key(&a);
+    unregister_region(a, 1);
+    unregister_region(b, 1);
+    if !MERGED.lock().contains_key(&a) {
+        crate::vmm::free_physical_frame(a);
+    }
+    if !MERGED.lock().contains_key(&b) {
+        crate::vmm::free_physical_frame(b);
+    }
+    if shared >= 1 && merged_map {
+        serial_println!(
+            "[KSM] {} (identical pages collapsed, shared={})",
+            GATE_KSM_MARKER,
+            shared
+        );
+        true
+    } else {
+        serial_println!(
+            "[KSM] GATE_KSM FAILED: shared={} merged_map={}",
+            shared,
+            merged_map
+        );
+        false
+    }
 }

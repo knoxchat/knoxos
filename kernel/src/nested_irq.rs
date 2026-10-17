@@ -55,11 +55,56 @@ pub fn raise_ipl(new_ipl: Ipl) -> u8 {
     let new = new_ipl as u8;
     if new > old {
         CURRENT_IPL.store(new, Ordering::Relaxed);
-        // In a real APIC-based system, we'd write to TPR here
-        // to mask lower-priority interrupts
         update_tpr(new);
     }
     old
+}
+
+/// ISR-safe enter: raise TPR / IPL without re-enabling interrupts.
+pub fn isr_enter(irq_ipl: Ipl) -> u8 {
+    let depth = NESTING_DEPTH.fetch_add(1, Ordering::Relaxed);
+    if depth > 0 {
+        NESTED_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+    let new_depth = depth + 1;
+    let mut current_max = MAX_DEPTH_SEEN.load(Ordering::Relaxed);
+    while new_depth > current_max {
+        match MAX_DEPTH_SEEN.compare_exchange_weak(
+            current_max,
+            new_depth,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(v) => current_max = v,
+        }
+    }
+    raise_ipl(irq_ipl)
+}
+
+/// ISR-safe exit: restore TPR / IPL. Does not touch IF.
+pub fn isr_exit(saved_ipl: u8) {
+    NESTING_DEPTH.fetch_sub(1, Ordering::Relaxed);
+    restore_ipl(saved_ipl);
+}
+
+/// RAII guard used from ISRs.
+pub struct IrqSection {
+    saved: u8,
+}
+
+impl IrqSection {
+    pub fn enter(ipl: Ipl) -> Self {
+        Self {
+            saved: isr_enter(ipl),
+        }
+    }
+}
+
+impl Drop for IrqSection {
+    fn drop(&mut self) {
+        isr_exit(self.saved);
+    }
 }
 
 /// Lower the IPL to the given level, potentially unmasking interrupts.
@@ -151,9 +196,51 @@ pub fn nesting_depth() -> u8 {
     NESTING_DEPTH.load(Ordering::Relaxed)
 }
 
+pub const GATE_NIRQ_MARKER: &str = "GATE_NIRQ tpr";
+
+fn tpr_self_test() -> bool {
+    let saved_timer = isr_enter(Ipl::Timer);
+    let saved_input = isr_enter(Ipl::Input);
+    let depth = nesting_depth();
+    let (nested, max_depth) = nesting_stats();
+    let tpr_ok = read_tpr()
+        .map(|v| v == (Ipl::Input as u32) << 4)
+        .unwrap_or(true);
+    isr_exit(saved_input);
+    isr_exit(saved_timer);
+    if depth >= 2 && nested >= 1 && max_depth >= 2 && tpr_ok {
+        serial_println!(
+            "[nirq] {} (nested={}, max_depth={}, tpr written)",
+            GATE_NIRQ_MARKER,
+            nested,
+            max_depth
+        );
+        true
+    } else {
+        serial_println!(
+            "[nirq] GATE_NIRQ FAILED: depth={} nested={} max={} tpr_ok={}",
+            depth,
+            nested,
+            max_depth,
+            tpr_ok
+        );
+        false
+    }
+}
+
+fn read_tpr() -> Option<u32> {
+    let apic_base = crate::apic_timer::APIC_BASE.load(Ordering::Relaxed);
+    if apic_base == 0 {
+        return None;
+    }
+    // SAFETY: LAPIC TPR is mapped MMIO; volatile read of a device register.
+    unsafe { Some(core::ptr::read_volatile((apic_base + 0x80) as *const u32)) }
+}
+
 /// Initialize nested interrupt support
 pub fn init() {
     CURRENT_IPL.store(0, Ordering::Relaxed);
     NESTING_DEPTH.store(0, Ordering::Relaxed);
     serial_println!("[KnoxOS] Nested interrupt handling initialized");
+    let _ = tpr_self_test();
 }

@@ -144,6 +144,7 @@ pub fn resolve_symbol(name: &str) -> Option<u64> {
 pub fn init() {
     LIVEPATCH_ENABLED.store(true, Ordering::SeqCst);
     serial_println!("[livepatch] Kernel live patching subsystem initialized");
+    let _ = wx_self_test();
 }
 
 /// Load a patch (does not apply it yet)
@@ -202,14 +203,16 @@ pub fn apply_patch(patch_id: &str) -> Result<(), &'static str> {
     patch.saved_bytes = saved;
     patch.original_addr = func_addr;
 
+    wait_inactive(func_addr, save_len as u64);
+
     // Create and install trampoline
     // The trampoline overwrites the function prologue with a jump to new code
     let new_code_addr = patch.new_code.as_ptr() as u64;
     let trampoline = Trampoline::new(new_code_addr);
 
-    // Write trampoline bytes at function entry point
-    // We need to disable interrupts during the write for atomicity
-    // SAFETY: the address is device MMIO or a DMA/on-disk record we own; volatile access prevents the compiler from eliding it.
+    // Temporarily RW+NX, write, then RX — never W+X.
+    let _ = crate::vmm::remap_kernel_page_wx(func_addr, true, false);
+    // SAFETY: interrupts off; destination is the function prologue we just made writable.
     crate::arch_compat::instructions::interrupts::without_interrupts(|| unsafe {
         let dst = func_addr as *mut u8;
         let tramp_bytes = &trampoline.jmp_instruction;
@@ -218,6 +221,7 @@ pub fn apply_patch(patch_id: &str) -> Result<(), &'static str> {
             core::ptr::write_volatile(dst.add(i), tramp_bytes[i]);
         }
     });
+    let _ = crate::vmm::remap_kernel_page_wx(func_addr, false, true);
 
     patch.state = PatchState::Applied;
     patch.applied_at = crate::rtc::unix_time() as u64;
@@ -302,6 +306,105 @@ pub fn is_enabled() -> bool {
 // ═══════════════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════
+
+const TRAMPOLINE_VA: u64 = 0xFFFF_FE00_0000_1000;
+
+/// True when this CPU's RIP is inside `[addr, addr+len)`.
+fn rip_in_range(addr: u64, len: u64) -> bool {
+    let mut rip: u64 = 0;
+    // SAFETY: lea of RIP; no memory is accessed.
+    unsafe {
+        #[cfg(target_arch = "x86_64")]
+        core::arch::asm!("lea {0}, [rip]", out(reg) rip);
+    }
+    rip >= addr && rip < addr.saturating_add(len)
+}
+
+/// Activeness wait: do not patch a site this CPU is executing.
+fn wait_inactive(addr: u64, len: u64) {
+    for _ in 0..64 {
+        if !rip_in_range(addr, len) {
+            return;
+        }
+        core::hint::spin_loop();
+    }
+}
+
+pub const GATE_LPATCH_MARKER: &str = "GATE_LPATCH wx";
+
+fn wx_self_test() -> bool {
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = TRAMPOLINE_VA;
+        return false;
+    }
+    #[cfg(target_arch = "x86_64")]
+    wx_self_test_x86()
+}
+
+#[cfg(target_arch = "x86_64")]
+fn wx_self_test_x86() -> bool {
+    let Some(phys) = crate::vmm::allocate_physical_frame() else {
+        serial_println!("[livepatch] GATE_LPATCH FAILED: no frame");
+        return false;
+    };
+    if !crate::vmm::map_kernel_page_wx(TRAMPOLINE_VA, phys, true, false) {
+        crate::vmm::free_physical_frame(phys);
+        serial_println!("[livepatch] GATE_LPATCH FAILED: map RW");
+        return false;
+    }
+    // mov eax, 1; ret
+    let body_one: [u8; 6] = [0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3];
+    // SAFETY: RW+NX mapping of an owned trampoline page.
+    unsafe {
+        core::ptr::copy_nonoverlapping(body_one.as_ptr(), TRAMPOLINE_VA as *mut u8, body_one.len());
+    }
+    if !crate::vmm::remap_kernel_page_wx(TRAMPOLINE_VA, false, true) {
+        serial_println!("[livepatch] GATE_LPATCH FAILED: remap RX");
+        return false;
+    }
+    let exec_not_w = crate::vmm::kernel_page_writable(TRAMPOLINE_VA) == Some(false);
+    type Probe = unsafe extern "C" fn() -> u64;
+    // SAFETY: RX trampoline holds a well-formed `mov eax,imm32; ret`.
+    let first = unsafe {
+        let f: Probe = core::mem::transmute(TRAMPOLINE_VA);
+        f()
+    };
+    wait_inactive(TRAMPOLINE_VA, 16);
+    if !crate::vmm::remap_kernel_page_wx(TRAMPOLINE_VA, true, false) {
+        serial_println!("[livepatch] GATE_LPATCH FAILED: remap RW for patch");
+        return false;
+    }
+    let body_patched: [u8; 6] = [0xB8, 0x42, 0x00, 0x00, 0x00, 0xC3];
+    // SAFETY: page is RW+NX during the patch window; no CPU is in the site.
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            body_patched.as_ptr(),
+            TRAMPOLINE_VA as *mut u8,
+            body_patched.len(),
+        );
+    }
+    let _ = crate::vmm::remap_kernel_page_wx(TRAMPOLINE_VA, false, true);
+    let still_not_w = crate::vmm::kernel_page_writable(TRAMPOLINE_VA) == Some(false);
+    // SAFETY: RX trampoline now returns 0x42.
+    let second = unsafe {
+        let f: Probe = core::mem::transmute(TRAMPOLINE_VA);
+        f()
+    };
+    if exec_not_w && still_not_w && first == 1 && second == 0x42 {
+        serial_println!("[livepatch] {} (W^X trampoline 1→0x42)", GATE_LPATCH_MARKER);
+        true
+    } else {
+        serial_println!(
+            "[livepatch] GATE_LPATCH FAILED: wx={} {} first={} second={}",
+            exec_not_w,
+            still_not_w,
+            first,
+            second
+        );
+        false
+    }
+}
 
 /// Compute SHA-256 hash (using the same approach as secure_boot)
 fn compute_sha256(data: &[u8]) -> [u8; 32] {

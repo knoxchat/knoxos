@@ -49,8 +49,8 @@ pub use loader::{
     setup_initial_stack, setup_user_stack,
 };
 pub use page_table::{
-    activate_cr3, activate_kernel_cr3, get_kernel_cr3, get_phys_mem_offset, map_mmio,
-    map_page_in_table_pub, phys_to_virt, ready,
+    activate_cr3, activate_kernel_cr3, get_kernel_cr3, get_phys_mem_offset, kernel_page_writable,
+    map_kernel_page_wx, map_mmio, map_page_in_table_pub, phys_to_virt, ready, remap_kernel_page_wx,
 };
 pub use region::{MappingType, MmapFlags, ProtFlags, VirtualMemoryArea};
 pub use selftest::{
