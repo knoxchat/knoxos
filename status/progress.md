@@ -26,7 +26,7 @@ Process/Sched:      ████████████████████
 Filesystem:         ████████████████████████░  99%  Wired         ← C1–C8 (`/bin` persist + JBD2 replay) + inotify + VFS syscalls through BL
 Networking:         ███████████████████░░░░░░  76%  Wired         ← D1–D6 IPv6 echo TX + accept4 (BG2) + getsockname/getpeername (BH2–BH3) + sendmsg/recvmsg/shutdown (BI1–BI3) + sendmmsg/recvmmsg/getsockopt (BJ1–BJ3) + setsockopt (BK1) + TCP send/recv (BK2–BK3)
 Device Drivers:     ██████████████░░░░░░░░░░░  58%  Wired         ← AHCI + NVMe DMA + VirtIO-GPU (F8) + USB HID URB + XHCI MMIO
-GUI & Desktop:      ████████████████████████░  96%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + VirtIO-GPU cursor + VSync + GATE_TERM openpty SHM
+GUI & Desktop:      ████████████████████████░  98%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + wl_display + VirtIO-GPU cursor + VSync + Ring 3 Terminal PTY + GATE_GPU scanout
 Shell & Terminal:   ████████████████████░░░░░  82%  Live          ← sigreturn
 Security:           ████████████████████░░░░░  80%  Wired         ← E1–E4 + K4 Landlock + J4/L4/M4/N4/O4/P4/Q4/R4/S4/T4/U4/V4/W4/X4/Y4/Z4/AA4/AB4/AC4/AD4/AE4/AF4/AG4/AH4/AI4/AJ4/AK4/AL4/AM4/AN4/AO4/AP4/AQ4/AR4/AS4/AT4/AU4/AV4/AW4/AX4/AY4/AZ4/BA4/BB4/BC4/BD4/BK4/BL4 ENOSYS
 System Services:    ██████████████░░░░░░░░░░░  55%  Wired         ← K3 /sbin/init + L3 D-Bus AF_UNIX + svc restart + cron timer + udev /dev
@@ -34,8 +34,8 @@ Virtualization:     ████████░░░░░░░░░░░░
 AI/ML:              █████░░░░░░░░░░░░░░░░░░░░  22%  Wired
 Binary Compat:      ████████████████████████░  99%  Wired         ← execve + fork + clone + TLS %fs + userspace ld.so (BM1) + VMM dlopen (BM2) + static musl CRT (BM3) + dyn musl (BM4) + 200+ Ring 3 syscalls
 i18n & Fonts:       █████████████████░░░░░░░░  68%  Live
-Build System:       ████████████████████░░░░░  80%  Live          ← G3 feature flags + flake.nix
-Testing:            ███████████████████████░░  92%  Wired         ← 293 QEMU markers + host parser tests
+Build System:       ████████████████████████░  95%  Live          ← G3 feature flags + flake.nix + workspace (kernel+boot)
+Testing:            ████████████████████████░  96%  Wired         ← 296 QEMU markers + host parser fuzz
 Documentation:      ██████████████████░░░░░░░  70%  Wired         ← BUILDING + CONTRIBUTING + docs/ + CHANGELOG + rustdoc
 CI/CD:              ████████████████░░░░░░░░░  65%  Wired         ← aarch64/riscv64 QEMU boot + Secure Boot + rustdoc + audit + nightly images
 ```

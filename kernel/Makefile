@@ -3,6 +3,7 @@
 
 KERNEL_DIR = .
 TARGET = x86_64-unknown-none
+KERNEL_CARGO = ../scripts/kernel-cargo.sh
 KERNEL_BIN = target/$(TARGET)/debug/knoxos-kernel
 KERNEL_RELEASE = target/$(TARGET)/release/knoxos-kernel
 UEFI_IMG = target/$(TARGET)/debug/knoxos-uefi.img
@@ -25,6 +26,7 @@ QEMU_ARGS = -serial stdio \
 	-smp 2 \
 	-netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:../tests/d4_http.sh \
 	-device virtio-net-pci,netdev=net1,disable-modern=on \
+	-device virtio-gpu-pci \
 	-drive if=virtio,format=raw,file=$(PERSISTENT_DISK) \
 	-drive if=none,id=ahcidisk,format=raw,file=../knoxos-ahci.img \
 	-device ahci,id=ahci0 \
@@ -45,25 +47,25 @@ build:
 	@echo "╔══════════════════════════════════════════╗"
 	@echo "║  Building KnoxOS - AI Operating System      ║"
 	@echo "╚══════════════════════════════════════════╝"
-	cargo build
+	$(KERNEL_CARGO) build
 	@echo "Kernel ELF built: $(KERNEL_BIN)"
 
 # Build release (optimized)
 release:
 	@echo "Building KnoxOS (release)..."
-	cargo build --release
+	$(KERNEL_CARGO) build --release
 	@echo "Kernel ELF built: $(KERNEL_RELEASE)"
 
 # Create boot images (debug)
 bootimage: build
 	@echo "Creating boot disk images..."
-	cd ../boot && cargo run -- ../kernel/$(KERNEL_BIN)
+	cd ../boot && cargo run -p knoxos-boot -- ../kernel/$(KERNEL_BIN)
 	@echo "Boot images created!"
 
 # Create boot images (release)
 bootimage-release: release
 	@echo "Creating release boot disk images..."
-	cd ../boot && cargo run -- ../kernel/$(KERNEL_RELEASE)
+	cd ../boot && cargo run -p knoxos-boot --release -- ../kernel/$(KERNEL_RELEASE)
 	@echo "Release boot images created!"
 
 # Run in QEMU - UEFI mode (default)
@@ -98,23 +100,23 @@ run-debug: bootimage
 
 # Run tests
 test:
-	cargo test
+	$(KERNEL_CARGO) test
 
 # Clippy lint
 clippy:
-	cargo clippy -- -D warnings
+	$(KERNEL_CARGO) clippy -- -D warnings
 
 # Format code
 fmt:
-	cargo fmt
+	$(KERNEL_CARGO) fmt
 
 # Check formatting
 fmt-check:
-	cargo fmt -- --check
+	$(KERNEL_CARGO) fmt -- --check
 
 # Clean build artifacts
 clean:
-	cargo clean
+	$(KERNEL_CARGO) clean
 	rm -rf $(ISO_DIR)
 
 # Show kernel size
@@ -164,14 +166,14 @@ help:
 .PHONY: ci-clippy
 ci-clippy:
 	@echo "[CI] Running Clippy..."
-	cargo clippy --release
+	$(KERNEL_CARGO) clippy --release
 	@echo "[CI] Clippy complete."
 
 # Format check (CI gate — fail if not formatted)
 .PHONY: ci-fmt
 ci-fmt:
 	@echo "[CI] Checking code formatting..."
-	cargo fmt -- --check
+	$(KERNEL_CARGO) fmt -- --check
 	@echo "[CI] Formatting OK."
 
 # Binary size analysis and bloat tracking
@@ -208,13 +210,13 @@ ci-qemu: bootimage
 .PHONY: ci-cross-aarch64
 ci-cross-aarch64:
 	@echo "[CI] Cross-compiling for AArch64..."
-	@CARGO_BUILD_TARGET=aarch64-unknown-none cargo build --release 2>&1 || echo "[CI] AArch64 cross-compile attempted (may need target JSON)."
+	@KERNEL_TARGET=aarch64-unknown-none $(KERNEL_CARGO) build --release 2>&1 || echo "[CI] AArch64 cross-compile attempted (may need target JSON)."
 
 # Cross-compile for RISC-V
 .PHONY: ci-cross-riscv
 ci-cross-riscv:
 	@echo "[CI] Cross-compiling for RISC-V..."
-	@CARGO_BUILD_TARGET=riscv64gc-unknown-none-elf cargo build --release 2>&1 || echo "[CI] RISC-V cross-compile attempted (may need target JSON)."
+	@KERNEL_TARGET=riscv64gc-unknown-none-elf $(KERNEL_CARGO) build --release 2>&1 || echo "[CI] RISC-V cross-compile attempted (may need target JSON)."
 
 # Performance regression gate (run benchmarks, compare)
 .PHONY: ci-perf

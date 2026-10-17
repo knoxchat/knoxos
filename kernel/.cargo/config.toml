@@ -1,3 +1,6 @@
+# Package-local config is ignored while kernel is a workspace member.
+# Canonical flags live in the repo-root `.cargo/config.toml` plus
+# `scripts/kernel-cargo.sh` (`--target` + `-Zbuild-std`).
 [build]
 target = "x86_64-unknown-none"
 # Force abort for every rustc on this target, including build-std.

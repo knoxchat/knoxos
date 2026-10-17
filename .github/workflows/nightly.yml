@@ -24,10 +24,9 @@ jobs:
             --target x86_64-unknown-none \
             --allow-downgrade
       - name: Build kernel + BIOS image
-        working-directory: kernel
         run: |
-          cargo build --release
-          cd ../boot && cargo run --release -- ../kernel/target/x86_64-unknown-none/release/knoxos-kernel
+          ./scripts/kernel-cargo.sh build --release
+          cargo run -p knoxos-boot --release -- kernel/target/x86_64-unknown-none/release/knoxos-kernel
       - name: Checksums + ISO
         run: ./scripts/release-checksums.sh
       - name: Upload dist

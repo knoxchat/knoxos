@@ -29,6 +29,8 @@ pub const GATE_G4_AUDIT_MARKER: &str = "GATE_G4 audit live";
 pub const GATE_F1_MARKER: &str = "GATE_F1 client isolated";
 /// Ring 3 client presented via AF_UNIX `/run/wayland-0`, not ioctl(`/dev/wl0`).
 pub const GATE_F5_MARKER: &str = "GATE_F5 wayland unix";
+/// Ring 3 client spoke `wl_display` object opcodes on `/run/wayland-0`.
+pub const GATE_WL_MARKER: &str = "GATE_WL display protocol";
 
 pub const GATE_K1_MARKER: &str = "GATE_K1 thread join";
 pub const GATE_K3_MARKER: &str = "GATE_K3 init userspace";

@@ -45,15 +45,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly + rustfmt
-        working-directory: kernel
         run: |
           rustup toolchain install nightly --profile minimal \
             --component rust-src,rustfmt,clippy,llvm-tools-preview \
             --target x86_64-unknown-none \
             --allow-downgrade
       - name: Format check
-        working-directory: kernel
-        run: cargo fmt -- --check
+        run: ./scripts/kernel-cargo.sh fmt -- --check
 
   clippy-size:
     name: clippy + size
@@ -61,15 +59,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly + clippy
-        working-directory: kernel
         run: |
           rustup toolchain install nightly --profile minimal \
             --component rust-src,rustfmt,clippy,llvm-tools-preview \
             --target x86_64-unknown-none \
             --allow-downgrade
       - name: Clippy
-        working-directory: kernel
-        run: cargo clippy --release
+        run: ./scripts/kernel-cargo.sh clippy --release
       - name: Release size gate
         working-directory: kernel
         run: make ci-size
@@ -83,17 +79,16 @@ jobs:
       - name: Install QEMU
         run: sudo apt-get update && sudo apt-get install -y qemu-system-x86
       - name: Install nightly
-        working-directory: kernel
         run: |
           rustup toolchain install nightly --profile minimal \
             --component rust-src,rustfmt,clippy,llvm-tools-preview \
             --target x86_64-unknown-none \
             --allow-downgrade
       - name: Build kernel + BIOS image
-        working-directory: kernel
         run: |
-          cargo build --release
-          cd ../boot && cargo run --release -- ../kernel/target/x86_64-unknown-none/release/knoxos-kernel
+          chmod +x scripts/kernel-cargo.sh
+          ./scripts/kernel-cargo.sh build --release
+          cargo run -p knoxos-boot --release -- kernel/target/x86_64-unknown-none/release/knoxos-kernel
       - name: Boot until desktop marker
         run: |
           BIOS_IMG=kernel/target/x86_64-unknown-none/release/knoxos-bios.img
@@ -160,11 +155,9 @@ jobs:
             --target aarch64-unknown-none,riscv64gc-unknown-none-elf \
             --allow-downgrade
       - name: aarch64 check
-        working-directory: kernel
-        run: cargo check --release --target aarch64-unknown-none
+        run: KERNEL_TARGET=aarch64-unknown-none ./scripts/kernel-cargo.sh check --release
       - name: riscv64 check
-        working-directory: kernel
-        run: cargo check --release --target riscv64gc-unknown-none-elf
+        run: KERNEL_TARGET=riscv64gc-unknown-none-elf ./scripts/kernel-cargo.sh check --release
 
   cross-boot:
     name: aarch64/riscv64 QEMU boot
@@ -181,10 +174,9 @@ jobs:
             --component rust-src,llvm-tools-preview \
             --allow-downgrade
       - name: Build aarch64 + riscv64 kernels
-        working-directory: kernel
         run: |
-          cargo build --release --target aarch64-knoxos.json -Zjson-target-spec
-          cargo build --release --target riscv64-knoxos.json -Zjson-target-spec
+          KERNEL_TARGET=kernel/aarch64-knoxos.json ./scripts/kernel-cargo.sh build --release -Zjson-target-spec
+          KERNEL_TARGET=kernel/riscv64-knoxos.json ./scripts/kernel-cargo.sh build --release -Zjson-target-spec
       - name: QEMU serial boot
         run: |
           chmod +x scripts/qemu-cross-boot.sh
@@ -208,10 +200,9 @@ jobs:
             --target x86_64-unknown-none \
             --allow-downgrade
       - name: Build kernel + UEFI image
-        working-directory: kernel
         run: |
-          cargo build --release
-          cd ../boot && cargo run --release -- ../kernel/target/x86_64-unknown-none/release/knoxos-kernel
+          ./scripts/kernel-cargo.sh build --release
+          cargo run -p knoxos-boot --release -- kernel/target/x86_64-unknown-none/release/knoxos-kernel
       - name: Enroll PK and boot
         run: |
           chmod +x scripts/secure-boot-enroll.sh scripts/qemu-secure-boot.sh
@@ -230,10 +221,9 @@ jobs:
             --target x86_64-unknown-none \
             --allow-downgrade
       - name: rustdoc
-        working-directory: kernel
         env:
           RUSTDOCFLAGS: "--cfg docsrs"
-        run: cargo doc --release --no-deps --document-private-items
+        run: ./scripts/kernel-cargo.sh doc --release --no-deps --document-private-items
       - name: Upload rustdoc
         uses: actions/upload-artifact@v4
         with:
@@ -250,7 +240,6 @@ jobs:
         run: ./scripts/license-check.sh
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
-      - name: Audit kernel lockfile
-        working-directory: kernel
+      - name: Audit workspace lockfile
         run: cargo audit
         continue-on-error: true

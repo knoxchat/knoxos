@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-# Kernel (`x86_64-unknown-none` + build-std) and boot (UEFI image builder)
-# keep independent manifests and lockfiles.
-members = ["tools/svg2rgba", "tools/host-tests"]
-exclude = ["kernel", "boot"]
+members = ["kernel", "boot", "tools/svg2rgba", "tools/host-tests"]
+default-members = ["tools/svg2rgba", "tools/host-tests"]
+# Kernel is `x86_64-unknown-none` + build-std. Build it with
+# `./scripts/kernel-cargo.sh build --release` (or `make kernel`) so host
+# `cargo test` never tries to compile the none target.
+
+[profile.release]
+lto = true
+opt-level = "z"

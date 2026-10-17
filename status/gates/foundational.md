@@ -68,12 +68,12 @@ This **is** becoming an OS.
 |----|------|-----------|
 | F1 | One Wayland client (or custom protocol) out of process | **Done** — Ring 3 `/dev/wl0` present (`GATE_F1 client isolated`). |
 | F2 | SHM / DMA-BUF to compositor | **Done** — client mmap copied into a kernel SHM pool; compositor round-trips magic pixels (`GATE_F2 shm commit`) |
-| F3 | VirtIO-GPU scanout or keep FB but clients isolated | **Done** — FB scanout of SHM; Ring 3 terminal is Empty+SHM, not `WindowContentType::Terminal` (`GATE_F3 terminal isolated`). Interactive desktop terminal still in-kernel for PTY I/O. |
+| F3 | VirtIO-GPU scanout or keep FB but clients isolated | **Done** — FB scanout of SHM; Ring 3 terminal is Empty+SHM, not `WindowContentType::Terminal` (`GATE_F3 terminal isolated`). Start-menu Terminal is Ring 3 `openpty` (`GATE_TERM pty interactive`). |
 | F4 | Remove Empty launcher stubs or implement them as userspace | **Done** — Doom/Quake/Webamp stubs removed; Paint is a Ring 3 SHM client (`GATE_F4 launcher userspace`) |
-| F5 | Wayland over a Unix socket | **Done** — compositor `listen`s `/run/wayland-0`; Ring 3 `connect`+`sendto` presents SHM (`GATE_F5 wayland unix`) |
+| F5 | Wayland over a Unix socket | **Done** — compositor `listen`s `/run/wayland-0`; Ring 3 `connect`+`sendto` presents SHM (`GATE_F5 wayland unix`). Object protocol: `GATE_WL display protocol`. |
 | F6 | Calculator userspace | **Done** — Ring 3 SHM, not `WindowContentType::Calculator` (`GATE_F6 calculator userspace`) |
 | F7 | Files userspace | **Done** — Ring 3 SHM, not `WindowContentType::FileExplorer` (`GATE_F7 files userspace`) |
-| F8 | VirtIO-GPU scanout + hardware cursor | **Done** — controlq 2D resource + SET_SCANOUT + FLUSH (`GATE_F8 virtio-gpu scanout`); cursorq UPDATE_CURSOR (`GATE_F8 hw cursor`). Desktop software-blits to VGA; host GPU also scanouts a 64×64 resource. |
+| F8 | VirtIO-GPU scanout + hardware cursor | **Done** — controlq 2D resource + SET_SCANOUT + FLUSH (`GATE_F8 virtio-gpu scanout`); cursorq UPDATE_CURSOR (`GATE_F8 hw cursor`). Desktop `present_rect` also flushes through that scanout (`GATE_GPU desktop scanout`). |
 
 ### Gate H — Memory, VFS, core leftovers (after A–F)
 

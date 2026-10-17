@@ -1,0 +1,11 @@
+# Workspace-root cargo config. Do not set `build.target` or `build-std` here:
+# default-members are host tools. Kernel builds pass --target + -Zbuild-std
+# via scripts/kernel-cargo.sh / Makefile.
+[target.x86_64-unknown-none]
+rustflags = ["-C", "panic=abort", "-A", "x86_softfloat_sse"]
+
+[env]
+CARGO_TARGET_X86_64_UNKNOWN_UEFI_RUSTFLAGS = "-C llvm-args=-disable-loop-idiom-wcslen"
+
+[future-incompat-report]
+frequency = "never"

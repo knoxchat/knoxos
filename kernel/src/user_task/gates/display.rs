@@ -127,3 +127,21 @@ pub(super) fn run_gate_f5() {
         reaped
     );
 }
+
+pub(super) fn run_gate_wl() {
+    serial_println!("[user_task] Gate WL: wl_display object protocol");
+    let elf = crate::init::wayland_protocol_client_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "wl-proto") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate WL pid={} reaped={} (marker from userspace)",
+        pid,
+        reaped
+    );
+}

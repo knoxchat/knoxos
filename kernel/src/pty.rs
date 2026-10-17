@@ -167,6 +167,12 @@ impl PtyPair {
         let space = PTY_BUFFER_SIZE - self.master_to_slave.len();
         let to_write = data.len().min(space);
         self.master_to_slave.extend_from_slice(&data[..to_write]);
+        // ECHO: typed bytes reappear on the master so a Ring 3 emulator can paint.
+        if self.termios.c_lflag & ECHO != 0 {
+            let echo_space = PTY_BUFFER_SIZE - self.slave_to_master.len();
+            let echo_n = to_write.min(echo_space);
+            self.slave_to_master.extend_from_slice(&data[..echo_n]);
+        }
         Ok(to_write)
     }
 
@@ -292,6 +298,8 @@ lazy_static::lazy_static! {
     static ref PTY_TABLE: Mutex<BTreeMap<u32, PtyPair>> = Mutex::new(BTreeMap::new());
     /// Next PTY index
     static ref NEXT_PTY_INDEX: Mutex<u32> = Mutex::new(0);
+    /// Last `openpty` index for a Ring 3 pid (start-menu Terminal / GATE_TERM).
+    static ref PTY_BY_PID: Mutex<BTreeMap<u32, u32>> = Mutex::new(BTreeMap::new());
 }
 
 /// Allocate a new PTY pair
@@ -316,8 +324,23 @@ pub fn openpty() -> Result<(u32, String), i32> {
 
     PTY_TABLE.lock().insert(index, pty);
 
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        vfs.create_file_at_path(&path, crate::vfs::FileType::CharDevice, &[], 0o666);
+    }
+
     serial_println!("[pty] openpty: allocated pts/{}", index);
     Ok((index, path))
+}
+
+/// Remember which PTY a userspace pid allocated (for SHM Terminal keyboard).
+pub fn bind_pid(pid: u32, pty_id: u32) {
+    PTY_BY_PID.lock().insert(pid, pty_id);
+}
+
+/// PTY index last allocated by `pid`, if any.
+pub fn pty_for_pid(pid: u32) -> Option<u32> {
+    PTY_BY_PID.lock().get(&pid).copied()
 }
 
 /// posix_openpt() — POSIX-compliant PTY allocation

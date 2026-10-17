@@ -108,6 +108,11 @@ pub(crate) fn inotify_id_from_path(path: &str) -> Option<i32> {
     path.strip_prefix("inotify:")?.parse().ok()
 }
 
+/// Parse `ptmx:{id}` written by `sys_openpty` (master side).
+pub(crate) fn ptmx_id_from_path(path: &str) -> Option<u32> {
+    path.strip_prefix("ptmx:")?.parse().ok()
+}
+
 /// Parse `pidfd:{id}` written by `sys_pidfd_open`.
 pub(crate) fn pidfd_id_from_path(path: &str) -> Option<u64> {
     path.strip_prefix("pidfd:")?.parse().ok()
@@ -459,6 +464,9 @@ impl FdTable {
                 if let Some(id) = inotify_id_from_path(&file.path) {
                     return crate::inotify::inotify_read_bytes(id, buf);
                 }
+                if let Some(idx) = ptmx_id_from_path(&file.path) {
+                    return crate::pty::read_master(idx, buf);
+                }
                 if let Some(idx) = pts_index(&file.path) {
                     return crate::pty::read_slave(idx, buf);
                 }
@@ -575,6 +583,9 @@ impl FdTable {
                 }
                 if let Some(id) = eventfd_id_from_path(&file.path) {
                     return crate::eventfd::eventfd_write_bytes(id, buf);
+                }
+                if let Some(idx) = ptmx_id_from_path(&file.path) {
+                    return crate::pty::write_master(idx, buf);
                 }
                 if let Some(idx) = pts_index(&file.path) {
                     for &byte in buf {

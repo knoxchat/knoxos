@@ -367,7 +367,7 @@ check_toolchain() {
 
 check_crate_layout() {
   [[ -f "$KERNEL_DIR/Cargo.toml" ]] || die "kernel Cargo.toml missing in $KERNEL_DIR"
-  [[ -f "$KERNEL_DIR/Cargo.lock" ]] || die "kernel/Cargo.lock missing; run: (cd kernel && cargo generate-lockfile)"
+  [[ -f "$PROJECT_ROOT/Cargo.lock" ]] || die "workspace Cargo.lock missing; run: cargo generate-lockfile"
   grep -q 'name = "knoxos-kernel"' "$KERNEL_DIR/Cargo.toml" ||
     die "kernel Cargo.toml package name is not knoxos-kernel"
   grep -q 'edition = "2024"' "$KERNEL_DIR/Cargo.toml" ||
@@ -377,8 +377,7 @@ check_crate_layout() {
 }
 
 check_lockfile() {
-  cargo_in "$KERNEL_DIR" metadata --format-version 1 "${CARGO_COMMON[@]}" >/dev/null
-  cargo_in "$BOOT_DIR" metadata --format-version 1 "${CARGO_COMMON[@]}" >/dev/null
+  cargo_in "$PROJECT_ROOT" metadata --format-version 1 "${CARGO_COMMON[@]}" >/dev/null
 }
 
 check_hygiene() {
@@ -443,11 +442,7 @@ check_dbg_macros() {
 }
 
 fmt_all_crates() {
-  cargo_in "$KERNEL_DIR" fmt --all "$@" || return 1
-  cargo_in "$BOOT_DIR" fmt --all "$@" || return 1
-  if [[ -f "$TOOLS_DIR/Cargo.toml" ]]; then
-    cargo_in "$TOOLS_DIR" fmt --all "$@" || return 1
-  fi
+  cargo_in "$PROJECT_ROOT" fmt --all "$@" || return 1
 }
 
 # Re-stage .rs files that were already in the index and rustfmt/clippy --fix
@@ -503,11 +498,11 @@ run_fmt() {
 }
 
 run_check() {
-  cargo_in "$KERNEL_DIR" check "${CARGO_COMMON[@]}" --target "$KERNEL_TARGET"
+  (cd "$PROJECT_ROOT" && ./scripts/kernel-cargo.sh check "${CARGO_COMMON[@]}")
 }
 
 run_check_boot() {
-  cargo_in "$BOOT_DIR" check "${CARGO_COMMON[@]}"
+  cargo_in "$PROJECT_ROOT" check -p knoxos-boot "${CARGO_COMMON[@]}"
 }
 
 clippy_deny_args() {
@@ -542,20 +537,27 @@ clippy_with_optional_fix() {
 
 run_clippy() {
   clippy_deny_args
-  clippy_with_optional_fix "$KERNEL_DIR" "${CARGO_COMMON[@]}" --target "$KERNEL_TARGET" -- "${CLIPPY_DENY[@]}"
+  if (cd "$PROJECT_ROOT" && ./scripts/kernel-cargo.sh clippy "${CARGO_COMMON[@]}" -- "${CLIPPY_DENY[@]}"); then
+    return 0
+  fi
+  ((AUTO_FIX)) || return 1
+  info "clippy failed — applying auto-fixable lints (--fix --allow-dirty --allow-staged)"
+  (cd "$PROJECT_ROOT" && ./scripts/kernel-cargo.sh clippy --fix --allow-dirty --allow-staged "${CARGO_COMMON[@]}" -- "${CLIPPY_DENY[@]}") || true
+  restage_rewritten_rust || return 1
+  (cd "$PROJECT_ROOT" && ./scripts/kernel-cargo.sh clippy "${CARGO_COMMON[@]}" -- "${CLIPPY_DENY[@]}")
 }
 
 run_clippy_boot() {
   clippy_deny_args
-  clippy_with_optional_fix "$BOOT_DIR" "${CARGO_COMMON[@]}" -- "${CLIPPY_DENY[@]}"
+  clippy_with_optional_fix "$PROJECT_ROOT" -p knoxos-boot "${CARGO_COMMON[@]}" -- "${CLIPPY_DENY[@]}"
 }
 
 # Compile the kernel test harness. Do not boot QEMU (too slow for a git hook).
 # Use a separate target dir: build-std after clippy otherwise rebuilds `core`
 # with different cfg and hits duplicate lang item `sized`.
 run_tests() {
-  cargo_in "$KERNEL_DIR" test "${CARGO_COMMON[@]}" --target "$KERNEL_TARGET" \
-    --target-dir target/precommit-test --no-run --quiet
+  KERNEL_TARGET_DIR="$KERNEL_DIR/target/precommit-test" \
+    "$PROJECT_ROOT/scripts/kernel-cargo.sh" test "${CARGO_COMMON[@]}" --no-run --quiet
 }
 
 run_optional_audit() {
@@ -566,7 +568,7 @@ run_optional_audit() {
   local start now
   start="$(date +%s)"
   info "${BOLD}cargo-audit${RESET}"
-  if (cd "$KERNEL_DIR" && cargo audit); then
+  if (cd "$PROJECT_ROOT" && cargo audit); then
     now="$(date +%s)"
     record_pass "cargo-audit" "$((now - start))"
   else

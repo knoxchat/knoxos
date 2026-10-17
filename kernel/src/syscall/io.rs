@@ -303,20 +303,28 @@ pub fn sys_mkfifo(path_ptr: u64, mode: u32) -> SyscallResult {
 
 pub fn sys_openpty(master_fd_ptr: u64, slave_name_ptr: u64) -> SyscallResult {
     let (pty_id, slave_name) = crate::pty::openpty().map_err(|_| SyscallError::IoError)?;
+    let _ = crate::pty::open_slave(pty_id);
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    crate::pty::bind_pid(pid, pty_id);
+
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    let fd_table = tables.get_mut(&pid).ok_or(SyscallError::TooManyFiles)?;
+    let fd = fd_table
+        .open(
+            &alloc::format!("ptmx:{}", pty_id),
+            crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+            crate::fd::FileType::CharDevice,
+        )
+        .map_err(|_| SyscallError::TooManyFiles)?;
+    drop(tables);
 
     if master_fd_ptr != 0 {
-        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
-        unsafe {
-            *(master_fd_ptr as *mut u32) = pty_id;
-        }
+        crate::vmm::write_user_memory(pid, master_fd_ptr, &(fd as i32).to_le_bytes());
     }
     if slave_name_ptr != 0 {
-        let bytes = slave_name.as_bytes();
-        let len = core::cmp::min(bytes.len(), 255);
-        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
-        let dst = unsafe { core::slice::from_raw_parts_mut(slave_name_ptr as *mut u8, len + 1) };
-        dst[..len].copy_from_slice(&bytes[..len]);
-        dst[len] = 0;
+        let mut bytes = slave_name.into_bytes();
+        bytes.push(0);
+        crate::vmm::write_user_memory(pid, slave_name_ptr, &bytes);
     }
 
     Ok(pty_id as u64)

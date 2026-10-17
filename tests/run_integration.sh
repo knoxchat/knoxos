@@ -22,8 +22,8 @@ echo "════════════════════════�
 
 # 1. Build
 echo "[1/4] Building kernel..."
-cd "$KERNEL_DIR"
-cargo build --release 2>&1 | tail -5
+cd "$PROJECT_ROOT"
+./scripts/kernel-cargo.sh build --release 2>&1 | tail -5
 KERNEL_BIN="$KERNEL_DIR/target/x86_64-unknown-none/release/knoxos-kernel"
 if [ ! -f "$KERNEL_BIN" ]; then
     echo "ERROR: Kernel binary not found at $KERNEL_BIN"
@@ -32,9 +32,8 @@ fi
 echo "       Kernel OK"
 
 echo "       Creating BIOS disk image..."
-cd "$PROJECT_ROOT/boot"
-export CARGO_TARGET_X86_64_UNKNOWN_UEFI_RUSTFLAGS="${CARGO_TARGET_X86_64_UNKNOWN_UEFI_RUSTFLAGS:--C llvm-args=-disable-loop-idiom-wcslen}"
-cargo run --release -- "$KERNEL_BIN" >/dev/null
+cd "$PROJECT_ROOT"
+cargo run -p knoxos-boot --release -- "$KERNEL_BIN" >/dev/null
 BIOS_IMG="$KERNEL_DIR/target/x86_64-unknown-none/release/knoxos-bios.img"
 if [ ! -f "$BIOS_IMG" ]; then
     echo "ERROR: BIOS image not found at $BIOS_IMG"
@@ -469,6 +468,9 @@ check_marker "GATE_QUOTA enforce"
 check_marker "GATE_CRON reboot"
 check_marker "GATE_VSYNC paced"
 check_marker "GATE_TERM pty userspace"
+check_marker "GATE_TERM pty interactive"
+check_marker "GATE_WL display protocol"
+check_marker "GATE_GPU desktop scanout"
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

@@ -1125,8 +1125,14 @@ fn focused_terminal_window_id() -> Option<u32> {
     let wm = crate::gui::window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.focused_window {
         if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
-            if win.content_type == crate::gui::window::WindowContentType::Terminal
-                && win.state != crate::gui::window::WindowState::Minimized
+            if win.state == crate::gui::window::WindowState::Minimized {
+                return None;
+            }
+            if win.content_type == crate::gui::window::WindowContentType::Terminal {
+                return Some(wid);
+            }
+            if win.content_type == crate::gui::window::WindowContentType::Empty
+                && crate::wayland::window_pty(wid).is_some()
             {
                 return Some(wid);
             }
@@ -1203,6 +1209,13 @@ fn is_terminal_focused() -> bool {
 /// Send a terminal key event to the active terminal (accounting for tabs)
 fn handle_terminal_key(key: TerminalKey) {
     if let Some(wid) = focused_terminal_window_id() {
+        if crate::wayland::window_pty(wid).is_some() {
+            if let Some(bytes) = terminal_key_bytes(key) {
+                crate::wayland::pty_key_to_window(wid, &bytes);
+            }
+            crate::gui::request_redraw();
+            return;
+        }
         let active_term_id = {
             let wm = crate::gui::window::WINDOW_MANAGER.lock();
             wm.windows
@@ -1220,6 +1233,38 @@ fn handle_terminal_key(key: TerminalKey) {
         crate::terminal::handle_key_for_window(active_term_id, key);
         crate::gui::request_redraw();
     }
+}
+
+fn terminal_key_bytes(key: TerminalKey) -> Option<alloc::vec::Vec<u8>> {
+    use alloc::vec;
+    Some(match key {
+        TerminalKey::Char(c) => {
+            let mut buf = [0u8; 4];
+            let s = c.encode_utf8(&mut buf);
+            s.as_bytes().to_vec()
+        }
+        TerminalKey::Enter => vec![b'\n'],
+        TerminalKey::Backspace => vec![0x7F],
+        TerminalKey::Delete => vec![0x1B, b'[', b'3', b'~'],
+        TerminalKey::Tab => vec![b'\t'],
+        TerminalKey::Escape => vec![0x1B],
+        TerminalKey::Left => vec![0x1B, b'[', b'D'],
+        TerminalKey::Right => vec![0x1B, b'[', b'C'],
+        TerminalKey::Up => vec![0x1B, b'[', b'A'],
+        TerminalKey::Down => vec![0x1B, b'[', b'B'],
+        TerminalKey::Home => vec![0x1B, b'[', b'H'],
+        TerminalKey::End => vec![0x1B, b'[', b'F'],
+        TerminalKey::CtrlA => vec![0x01],
+        TerminalKey::CtrlC => vec![0x03],
+        TerminalKey::CtrlD => vec![0x04],
+        TerminalKey::CtrlE => vec![0x05],
+        TerminalKey::CtrlK => vec![0x0B],
+        TerminalKey::CtrlL => vec![0x0C],
+        TerminalKey::CtrlR => vec![0x12],
+        TerminalKey::CtrlU => vec![0x15],
+        TerminalKey::CtrlW => vec![0x17],
+        _ => return None,
+    })
 }
 
 /// Handle a decoded key press

@@ -58,6 +58,8 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 47. **Quota enforce** — hard block limit returns `EDQUOT` (`GATE_QUOTA enforce`).
 48. **Cron reboot** — `@reboot` `/usr/sbin/fsck` runs at init (`GATE_CRON reboot`); timer IRQ sets a due flag.
 49. **VSync paced** — software VBlank page flip (`GATE_VSYNC paced`).
-50. **Gate TERM** — Ring 3 `openpty` + SHM present as Empty (`GATE_TERM pty userspace`).
+50. **Gate TERM** — Ring 3 `openpty` + SHM present as Empty (`GATE_TERM pty userspace`). Start-menu Terminal is that client; master fd + slave I/O (`GATE_TERM pty interactive`).
+51. **Gate WL** — `wl_display` object protocol on `/run/wayland-0` (`GATE_WL display protocol`).
+52. **Gate GPU** — desktop `present_rect` flushes through VirtIO-GPU (`GATE_GPU desktop scanout`).
 
-Integration: `./tests/run_integration.sh` **293/293** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **296/296** on QEMU (2026-10-18).

@@ -1,5 +1,3 @@
-[workspace]
-
 [package]
 name = "knoxos-kernel"
 version = "0.2.3"
@@ -73,7 +71,3 @@ bench = false
 [lib]
 doctest = false
 harness = false
-
-[profile.release]
-lto = true
-opt-level = "z"

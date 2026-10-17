@@ -198,6 +198,31 @@ fn unix_connect(
         .ok_or(-111i32)?
         .backlog
         .push(accepted_id);
+    if path == crate::wayland::WAYLAND_SOCKET_PATH {
+        crate::wayland::on_client_connected(crate::context::current_pid());
+    }
+    Ok(())
+}
+
+enum UnixWlOp {
+    F5 { pid: u32, vaddr: u64 },
+    Protocol { pid: u32 },
+}
+
+fn finish_unix_wl(buf: &[u8], present: Option<UnixWlOp>) -> Result<(), i32> {
+    match present {
+        Some(UnixWlOp::F5 { pid, vaddr }) => {
+            if !crate::wayland::present_unix_buffer(pid, vaddr) {
+                return Err(-5);
+            }
+        }
+        Some(UnixWlOp::Protocol { pid }) => {
+            if !crate::wayland::dispatch_client_bytes(pid, buf) {
+                return Err(-5);
+            }
+        }
+        None => {}
+    }
     Ok(())
 }
 
@@ -205,7 +230,7 @@ fn unix_send(
     sockets: &mut BTreeMap<u32, Socket>,
     sockfd: u32,
     buf: &[u8],
-) -> Result<(usize, Option<(u32, u64)>), i32> {
+) -> Result<(usize, Option<UnixWlOp>), i32> {
     let sock = sockets.get(&sockfd).ok_or(-9i32)?;
     if sock.sock_type == SocketType::Stream && sock.state != SocketState::Connected {
         return Err(-107);
@@ -219,10 +244,16 @@ fn unix_send(
         );
     let peer_sock = sockets.get_mut(&peer).ok_or(-32i32)?;
     peer_sock.recv_buf.extend_from_slice(buf);
-    let present = if wayland && buf.len() >= 8 {
+    let pid = crate::context::current_pid();
+    let present = if wayland && buf.len() > 8 {
+        Some(UnixWlOp::Protocol { pid })
+    } else if wayland && buf.len() >= 8 {
         let mut vaddr = [0u8; 8];
         vaddr.copy_from_slice(&buf[..8]);
-        Some((crate::context::current_pid(), u64::from_le_bytes(vaddr)))
+        Some(UnixWlOp::F5 {
+            pid,
+            vaddr: u64::from_le_bytes(vaddr),
+        })
     } else {
         None
     };
@@ -492,11 +523,7 @@ pub fn sys_sendto(sockfd: u32, buf: &[u8], addr_ptr: u64) -> Result<usize, i32> 
                 let mut sockets = SOCKETS.lock();
                 let (n, present) = unix_send(&mut sockets, sockfd, buf)?;
                 drop(sockets);
-                if let Some((pid, vaddr)) = present {
-                    if !crate::wayland::present_unix_buffer(pid, vaddr) {
-                        return Err(-5);
-                    }
-                }
+                finish_unix_wl(buf, present)?;
                 return Ok(n);
             }
         }
@@ -504,11 +531,7 @@ pub fn sys_sendto(sockfd: u32, buf: &[u8], addr_ptr: u64) -> Result<usize, i32> 
         let mut sockets = SOCKETS.lock();
         let (n, present) = unix_send(&mut sockets, sockfd, buf)?;
         drop(sockets);
-        if let Some((pid, vaddr)) = present {
-            if !crate::wayland::present_unix_buffer(pid, vaddr) {
-                return Err(-5);
-            }
-        }
+        finish_unix_wl(buf, present)?;
         return Ok(n);
     }
     nic_send(sockfd, buf, dest)

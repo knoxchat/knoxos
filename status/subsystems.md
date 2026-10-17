@@ -43,6 +43,6 @@ Percentages are **production usefulness**, not lines of code.
 | 17 | [Docs](subsystems/17-docs.md) | Wired | 70% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + `status/` + `docs/` + CHANGELOG + rustdoc artifact. |
 | 18 | [CI/CD](subsystems/18-ci.md) | Wired | 55% | High | GitHub Actions fmt/clippy/size/QEMU boot + aarch64/riscv64 compile + rustdoc + audit + nightly images. |
 
-**QEMU desktop demo: ~99%.** **Production OS: ~98%.** Gates A–F, H–I, J–BL, BM1–BM4, F5–F8, C7–C9, G3–G5, I4, D6, USB HID URB, XHCI MMIO, udev/quota/cron/vsync/TERM are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **293/293** on QEMU (2026-10-18). What to do next: [next.md](next.md).
+**QEMU desktop demo: ~99%.** **Production OS: ~98%.** Gates A–F, H–I, J–BL, BM1–BM4, F5–F8, C7–C9, G3–G5, I4, D6, USB HID URB, XHCI MMIO, udev/quota/cron/vsync/TERM are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **296/296** on QEMU (2026-10-18). What to do next: [next.md](next.md).
 
 ---

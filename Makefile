@@ -35,28 +35,28 @@ help: ## Show this help message
 
 kernel: ## Build the KnoxOS kernel
 	@echo "$(BLUE)[KnoxOS] Building kernel...$(NC)"
-	@cd $(KERNEL_DIR) && cargo build --release 2>&1 | grep -E "Compiling|Finished|error" || true
+	@./scripts/kernel-cargo.sh build --release 2>&1 | grep -E "Compiling|Finished|error" || true
 	@echo "$(GREEN)[✓] Kernel built$(NC)"
 
 kernel-debug: ## Build kernel with debug symbols
 	@echo "$(BLUE)[KnoxOS] Building kernel (debug)...$(NC)"
-	@cd $(KERNEL_DIR) && cargo build 2>&1 | grep -E "Compiling|Finished|error" || true
+	@./scripts/kernel-cargo.sh build 2>&1 | grep -E "Compiling|Finished|error" || true
 	@echo "$(GREEN)[✓] Kernel built$(NC)"
 
 kernel-clean: ## Clean kernel build artifacts
 	@echo "$(YELLOW)[KnoxOS] Cleaning kernel...$(NC)"
-	@cd $(KERNEL_DIR) && cargo clean
+	@./scripts/kernel-cargo.sh clean || true
 	@echo "$(GREEN)[✓] Kernel cleaned$(NC)"
 
 kernel-test: ## Run kernel tests
 	@echo "$(BLUE)[KnoxOS] Running kernel tests...$(NC)"
-	@cd $(KERNEL_DIR) && cargo test 2>&1 | tail -20
+	@./scripts/kernel-cargo.sh test 2>&1 | tail -20
 
 # ─── Boot Building ──────────────────────────────────────────────────────
 
 boot: kernel ## Build boot images (BIOS & UEFI)
 	@echo "$(BLUE)[KnoxOS] Building boot images...$(NC)"
-	@cd $(BOOT_DIR) && cargo run --release -- ../$(KERNEL_DIR)/target/release/knoxos-kernel 2>&1 | grep -E "Creating|successfully|Error" || true
+	@cargo run -p knoxos-boot --release -- $(KERNEL_DIR)/target/x86_64-unknown-none/release/knoxos-kernel 2>&1 | grep -E "Creating|successfully|Error" || true
 	@echo "$(GREEN)[✓] Boot images built$(NC)"
 
 boot-list: ## List generated boot images
@@ -79,6 +79,7 @@ run-kernel: boot ## Run kernel in QEMU (BIOS mode)
 			-global VGA.vgamem_mb=64 \
 			-global VGA.xres=1920 \
 			-global VGA.yres=1080 \
+			-device virtio-gpu-pci \
 			-display cocoa,show-cursor=off \
 			-usb \
 			-device usb-tablet; \
@@ -101,6 +102,7 @@ run-kernel-uefi: boot ## Run kernel in QEMU (UEFI mode)
 			-global VGA.vgamem_mb=64 \
 			-global VGA.xres=1920 \
 			-global VGA.yres=1080 \
+			-device virtio-gpu-pci \
 			-display cocoa,show-cursor=off \
 			-usb \
 			-device usb-tablet; \

@@ -24,6 +24,10 @@ pub fn open_application(name: &str, icon_type: IconType) {
             crate::user_task::spawn_calculator_app();
             return;
         }
+        "Terminal" => {
+            crate::user_task::spawn_pty_terminal_app();
+            return;
+        }
         "Monaco Editor" | "Text Editor" | "Editor" => {
             crate::user_task::spawn_editor_app();
             return;
@@ -57,8 +61,8 @@ pub fn open_application(name: &str, icon_type: IconType) {
     let cascade = wm.windows.len() as i32;
     let offset = cascade * 26;
 
-    // Interactive terminal stays in-kernel for PTY I/O. Everything else
-    // above is a Ring 3 SHM client.
+    // Start-menu Terminal is Ring 3 (`spawn_pty_terminal_app`). Vim still
+    // uses IconType::Terminal and opens the leftover in-kernel emulator.
     let win = if icon_type == IconType::Terminal {
         let mut w = window::Window::new("Terminal", 280 + offset, 100 + offset, 860, 540);
         w.content_color = Pixel::rgb(12, 12, 12);

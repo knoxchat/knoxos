@@ -22,6 +22,17 @@ impl FrameBuffer {
         let hw_stride_bytes = self.hw_stride * hw_bpp;
         let internal_bpp = self.bytes_per_pixel;
 
+        crate::virtio_gpu::present_desktop_fb(
+            &self.buffer,
+            self.width,
+            self.height,
+            self.pitch,
+            x0 as i32,
+            y0 as i32,
+            (x1 - x0) as u32,
+            (y1 - y0) as u32,
+        );
+
         // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             let fb_ptr = self.framebuffer_addr as *mut u8;
@@ -86,6 +97,17 @@ impl FrameBuffer {
         let hw_bpp = self.hw_bytes_per_pixel;
         let hw_stride_bytes = self.hw_stride * hw_bpp;
         let internal_bpp = self.bytes_per_pixel; // always 4
+
+        crate::virtio_gpu::present_desktop_fb(
+            &self.buffer,
+            self.width,
+            self.height,
+            self.pitch,
+            0,
+            0,
+            self.width as u32,
+            self.height as u32,
+        );
 
         // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {

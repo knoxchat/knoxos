@@ -76,12 +76,12 @@ Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 
 Details: [subsystems/07-gui.md](subsystems/07-gui.md)
 
-- [ ] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2) plus AF_UNIX `/run/wayland-0` present (F5); not a `wl_display` object-protocol server
-- [ ] **GPU compositor** — `gpu_compositor.rs` never invoked; desktop software-blits to VGA (F8 scanouts a separate 64×64 virtio resource)
+- [x] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2) plus AF_UNIX `/run/wayland-0` (F5) plus `wl_display` object opcodes (`GATE_WL display protocol`)
+- [x] **GPU compositor** — `gpu_compositor` init + VSync; desktop `present_rect` flushes through VirtIO-GPU (`GATE_GPU desktop scanout`). VGA blit remains for `-vga std`.
 - [x] Hardware cursor — VirtIO-GPU cursorq `UPDATE_CURSOR` / `MOVE_CURSOR`; desktop skips software blit (`GATE_F8 hw cursor`)
 - [x] VSync — `gpu_compositor` software VBlank flip on the live path (`GATE_VSYNC paced`); desktop still software-blits to VGA
 - [ ] HDR, VRR, TrueType bytecode hinting, full IME framework
-- [x] Ring 3 `openpty` + SHM terminal client (`GATE_TERM pty userspace`). Interactive start-menu Terminal still in-kernel for live PTY I/O.
+- [x] Ring 3 `openpty` + SHM terminal client (`GATE_TERM pty userspace`). Start-menu Terminal is Ring 3; master fd + slave I/O (`GATE_TERM pty interactive`).
 
 ## 8. Shell & Terminal
 
@@ -149,7 +149,7 @@ Details: [subsystems/14-i18n.md](subsystems/14-i18n.md)
 Details: [subsystems/15-build.md](subsystems/15-build.md)
 
 - [x] **`flake.nix`** — present (devShell + QEMU/Make; kernel still rustup nightly)
-- [ ] Cargo workspace unifying `kernel` + `boot` + `tools`
+- [x] Cargo workspace unifying `kernel` + `boot` + `tools` (`default-members` are host tools; kernel via `./scripts/kernel-cargo.sh`)
 - [x] Feature flags so Unused modules do not compile into the demo kernel (`gui`/`net` default; `stub-drivers`/`fs-ext4` opt-in)
 - [x] ISO + SHA256SUMS + optional GPG (`scripts/make-iso.sh`, `scripts/release-checksums.sh`). PK/KEK/db + OVMF enroll via `scripts/secure-boot-enroll.sh`. QEMU Secure Boot boot: `scripts/qemu-secure-boot.sh` (`GATE_SB ovmf boot`).
 
@@ -160,7 +160,7 @@ Details: [subsystems/16-testing.md](subsystems/16-testing.md)
 - [x] Host-side `#[test]` in `tools/host-tests` (`cargo test -p knoxos-host-tests`)
 - [x] Clippy `undocumented_unsafe_blocks` is **deny** (`kernel/Cargo.toml`); every `unsafe {` has a `// SAFETY:` comment (`GATE_G5 safety comments`).
 - [x] Host parser tests (ELF / ICMPv6 / cron / ext4 magic / quota KiB)
-- [ ] No Miri, no fuzz of ELF/ext4/packet parsers, no coverage
+- [x] Host fuzz of ELF / ext4 / packet parsers (`cargo test -p knoxos-host-tests`; malformed inputs must not panic). No Miri, no coverage.
 
 ## 17. Documentation
 

@@ -208,6 +208,7 @@ pub struct CursorState {
 
 pub const GATE_F8_SCANOUT: &str = "GATE_F8 virtio-gpu scanout";
 pub const GATE_F8_CURSOR: &str = "GATE_F8 hw cursor";
+pub const GATE_GPU_MARKER: &str = "GATE_GPU desktop scanout";
 
 const VIRTIO_PCI_VENDOR: u16 = 0x1AF4;
 const VIRTIO_GPU_DEVICE_MODERN: u16 = 0x1050;
@@ -315,6 +316,7 @@ struct LiveGpu {
 static LIVE_GPU: Mutex<Option<LiveGpu>> = Mutex::new(None);
 static SCANOUT_LIVE: AtomicBool = AtomicBool::new(false);
 static CURSOR_LIVE: AtomicBool = AtomicBool::new(false);
+static DESKTOP_SCANOUT: AtomicBool = AtomicBool::new(false);
 
 fn mmio_r8(addr: u64) -> u8 {
     // SAFETY: `addr` is a mapped VirtIO MMIO register.
@@ -1190,6 +1192,66 @@ pub fn scanout_live() -> bool {
 /// True once cursorq UPDATE_CURSOR completed against the host.
 pub fn cursor_live() -> bool {
     CURSOR_LIVE.load(Ordering::Relaxed)
+}
+
+/// Copy a region of the software desktop framebuffer into the live VirtIO
+/// scanout resource and flush it to the host (Gate GPU).
+pub fn present_desktop_fb(
+    src: &[u8],
+    width: usize,
+    height: usize,
+    pitch: usize,
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+) {
+    if !SCANOUT_LIVE.load(Ordering::Relaxed) {
+        return;
+    }
+    let x0 = x.max(0) as usize;
+    let y0 = y.max(0) as usize;
+    let x1 = ((x + w as i32).max(0) as usize).min(width);
+    let y1 = ((y + h as i32).max(0) as usize).min(height);
+    if x0 >= x1 || y0 >= y1 || src.len() < 4 {
+        return;
+    }
+    let rw = (x1 - x0).max(1);
+    let rh = (y1 - y0).max(1);
+    let mut gpu_lock = LIVE_GPU.lock();
+    let Some(ref mut gpu) = *gpu_lock else {
+        return;
+    };
+    if !gpu.ready {
+        return;
+    }
+    let virt = crate::vmm::phys_to_virt(gpu.scanout_phys);
+    // SAFETY: scanout backing is exclusive DMA memory of SCANOUT_BYTES.
+    unsafe {
+        let dst = virt as *mut u8;
+        for sy in 0..SCANOUT_H as usize {
+            let src_y = y0 + sy * rh / SCANOUT_H as usize;
+            if src_y >= height {
+                break;
+            }
+            for sx in 0..SCANOUT_W as usize {
+                let src_x = x0 + sx * rw / SCANOUT_W as usize;
+                if src_x >= width {
+                    break;
+                }
+                let so = src_y * pitch + src_x * 4;
+                let doff = (sy * SCANOUT_W as usize + sx) * 4;
+                if so + 4 <= src.len() && doff + 4 <= SCANOUT_BYTES {
+                    core::ptr::copy_nonoverlapping(src.as_ptr().add(so), dst.add(doff), 4);
+                }
+            }
+        }
+    }
+    let _ = gpu_cmd_transfer(gpu, FB_RESOURCE, SCANOUT_W, SCANOUT_H);
+    let _ = gpu_cmd_flush(gpu, FB_RESOURCE, SCANOUT_W, SCANOUT_H);
+    if !DESKTOP_SCANOUT.swap(true, Ordering::SeqCst) {
+        serial_println!("[VIRTIO-GPU] {}", GATE_GPU_MARKER);
+    }
 }
 
 /// Move the host cursor plane. No-op until Gate F8 cursor is live.

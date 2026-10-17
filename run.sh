@@ -248,12 +248,10 @@ build_kernel() {
 
     log_step "Building KnoxOS kernel ($profile)..."
 
-    cd "$KERNEL_DIR"
-
     if [ "$profile" = "release" ]; then
-        cargo build --release
+        "$SCRIPT_DIR/scripts/kernel-cargo.sh" build --release
     else
-        cargo build
+        "$SCRIPT_DIR/scripts/kernel-cargo.sh" build
     fi
 
     if [ "$profile" = "release" ]; then
@@ -276,10 +274,8 @@ create_boot_image() {
 
     log_step "Creating boot disk images..."
 
-    cd "$BOOT_DIR"
-    # LLVM 23 may emit `wcslen` for UEFI; the UEFI target has no libc.
-    export CARGO_TARGET_X86_64_UNKNOWN_UEFI_RUSTFLAGS="${CARGO_TARGET_X86_64_UNKNOWN_UEFI_RUSTFLAGS:--C llvm-args=-disable-loop-idiom-wcslen}"
-    cargo run -- "$kernel_bin" 2>&1
+    cd "$SCRIPT_DIR"
+    cargo run -p knoxos-boot -- "$kernel_bin" 2>&1
 
     if [ $? -ne 0 ]; then
         log_error "Boot image creation failed!"

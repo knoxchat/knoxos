@@ -2,7 +2,7 @@
 
 # 15. Build System & Tooling
 
-**Grade: Live (80%)** · `Makefile`, `kernel/Makefile`, `run.sh`
+**Grade: Live (95%)** · `Makefile`, `kernel/Makefile`, `run.sh`
 
 ### Live
 - [x] `./run.sh` / `make kernel` / BIOS & UEFI images
@@ -14,7 +14,7 @@
 
 ### Missing (old status was wrong)
 - [x] **`flake.nix`** — present (devShell + QEMU/Make; kernel still rustup nightly)
-- [ ] Cargo workspace unifying `kernel` + `boot` + `tools` — tools workspace exists (`tools/svg2rgba`, `tools/host-tests`); kernel/boot stay independent (`x86_64-unknown-none` + UEFI builder)
+- [x] Cargo workspace unifying `kernel` + `boot` + `tools` — `default-members` are host tools; kernel is `./scripts/kernel-cargo.sh` (`x86_64-unknown-none` + `-Zbuild-std`)
 - [x] Feature flags so Unused modules do not compile into the demo kernel (`gui`/`net` default)
 - [x] ISO + SHA256SUMS + optional GPG (`scripts/make-iso.sh`, `scripts/release-checksums.sh`). PK/KEK/db + OVMF Secure Boot QEMU boot (`scripts/qemu-secure-boot.sh`).
 

@@ -1022,6 +1022,44 @@ impl Compositor {
     }
 }
 
+// ─── wl_display object protocol ────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+enum WlObj {
+    Display,
+    Registry,
+    Compositor,
+    Shm,
+    ShmPool {
+        vaddr: u64,
+        #[allow(dead_code)]
+        size: u32,
+    },
+    Buffer {
+        pool: u32,
+    },
+    Surface {
+        buf: Option<u32>,
+    },
+}
+
+struct WlClient {
+    objects: BTreeMap<u32, WlObj>,
+    #[allow(dead_code)]
+    committed: bool,
+}
+
+impl WlClient {
+    fn new() -> Self {
+        let mut objects = BTreeMap::new();
+        objects.insert(1, WlObj::Display);
+        Self {
+            objects,
+            committed: false,
+        }
+    }
+}
+
 // ─── Global state ──────────────────────────────────────────────────────
 
 lazy_static::lazy_static! {
@@ -1030,6 +1068,12 @@ lazy_static::lazy_static! {
     static ref WINDOW_SURFACES: Mutex<BTreeMap<u32, u32>> = Mutex::new(BTreeMap::new());
     /// Copied SHM pixels so the GUI can blit without locking the compositor.
     static ref WINDOW_PIXELS: Mutex<BTreeMap<u32, (Vec<u8>, u32, u32)>> = Mutex::new(BTreeMap::new());
+    /// Ring 3 pid → chrome window id (live present updates this surface).
+    static ref CLIENT_WINDOWS: Mutex<BTreeMap<u32, u32>> = Mutex::new(BTreeMap::new());
+    /// Chrome window id → PTY index for Ring 3 Terminal.
+    static ref WINDOW_PTY: Mutex<BTreeMap<u32, u32>> = Mutex::new(BTreeMap::new());
+    /// Per-connection `wl_display` object map (pid → objects).
+    static ref WL_CLIENTS: Mutex<BTreeMap<u32, WlClient>> = Mutex::new(BTreeMap::new());
 }
 
 static WAYLAND_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -1201,6 +1245,7 @@ pub const GATE_F2_MARKER: &str = "GATE_F2 shm commit";
 pub const GATE_F3_MARKER: &str = "GATE_F3 terminal isolated";
 pub const GATE_F4_MARKER: &str = "GATE_F4 launcher userspace";
 pub const GATE_F5_MARKER: &str = "GATE_F5 wayland unix";
+pub const GATE_WL_MARKER: &str = "GATE_WL display protocol";
 pub const GATE_F6_MARKER: &str = "GATE_F6 calculator userspace";
 pub const GATE_F7_MARKER: &str = "GATE_F7 files userspace";
 pub const WAYLAND_SOCKET_PATH: &str = "/run/wayland-0";
@@ -1216,6 +1261,7 @@ const GATE_F11_MAGIC: [u8; 4] = [0x3A, 0x2D, 0x28, 0xFF];
 const GATE_F12_MAGIC: [u8; 4] = [0x26, 0x16, 0x12, 0xFF];
 const GATE_TERM_MAGIC: [u8; 4] = [0x0D, 0x1A, 0x2B, 0xFF];
 pub const GATE_TERM_MARKER: &str = "GATE_TERM pty userspace";
+pub const GATE_TERM_IO_MARKER: &str = "GATE_TERM pty interactive";
 
 fn shm_title_for_magic(pixels: &[u8]) -> &'static str {
     let Some(head) = pixels.get(0..4) else {
@@ -1302,16 +1348,41 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     let roundtrip = comp.read_from_pool(pool, 0, 4);
     drop(comp);
 
+    if let Some(&existing) = CLIENT_WINDOWS.lock().get(&pid) {
+        WINDOW_PIXELS
+            .lock()
+            .insert(existing, (pixels.clone(), GATE_F_WIDTH, GATE_F_HEIGHT));
+        crate::gui::request_redraw();
+        return magic_ok_for(&pixels, &roundtrip, existing, sid, pid, title);
+    }
+
     let mut win = crate::gui::window::Window::new(title, 120, 80, 280, 200);
     win.content_type = crate::gui::window::WindowContentType::Empty;
     let wid = win.id;
     crate::gui::window::WINDOW_MANAGER.lock().add_window(win);
+    CLIENT_WINDOWS.lock().insert(pid, wid);
     WINDOW_SURFACES.lock().insert(wid, sid);
     WINDOW_PIXELS
         .lock()
         .insert(wid, (pixels.clone(), GATE_F_WIDTH, GATE_F_HEIGHT));
+    if pixels.get(0..4) == Some(&GATE_TERM_MAGIC[..]) {
+        if let Some(pty) = crate::pty::pty_for_pid(pid) {
+            WINDOW_PTY.lock().insert(wid, pty);
+        }
+    }
     crate::gui::request_redraw();
 
+    magic_ok_for(&pixels, &roundtrip, wid, sid, pid, title)
+}
+
+fn magic_ok_for(
+    pixels: &[u8],
+    roundtrip: &Option<Vec<u8>>,
+    wid: u32,
+    sid: u32,
+    pid: u32,
+    title: &str,
+) -> bool {
     let head = pixels.get(0..4);
     let magic_ok = match head {
         Some(p) if is_known_shm_magic(p) => roundtrip.as_deref() == Some(p),
@@ -1399,6 +1470,42 @@ pub fn window_shm_pixels(window_id: u32) -> Option<(Vec<u8>, u32, u32)> {
 pub fn forget_window(window_id: u32) {
     WINDOW_SURFACES.lock().remove(&window_id);
     WINDOW_PIXELS.lock().remove(&window_id);
+    WINDOW_PTY.lock().remove(&window_id);
+    CLIENT_WINDOWS.lock().retain(|_, wid| *wid != window_id);
+}
+
+/// PTY index attached to a Ring 3 Terminal SHM window.
+pub fn window_pty(window_id: u32) -> Option<u32> {
+    WINDOW_PTY.lock().get(&window_id).copied()
+}
+
+/// Keyboard → PTY master for an Empty+SHM Terminal window.
+pub fn pty_key_to_window(window_id: u32, bytes: &[u8]) {
+    let Some(pty) = window_pty(window_id) else {
+        return;
+    };
+    let _ = crate::pty::write_master(pty, bytes);
+    let mut out = [0u8; 64];
+    let n = crate::pty::read_master(pty, &mut out).unwrap_or(0);
+    if n == 0 {
+        return;
+    }
+    let mut pixels_guard = WINDOW_PIXELS.lock();
+    if let Some((pixels, w, h)) = pixels_guard.get_mut(&window_id) {
+        // Paint echoed bytes as a 1-pixel-high activity strip so SHM updates.
+        let stride = (*w as usize) * 4;
+        let row = ((*h as usize) / 2).saturating_sub(1);
+        for (i, b) in out[..n].iter().enumerate() {
+            let x = i.min(*w as usize - 1);
+            let off = row * stride + x * 4;
+            if off + 3 < pixels.len() {
+                pixels[off] = *b;
+                pixels[off + 1] = 0xC0;
+                pixels[off + 2] = 0x20;
+                pixels[off + 3] = 0xFF;
+            }
+        }
+    }
 }
 
 /// Kernel-only SHM pool write/read round-trip (no Ring 3).
@@ -1414,6 +1521,142 @@ pub fn shm_pool_self_test() -> bool {
     let back = comp.read_from_pool(pool, 0, 4);
     comp.destroy_shm_pool(pool);
     back.as_deref() == Some(&GATE_F_MAGIC[..])
+}
+
+/// Register object 1 (`wl_display`) for a newly connected AF_UNIX client.
+pub fn on_client_connected(pid: u32) {
+    WL_CLIENTS.lock().insert(pid, WlClient::new());
+}
+
+fn read_u32(args: &[u8], off: usize) -> Option<u32> {
+    args.get(off..off + 4)
+        .and_then(|s| s.try_into().ok())
+        .map(u32::from_le_bytes)
+}
+
+fn read_u64(args: &[u8], off: usize) -> Option<u64> {
+    args.get(off..off + 8)
+        .and_then(|s| s.try_into().ok())
+        .map(u64::from_le_bytes)
+}
+
+fn skip_wl_string(args: &[u8], off: &mut usize) -> bool {
+    let Some(n) = read_u32(args, *off) else {
+        return false;
+    };
+    *off += 4;
+    let n = n as usize;
+    if *off + n > args.len() {
+        return false;
+    }
+    *off += n;
+    while *off % 4 != 0 {
+        *off += 1;
+    }
+    true
+}
+
+/// Parse concatenated Wayland messages and present on `wl_surface.commit`.
+pub fn dispatch_client_bytes(pid: u32, buf: &[u8]) -> bool {
+    {
+        let mut clients = WL_CLIENTS.lock();
+        clients.entry(pid).or_insert_with(WlClient::new);
+    }
+    let mut i = 0;
+    let mut present_vaddr: Option<u64> = None;
+    while i + 8 <= buf.len() {
+        let object_id = u32::from_le_bytes(buf[i..i + 4].try_into().unwrap_or([0; 4]));
+        let opcode = u16::from_le_bytes(buf[i + 4..i + 6].try_into().unwrap_or([0; 2]));
+        let size = u16::from_le_bytes(buf[i + 6..i + 8].try_into().unwrap_or([0; 2])) as usize;
+        if size < 8 || i + size > buf.len() || size % 4 != 0 {
+            break;
+        }
+        let args = &buf[i + 8..i + size];
+        let mut clients = WL_CLIENTS.lock();
+        let Some(client) = clients.get_mut(&pid) else {
+            break;
+        };
+        let iface = client.objects.get(&object_id).copied();
+        match (iface, opcode) {
+            (Some(WlObj::Display), 1) => {
+                // wl_display.get_registry(new_id)
+                if let Some(new_id) = read_u32(args, 0) {
+                    client.objects.insert(new_id, WlObj::Registry);
+                }
+            }
+            (Some(WlObj::Registry), 0) => {
+                // wl_registry.bind(name, interface, version, new_id)
+                let name = read_u32(args, 0).unwrap_or(0);
+                let mut off = 4;
+                let _ = skip_wl_string(args, &mut off);
+                off += 4; // version
+                if let Some(new_id) = read_u32(args, off) {
+                    let obj = if name == 1 {
+                        WlObj::Compositor
+                    } else {
+                        WlObj::Shm
+                    };
+                    client.objects.insert(new_id, obj);
+                }
+            }
+            (Some(WlObj::Compositor), 0) => {
+                if let Some(new_id) = read_u32(args, 0) {
+                    client.objects.insert(new_id, WlObj::Surface { buf: None });
+                }
+            }
+            (Some(WlObj::Shm), 0) => {
+                // KnoxOS: create_pool(new_id, size, vaddr)
+                if let (Some(new_id), Some(sz), Some(vaddr)) =
+                    (read_u32(args, 0), read_u32(args, 4), read_u64(args, 8))
+                {
+                    client
+                        .objects
+                        .insert(new_id, WlObj::ShmPool { vaddr, size: sz });
+                }
+            }
+            (Some(WlObj::ShmPool { .. }), 0) => {
+                if let Some(new_id) = read_u32(args, 0) {
+                    client
+                        .objects
+                        .insert(new_id, WlObj::Buffer { pool: object_id });
+                }
+            }
+            (Some(WlObj::Surface { .. }), 1) => {
+                let buf_id = read_u32(args, 0).unwrap_or(0);
+                client
+                    .objects
+                    .insert(object_id, WlObj::Surface { buf: Some(buf_id) });
+            }
+            (Some(WlObj::Surface { buf }), 6) => {
+                if let Some(buf_id) = buf {
+                    if let Some(WlObj::Buffer { pool }) = client.objects.get(&buf_id).copied() {
+                        if let Some(WlObj::ShmPool { vaddr, .. }) =
+                            client.objects.get(&pool).copied()
+                        {
+                            present_vaddr = Some(vaddr);
+                            client.committed = true;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += size;
+    }
+    let Some(vaddr) = present_vaddr else {
+        return false;
+    };
+    if !present_user_buffer(pid, vaddr) {
+        serial_println!("[WL] Gate WL FAILED: protocol present pid={}", pid);
+        return false;
+    }
+    serial_println!(
+        "[WL] {} (pid={} path={})",
+        GATE_WL_MARKER,
+        pid,
+        WAYLAND_SOCKET_PATH
+    );
+    true
 }
 
 /// Initialize the Wayland compositor layer with real SHM buffer exchange

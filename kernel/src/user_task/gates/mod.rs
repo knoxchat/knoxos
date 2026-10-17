@@ -109,6 +109,7 @@ extern "C" fn gate_boot_body() {
     run_gate_f3();
     run_gate_f4();
     run_gate_f5();
+    run_gate_wl();
     run_gate_j1();
     run_gate_j4();
     run_gate_k1();
@@ -336,4 +337,10 @@ pub fn spawn_browser_app() {
 pub fn spawn_ai_app() {
     let elf = crate::init::ai_client_elf_data();
     let _ = spawn_or_log(&elf, "AI Assistant");
+}
+
+/// Spawn a Ring 3 PTY terminal (start-menu Terminal, not `WindowContentType::Terminal`).
+pub fn spawn_pty_terminal_app() {
+    let elf = crate::init::pty_terminal_client_elf_data();
+    let _ = spawn_or_log(&elf, "Terminal");
 }
