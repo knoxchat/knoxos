@@ -107,5 +107,8 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 96. **i915** — pipe A + GTT modeset (`GATE_I915 modeset`).
 97. **Btrfs** — superblock + inode + extent `$DATA` (`GATE_BTRFS block`).
 98. **VLAN** — 802.1Q insert/strip (`GATE_VLAN tag`).
+99. **USB Audio** — UAC SET_CUR 48 kHz + isochronous PCM loopback (`GATE_USB audio`).
+100. **Trackpad / Wacom / touch** — HID two-finger scroll (`GATE_USB trackpad`); Intuos pen (`GATE_USB wacom`); digitizer absolute (`GATE_USB touch`).
+101. **UVC / USB Ethernet / GPIO** — YUY2 EOF payload (`GATE_USB uvc`); CDC ECM loopback (`GATE_USB ethernet`); pin loopback (`GATE_GPIO xfer`).
 
-Integration: `./tests/run_integration.sh` **353/353** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **360/360** on QEMU (2026-10-18).

@@ -248,10 +248,67 @@ unsafe fn wait_ps2_read_timeout() -> bool {
 
 // ─── Initialize ────────────────────────────────────────────────────
 
+/// HID digitizer / usb-tablet report: `[buttons, x_lo, x_hi, y_lo, y_hi]`.
+/// bit0 = tip, X/Y are 16-bit little-endian in device units (0..32767 typical).
+pub fn parse_hid_digitizer(report: &[u8]) -> Option<(u16, u16, bool)> {
+    if report.len() < 5 {
+        return None;
+    }
+    let tip = report[0] & 0x01 != 0;
+    let x = u16::from_le_bytes([report[1], report[2]]);
+    let y = u16::from_le_bytes([report[3], report[4]]);
+    Some((x, y, tip))
+}
+
+/// Map 16-bit tablet units onto the framebuffer and update cursor state.
+pub fn handle_digitizer_report(report: &[u8]) -> bool {
+    let Some((x, y, tip)) = parse_hid_digitizer(report) else {
+        return false;
+    };
+    let sw = SCREEN_WIDTH.load(Ordering::Relaxed).max(1);
+    let sh = SCREEN_HEIGHT.load(Ordering::Relaxed).max(1);
+    let px = (x as u32 * sw / 32767) as i32;
+    let py = (y as u32 * sh / 32767) as i32;
+    activate();
+    set_position(px, py);
+    set_buttons(tip, false, false);
+    true
+}
+
+pub const GATE_USB_TOUCH_MARKER: &str = "GATE_USB touch";
+
+fn digitizer_self_test() -> bool {
+    set_screen_size(1024, 768);
+    // tip + X=16383 (~mid), Y=0 (top)
+    let report = [0x01u8, 0xFF, 0x3F, 0x00, 0x00];
+    if !handle_digitizer_report(&report) {
+        serial_println!("[TABLET] GATE_USB FAILED: parse");
+        return false;
+    }
+    let (x, y) = get_position();
+    let (left, _, _) = get_buttons();
+    let ok = is_active() && left && x > 400 && x < 624 && y == 0;
+    if ok {
+        serial_println!(
+            "[TABLET] {} (HID digitizer x={} y={})",
+            GATE_USB_TOUCH_MARKER,
+            x,
+            y
+        );
+    } else {
+        serial_println!("[TABLET] GATE_USB FAILED x={} y={} tip={}", x, y, left);
+    }
+    // Do not leave tablet mode sticky after the software KAT.
+    deactivate();
+    set_buttons(false, false, false);
+    ok
+}
+
 /// Initialize the tablet input subsystem
 /// Detects whether QEMU USB tablet is present and activates absolute mode
 pub fn init() {
     serial_println!("[TABLET] Initializing USB tablet / absolute pointer support...");
+    let _ = digitizer_self_test();
 
     // Set initial screen dimensions from GUI module
     let (w, h) = crate::gui::cached_screen_size();

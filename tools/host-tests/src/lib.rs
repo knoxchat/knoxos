@@ -280,6 +280,67 @@ pub fn hid_gamepad_a_pressed(report: &[u8]) -> Option<bool> {
     Some(report[0] & 1 != 0)
 }
 
+/// HID digitizer / usb-tablet: `[buttons, x_lo, x_hi, y_lo, y_hi]`.
+pub fn parse_hid_digitizer_xy(report: &[u8]) -> Option<(u16, u16, bool)> {
+    if report.len() < 5 {
+        return None;
+    }
+    Some((
+        u16::from_le_bytes([report[1], report[2]]),
+        u16::from_le_bytes([report[3], report[4]]),
+        report[0] & 1 != 0,
+    ))
+}
+
+/// HID multitouch contact count is byte 0; each contact is 6 bytes.
+pub fn parse_mt_contact_count(report: &[u8]) -> Option<u8> {
+    if report.is_empty() {
+        return None;
+    }
+    let count = report[0];
+    let need = 1usize.saturating_add((count as usize).saturating_mul(6));
+    if count == 0 || count > 5 || report.len() < need {
+        return None;
+    }
+    Some(count)
+}
+
+/// Wacom Intuos 10-byte HID: pressure at bytes 6..8.
+pub fn parse_wacom_pressure(report: &[u8]) -> Option<u16> {
+    if report.len() < 10 {
+        return None;
+    }
+    Some(u16::from_le_bytes([report[6], report[7]]))
+}
+
+/// UVC payload HLE + BFH; bit 1 of BFH is EOF.
+pub fn parse_uvc_eof(packet: &[u8]) -> Option<bool> {
+    if packet.is_empty() {
+        return None;
+    }
+    let hle = packet[0] as usize;
+    if hle < 2 || hle > packet.len() {
+        return None;
+    }
+    Some(packet[1] & 0x02 != 0)
+}
+
+/// UAC 1.0 SET_CUR sampling frequency is 3 bytes little-endian.
+pub fn parse_uac_set_cur_freq(data: &[u8]) -> Option<u32> {
+    if data.len() < 3 {
+        return None;
+    }
+    Some(u32::from(data[0]) | (u32::from(data[1]) << 8) | (u32::from(data[2]) << 16))
+}
+
+/// CDC ECM bulk payload is a raw Ethernet frame; returns EtherType.
+pub fn parse_cdc_ecm_ethertype(frame: &[u8]) -> Option<u16> {
+    if frame.len() < 14 {
+        return None;
+    }
+    Some(u16::from_be_bytes([frame[12], frame[13]]))
+}
+
 /// TrueType 26.6 round-to-grid.
 pub fn round_26_6(v: i32) -> i32 {
     if v >= 0 {
@@ -698,6 +759,32 @@ mod tests {
     }
 
     #[test]
+    fn usb_hid_uvc_audio_ecm_parsers() {
+        assert_eq!(
+            parse_hid_digitizer_xy(&[0x01, 0xFF, 0x3F, 0x00, 0x00]),
+            Some((0x3FFF, 0, true))
+        );
+        assert!(parse_hid_digitizer_xy(&[0x01, 0x00]).is_none());
+        let mt = [
+            2u8, 0, 1, 0x00, 0x04, 0xE8, 0x03, 1, 1, 0x00, 0x08, 0xE8, 0x03,
+        ];
+        assert_eq!(parse_mt_contact_count(&mt), Some(2));
+        assert!(parse_mt_contact_count(&[0u8]).is_none());
+        assert!(parse_mt_contact_count(&[2u8, 0, 1]).is_none());
+        let wacom = [0x02u8, 0x03, 0xE8, 0x03, 0xD0, 0x07, 0x00, 0x10, 10, 0];
+        assert_eq!(parse_wacom_pressure(&wacom), Some(4096));
+        assert!(parse_wacom_pressure(&[0u8; 4]).is_none());
+        assert_eq!(parse_uvc_eof(&[2u8, 0x03, 0x10, 0x80]), Some(true));
+        assert!(parse_uvc_eof(&[8u8]).is_none());
+        assert_eq!(parse_uac_set_cur_freq(&[0x80, 0xBB, 0x00]), Some(48000));
+        assert!(parse_uac_set_cur_freq(&[0x80]).is_none());
+        let mut frame = [0u8; 14];
+        frame[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
+        assert_eq!(parse_cdc_ecm_ethertype(&frame), Some(0x0800));
+        assert!(parse_cdc_ecm_ethertype(&[0u8; 13]).is_none());
+    }
+
+    #[test]
     fn ipv4_checksum_zero_header() {
         let mut hdr = [0u8; 20];
         hdr[0] = 0x45;
@@ -782,6 +869,12 @@ mod tests {
                 let _ = parse_ipv4(&buf[14.min(buf.len())..]);
             }
             let _ = parse_ipv6(&buf);
+            let _ = parse_hid_digitizer_xy(&buf);
+            let _ = parse_mt_contact_count(&buf);
+            let _ = parse_wacom_pressure(&buf);
+            let _ = parse_uvc_eof(&buf);
+            let _ = parse_uac_set_cur_freq(&buf);
+            let _ = parse_cdc_ecm_ethertype(&buf);
         }
     }
 }

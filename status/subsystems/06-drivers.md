@@ -2,7 +2,7 @@
 
 # 6. Device Drivers
 
-**Grade: Wired (74%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `virtio_gpu.rs`, `i915.rs`, …
+**Grade: Wired (82%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `virtio_gpu.rs`, `i915.rs`, …
 
 ### Live
 - [x] PCI config `0xCF8`/`0xCFC`, BDF scan, BAR decode
@@ -25,13 +25,13 @@
 - [x] VirtIO-GPU — controlq + cursorq vs QEMU `-device virtio-gpu-pci` (F8). 3D/Virgl not negotiated.
 - [x] DRM — GEM from buddy frames + CRTC set (`GATE_DRM gem`). HDR PQ + VRR (`GATE_HDR pq`, `GATE_VRR range`)
 - [x] USB HID URB completion — submit + complete + boot-protocol parse → evdev (`GATE_USB hid urb`). Transfer Events feed the same handler and the GUI mouse/key path.
-- [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). Audio still stub.
+- [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). USB Audio SET_CUR + PCM (`GATE_USB audio`).
 - [x] USB hub — descriptor type 0x29 + GetPortStatus (`GATE_USB hub`)
 - [x] USB HID gamepad — 8-byte report parse (`GATE_USB gamepad`)
 - [x] I2C SMBus EEPROM write/read (`GATE_I2C xfer`)
 - [x] e1000 — `Socket::send` programs the TX ring; loopback RX (`GATE_E1000 send`). rtl8139 later.
-- [ ] Touchscreen, trackpad, GPIO, Thunderbolt, Wacom, UVC
-- [ ] Broadcom Wi-Fi, AX211, USB Ethernet
+- [x] Touchscreen HID digitizer (`GATE_USB touch`); trackpad two-finger (`GATE_USB trackpad`); GPIO loopback (`GATE_GPIO xfer`); Wacom pen (`GATE_USB wacom`); UVC YUY2 (`GATE_USB uvc`)
+- [x] USB Ethernet CDC ECM loopback (`GATE_USB ethernet`). Broadcom Wi-Fi, AX211, Thunderbolt later.
 
 ### Perfect-OS next steps
 1. One storage, one net, one GPU scanout, one USB HID — **finished**, not 40 started.

@@ -21,12 +21,14 @@ QEMU flags used by `./run.sh` and `tests/run_integration.sh`: `-drive if=virtio`
 ## Wired, not the live input/display path
 
 - USB XHCI: BAR0 mapped uncached (`GATE_USB xhci mmio`). HID URB submit + complete + boot-protocol parse is live (`GATE_USB hid urb`). Transfer Events drain into that handler and the GUI mouse/key path. PS/2 remains the fallback. Enumeration still has timeout fallbacks.
+- USB class KATs: MSC, hub, gamepad, audio, trackpad, Wacom, UVC, CDC ECM, HID digitizer (`GATE_USB audio` / `trackpad` / `wacom` / `uvc` / `ethernet` / `touch`).
+- GPIO pin0→pin1 loopback (`GATE_GPIO xfer`).
 - i915 / AMDGPU: register r/w; no modeset.
 - e1000: probed; sockets use VirtIO-net.
 
 ## Stub (do not count)
 
-Btrfs/ZFS, Wi-Fi, TPM measured boot, Thunderbolt, UVC, GPU compute. Full inventory: [status/subsystems/06-drivers.md](../status/subsystems/06-drivers.md).
+ZFS, WPA3, TPM measured boot, Thunderbolt, Broadcom Wi-Fi, AX211, GPU compute. Full inventory: [status/subsystems/06-drivers.md](../status/subsystems/06-drivers.md).
 
 ## Next (from [status/next.md](../status/next.md))
 

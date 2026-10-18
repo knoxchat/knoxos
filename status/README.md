@@ -3,7 +3,7 @@
 > **Last updated**: 2026-10-18
 > **Version**: 0.2.4 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.4)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
-> **Codebase**: 610 Rust files in `kernel/src` · ~347,000 lines · 408 `pub mod` entries
+> **Codebase**: 611 Rust files in `kernel/src` · ~347,000 lines · 408 `pub mod` entries
 > **Honesty rule**: a module that compiles is not a feature. Only **Live** work counts toward production.
 
 **Start here:** [next.md](next.md) — what to do first, in order.
@@ -71,7 +71,7 @@ Read top to bottom if you are choosing work. Skip the archives unless you need e
 | 3 | [03-process.md](subsystems/03-process.md) | Wired 99% | Critical |
 | 4 | [04-filesystem.md](subsystems/04-filesystem.md) | Wired 99% | Critical |
 | 5 | [05-networking.md](subsystems/05-networking.md) | Wired 82% | Critical |
-| 6 | [06-drivers.md](subsystems/06-drivers.md) | Wired 74% | Critical |
+| 6 | [06-drivers.md](subsystems/06-drivers.md) | Wired 82% | Critical |
 | 7 | [07-gui.md](subsystems/07-gui.md) | Live 99% | Medium |
 | 8 | [08-shell.md](subsystems/08-shell.md) | Live 86% | Medium |
 | 9 | [09-security.md](subsystems/09-security.md) | Wired 96% | Critical |

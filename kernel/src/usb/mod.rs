@@ -9,6 +9,7 @@
 //!   - USB device enumeration via port status change detection
 //!   - USB Mass Storage Class (MSC) Bulk-Only Transport
 //!   - SCSI READ(10)/WRITE(10)/READ CAPACITY/INQUIRY over USB bulk pipes
+mod audio;
 mod cdc;
 mod control;
 mod enumerate;
@@ -23,6 +24,7 @@ mod uvc;
 mod wacom;
 mod xhci;
 
+pub use audio::*;
 pub use cdc::*;
 pub use control::*;
 pub use enumerate::{
@@ -115,4 +117,9 @@ pub fn init() {
     msc::init();
     let _ = ports::hub_self_test();
     let _ = gamepad::gamepad_self_test();
+    let _ = audio::audio_self_test();
+    let _ = trackpad::trackpad_self_test();
+    let _ = wacom::wacom_self_test();
+    let _ = uvc::uvc_self_test();
+    let _ = ethernet::usb_ethernet_self_test();
 }

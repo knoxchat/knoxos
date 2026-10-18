@@ -77,6 +77,12 @@ pub struct GpioChip {
     pub num_pins: u16,
     pub mmio_base: u64,
     pub pins: Vec<GpioPin>,
+    /// Shadow DIR register: bit N = 1 means output.
+    dir_reg: u32,
+    /// Shadow DATA register: bit N is the pin level.
+    data_reg: u32,
+    /// Bit N set: pin N is looped to pin N^1 (pairs 0↔1, 2↔3, …).
+    loopback_mask: u32,
 }
 
 lazy_static::lazy_static! {
@@ -107,6 +113,9 @@ impl GpioChip {
             num_pins,
             mmio_base,
             pins,
+            dir_reg: 0,
+            data_reg: 0,
+            loopback_mask: 0,
         }
     }
 
@@ -137,9 +146,18 @@ impl GpioChip {
 
     /// Set pin direction
     pub fn set_direction(&mut self, offset: u16, dir: PinDirection) -> Result<(), &'static str> {
-        let pin = self.pin_mut(offset)?;
-        pin.direction = dir;
-        // Write direction register at mmio_base + direction_offset
+        if offset >= 32 {
+            return Err("Pin out of range");
+        }
+        {
+            let pin = self.pin_mut(offset)?;
+            pin.direction = dir;
+        }
+        if dir == PinDirection::Output {
+            self.dir_reg |= 1 << offset;
+        } else {
+            self.dir_reg &= !(1 << offset);
+        }
         Ok(())
     }
 
@@ -150,22 +168,64 @@ impl GpioChip {
         Ok(())
     }
 
+    /// Pair pin `offset` with `offset ^ 1` so output writes appear on the partner input.
+    pub fn set_loopback(&mut self, offset: u16, enable: bool) -> Result<(), &'static str> {
+        if offset >= 32 || self.pins.get(offset as usize).is_none() {
+            return Err("Pin out of range");
+        }
+        if enable {
+            self.loopback_mask |= 1 << offset;
+            self.loopback_mask |= 1 << (offset ^ 1);
+        } else {
+            self.loopback_mask &= !(1 << offset);
+            self.loopback_mask &= !(1 << (offset ^ 1));
+        }
+        Ok(())
+    }
+
+    fn write_data_bit(&mut self, offset: u16, val: PinValue) {
+        if val == PinValue::High {
+            self.data_reg |= 1 << offset;
+        } else {
+            self.data_reg &= !(1 << offset);
+        }
+        if let Some(pin) = self.pins.get_mut(offset as usize) {
+            pin.value = val;
+        }
+    }
+
     /// Set output value
     pub fn set_value(&mut self, offset: u16, val: PinValue) -> Result<(), &'static str> {
-        let pin = self.pin_mut(offset)?;
-        if pin.direction != PinDirection::Output {
-            return Err("Pin not configured as output");
+        if offset >= 32 {
+            return Err("Pin out of range");
         }
-        pin.value = val;
-        // Write set/clear register
+        {
+            let pin = self.pin_mut(offset)?;
+            if pin.direction != PinDirection::Output {
+                return Err("Pin not configured as output");
+            }
+        }
+        self.write_data_bit(offset, val);
+        if self.loopback_mask & (1 << offset) != 0 {
+            let partner = offset ^ 1;
+            if (self.dir_reg & (1 << partner)) == 0 {
+                self.write_data_bit(partner, val);
+            }
+        }
         Ok(())
     }
 
     /// Read input value
     pub fn get_value(&self, offset: u16) -> Result<PinValue, &'static str> {
-        let pin = self.pins.get(offset as usize).ok_or("Pin out of range")?;
-        // Read level register
-        Ok(pin.value)
+        if offset >= 32 {
+            return Err("Pin out of range");
+        }
+        let _pin = self.pins.get(offset as usize).ok_or("Pin out of range")?;
+        if self.data_reg & (1 << offset) != 0 {
+            Ok(PinValue::High)
+        } else {
+            Ok(PinValue::Low)
+        }
     }
 
     /// Configure interrupt
@@ -210,6 +270,38 @@ pub fn register_chip(id: u8, label: &str, mmio_base: u64, base: u16, num_pins: u
     GPIO_CHIPS.lock().push(chip);
 }
 
+pub const GATE_GPIO_MARKER: &str = "GATE_GPIO xfer";
+
+fn gpio_self_test() -> bool {
+    let mut chip = GpioChip::new(0, String::from("virt-gpio"), 0, 0, 8);
+    if chip.request_pin(0, "out").is_err() || chip.request_pin(1, "in").is_err() {
+        serial_println!("[GPIO] GATE_GPIO FAILED: request");
+        return false;
+    }
+    if chip.set_direction(0, PinDirection::Output).is_err()
+        || chip.set_direction(1, PinDirection::Input).is_err()
+        || chip.set_loopback(0, true).is_err()
+    {
+        serial_println!("[GPIO] GATE_GPIO FAILED: config");
+        return false;
+    }
+    if chip.set_value(0, PinValue::High).is_err() {
+        serial_println!("[GPIO] GATE_GPIO FAILED: set");
+        return false;
+    }
+    match chip.get_value(1) {
+        Ok(PinValue::High) => {
+            serial_println!("[GPIO] {} (pin0→pin1 loopback HIGH)", GATE_GPIO_MARKER);
+            true
+        }
+        other => {
+            serial_println!("[GPIO] GATE_GPIO FAILED get={:?}", other);
+            false
+        }
+    }
+}
+
 pub fn init() {
     serial_println!("[GPIO] GPIO subsystem loaded");
+    let _ = gpio_self_test();
 }

@@ -57,7 +57,7 @@ use knoxos_kernel::{
     chromium_sandbox, clock, close_range, cmdline, container, context, cpio, cpufreq, cred, cron,
     crypto, dbus, desktop_apps, devfs, dmesg, dpkg, drm, dynlink, e1000, ebpf, elf, epoll, eventfd,
     exfat, ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
-    gettext, glibc_compat, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http,
+    gettext, glibc_compat, gpio, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http,
     huge_pages, hwtest, i2c, i18n, i915, ima, inference_api, init, inotify, input_event,
     interrupts, io_prio, io_uring, iommu, ipc, journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm,
     landlock, ldknoxos, libc_funcs, livepatch, llm, media_player, membarrier, memfd, memory, midi,
@@ -639,6 +639,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // TPM TIS locality + I2C SMBus EEPROM (software path when no hardware)
     tpm2::init();
     i2c::init();
+    gpio::init();
 
     // Initialize virtual memory swapping
     swap::init();

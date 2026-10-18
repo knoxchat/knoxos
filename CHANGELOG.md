@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **USB Audio** — UAC SET_CUR 48 kHz plus isochronous PCM loopback (`GATE_USB audio`).
+- **Trackpad / Wacom / touch** — HID multitouch two-finger scroll (`GATE_USB trackpad`); Intuos pen report (`GATE_USB wacom`); digitizer absolute cursor (`GATE_USB touch`).
+- **UVC / USB Ethernet** — YUY2 payload header + EOF frame (`GATE_USB uvc`); CDC ECM Ethernet loopback (`GATE_USB ethernet`).
+- **GPIO** — pin0→pin1 shadow-register loopback (`GATE_GPIO xfer`). Thunderbolt / Broadcom Wi-Fi / AX211 stay later.
+
 ## 0.2.4
 
 - **TLS 1.3 HKDF** — RFC 5869 SHA-256 extract/expand plus RFC 8446 Expand-Label (`GATE_TLS13 hkdf`).

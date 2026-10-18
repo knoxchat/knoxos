@@ -71,13 +71,13 @@ Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 - [x] VirtIO-GPU — controlq + cursorq vs QEMU `-device virtio-gpu-pci` (`GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`)
 - [x] DRM — GEM from buddy frames + CRTC set (`GATE_DRM gem`). HDR PQ + VRR Adaptive-Sync (`GATE_HDR pq`, `GATE_VRR range`).
 - [x] USB HID URB completion — submit + complete + boot-protocol parse (`GATE_USB hid urb`). Transfer Events feed the same handler and the GUI mouse/key path.
-- [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). Audio still stub.
+- [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). USB Audio SET_CUR + PCM loopback (`GATE_USB audio`).
 - [x] USB hub — descriptor type 0x29 + GetPortStatus (`GATE_USB hub`)
 - [x] USB HID gamepad — 8-byte report parse (`GATE_USB gamepad`)
 - [x] I2C SMBus EEPROM write/read (`GATE_I2C xfer`)
 - [x] e1000 — `Socket::send` programs the TX ring; loopback RX (`GATE_E1000 send`). rtl8139 later.
-- [ ] Touchscreen, trackpad, GPIO, Thunderbolt, Wacom, UVC
-- [ ] Broadcom Wi-Fi, AX211, USB Ethernet
+- [x] Touchscreen HID digitizer (`GATE_USB touch`); trackpad two-finger scroll (`GATE_USB trackpad`); GPIO pin loopback (`GATE_GPIO xfer`); Wacom pen (`GATE_USB wacom`); UVC YUY2 (`GATE_USB uvc`)
+- [x] USB Ethernet CDC ECM frame loopback (`GATE_USB ethernet`). Broadcom Wi-Fi, AX211, Thunderbolt later.
 
 ## 7. GUI & Desktop Environment
 

@@ -565,7 +565,6 @@ pub mod bt_audio;
 pub mod dp_mst;
 #[cfg(feature = "stub-drivers")]
 pub mod floppy;
-#[cfg(feature = "stub-drivers")]
 pub mod gpio;
 #[cfg(feature = "stub-drivers")]
 pub mod hdmi_cec;
