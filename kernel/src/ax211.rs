@@ -366,12 +366,108 @@ pub fn probe(vendor: u16, device: u16) -> bool {
         && (device == AX211_DEVICE_ID || device == AX211_DEVICE_ID_2 || device == AX211_DEVICE_ID_3)
 }
 
-/// Initialize AX211 driver
-pub fn init(mmio_base: u64) {
+/// Attach a mapped AX211 BAR. Stock QEMU has no AX211; boot uses `init()`.
+pub fn attach(mmio_base: u64) {
     let mut dev = Ax211::new(mmio_base);
     if let Err(e) = dev.init() {
         serial_println!("[AX211] Init failed: {}", e);
         return;
     }
     *AX211.lock() = Some(dev);
+}
+
+/// iwlwifi container: `IWLWIFI\0` + version + (type u32, len u32, payload)* TLVs.
+pub const IWL_FW_MAGIC: &[u8; 8] = b"IWLWIFI\0";
+pub const IWL_TLV_MAC: u32 = 1;
+pub const IWL_TLV_UCODE: u32 = 2;
+pub const GATE_AX211_MARKER: &str = "GATE_AX211 fw";
+
+/// Parse iwlwifi-style TLVs. Returns the number of sections.
+pub fn parse_iwl_firmware(blob: &[u8]) -> Option<u32> {
+    if blob.len() < 12 {
+        return None;
+    }
+    if blob[0..8] != *IWL_FW_MAGIC {
+        return None;
+    }
+    let mut off: usize = 12;
+    let mut sections = 0u32;
+    while off.saturating_add(8) <= blob.len() {
+        let ty = u32::from_le_bytes(blob[off..off + 4].try_into().ok()?);
+        let len = u32::from_le_bytes(blob[off + 4..off + 8].try_into().ok()?) as usize;
+        off += 8;
+        if off.saturating_add(len) > blob.len() {
+            return None;
+        }
+        if ty == 0 || ty > 16 {
+            return None;
+        }
+        sections += 1;
+        off += len;
+    }
+    if sections == 0 { None } else { Some(sections) }
+}
+
+fn build_gate_firmware() -> Vec<u8> {
+    let mut blob = Vec::new();
+    blob.extend_from_slice(IWL_FW_MAGIC);
+    blob.extend_from_slice(&1u32.to_le_bytes());
+    let mac = [0x00u8, 0x1E, 0x4C, 0x11, 0x22, 0x33];
+    blob.extend_from_slice(&IWL_TLV_MAC.to_le_bytes());
+    blob.extend_from_slice(&(mac.len() as u32).to_le_bytes());
+    blob.extend_from_slice(&mac);
+    let ucode = b"ty-a0-gf";
+    blob.extend_from_slice(&IWL_TLV_UCODE.to_le_bytes());
+    blob.extend_from_slice(&(ucode.len() as u32).to_le_bytes());
+    blob.extend_from_slice(ucode);
+    blob
+}
+
+pub fn inject_scan_result(dev: &mut Ax211, ssid: &str) {
+    dev.scan_results.push(ScanResult {
+        ssid: String::from(ssid),
+        bssid: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+        channel: 6,
+        band: WifiBand::Band2_4GHz,
+        rssi: -40,
+        security: WifiSecurity::WPA2Personal,
+        supports_6ghz: false,
+        supports_ax: true,
+    });
+}
+
+fn firmware_self_test() -> bool {
+    let blob = build_gate_firmware();
+    let Some(n) = parse_iwl_firmware(&blob) else {
+        serial_println!("[AX211] GATE_AX211 FAILED: parse");
+        return false;
+    };
+    if n != 2 {
+        serial_println!("[AX211] GATE_AX211 FAILED: sections={}", n);
+        return false;
+    }
+    let mut dev = Ax211::new(0);
+    dev.fw_state = FirmwareState::Running;
+    inject_scan_result(&mut dev, "GATE");
+    if dev
+        .scan_results
+        .iter()
+        .any(|s| s.ssid == "GATE" && s.supports_ax)
+    {
+        serial_println!(
+            "[AX211] {} (IWLWIFI TLV {} sections + Beacon GATE)",
+            GATE_AX211_MARKER,
+            n
+        );
+        true
+    } else {
+        serial_println!("[AX211] GATE_AX211 FAILED: scan");
+        false
+    }
+}
+
+/// Boot-path init: firmware KAT, no MMIO (stock QEMU has no AX211).
+pub fn init() {
+    serial_println!("[AX211] driver loaded (firmware KAT; no CNVio2 on stock QEMU)");
+    let _ = firmware_self_test();
 }

@@ -110,5 +110,20 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 99. **USB Audio** — UAC SET_CUR 48 kHz + isochronous PCM loopback (`GATE_USB audio`).
 100. **Trackpad / Wacom / touch** — HID two-finger scroll (`GATE_USB trackpad`); Intuos pen (`GATE_USB wacom`); digitizer absolute (`GATE_USB touch`).
 101. **UVC / USB Ethernet / GPIO** — YUY2 EOF payload (`GATE_USB uvc`); CDC ECM loopback (`GATE_USB ethernet`); pin loopback (`GATE_GPIO xfer`).
+102. **rtl8139** — TX copies into the RX ring with a Realtek ROK header (`GATE_RTL8139 send`).
+103. **CIFS** — SMB2 Negotiate parse + TREE WRITE/READ (`GATE_CIFS smb2`).
+104. **GPOS** — A+V pair-adjustment shrinks advance (`GATE_GPOS kern`).
+105. **AMDGPU** — PSP+SMU+SDMA+GFX firmware + CRTC0 enable (`GATE_AMDGPU fw`).
+106. **AX211** — iwlwifi TLV firmware + Beacon GATE (`GATE_AX211 fw`).
+107. **FUSE** — LOOKUP+READ through the in-kernel loopback daemon (`GATE_FUSE lookup`).
+108. **KVM** — software 4-level EPT + HLT `0xF4` VM-exit + virtio-mmio magic (`GATE_KVM ept`, `GATE_KVM vmlaunch`).
+109. **OCI** — `runc start` unshare + `pivot_root` (`GATE_OCI start`).
+110. **ZFS** — uberblock `0x00BAB10C` + Fletcher-4 ramdisk (`GATE_ZFS block`).
+111. **WPA3 / bridge** — SAE matching PMK (`GATE_WPA3 sae`); FDB learn/forward (`GATE_BRIDGE fdb`).
+112. **TLS 1.3 handshake** — ClientHello+ServerHello matching `c hs traffic` (`GATE_TLS13 hs`).
+113. **GPU matmul** — CPU KAT `[[19,22],[43,50]]` (`GATE_GPU matmul`).
+114. **AI** — scaled-dot-product attention + KV append (`GATE_AI attn`); assistant summarize (`GATE_AI chat`).
+115. **NFS** — COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`).
+116. **Broadcom / Thunderbolt** — `BRCMFW` TLV + scan (`GATE_BRCM fw`); TB route hop (`GATE_TB hop`).
 
-Integration: `./tests/run_integration.sh` **360/360** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **379/379** on QEMU (2026-10-18).

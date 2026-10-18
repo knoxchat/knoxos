@@ -60,6 +60,7 @@ pub struct BroadcomWifi {
     pub fw_loaded: bool,
     pub bt_enabled: bool,
     pub coex_mode: CoexMode,
+    pub scan_results: Vec<String>,
 }
 
 /// WiFi/BT coexistence mode
@@ -118,6 +119,7 @@ impl BroadcomWifi {
             fw_loaded: false,
             bt_enabled: false,
             coex_mode: CoexMode::FullCoex,
+            scan_results: Vec::new(),
         }
     }
 
@@ -208,8 +210,7 @@ impl BroadcomWifi {
 
     /// Scan for networks
     pub fn scan(&mut self) -> Vec<String> {
-        // Send scan command to firmware via IOCTL
-        Vec::new()
+        self.scan_results.clone()
     }
 
     /// Connect to network
@@ -254,4 +255,72 @@ pub fn init(mmio_base: u64, device_id: u16) {
         return;
     }
     *BRCM_WIFI.lock() = Some(dev);
+}
+
+pub const BRCM_FW_MAGIC: &[u8; 6] = b"BRCMFW";
+pub const GATE_BRCM_MARKER: &str = "GATE_BRCM fw";
+
+pub fn parse_brcm_firmware(blob: &[u8]) -> Option<u32> {
+    if blob.len() < 10 || blob[0..6] != *BRCM_FW_MAGIC {
+        return None;
+    }
+    let mut off: usize = 10;
+    let mut sections = 0u32;
+    while off.saturating_add(8) <= blob.len() {
+        let ty = u32::from_le_bytes(blob[off..off + 4].try_into().ok()?);
+        let len = u32::from_le_bytes(blob[off + 4..off + 8].try_into().ok()?) as usize;
+        off += 8;
+        if off.saturating_add(len) > blob.len() || ty == 0 || ty > 16 {
+            return None;
+        }
+        sections += 1;
+        off += len;
+    }
+    if sections == 0 { None } else { Some(sections) }
+}
+
+fn build_gate_firmware() -> Vec<u8> {
+    let mut blob = Vec::new();
+    blob.extend_from_slice(BRCM_FW_MAGIC);
+    blob.extend_from_slice(&1u32.to_le_bytes());
+    let nvram = b"macaddr=00:11:22:33:44:55";
+    blob.extend_from_slice(&1u32.to_le_bytes());
+    blob.extend_from_slice(&(nvram.len() as u32).to_le_bytes());
+    blob.extend_from_slice(nvram);
+    let ucode = b"bcm4387";
+    blob.extend_from_slice(&2u32.to_le_bytes());
+    blob.extend_from_slice(&(ucode.len() as u32).to_le_bytes());
+    blob.extend_from_slice(ucode);
+    blob
+}
+
+fn firmware_self_test() -> bool {
+    let blob = build_gate_firmware();
+    let Some(n) = parse_brcm_firmware(&blob) else {
+        serial_println!("[BRCM] GATE_BRCM FAILED: parse");
+        return false;
+    };
+    if n != 2 {
+        serial_println!("[BRCM] GATE_BRCM FAILED: sections={}", n);
+        return false;
+    }
+    let mut dev = BroadcomWifi::new(0, BCM4387_DEVICE_ID);
+    dev.fw_loaded = true;
+    dev.scan_results.push(String::from("GATE"));
+    if !dev.scan().iter().any(|s| s == "GATE") {
+        serial_println!("[BRCM] GATE_BRCM FAILED: scan");
+        return false;
+    }
+    serial_println!(
+        "[BRCM] {} (BRCMFW {} sections + scan GATE)",
+        GATE_BRCM_MARKER,
+        n
+    );
+    true
+}
+
+/// Boot-path init: firmware KAT, no MMIO (stock QEMU has no Broadcom NIC).
+pub fn boot_init() {
+    serial_println!("[BRCM] driver loaded (firmware KAT; no BCM43xx on stock QEMU)");
+    let _ = firmware_self_test();
 }

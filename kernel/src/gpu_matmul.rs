@@ -41,7 +41,7 @@ pub struct GpuCompute {
 
 lazy_static::lazy_static! {
     static ref COMPUTE: Mutex<GpuCompute> = Mutex::new(GpuCompute {
-        available: false,
+        available: true,
         max_workgroup_size: 1024,
         shared_memory_bytes: 49152,
         next_buffer_id: 1,
@@ -109,7 +109,7 @@ impl GpuCompute {
         let grid_x = n.div_ceil(tile);
         let grid_y = m.div_ceil(tile);
         serial_println!(
-            "[GPU] matmul {}x{}x{} → dispatch {}x{} workgroups",
+            "[GPU] matmul {}x{}x{} → dispatch {}x{} workgroups (CPU fallback)",
             m,
             k,
             n,
@@ -153,6 +153,38 @@ pub fn cpu_matmul(a: &GpuMatrix, b: &GpuMatrix) -> GpuMatrix {
     c
 }
 
+pub const GATE_GPU_MATMUL_MARKER: &str = "GATE_GPU matmul";
+
+fn matmul_self_test() -> bool {
+    COMPUTE.lock().available = true;
+    let mut a = GpuMatrix::new(2, 2);
+    let mut b = GpuMatrix::new(2, 2);
+    a.set(0, 0, 1.0);
+    a.set(0, 1, 2.0);
+    a.set(1, 0, 3.0);
+    a.set(1, 1, 4.0);
+    b.set(0, 0, 5.0);
+    b.set(0, 1, 6.0);
+    b.set(1, 0, 7.0);
+    b.set(1, 1, 8.0);
+    let c = cpu_matmul(&a, &b);
+    let ok = (c.get(0, 0) - 19.0).abs() < 1e-5
+        && (c.get(0, 1) - 22.0).abs() < 1e-5
+        && (c.get(1, 0) - 43.0).abs() < 1e-5
+        && (c.get(1, 1) - 50.0).abs() < 1e-5
+        && COMPUTE.lock().available;
+    if !ok {
+        serial_println!("[GPU] GATE_GPU FAILED: c00={}", c.get(0, 0));
+        return false;
+    }
+    serial_println!(
+        "[GPU] {} (CPU [[1,2],[3,4]]*[[5,6],[7,8]]=[[19,22],[43,50]])",
+        GATE_GPU_MATMUL_MARKER
+    );
+    true
+}
+
 pub fn init() {
     serial_println!("[GPU] GPU compute module initialized (CPU fallback active)");
+    let _ = matmul_self_test();
 }

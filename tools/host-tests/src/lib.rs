@@ -341,6 +341,195 @@ pub fn parse_cdc_ecm_ethertype(frame: &[u8]) -> Option<u16> {
     Some(u16::from_be_bytes([frame[12], frame[13]]))
 }
 
+/// SMB2 header: `\xFESMB` + StructureSize 64 + Command at offset 12.
+pub fn parse_smb2_command(pkt: &[u8]) -> Option<u16> {
+    if pkt.len() < 64 {
+        return None;
+    }
+    if pkt[0..4] != [0xFE, 0x53, 0x4D, 0x42] {
+        return None;
+    }
+    if u16::from_le_bytes([pkt[4], pkt[5]]) != 64 {
+        return None;
+    }
+    Some(u16::from_le_bytes([pkt[12], pkt[13]]))
+}
+
+/// RTL8139 RX status dword: bit0 ROK, bits 16..31 length including CRC.
+pub fn parse_rtl8139_rx_header(header: u32) -> Option<usize> {
+    let rok = (header & 0x01) != 0;
+    let len = ((header >> 16) & 0xFFFF) as usize;
+    if !rok || len < 4 || len > 1600 {
+        return None;
+    }
+    Some(len)
+}
+
+/// FUSE entry payload: ino u64, size u64, mode u32.
+pub fn parse_fuse_entry(data: &[u8]) -> Option<(u64, u64, u32)> {
+    if data.len() < 20 {
+        return None;
+    }
+    let ino = u64::from_le_bytes(data[0..8].try_into().ok()?);
+    let size = u64::from_le_bytes(data[8..16].try_into().ok()?);
+    let mode = u32::from_le_bytes(data[16..20].try_into().ok()?);
+    Some((ino, size, mode))
+}
+
+/// AMDGPU firmware: `AMDGPUFW` + count + (ip, size, payload)*.
+pub fn parse_amdgpu_firmware_ips(blob: &[u8]) -> Option<u32> {
+    if blob.len() < 12 || blob[0..8] != *b"AMDGPUFW" {
+        return None;
+    }
+    let count = u32::from_le_bytes(blob[8..12].try_into().ok()?) as usize;
+    if count == 0 || count > 16 {
+        return None;
+    }
+    let mut off: usize = 12;
+    let mut seen = 0u32;
+    for _ in 0..count {
+        if off.saturating_add(8) > blob.len() {
+            return None;
+        }
+        let ip = u32::from_le_bytes(blob[off..off + 4].try_into().ok()?);
+        let size = u32::from_le_bytes(blob[off + 4..off + 8].try_into().ok()?) as usize;
+        off += 8;
+        if off.saturating_add(size) > blob.len() || ip == 0 || ip > 31 {
+            return None;
+        }
+        seen |= 1 << ip;
+        off += size;
+    }
+    Some(seen)
+}
+
+/// iwlwifi firmware: `IWLWIFI\0` + version + TLVs.
+pub fn parse_iwl_firmware_sections(blob: &[u8]) -> Option<u32> {
+    if blob.len() < 12 || blob[0..8] != *b"IWLWIFI\0" {
+        return None;
+    }
+    let mut off: usize = 12;
+    let mut sections = 0u32;
+    while off.saturating_add(8) <= blob.len() {
+        let ty = u32::from_le_bytes(blob[off..off + 4].try_into().ok()?);
+        let len = u32::from_le_bytes(blob[off + 4..off + 8].try_into().ok()?) as usize;
+        off += 8;
+        if off.saturating_add(len) > blob.len() || ty == 0 || ty > 16 {
+            return None;
+        }
+        sections += 1;
+        off += len;
+    }
+    if sections == 0 {
+        None
+    } else {
+        Some(sections)
+    }
+}
+
+/// ZFS uberblock magic `0x00BAB10C` (big-endian).
+pub fn parse_zfs_uberblock_magic(ub: &[u8]) -> Option<u32> {
+    if ub.len() < 4 {
+        return None;
+    }
+    let magic = u32::from_be_bytes(ub[0..4].try_into().ok()?);
+    if magic != 0x00BA_B10C {
+        return None;
+    }
+    Some(magic)
+}
+
+/// NFSv4 XDR opcode (LOOKUP is 15).
+pub fn parse_nfs4_op(xdr: &[u8]) -> Option<u32> {
+    if xdr.len() < 4 {
+        return None;
+    }
+    let op = u32::from_be_bytes(xdr[0..4].try_into().ok()?);
+    if op == 0 || op > 75 {
+        return None;
+    }
+    Some(op)
+}
+
+/// TLS record + handshake type. Byte 0 is content type 22, byte 5 is HS type.
+pub fn parse_tls_handshake_type(rec: &[u8]) -> Option<u8> {
+    if rec.len() < 6 || rec[0] != 22 {
+        return None;
+    }
+    Some(rec[5])
+}
+
+/// SAE commit group id (little-endian u16); group 19 is NIST P-256.
+pub fn parse_sae_commit_group(msg: &[u8]) -> Option<u16> {
+    if msg.len() < 2 {
+        return None;
+    }
+    let g = u16::from_le_bytes([msg[0], msg[1]]);
+    if g != 19 {
+        return None;
+    }
+    Some(g)
+}
+
+/// EPT PTE R/W/X bits. Present requires the read bit.
+pub fn parse_ept_pte(pte: u64) -> Option<(bool, bool, bool)> {
+    let r = pte & 1 != 0;
+    let w = pte & 2 != 0;
+    let x = pte & 4 != 0;
+    if !r {
+        return None;
+    }
+    Some((r, w, x))
+}
+
+/// virtio-mmio magic `0x74726976` ("virt").
+pub fn parse_virtio_mmio_magic(b: &[u8]) -> Option<u32> {
+    if b.len() < 4 {
+        return None;
+    }
+    let m = u32::from_le_bytes(b[0..4].try_into().ok()?);
+    if m != 0x7472_6976 {
+        return None;
+    }
+    Some(m)
+}
+
+/// Broadcom firmware: `BRCMFW` + version + TLVs.
+pub fn parse_brcm_firmware_sections(blob: &[u8]) -> Option<u32> {
+    if blob.len() < 10 || blob[0..6] != *b"BRCMFW" {
+        return None;
+    }
+    let mut off: usize = 10;
+    let mut sections = 0u32;
+    while off.saturating_add(8) <= blob.len() {
+        let ty = u32::from_le_bytes(blob[off..off + 4].try_into().ok()?);
+        let len = u32::from_le_bytes(blob[off + 4..off + 8].try_into().ok()?) as usize;
+        off += 8;
+        if off.saturating_add(len) > blob.len() || ty == 0 || ty > 16 {
+            return None;
+        }
+        sections += 1;
+        off += len;
+    }
+    if sections == 0 {
+        None
+    } else {
+        Some(sections)
+    }
+}
+
+/// Thunderbolt route string (nonzero u64 LE).
+pub fn parse_tb_route(bytes: &[u8]) -> Option<u64> {
+    if bytes.len() < 8 {
+        return None;
+    }
+    let r = u64::from_le_bytes(bytes[0..8].try_into().ok()?);
+    if r == 0 {
+        return None;
+    }
+    Some(r)
+}
+
 /// TrueType 26.6 round-to-grid.
 pub fn round_26_6(v: i32) -> i32 {
     if v >= 0 {
@@ -785,6 +974,74 @@ mod tests {
     }
 
     #[test]
+    fn smb2_rtl8139_fuse_fw_parsers() {
+        let mut smb = vec![0u8; 64];
+        smb[0..4].copy_from_slice(&[0xFE, 0x53, 0x4D, 0x42]);
+        smb[4..6].copy_from_slice(&64u16.to_le_bytes());
+        smb[12..14].copy_from_slice(&0u16.to_le_bytes());
+        assert_eq!(parse_smb2_command(&smb), Some(0));
+        smb[0] = 0;
+        assert!(parse_smb2_command(&smb).is_none());
+        assert!(parse_smb2_command(&[0u8; 8]).is_none());
+        assert_eq!(parse_rtl8139_rx_header(0x0001 | (16 << 16)), Some(16));
+        assert!(parse_rtl8139_rx_header(0).is_none());
+        let mut entry = [0u8; 20];
+        entry[0..8].copy_from_slice(&2u64.to_le_bytes());
+        entry[8..16].copy_from_slice(&12u64.to_le_bytes());
+        entry[16..20].copy_from_slice(&0o100644u32.to_le_bytes());
+        assert_eq!(parse_fuse_entry(&entry), Some((2, 12, 0o100644)));
+        assert!(parse_fuse_entry(&[0u8; 4]).is_none());
+        let mut amd = b"AMDGPUFW".to_vec();
+        amd.extend_from_slice(&1u32.to_le_bytes());
+        amd.extend_from_slice(&1u32.to_le_bytes());
+        amd.extend_from_slice(&3u32.to_le_bytes());
+        amd.extend_from_slice(b"psp");
+        assert_eq!(parse_amdgpu_firmware_ips(&amd), Some(1 << 1));
+        assert!(parse_amdgpu_firmware_ips(b"NOPE").is_none());
+        let mut iwl = b"IWLWIFI\0".to_vec();
+        iwl.extend_from_slice(&1u32.to_le_bytes());
+        iwl.extend_from_slice(&1u32.to_le_bytes());
+        iwl.extend_from_slice(&3u32.to_le_bytes());
+        iwl.extend_from_slice(b"mac");
+        assert_eq!(parse_iwl_firmware_sections(&iwl), Some(1));
+        assert!(parse_iwl_firmware_sections(b"NOPE").is_none());
+    }
+
+    #[test]
+    fn later_list_parsers() {
+        let mut ub = [0u8; 8];
+        ub[0..4].copy_from_slice(&0x00BA_B10Cu32.to_be_bytes());
+        assert_eq!(parse_zfs_uberblock_magic(&ub), Some(0x00BA_B10C));
+        assert!(parse_zfs_uberblock_magic(&[0u8; 2]).is_none());
+        assert_eq!(parse_nfs4_op(&15u32.to_be_bytes()), Some(15));
+        assert!(parse_nfs4_op(&[0, 0, 0, 0]).is_none());
+        let mut rec = [0u8; 6];
+        rec[0] = 22;
+        rec[5] = 1;
+        assert_eq!(parse_tls_handshake_type(&rec), Some(1));
+        rec[0] = 23;
+        assert!(parse_tls_handshake_type(&rec).is_none());
+        assert_eq!(parse_sae_commit_group(&19u16.to_le_bytes()), Some(19));
+        assert!(parse_sae_commit_group(&[0, 0]).is_none());
+        assert_eq!(parse_ept_pte(0b111), Some((true, true, true)));
+        assert!(parse_ept_pte(0).is_none());
+        assert_eq!(
+            parse_virtio_mmio_magic(&0x7472_6976u32.to_le_bytes()),
+            Some(0x7472_6976)
+        );
+        assert!(parse_virtio_mmio_magic(&[0, 0, 0, 0]).is_none());
+        let mut brcm = b"BRCMFW".to_vec();
+        brcm.extend_from_slice(&1u32.to_le_bytes());
+        brcm.extend_from_slice(&1u32.to_le_bytes());
+        brcm.extend_from_slice(&3u32.to_le_bytes());
+        brcm.extend_from_slice(b"mac");
+        assert_eq!(parse_brcm_firmware_sections(&brcm), Some(1));
+        assert!(parse_brcm_firmware_sections(b"NOPE").is_none());
+        assert_eq!(parse_tb_route(&1u64.to_le_bytes()), Some(1));
+        assert!(parse_tb_route(&[0u8; 8]).is_none());
+    }
+
+    #[test]
     fn ipv4_checksum_zero_header() {
         let mut hdr = [0u8; 20];
         hdr[0] = 0x45;
@@ -875,6 +1132,22 @@ mod tests {
             let _ = parse_uvc_eof(&buf);
             let _ = parse_uac_set_cur_freq(&buf);
             let _ = parse_cdc_ecm_ethertype(&buf);
+            let _ = parse_smb2_command(&buf);
+            let _ = parse_fuse_entry(&buf);
+            let _ = parse_amdgpu_firmware_ips(&buf);
+            let _ = parse_iwl_firmware_sections(&buf);
+            let _ = parse_zfs_uberblock_magic(&buf);
+            let _ = parse_nfs4_op(&buf);
+            let _ = parse_tls_handshake_type(&buf);
+            let _ = parse_sae_commit_group(&buf);
+            if buf.len() >= 8 {
+                let mut pte = [0u8; 8];
+                pte.copy_from_slice(&buf[..8]);
+                let _ = parse_ept_pte(u64::from_le_bytes(pte));
+            }
+            let _ = parse_virtio_mmio_magic(&buf);
+            let _ = parse_brcm_firmware_sections(&buf);
+            let _ = parse_tb_route(&buf);
         }
     }
 }

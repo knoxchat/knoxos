@@ -9,10 +9,11 @@ The compositor is an in-kernel software desktop, not a Unix display server. Prod
 - Ring 3 SHM clients via `/dev/wl0` ioctl (F1–F2), AF_UNIX `/run/wayland-0` (F5), and `wl_display` object opcodes (`GATE_WL display protocol`).
 - Calculator (F6) and Files (F7) are userspace SHM, not `WindowContentType`. Settings, Task Manager, Editor, Browser, and AI spawn the same class. Start-menu Terminal is Ring 3 `openpty` (`GATE_TERM pty interactive`).
 - VirtIO-GPU 2D resource scanout + hardware cursor plane (F8). Desktop `present_rect` also flushes through that scanout (`GATE_GPU desktop scanout`). When cursorq completes, the desktop does not software-blit the pointer.
+- GSUB Latin `fi` ligature (`GATE_GSUB liga`) and GPOS A+V kerning (`GATE_GPOS kern`).
 
 ## What is not
 
-- HDR, VRR, TrueType bytecode hinting, full IME. SCM_RIGHTS / memfd `wl_shm.create_pool` (GATE_WL uses a KnoxOS vaddr create_pool).
+- Full IME framework, HarfBuzz-class GPOS mark attachment. SCM_RIGHTS / memfd `wl_shm.create_pool` (GATE_WL uses a KnoxOS vaddr create_pool).
 
 ## Client rule
 

@@ -232,7 +232,8 @@ impl SaeSession {
         // Compute shared secret: K = scalar_op(own_rand, (peer_scalar * PWE + peer_element))
         let shared_point = compute_shared_secret(
             &self.pwe,
-            &self.own_rand,
+            &self.own_scalar,
+            &self.own_element,
             &self.peer_scalar,
             &self.peer_element,
         );
@@ -476,20 +477,31 @@ fn hash_to_element(password: &[u8], ssid: &[u8], addr1: &[u8; 6], addr2: &[u8; 6
     sswu_map(&hash)
 }
 
-/// Compute shared secret from SAE exchange
+/// Compute shared secret from SAE exchange. Inputs are sorted so both
+/// peers derive the same K from a matching (scalar, element) pair.
 fn compute_shared_secret(
     pwe: &[u8; 64],
-    own_rand: &[u8; 32],
+    own_scalar: &[u8; 32],
+    own_element: &[u8; 64],
     peer_scalar: &[u8; 32],
     peer_element: &[u8; 64],
 ) -> [u8; 32] {
-    // K = own_rand * (peer_scalar * PWE + peer_element)
-    // Simplified: hash the relevant inputs to get shared key material
+    let (s0, s1) = if own_scalar <= peer_scalar {
+        (own_scalar.as_slice(), peer_scalar.as_slice())
+    } else {
+        (peer_scalar.as_slice(), own_scalar.as_slice())
+    };
+    let (e0, e1) = if own_element <= peer_element {
+        (own_element.as_slice(), peer_element.as_slice())
+    } else {
+        (peer_element.as_slice(), own_element.as_slice())
+    };
     let mut input = Vec::new();
-    input.extend_from_slice(own_rand);
-    input.extend_from_slice(peer_scalar);
     input.extend_from_slice(pwe);
-    input.extend_from_slice(peer_element);
+    input.extend_from_slice(s0);
+    input.extend_from_slice(s1);
+    input.extend_from_slice(e0);
+    input.extend_from_slice(e1);
     hmac_sha256(b"SAE shared secret", &input)
 }
 
@@ -795,9 +807,62 @@ pub fn is_active() -> bool {
     SAE_ACTIVE.load(Ordering::SeqCst)
 }
 
+pub const GATE_WPA3_MARKER: &str = "GATE_WPA3 sae";
+
+fn sae_self_test() -> bool {
+    let sta_mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x01];
+    let ap_mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x02];
+    let pw = b"knoxos-sae";
+    let ssid = b"GATE";
+    let mut sta = SaeSession::new(sta_mac, ap_mac, pw, ssid, SaeMethod::HashToElement);
+    let mut ap = SaeSession::new(ap_mac, sta_mac, pw, ssid, SaeMethod::HashToElement);
+    let Ok(sta_commit) = sta.generate_commit() else {
+        serial_println!("[SAE] GATE_WPA3 FAILED: sta commit");
+        return false;
+    };
+    let Ok(ap_commit) = ap.generate_commit() else {
+        serial_println!("[SAE] GATE_WPA3 FAILED: ap commit");
+        return false;
+    };
+    if sta_commit.group_id != 19 || is_zero(&sta_commit.scalar) {
+        serial_println!("[SAE] GATE_WPA3 FAILED: group/scalar");
+        return false;
+    }
+    if sta.process_commit(&ap_commit).is_err() || ap.process_commit(&sta_commit).is_err() {
+        serial_println!("[SAE] GATE_WPA3 FAILED: process_commit");
+        return false;
+    }
+    let Ok(sta_confirm) = sta.generate_confirm() else {
+        serial_println!("[SAE] GATE_WPA3 FAILED: sta confirm");
+        return false;
+    };
+    let Ok(ap_confirm) = ap.generate_confirm() else {
+        serial_println!("[SAE] GATE_WPA3 FAILED: ap confirm");
+        return false;
+    };
+    if ap.verify_confirm(&sta_confirm).is_err() {
+        serial_println!("[SAE] GATE_WPA3 FAILED: ap verify");
+        return false;
+    }
+    if sta.verify_confirm(&ap_confirm).is_err() {
+        serial_println!("[SAE] GATE_WPA3 FAILED: sta verify");
+        return false;
+    }
+    if sta.pmk != ap.pmk || is_zero(&sta.pmk) {
+        serial_println!("[SAE] GATE_WPA3 FAILED: pmk mismatch");
+        return false;
+    }
+    serial_println!(
+        "[SAE] {} (group 19 commit/confirm, matching PMK)",
+        GATE_WPA3_MARKER
+    );
+    true
+}
+
 /// Initialize WPA3-SAE subsystem
 pub fn init() {
     serial_println!("[WPA3-SAE] Dragonfly key exchange initialized");
     serial_println!("[WPA3-SAE] Supported: Hunting-and-Pecking, Hash-to-Element (H2E)");
     serial_println!("[WPA3-SAE] Group: NIST P-256 (Group 19)");
+    let _ = sae_self_test();
 }

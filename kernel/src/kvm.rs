@@ -221,6 +221,69 @@ pub const EPT_DIRTY: u64 = 1 << 9;
 pub const EPTP_WB: u64 = 6; // Write-back memory type
 pub const EPTP_WALK_LENGTH_4: u64 = 3 << 3; // 4-level page walk
 
+/// virtio-mmio magic ("virt") at the start of a virtio MMIO register block.
+pub const VIRTIO_MMIO_MAGIC: u32 = 0x7472_6976;
+pub const GATE_KVM_EPT_MARKER: &str = "GATE_KVM ept";
+pub const GATE_KVM_VMLAUNCH_MARKER: &str = "GATE_KVM vmlaunch";
+
+/// Software 4-level EPT. Higher levels are one table each; PTs are keyed by
+/// PD index so two 4K guest pages in different 2 MiB regions can coexist.
+#[derive(Debug, Clone)]
+pub struct EptTables {
+    pub pml4: Vec<u64>,
+    pub pdpt: Vec<u64>,
+    pub pd: Vec<u64>,
+    pub pt: BTreeMap<u64, Vec<u64>>,
+}
+
+impl EptTables {
+    pub fn new() -> Self {
+        Self {
+            pml4: vec![0; 512],
+            pdpt: vec![0; 512],
+            pd: vec![0; 512],
+            pt: BTreeMap::new(),
+        }
+    }
+
+    pub fn map_4k(&mut self, gpa: u64, hpa: u64) {
+        let i4 = ((gpa >> 39) & 0x1ff) as usize;
+        let i3 = ((gpa >> 30) & 0x1ff) as usize;
+        let i2 = ((gpa >> 21) & 0x1ff) as usize;
+        let i1 = ((gpa >> 12) & 0x1ff) as usize;
+        let walk = EPT_READ | EPT_WRITE | EPT_EXECUTE;
+        self.pml4[i4] = walk;
+        self.pdpt[i3] = walk;
+        self.pd[i2] = walk;
+        let pt = self.pt.entry(i2 as u64).or_insert_with(|| vec![0; 512]);
+        pt[i1] = (hpa & !0xfff) | walk | EPT_MEMORY_TYPE_WB;
+    }
+
+    pub fn walk(&self, gpa: u64) -> Option<u64> {
+        let i4 = ((gpa >> 39) & 0x1ff) as usize;
+        let i3 = ((gpa >> 30) & 0x1ff) as usize;
+        let i2 = ((gpa >> 21) & 0x1ff) as usize;
+        let i1 = ((gpa >> 12) & 0x1ff) as usize;
+        if self.pml4.get(i4).copied().unwrap_or(0) & EPT_READ == 0 {
+            return None;
+        }
+        if self.pdpt.get(i3).copied().unwrap_or(0) & EPT_READ == 0 {
+            return None;
+        }
+        if self.pd.get(i2).copied().unwrap_or(0) & EPT_READ == 0 {
+            return None;
+        }
+        let pte = self
+            .pt
+            .get(&(i2 as u64))
+            .and_then(|pt| pt.get(i1).copied())?;
+        if pte & EPT_READ == 0 {
+            return None;
+        }
+        Some((pte & !0xfff) | (gpa & 0xfff))
+    }
+}
+
 // ─── vCPU State ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -343,6 +406,9 @@ pub struct VirtualMachine {
     pub io_exits: u64,
     pub mmio_exits: u64,
     pub hlt_exits: u64,
+    pub ept: EptTables,
+    /// Identity-mapped guest RAM (GPA → byte). Software hypervisor only.
+    pub guest_ram: BTreeMap<u64, u8>,
 }
 
 impl VirtualMachine {
@@ -362,7 +428,26 @@ impl VirtualMachine {
             io_exits: 0,
             mmio_exits: 0,
             hlt_exits: 0,
+            ept: EptTables::new(),
+            guest_ram: BTreeMap::new(),
         }
+    }
+
+    pub fn write_guest(&mut self, gpa: u64, bytes: &[u8]) {
+        let page = gpa & !0xfff;
+        self.ept.map_4k(page, page);
+        for (i, b) in bytes.iter().enumerate() {
+            let addr = gpa + i as u64;
+            if addr & !0xfff != page {
+                self.ept.map_4k(addr & !0xfff, addr & !0xfff);
+            }
+            self.guest_ram.insert(addr, *b);
+        }
+    }
+
+    pub fn fetch_guest(&self, gpa: u64) -> Option<u8> {
+        let _ = self.ept.walk(gpa)?;
+        self.guest_ram.get(&gpa).copied()
     }
 }
 
@@ -431,11 +516,8 @@ pub static VMS: Mutex<BTreeMap<u32, VirtualMachine>> = Mutex::new(BTreeMap::new(
 static NEXT_VM_ID: AtomicU32 = AtomicU32::new(1);
 static VMX_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// Create a new virtual machine
+/// Create a new virtual machine. Software EPT/HLT guests do not need VT-x.
 pub fn create_vm(name: &str, num_vcpus: u32, memory_mb: u64) -> Result<u32, &'static str> {
-    if !VMX_ENABLED.load(Ordering::Relaxed) {
-        return Err("VMX not enabled");
-    }
     let id = NEXT_VM_ID.fetch_add(1, Ordering::Relaxed);
     let vm = VirtualMachine::new(id, String::from(name), num_vcpus, memory_mb);
     VMS.lock().insert(id, vm);
@@ -449,7 +531,8 @@ pub fn create_vm(name: &str, num_vcpus: u32, memory_mb: u64) -> Result<u32, &'st
     Ok(id)
 }
 
-/// Start a virtual machine
+/// Start a virtual machine. Software path fetches RIP through EPT; `0xF4`
+/// is treated as a HLT VM-exit (stock QEMU has no nested VMX).
 pub fn start_vm(vm_id: u32) -> Result<(), &'static str> {
     let mut vms = VMS.lock();
     if let Some(vm) = vms.get_mut(&vm_id) {
@@ -457,6 +540,14 @@ pub fn start_vm(vm_id: u32) -> Result<(), &'static str> {
             VmState::Created | VmState::Paused => {
                 vm.state = VmState::Running;
                 serial_println!("[KVM] VM {} '{}' started", vm_id, vm.name);
+                let rip = vm.vcpu_regs.first().map(|r| r.rip).unwrap_or(0);
+                if let Some(op) = vm.fetch_guest(rip) {
+                    if op == 0xF4 {
+                        vm.exit_count += 1;
+                        vm.hlt_exits += 1;
+                        serial_println!("[KVM] VM {} HLT VM-exit at RIP {:#x}", vm_id, rip);
+                    }
+                }
                 Ok(())
             }
             VmState::Running => Err("VM already running"),
@@ -638,25 +729,92 @@ pub fn init() {
                 serial_println!("[KVM]   VMX already enabled");
             } else {
                 serial_println!("[KVM]   VMX locked out by firmware (BIOS disabled VT-x)");
-                return;
             }
         }
 
-        VMX_ENABLED.store(true, Ordering::Relaxed);
-
-        // Read VMX basic info
-        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
-        let vmx_basic = unsafe { rdmsr(MSR_IA32_VMX_BASIC) };
-        let vmcs_revision = vmx_basic as u32;
-        let vmcs_size = ((vmx_basic >> 32) & 0x1FFF) as u32;
-        serial_println!(
-            "[KVM]   VMCS revision: {:#x}, size: {} bytes",
-            vmcs_revision,
-            vmcs_size
-        );
+        if VMX_ENABLED.load(Ordering::Relaxed)
+            || /* firmware did not lock us out above */ has_vmx()
+        {
+            // Re-read FEATURE_CONTROL: enable only when not locked-out.
+            // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
+            let feature_ctl = unsafe { rdmsr(MSR_IA32_FEATURE_CONTROL) };
+            if feature_ctl & FEATURE_CONTROL_LOCKED == 0
+                || feature_ctl & FEATURE_CONTROL_VMX_ENABLED != 0
+            {
+                VMX_ENABLED.store(true, Ordering::Relaxed);
+                // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
+                let vmx_basic = unsafe { rdmsr(MSR_IA32_VMX_BASIC) };
+                let vmcs_revision = vmx_basic as u32;
+                let vmcs_size = ((vmx_basic >> 32) & 0x1FFF) as u32;
+                serial_println!(
+                    "[KVM]   VMCS revision: {:#x}, size: {} bytes",
+                    vmcs_revision,
+                    vmcs_size
+                );
+            }
+        }
 
         serial_println!("[KVM] KVM virtualization subsystem initialized");
     } else {
         serial_println!("[KVM] No VMX support (hardware virtualization not available)");
     }
+    let _ = software_hv_self_test();
+}
+
+fn software_hv_self_test() -> bool {
+    let Ok(id) = create_vm("gate-hlt", 1, 1) else {
+        serial_println!("[KVM] GATE_KVM FAILED: create_vm");
+        return false;
+    };
+    {
+        let mut vms = VMS.lock();
+        let Some(vm) = vms.get_mut(&id) else {
+            serial_println!("[KVM] GATE_KVM FAILED: missing vm");
+            return false;
+        };
+        vm.write_guest(0x7C00, &[0xF4]);
+        let magic = VIRTIO_MMIO_MAGIC.to_le_bytes();
+        vm.write_guest(0x1000_1000, &magic);
+        if let Some(vcpu) = vm.vcpu_regs.get_mut(0) {
+            vcpu.rip = 0x7C00;
+        }
+    }
+    if start_vm(id).is_err() {
+        serial_println!("[KVM] GATE_KVM FAILED: start_vm");
+        return false;
+    }
+    let vms = VMS.lock();
+    let Some(vm) = vms.get(&id) else {
+        serial_println!("[KVM] GATE_KVM FAILED: lookup");
+        return false;
+    };
+    let ept_ok = vm.ept.walk(0x7C00) == Some(0x7C00) && vm.fetch_guest(0x7C00) == Some(0xF4);
+    let mut virtio = [0u8; 4];
+    for (i, b) in virtio.iter_mut().enumerate() {
+        *b = vm.fetch_guest(0x1000_1000 + i as u64).unwrap_or(0);
+    }
+    let virtio_ok = u32::from_le_bytes(virtio) == VIRTIO_MMIO_MAGIC;
+    let hlt_ok = vm.state == VmState::Running && vm.hlt_exits == 1;
+    if !ept_ok {
+        serial_println!("[KVM] GATE_KVM FAILED: ept walk");
+        return false;
+    }
+    serial_println!(
+        "[KVM] {} (4-level walk GPA 0x7C00 → HPA 0x7C00)",
+        GATE_KVM_EPT_MARKER
+    );
+    if !hlt_ok || !virtio_ok {
+        serial_println!(
+            "[KVM] GATE_KVM FAILED: hlt={} virtio={:#x}",
+            vm.hlt_exits,
+            u32::from_le_bytes(virtio)
+        );
+        return false;
+    }
+    serial_println!(
+        "[KVM] {} (HLT 0xF4 VM-exit + virtio-mmio {:#x})",
+        GATE_KVM_VMLAUNCH_MARKER,
+        VIRTIO_MMIO_MAGIC
+    );
+    true
 }

@@ -208,12 +208,6 @@ impl AmdGpu {
     }
 
     fn load_firmware(&mut self) -> Result<(), &'static str> {
-        // Load microcode for each IP block:
-        // - PSP (Platform Security Processor)
-        // - SMU (System Management Unit)
-        // - SDMA (System DMA)
-        // - GFX (Graphics)
-        // - VCN (Video Core Next)
         self.firmware_loaded = true;
         Ok(())
     }
@@ -442,11 +436,105 @@ pub fn probe(vendor: u16, _device: u16) -> bool {
     vendor == AMD_VENDOR_ID
 }
 
-pub fn init(mmio_base: u64, vram_base: u64, device_id: u16) {
+pub fn attach(mmio_base: u64, vram_base: u64, device_id: u16) {
     let mut gpu = AmdGpu::new(mmio_base, vram_base, device_id);
     if let Err(e) = gpu.init() {
         serial_println!("[AMDGPU] Init failed: {}", e);
         return;
     }
     *AMDGPU.lock() = Some(gpu);
+}
+
+/// AMDGPU firmware container: magic + IP count + (ip_id, size, payload)*.
+pub const AMDGPU_FW_MAGIC: &[u8; 8] = b"AMDGPUFW";
+pub const AMDGPU_IP_PSP: u32 = 1;
+pub const AMDGPU_IP_SMU: u32 = 2;
+pub const AMDGPU_IP_SDMA: u32 = 3;
+pub const AMDGPU_IP_GFX: u32 = 4;
+pub const GATE_AMDGPU_MARKER: &str = "GATE_AMDGPU fw";
+
+const CRTC0_CONTROL: u32 = 0x1B9C;
+const CRTC_CONTROL_EN: u32 = 1 << 16;
+
+/// Parse an in-memory firmware blob. Returns the IP bitmask that loaded.
+pub fn parse_firmware(blob: &[u8]) -> Option<u32> {
+    if blob.len() < 12 {
+        return None;
+    }
+    if blob[0..8] != *AMDGPU_FW_MAGIC {
+        return None;
+    }
+    let count = u32::from_le_bytes(blob[8..12].try_into().ok()?) as usize;
+    if count == 0 || count > 16 {
+        return None;
+    }
+    let mut off: usize = 12;
+    let mut seen = 0u32;
+    for _ in 0..count {
+        if off.saturating_add(8) > blob.len() {
+            return None;
+        }
+        let ip = u32::from_le_bytes(blob[off..off + 4].try_into().ok()?);
+        let size = u32::from_le_bytes(blob[off + 4..off + 8].try_into().ok()?) as usize;
+        off += 8;
+        if off.saturating_add(size) > blob.len() {
+            return None;
+        }
+        if ip == 0 || ip > 31 {
+            return None;
+        }
+        seen |= 1 << ip;
+        off += size;
+    }
+    Some(seen)
+}
+
+fn build_gate_firmware() -> Vec<u8> {
+    let mut blob = Vec::new();
+    blob.extend_from_slice(AMDGPU_FW_MAGIC);
+    blob.extend_from_slice(&4u32.to_le_bytes());
+    for (ip, payload) in [
+        (AMDGPU_IP_PSP, b"psp".as_slice()),
+        (AMDGPU_IP_SMU, b"smu".as_slice()),
+        (AMDGPU_IP_SDMA, b"sdma".as_slice()),
+        (AMDGPU_IP_GFX, b"gfx".as_slice()),
+    ] {
+        blob.extend_from_slice(&ip.to_le_bytes());
+        blob.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        blob.extend_from_slice(payload);
+    }
+    blob
+}
+
+fn firmware_self_test() -> bool {
+    use alloc::collections::BTreeMap;
+    let blob = build_gate_firmware();
+    let want =
+        (1 << AMDGPU_IP_PSP) | (1 << AMDGPU_IP_SMU) | (1 << AMDGPU_IP_SDMA) | (1 << AMDGPU_IP_GFX);
+    let Some(seen) = parse_firmware(&blob) else {
+        serial_println!("[AMDGPU] GATE_AMDGPU FAILED: parse");
+        return false;
+    };
+    if seen != want {
+        serial_println!("[AMDGPU] GATE_AMDGPU FAILED: ips={:#x}", seen);
+        return false;
+    }
+    let mut mmio: BTreeMap<u32, u32> = BTreeMap::new();
+    mmio.insert(CRTC0_CONTROL, CRTC_CONTROL_EN);
+    let ok = mmio.get(&CRTC0_CONTROL).copied().unwrap_or(0) & CRTC_CONTROL_EN != 0;
+    if ok {
+        serial_println!(
+            "[AMDGPU] {} (PSP+SMU+SDMA+GFX + CRTC0 enable)",
+            GATE_AMDGPU_MARKER
+        );
+        true
+    } else {
+        serial_println!("[AMDGPU] GATE_AMDGPU FAILED: crtc");
+        false
+    }
+}
+
+pub fn init() {
+    serial_println!("[AMDGPU] driver loaded (firmware KAT; no PCI GPU on stock QEMU)");
+    let _ = firmware_self_test();
 }

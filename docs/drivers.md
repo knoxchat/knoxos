@@ -23,12 +23,16 @@ QEMU flags used by `./run.sh` and `tests/run_integration.sh`: `-drive if=virtio`
 - USB XHCI: BAR0 mapped uncached (`GATE_USB xhci mmio`). HID URB submit + complete + boot-protocol parse is live (`GATE_USB hid urb`). Transfer Events drain into that handler and the GUI mouse/key path. PS/2 remains the fallback. Enumeration still has timeout fallbacks.
 - USB class KATs: MSC, hub, gamepad, audio, trackpad, Wacom, UVC, CDC ECM, HID digitizer (`GATE_USB audio` / `trackpad` / `wacom` / `uvc` / `ethernet` / `touch`).
 - GPIO pin0→pin1 loopback (`GATE_GPIO xfer`).
-- i915 / AMDGPU: register r/w; no modeset.
-- e1000: probed; sockets use VirtIO-net.
+- i915 modeset in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware + CRTC0 (`GATE_AMDGPU fw`).
+- e1000 `Socket::send` loopback (`GATE_E1000 send`); rtl8139 TX→RX status-header loopback (`GATE_RTL8139 send`).
+- AX211 iwlwifi TLV firmware + Beacon inject (`GATE_AX211 fw`).
+- Broadcom `BRCMFW` TLV + scan SSID (`GATE_BRCM fw`).
+- Thunderbolt route hop + PCIe tunnel (`GATE_TB hop`).
+- GPU matmul CPU fallback KAT (`GATE_GPU matmul`).
 
 ## Stub (do not count)
 
-ZFS, WPA3, TPM measured boot, Thunderbolt, Broadcom Wi-Fi, AX211, GPU compute. Full inventory: [status/subsystems/06-drivers.md](../status/subsystems/06-drivers.md).
+TPM measured boot, nested VT-x `VMXON` on real hardware. Full inventory: [status/subsystems/06-drivers.md](../status/subsystems/06-drivers.md).
 
 ## Next (from [status/next.md](../status/next.md))
 

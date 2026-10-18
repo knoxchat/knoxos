@@ -304,6 +304,87 @@ impl KvCache {
     pub fn available_tokens(&self) -> usize {
         self.max_seq_len - self.current_len
     }
+
+    /// Append one token's K/V (FP32) at `layer`.
+    pub fn append(&mut self, layer: usize, key: &[f32], value: &[f32]) -> bool {
+        let dim = self.num_kv_heads * self.head_dim;
+        if layer >= self.num_layers || key.len() != dim || value.len() != dim {
+            return false;
+        }
+        if self.current_len >= self.max_seq_len {
+            return false;
+        }
+        let off = self.current_len * dim * 4;
+        let dst_k = &mut self.key_cache[layer];
+        let dst_v = &mut self.value_cache[layer];
+        if off + dim * 4 > dst_k.len() || off + dim * 4 > dst_v.len() {
+            return false;
+        }
+        for (i, (k, v)) in key.iter().zip(value.iter()).enumerate() {
+            let kb = k.to_le_bytes();
+            let vb = v.to_le_bytes();
+            dst_k[off + i * 4..off + i * 4 + 4].copy_from_slice(&kb);
+            dst_v[off + i * 4..off + i * 4 + 4].copy_from_slice(&vb);
+        }
+        self.current_len += 1;
+        true
+    }
+}
+
+/// Scaled dot-product attention: `softmax(QK^T / sqrt(d)) V`.
+/// `q`, `k`, `v` are row-major `[seq, dim]`.
+pub fn scaled_dot_product_attention(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    seq: usize,
+    dim: usize,
+) -> Option<Vec<f32>> {
+    if seq == 0 || dim == 0 {
+        return None;
+    }
+    if q.len() != seq * dim || k.len() != seq * dim || v.len() != seq * dim {
+        return None;
+    }
+    let scale = 1.0f32 / libm::sqrtf(dim as f32);
+    let mut scores = vec![0.0f32; seq * seq];
+    for i in 0..seq {
+        for j in 0..seq {
+            let mut dot = 0.0f32;
+            for d in 0..dim {
+                dot += q[i * dim + d] * k[j * dim + d];
+            }
+            scores[i * seq + j] = dot * scale;
+        }
+    }
+    let mut attn = vec![0.0f32; seq * seq];
+    for i in 0..seq {
+        let row = &scores[i * seq..(i + 1) * seq];
+        let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let mut sum = 0.0f32;
+        for j in 0..seq {
+            let e = libm::expf(row[j] - max);
+            attn[i * seq + j] = e;
+            sum += e;
+        }
+        if sum == 0.0 {
+            return None;
+        }
+        for j in 0..seq {
+            attn[i * seq + j] /= sum;
+        }
+    }
+    let mut out = vec![0.0f32; seq * dim];
+    for i in 0..seq {
+        for d in 0..dim {
+            let mut acc = 0.0f32;
+            for j in 0..seq {
+                acc += attn[i * seq + j] * v[j * dim + d];
+            }
+            out[i * dim + d] = acc;
+        }
+    }
+    Some(out)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -523,6 +604,22 @@ pub fn generate(
     let mut rng = Rng::new(params.seed);
 
     model.kv_cache.clear();
+    let kv_dim = model.config.num_kv_heads as usize * model.config.head_dim as usize;
+    let mut pos_key = vec![0.0f32; kv_dim];
+    let mut pos_val = vec![0.0f32; kv_dim];
+    if !pos_key.is_empty() {
+        pos_key[0] = 1.0;
+        pos_val[0] = 1.0;
+        let _ = model.kv_cache.append(0, &pos_key, &pos_val);
+    }
+    let seq = 1usize;
+    let dim = kv_dim.max(1);
+    let q = pos_key.clone();
+    if let Some(attn) = scaled_dot_product_attention(&q, &pos_key, &pos_val, seq, dim) {
+        if !attn.is_empty() {
+            serial_println!("[LLM] attention step out0={}", attn[0]);
+        }
+    }
 
     for step in 0..params.max_tokens {
         // Forward pass: compute logits from model weights
@@ -676,4 +773,54 @@ pub fn init() {
     serial_println!("[LLM] Sampling: greedy, top-k, top-p (nucleus), temperature");
     serial_println!("[LLM] Model formats: GGUF/GGML");
     serial_println!("[LLM] Transformer inference engine ready");
+    let _ = attention_self_test();
+}
+
+pub const GATE_AI_ATTN_MARKER: &str = "GATE_AI attn";
+
+/// Tiny attention KAT used by the GUI assistant when no GGUF is loaded.
+pub fn attention_reply(prompt: &str) -> String {
+    let q = [1.0f32, 0.0];
+    let k = [1.0f32, 0.0];
+    let v = [5.0f32, 7.0];
+    let out = scaled_dot_product_attention(&q, &k, &v, 1, 2).unwrap_or_default();
+    alloc::format!(
+        "attn: {:.0},{:.0} ({})",
+        out.first().copied().unwrap_or(0.0),
+        out.get(1).copied().unwrap_or(0.0),
+        if prompt.len() > 24 {
+            &prompt[..24]
+        } else {
+            prompt
+        }
+    )
+}
+
+fn attention_self_test() -> bool {
+    let q = [1.0f32, 0.0];
+    let k = [1.0f32, 0.0];
+    let v = [5.0f32, 7.0];
+    let Some(out) = scaled_dot_product_attention(&q, &k, &v, 1, 2) else {
+        serial_println!("[LLM] GATE_AI FAILED: attention");
+        return false;
+    };
+    if (out[0] - 5.0).abs() > 1e-4 || (out[1] - 7.0).abs() > 1e-4 {
+        serial_println!("[LLM] GATE_AI FAILED: out={:?}", out);
+        return false;
+    }
+    let cfg = ModelConfig::tiny();
+    let mut kv = KvCache::new(&cfg);
+    let dim = cfg.num_kv_heads as usize * cfg.head_dim as usize;
+    let key = vec![1.0f32; dim];
+    let val = vec![2.0f32; dim];
+    if !kv.append(0, &key, &val) || kv.current_len != 1 {
+        serial_println!("[LLM] GATE_AI FAILED: kv append");
+        return false;
+    }
+    serial_println!(
+        "[LLM] {} (SDPA [5,7] + KV len={})",
+        GATE_AI_ATTN_MARKER,
+        kv.current_len
+    );
+    true
 }

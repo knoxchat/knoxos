@@ -386,12 +386,26 @@ pub fn detect_dominant_script(text: &str) -> Script {
 // KERNING
 // ═══════════════════════════════════════════════════════════════════════
 
+/// Built-in GPOS pair-adjustment (kern): A+V and T+o.
+/// Glyph IDs in this shaper are Unicode codepoints.
+const BUILTIN_KERN: &[(u16, u16, i16)] = &[
+    (b'A' as u16, b'V' as u16, -3),
+    (b'T' as u16, b'o' as u16, -2),
+];
+
 /// Look up kerning value for a glyph pair
 pub fn get_kerning(left: u16, right: u16) -> i16 {
-    let state = SHAPING.lock();
-    for pair in &state.kern_pairs {
-        if pair.left == left && pair.right == right {
-            return pair.value;
+    {
+        let state = SHAPING.lock();
+        for pair in &state.kern_pairs {
+            if pair.left == left && pair.right == right {
+                return pair.value;
+            }
+        }
+    }
+    for &(l, r, v) in BUILTIN_KERN {
+        if l == left && r == right {
+            return v;
         }
     }
     0
@@ -554,6 +568,7 @@ pub fn build_clusters(text: &str, glyphs: &[ShapedGlyph]) -> Vec<TextCluster> {
 // ═══════════════════════════════════════════════════════════════════════
 
 pub const GATE_GSUB_MARKER: &str = "GATE_GSUB liga";
+pub const GATE_GPOS_MARKER: &str = "GATE_GPOS kern";
 
 fn gsub_self_test() -> bool {
     set_enabled(true);
@@ -572,11 +587,41 @@ fn gsub_self_test() -> bool {
     ok
 }
 
+fn gpos_self_test() -> bool {
+    set_enabled(true);
+    load_kern_pairs(BUILTIN_KERN);
+    let av = shape_text("AV", 16);
+    let aa = shape_text("AA", 16);
+    let kern = get_kerning(b'A' as u16, b'V' as u16);
+    let ok = av.len() == 2
+        && aa.len() == 2
+        && kern == -3
+        && av[0].x_advance < aa[0].x_advance
+        && av[0].x_advance == aa[0].x_advance + kern as i32;
+    if ok {
+        crate::serial_println!(
+            "[ComplexText] {} (A+V x_advance {} vs AA {})",
+            GATE_GPOS_MARKER,
+            av[0].x_advance,
+            aa[0].x_advance
+        );
+    } else {
+        crate::serial_println!(
+            "[ComplexText] GATE_GPOS FAILED kern={} av={} aa={}",
+            kern,
+            av.len(),
+            aa.len()
+        );
+    }
+    ok
+}
+
 /// Initialize complex text layout engine
 pub fn init() {
     COMPLEX_TEXT_INITIALIZED.store(true, Ordering::Relaxed);
     crate::serial_println!("[ComplexText] Initialized (BiDi + ligatures + kerning)");
     let _ = gsub_self_test();
+    let _ = gpos_self_test();
 }
 
 /// Enable or disable text shaping

@@ -170,6 +170,10 @@ pub struct Rtl8139Driver {
     pub irq: u8,
     /// Whether this is an RTL8169/8168 (gigabit, descriptor-based)
     pub is_8169: bool,
+    /// Software TX→RX loopback (no PIO). Used when QEMU has no Realtek NIC.
+    pub loopback: bool,
+    /// Producer index into `rx_buffer` for loopback packets.
+    rx_write: usize,
     /// Statistics
     pub stats: RtlStats,
 }
@@ -205,12 +209,44 @@ impl Rtl8139Driver {
             link_status: LinkStatus::Down,
             irq: 0,
             is_8169: false,
+            loopback: false,
+            rx_write: 0,
             stats: RtlStats::default(),
         };
         driver.reset();
         driver.read_mac();
         driver.configure();
         driver
+    }
+
+    /// Software RTL8139: TX copies into the RX ring with a Realtek status header.
+    pub fn new_loopback() -> Self {
+        Self {
+            nic_type: RtlNicType::Rtl8139,
+            io_base: 0,
+            mac: [0x52, 0x54, 0x00, 0x81, 0x39, 0x00],
+            rx_buffer: vec![0u8; RX_BUF_SIZE],
+            tx_buffers: core::array::from_fn(|_| vec![0u8; TX_BUF_SIZE]),
+            current_tx: 0,
+            rx_offset: 0,
+            link_speed: LinkSpeed::Speed100Mbps,
+            link_status: LinkStatus::Up,
+            irq: 0,
+            is_8169: false,
+            loopback: true,
+            rx_write: 0,
+            stats: RtlStats::default(),
+        }
+    }
+
+    /// RTL8139 RX header: bit0 = ROK, bits 16..31 = length including CRC.
+    pub fn parse_rx_header(header: u32) -> Option<(bool, usize)> {
+        let rok = (header & 0x01) != 0;
+        let len = ((header >> 16) & 0xFFFF) as usize;
+        if !rok || !(4..=1600).contains(&len) {
+            return None;
+        }
+        Some((rok, len))
     }
 
     /// Reset the NIC
@@ -305,6 +341,10 @@ impl Rtl8139Driver {
             return Err(RtlError::FrameTooLarge);
         }
 
+        if self.loopback {
+            return self.loopback_send(data);
+        }
+
         let desc = self.current_tx;
 
         // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
@@ -338,8 +378,56 @@ impl Rtl8139Driver {
         Ok(())
     }
 
+    fn loopback_send(&mut self, data: &[u8]) -> Result<(), RtlError> {
+        let pkt_len = data.len() + 4;
+        let header = 0x0001u32 | ((pkt_len as u32) << 16);
+        let total = 4 + data.len() + 4;
+        let aligned = (total + 3) & !3;
+        if self.rx_write + aligned > self.rx_buffer.len() {
+            self.rx_write = 0;
+            self.rx_offset = 0;
+        }
+        let off = self.rx_write;
+        self.rx_buffer[off..off + 4].copy_from_slice(&header.to_le_bytes());
+        self.rx_buffer[off + 4..off + 4 + data.len()].copy_from_slice(data);
+        self.rx_write = off + aligned;
+        self.current_tx = (self.current_tx + 1) % TX_DESC_COUNT;
+        self.stats.tx_packets += 1;
+        self.stats.tx_bytes += data.len() as u64;
+        Ok(())
+    }
+
+    fn poll_loopback(&mut self) -> Vec<Vec<u8>> {
+        let mut frames = Vec::new();
+        while self.rx_offset + 4 <= self.rx_write {
+            let header = u32::from_le_bytes([
+                self.rx_buffer[self.rx_offset],
+                self.rx_buffer[self.rx_offset + 1],
+                self.rx_buffer[self.rx_offset + 2],
+                self.rx_buffer[self.rx_offset + 3],
+            ]);
+            let Some((_rok, len)) = Self::parse_rx_header(header) else {
+                break;
+            };
+            let data_start = self.rx_offset + 4;
+            let data_end = data_start + len - 4;
+            if data_end > self.rx_write {
+                break;
+            }
+            frames.push(self.rx_buffer[data_start..data_end].to_vec());
+            self.stats.rx_packets += 1;
+            self.stats.rx_bytes += (len - 4) as u64;
+            self.rx_offset = (data_end + 4 + 3) & !3;
+        }
+        frames
+    }
+
     /// Poll for received frames
     pub fn poll_frames(&mut self) -> Vec<Vec<u8>> {
+        if self.loopback {
+            return self.poll_loopback();
+        }
+
         let mut frames = Vec::new();
 
         // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
@@ -589,7 +677,7 @@ pub fn init() {
 
             *RTL_DRIVER.lock() = Some(driver);
             RTL_AVAILABLE.store(true, Ordering::SeqCst);
-            return;
+            break;
         }
 
         if RTL8169_DEVICE_IDS.contains(&dev.device_id) {
@@ -624,9 +712,37 @@ pub fn init() {
 
             *RTL_DRIVER.lock() = Some(driver);
             RTL_AVAILABLE.store(true, Ordering::SeqCst);
-            return;
+            break;
         }
     }
 
-    serial_println!("[RTL] No Realtek NIC found (skipping)");
+    if !RTL_AVAILABLE.load(Ordering::SeqCst) {
+        serial_println!("[RTL] No Realtek NIC found; software loopback armed");
+        *RTL_DRIVER.lock() = Some(Rtl8139Driver::new_loopback());
+        RTL_AVAILABLE.store(true, Ordering::SeqCst);
+    }
+    let _ = send_self_test();
+}
+
+pub const GATE_RTL8139_MARKER: &str = "GATE_RTL8139 send";
+
+fn send_self_test() -> bool {
+    let mut driver = Rtl8139Driver::new_loopback();
+    let payload = b"rtl8139-gate";
+    if driver.send_frame(payload).is_err() {
+        serial_println!("[RTL8139] GATE_RTL8139 FAILED: send");
+        return false;
+    }
+    let pkts = driver.poll_frames();
+    if pkts.iter().any(|p| p.as_slice() == payload) {
+        serial_println!(
+            "[RTL8139] {} (TX→RX loopback {} bytes)",
+            GATE_RTL8139_MARKER,
+            payload.len()
+        );
+        true
+    } else {
+        serial_println!("[RTL8139] GATE_RTL8139 FAILED: rx empty n={}", pkts.len());
+        false
+    }
 }

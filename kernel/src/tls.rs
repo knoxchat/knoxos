@@ -210,6 +210,8 @@ pub struct TlsSession {
     pub read_buffer: Vec<u8>,
     /// Handshake messages hash (for Finished verification)
     pub handshake_hash: Vec<u8>,
+    /// TLS 1.3 client handshake traffic secret
+    pub hs_traffic: [u8; 32],
 }
 
 impl TlsSession {
@@ -236,6 +238,7 @@ impl TlsSession {
             write_buffer: Vec::new(),
             read_buffer: Vec::new(),
             handshake_hash: Vec::new(),
+            hs_traffic: [0; 32],
         }
     }
 
@@ -261,6 +264,7 @@ impl TlsSession {
             write_buffer: Vec::new(),
             read_buffer: Vec::new(),
             handshake_hash: Vec::new(),
+            hs_traffic: [0; 32],
         }
     }
 
@@ -362,6 +366,62 @@ impl TlsSession {
         record
     }
 
+    /// Build a TLS 1.3 ServerHello (RFC 8446 §4.1.3).
+    pub fn build_server_hello(&mut self) -> Vec<u8> {
+        let mut msg = Vec::new();
+        msg.push(HandshakeType::ServerHello as u8);
+        let len_pos = msg.len();
+        msg.extend_from_slice(&[0, 0, 0]);
+        let body_start = msg.len();
+
+        msg.push(0x03);
+        msg.push(0x03);
+        msg.extend_from_slice(&self.server_random);
+        msg.push(0); // empty session id
+        msg.extend_from_slice(&(CipherSuite::TLS_AES_128_GCM_SHA256 as u16).to_be_bytes());
+        msg.push(0); // null compression
+
+        let mut extensions = Vec::new();
+        let mut sv = Vec::new();
+        sv.push(2);
+        sv.extend_from_slice(&TLS_1_3.to_be_bytes());
+        extensions.extend_from_slice(&43u16.to_be_bytes());
+        extensions.extend_from_slice(&(sv.len() as u16).to_be_bytes());
+        extensions.extend_from_slice(&sv);
+        msg.extend_from_slice(&(extensions.len() as u16).to_be_bytes());
+        msg.extend_from_slice(&extensions);
+
+        let body_len = msg.len() - body_start;
+        msg[len_pos] = ((body_len >> 16) & 0xFF) as u8;
+        msg[len_pos + 1] = ((body_len >> 8) & 0xFF) as u8;
+        msg[len_pos + 2] = (body_len & 0xFF) as u8;
+
+        self.handshake_hash.extend_from_slice(&msg);
+        self.cipher_suite = Some(CipherSuite::TLS_AES_128_GCM_SHA256);
+        self.version = TLS_1_3;
+        self.state = TlsState::ServerHelloReceived;
+
+        let mut record = Vec::new();
+        record.push(ContentType::Handshake as u8);
+        record.push(0x03);
+        record.push(0x03);
+        record.extend_from_slice(&(msg.len() as u16).to_be_bytes());
+        record.extend_from_slice(&msg);
+        record
+    }
+
+    pub fn derive_hs_traffic(&mut self) {
+        let mut ikm = [0u8; 64];
+        ikm[..32].copy_from_slice(&self.client_random);
+        ikm[32..].copy_from_slice(&self.server_random);
+        let prk = hkdf_extract(&[0u8; 32], &ikm);
+        let out = hkdf_expand_label(&prk, b"c hs traffic", &[], 32);
+        if out.len() >= 32 {
+            self.hs_traffic.copy_from_slice(&out[..32]);
+        }
+        self.state = TlsState::Established;
+    }
+
     /// Process an incoming TLS record
     pub fn process_record(&mut self, data: &[u8]) -> Result<Vec<u8>, TlsError> {
         if let Some((header, payload)) = TlsRecordHeader::parse(data) {
@@ -383,6 +443,18 @@ impl TlsSession {
         }
 
         match data[0] {
+            1 => {
+                // ClientHello
+                if data.len() < 38 {
+                    return Err(TlsError::DecodeError);
+                }
+                self.client_random.copy_from_slice(&data[6..38]);
+                self.handshake_hash.extend_from_slice(data);
+                if !self.is_client {
+                    self.state = TlsState::ClientHelloSent;
+                }
+                Ok(Vec::new())
+            }
             2 => {
                 // ServerHello
                 if data.len() < 39 {
@@ -1219,6 +1291,11 @@ pub fn handshake(session_id: u64) -> Option<Vec<u8>> {
 
     match session.state {
         TlsState::Init if session.is_client => Some(session.build_client_hello()),
+        TlsState::ClientHelloSent if !session.is_client => Some(session.build_server_hello()),
+        TlsState::ServerHelloReceived => {
+            session.derive_hs_traffic();
+            None
+        }
         _ => None,
     }
 }
@@ -1278,6 +1355,7 @@ pub fn init() {
     serial_println!("[TLS]   Certificate chain verification: issuer/subject, CA, validity");
     serial_println!("[TLS]   SHA-256 hash + HMAC-SHA256: implemented");
     let _ = hkdf_self_test();
+    let _ = handshake_self_test();
 }
 
 /// HKDF-Extract (SHA-256): PRK = HMAC-Hash(salt, IKM). RFC 5869.
@@ -1349,6 +1427,57 @@ fn hkdf_self_test() -> bool {
         );
         false
     }
+}
+
+pub const GATE_TLS13_HS_MARKER: &str = "GATE_TLS13 hs";
+
+fn handshake_self_test() -> bool {
+    let client = create_client_session(Some("knoxos.test"));
+    let server = create_server_session();
+    let Some(ch) = handshake(client) else {
+        serial_println!("[TLS] GATE_TLS13 FAILED: ClientHello");
+        return false;
+    };
+    if ch.len() < 6 || ch[0] != 22 || ch[5] != 1 {
+        serial_println!("[TLS] GATE_TLS13 FAILED: CH type");
+        return false;
+    }
+    if process(server, &ch).is_err() {
+        serial_println!("[TLS] GATE_TLS13 FAILED: process CH");
+        return false;
+    }
+    let Some(sh) = handshake(server) else {
+        serial_println!("[TLS] GATE_TLS13 FAILED: ServerHello");
+        return false;
+    };
+    if sh.len() < 6 || sh[0] != 22 || sh[5] != 2 {
+        serial_println!("[TLS] GATE_TLS13 FAILED: SH type");
+        return false;
+    }
+    if process(client, &sh).is_err() {
+        serial_println!("[TLS] GATE_TLS13 FAILED: process SH");
+        return false;
+    }
+    let _ = handshake(client);
+    let _ = handshake(server);
+    let sessions = TLS_SESSIONS.lock();
+    let (Some(c), Some(s)) = (sessions.get(&client), sessions.get(&server)) else {
+        serial_println!("[TLS] GATE_TLS13 FAILED: sessions");
+        return false;
+    };
+    if c.hs_traffic != s.hs_traffic || c.hs_traffic.iter().all(|b| *b == 0) {
+        serial_println!("[TLS] GATE_TLS13 FAILED: traffic secret");
+        return false;
+    }
+    if c.state != TlsState::Established || s.state != TlsState::Established {
+        serial_println!("[TLS] GATE_TLS13 FAILED: state");
+        return false;
+    }
+    serial_println!(
+        "[TLS] {} (ClientHello+ServerHello, matching c hs traffic)",
+        GATE_TLS13_HS_MARKER
+    );
+    true
 }
 
 // ═══════════════════════════════════════════════════════════════════════

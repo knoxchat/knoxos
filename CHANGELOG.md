@@ -2,10 +2,26 @@
 
 ## Unreleased
 
+- **rtl8139** — TX copies into the RX ring with a Realtek status header (`GATE_RTL8139 send`).
+- **CIFS** — SMB2 Negotiate parse plus TREE WRITE/READ round-trip (`GATE_CIFS smb2`).
+- **GPOS** — pair-adjustment kerning: `shape_text("AV")` shrinks A’s advance (`GATE_GPOS kern`).
+- **AMDGPU** — firmware container (PSP+SMU+SDMA+GFX) plus CRTC0 enable in shadow MMIO (`GATE_AMDGPU fw`).
+- **AX211** — iwlwifi TLV firmware plus injected Beacon (`GATE_AX211 fw`).
+- **FUSE** — LOOKUP+READ through the in-kernel loopback daemon (`GATE_FUSE lookup`).
+- **KVM** — software 4-level EPT walk plus HLT `0xF4` VM-exit and virtio-mmio magic (`GATE_KVM ept`, `GATE_KVM vmlaunch`). Stock QEMU has no nested VMX.
+- **OCI** — `runc start` unshare(CLONE_NEWNS|UTS|PID) + `pivot_root` (`GATE_OCI start`).
+- **ZFS** — uberblock `0x00BAB10C` + Fletcher-4 through the ramdisk (`GATE_ZFS block`).
+- **WPA3 / bridge** — SAE commit/confirm matching PMK (`GATE_WPA3 sae`); FDB learn/forward (`GATE_BRIDGE fdb`).
+- **TLS 1.3 handshake** — ClientHello + ServerHello and matching `c hs traffic` (`GATE_TLS13 hs`). X.509 chain still later.
+- **GPU matmul** — CPU fallback KAT `[[19,22],[43,50]]` with `available: true` (`GATE_GPU matmul`).
+- **AI** — scaled-dot-product attention + KV append (`GATE_AI attn`); assistant summarize is live attention, not a placeholder (`GATE_AI chat`).
+- **NFS** — COMPOUND PUTROOTFH+LOOKUP+READ on a loopback export (`GATE_NFS compound`).
+- **Broadcom Wi-Fi** — `BRCMFW` TLV parse plus scan SSID (`GATE_BRCM fw`).
+- **Thunderbolt** — route hop + PCIe tunnel authorize (`GATE_TB hop`).
 - **USB Audio** — UAC SET_CUR 48 kHz plus isochronous PCM loopback (`GATE_USB audio`).
 - **Trackpad / Wacom / touch** — HID multitouch two-finger scroll (`GATE_USB trackpad`); Intuos pen report (`GATE_USB wacom`); digitizer absolute cursor (`GATE_USB touch`).
 - **UVC / USB Ethernet** — YUY2 payload header + EOF frame (`GATE_USB uvc`); CDC ECM Ethernet loopback (`GATE_USB ethernet`).
-- **GPIO** — pin0→pin1 shadow-register loopback (`GATE_GPIO xfer`). Thunderbolt / Broadcom Wi-Fi / AX211 stay later.
+- **GPIO** — pin0→pin1 shadow-register loopback (`GATE_GPIO xfer`).
 
 ## 0.2.4
 

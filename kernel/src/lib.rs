@@ -282,7 +282,7 @@ pub mod federated;
 pub mod io_sched;
 #[cfg(feature = "stub-drivers")]
 pub mod kdb;
-#[cfg(feature = "stub-drivers")]
+#[cfg(feature = "net")]
 pub mod nfs;
 #[cfg(feature = "stub-drivers")]
 pub mod sctp;
@@ -360,7 +360,6 @@ pub mod btrfs;
 pub mod posix2024;
 #[cfg(feature = "stub-drivers")]
 pub mod verify;
-#[cfg(feature = "stub-drivers")]
 pub mod zfs;
 
 // Phase 18+ modules — Full Linux /proc, strace, dmesg, sysinfo, UTS
@@ -518,18 +517,15 @@ pub mod webcam;
 pub mod bare_metal_test;
 #[cfg(feature = "stub-drivers")]
 pub mod bonding;
-#[cfg(feature = "stub-drivers")]
 pub mod bridge;
 #[cfg(feature = "stub-drivers")]
 pub mod browser_launch;
-#[cfg(feature = "stub-drivers")]
 pub mod cifs;
 #[cfg(feature = "stub-drivers")]
 pub mod device_mapper;
 #[cfg(feature = "stub-drivers")]
 pub mod disk_install;
 pub mod exfat;
-#[cfg(feature = "stub-drivers")]
 pub mod fuse;
 pub mod gpu_compositor;
 pub mod hw_nic;
@@ -553,11 +549,8 @@ pub mod xfs;
 
 // Phase 32+ modules — Production completeness (device drivers, desktop, security, AI, services)
 // Device drivers (additional)
-#[cfg(feature = "stub-drivers")]
 pub mod amdgpu;
-#[cfg(feature = "stub-drivers")]
 pub mod ax211;
-#[cfg(feature = "stub-drivers")]
 pub mod broadcom_wifi;
 #[cfg(feature = "stub-drivers")]
 pub mod bt_audio;
@@ -575,7 +568,6 @@ pub mod nouveau;
 pub mod pcie_hotplug;
 #[cfg(feature = "stub-drivers")]
 pub mod rtl8125;
-#[cfg(feature = "stub-drivers")]
 pub mod thunderbolt;
 pub mod tpm2;
 #[cfg(feature = "stub-drivers")]
@@ -640,7 +632,6 @@ pub mod webp;
 // AI subsystem (additional)
 #[cfg(feature = "stub-drivers")]
 pub mod ai_model_cache;
-#[cfg(feature = "stub-drivers")]
 pub mod gpu_matmul;
 #[cfg(feature = "stub-drivers")]
 pub mod image_gen;

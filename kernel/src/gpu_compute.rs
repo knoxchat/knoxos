@@ -1063,4 +1063,5 @@ pub fn init() {
         grayscale_id
     );
     serial_println!("[GPU-COMPUTE]   Backend: software (VirtIO GPU 3D available for acceleration)");
+    crate::gpu_matmul::init();
 }

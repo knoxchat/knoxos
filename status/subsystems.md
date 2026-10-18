@@ -27,22 +27,22 @@ Percentages are **production usefulness**, not lines of code.
 | 1 | [Kernel Core](subsystems/01-kernel-core.md) | Wired | 90% | High | Interrupts and timers; per-CPU TSS + GS; AP Ring 3 (I3); nested IRQ TPR; live patch W^X; UEFI RTC time. |
 | 2 | [Memory](subsystems/02-memory.md) | Wired | 86% | **Critical** | Demand paging, CoW, file mmap, buddy, LRU, swap I/O, OOM, stack guards, memory cgroup, NUMA frames, KSM merge. |
 | 3 | [Process](subsystems/03-process.md) | Wired | 99% | **Critical** | Scheduled Ring 3 (B2–B8); clone/clone3; namespaces; eBPF/sched_ext pick (`GATE_EBPF`). |
-| 4 | [Filesystem](subsystems/04-filesystem.md) | Wired | 99% | **Critical** | VirtIO-blk persist C1–C7 (`/bin` included); AHCI/NVMe DMA; NTFS/exFAT/XFS/Btrfs ramdisk. Virtual FS still rebuilt. |
-| 5 | [Networking](subsystems/05-networking.md) | Wired | 82% | **Critical** | Loopback + VirtIO-net DHCP/DNS/TCP CUBIC (D1–D5) + IPv6 echo TX (D6) + NAT + TLS HKDF + VLAN + e1000 `Socket::send` + Wi-Fi PMK. |
-| 6 | [Drivers](subsystems/06-drivers.md) | Wired | 82% | **Critical** | PCI, PS/2, UART, VirtIO-blk, VirtIO-GPU scanout+cursor (F8), AHCI/NVMe DMA, USB HID URB + XHCI MMIO + MSC/hub/gamepad/audio/trackpad/wacom/UVC/ethernet/touch + GPIO + DRM GEM + TPM TIS + I2C + i915 modeset + e1000 send. |
+| 4 | [Filesystem](subsystems/04-filesystem.md) | Wired | 99% | **Critical** | VirtIO-blk persist C1–C7 (`/bin` included); AHCI/NVMe DMA; NTFS/exFAT/XFS/Btrfs/ZFS ramdisk; CIFS SMB2; FUSE LOOKUP; NFS4 COMPOUND. Virtual FS still rebuilt. |
+| 5 | [Networking](subsystems/05-networking.md) | Wired | 88% | **Critical** | Loopback + VirtIO-net DHCP/DNS/TCP CUBIC (D1–D5) + IPv6 echo TX (D6) + NAT + TLS HKDF/handshake + VLAN + e1000 `Socket::send` + rtl8139 loopback + Wi-Fi PMK + WPA3-SAE + bridge FDB. |
+| 6 | [Drivers](subsystems/06-drivers.md) | Wired | 88% | **Critical** | PCI, PS/2, UART, VirtIO-blk, VirtIO-GPU scanout+cursor (F8), AHCI/NVMe DMA, USB HID URB + XHCI MMIO + MSC/hub/gamepad/audio/trackpad/wacom/UVC/ethernet/touch + GPIO + DRM GEM + TPM TIS + I2C + i915 modeset + AMDGPU fw + e1000/rtl8139 send + AX211 + Broadcom fw + Thunderbolt hop. |
 | 7 | [GUI](subsystems/07-gui.md) | Live | 99% | Medium | Software compositor + Ring 3 SHM (F1–F8) + VSync + VirtIO-GPU cursor + TTF hinting. Start-menu Terminal is Ring 3 PTY. |
 | 8 | [Shell](subsystems/08-shell.md) | Live | 86% | Medium | Real parser/PTY; Ring 3 `/bin/sh`; SIGTSTP/SIGCONT job control. |
 | 9 | [Security](subsystems/09-security.md) | Wired | 96% | **Critical** | W^X, ChaCha20, AES-GCM, Poly1305, X25519, Ed25519, RSA, ECDSA-P256, seccomp, caps (E1–E4); Landlock; IMA; lockdown; wipe-on-free. |
 | 10 | [Services](subsystems/10-services.md) | Wired | 72% | High | Ring 3 `/sbin/init` (K3); AF_UNIX D-Bus; crash restart; cron timer; udev `/dev`; NM DHCP; suspend; logind. |
-| 11 | [Virt](subsystems/11-virt.md) | Stub | 38% | Low | Namespaces live; cgroup v2 memory/CPU/IO; KVM `vmlaunch` unused. **Later.** |
-| 12 | [AI/ML](subsystems/12-ai.md) | Wired | 22% | Low | GGUF parse + naive CPU. **Later.** |
+| 11 | [Virt](subsystems/11-virt.md) | Wired | 55% | Low | Namespaces live; cgroup v2 memory/CPU/IO; software EPT+HLT (`GATE_KVM`); OCI unshare+pivot_root (`GATE_OCI`). |
+| 12 | [AI/ML](subsystems/12-ai.md) | Wired | 40% | Low | GGUF parse + SDPA/KV (`GATE_AI attn`) + CPU matmul (`GATE_GPU matmul`) + assistant chat (`GATE_AI chat`). |
 | 13 | [Binary compat](subsystems/13-binary-compat.md) | Wired | 99% | High | Static ELF + 200+ Ring 3 syscalls + `ld.so` (BM1) + VMM `dlopen` (BM2) + static musl CRT (BM3) + dynamically linked musl (BM4). Next: Ring 3 desktop apps. |
-| 14 | [i18n](subsystems/14-i18n.md) | Live | 90% | Low | TTF, CJK, RTL, fallback chain, GSUB Latin liga, color emoji, TTF hinting, `.mo` gettext, pinyin IME. |
+| 14 | [i18n](subsystems/14-i18n.md) | Live | 93% | Low | TTF, CJK, RTL, fallback chain, GSUB Latin liga, GPOS kern, color emoji, TTF hinting, `.mo` gettext, pinyin IME. |
 | 15 | [Build](subsystems/15-build.md) | Live | 80% | Medium | Make/QEMU work; feature flags G3; `flake.nix` present. |
-| 16 | [Testing](subsystems/16-testing.md) | Wired | 98% | **Critical** | 360 QEMU markers + host parser tests; `assert!(true)` gone. |
+| 16 | [Testing](subsystems/16-testing.md) | Wired | 98% | **Critical** | 379 QEMU markers + host parser tests; `assert!(true)` gone. |
 | 17 | [Docs](subsystems/17-docs.md) | Wired | 70% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + `status/` + `docs/` + CHANGELOG + rustdoc artifact. |
 | 18 | [CI/CD](subsystems/18-ci.md) | Wired | 55% | High | GitHub Actions fmt/clippy/size/QEMU boot + aarch64/riscv64 compile + rustdoc + audit + nightly images. |
 
-**QEMU desktop demo: ~99%.** **Production OS: ~99%.** Gates A–F, H–I, J–BL, BM1–BM4, F5–F8, C7–C9, G3–G5, I4, D6, USB HID URB, XHCI MMIO, udev/quota/cron/vsync/TERM plus cgroup/job/IMA/lockdown/UEFI/wipe/NM/XFS/X25519/Ed25519/locale/IME/MSC/NAT/DRM/GSUB/RSA/ECDSA/emoji/hub/gamepad/TPM/TTF/I2C/TLS13/HDR/VRR/e1000/eBPF/Wi-Fi/i915/Btrfs/VLAN plus USB audio/trackpad/wacom/UVC/ethernet/touch and GPIO are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **360/360** on QEMU (2026-10-18). What to do next: [next.md](next.md).
+**QEMU desktop demo: ~99%.** **Production OS: ~99%.** Gates A–F, H–I, J–BL, BM1–BM4, F5–F8, C7–C9, G3–G5, I4, D6, USB HID URB, XHCI MMIO, udev/quota/cron/vsync/TERM plus cgroup/job/IMA/lockdown/UEFI/wipe/NM/XFS/X25519/Ed25519/locale/IME/MSC/NAT/DRM/GSUB/RSA/ECDSA/emoji/hub/gamepad/TPM/TTF/I2C/TLS13/HDR/VRR/e1000/eBPF/Wi-Fi/i915/Btrfs/VLAN plus USB audio/trackpad/wacom/UVC/ethernet/touch/GPIO plus rtl8139/CIFS/GPOS/AMDGPU/AX211/FUSE plus KVM EPT/HLT, OCI start, ZFS, WPA3/bridge, TLS handshake, GPU matmul, AI attention, NFS, Broadcom, Thunderbolt are on the live boot path. Full gate tables: [gates/](gates/README.md). Integration: `./tests/run_integration.sh` **379/379** on QEMU (2026-10-18). What to do next: [next.md](next.md).
 
 ---

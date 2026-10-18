@@ -130,8 +130,16 @@ pub struct FuseRequest {
     pub data: Vec<u8>,
 }
 
+/// In-kernel loopback daemon: path → (ino, bytes).
+#[derive(Debug, Default)]
+struct LoopbackFs {
+    files: BTreeMap<String, (u64, Vec<u8>)>,
+    next_ino: u64,
+}
+
 lazy_static::lazy_static! {
     static ref MOUNTS: Mutex<BTreeMap<String, FuseMount>> = Mutex::new(BTreeMap::new());
+    static ref LOOPBACK: Mutex<BTreeMap<String, LoopbackFs>> = Mutex::new(BTreeMap::new());
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -163,7 +171,24 @@ pub fn mount(mount_point: &str, daemon_pid: u32) -> Result<(), &'static str> {
         daemon_pid
     );
     mounts.insert(String::from(mount_point), fm);
+    LOOPBACK.lock().insert(
+        String::from(mount_point),
+        LoopbackFs {
+            files: BTreeMap::new(),
+            next_ino: 2,
+        },
+    );
     Ok(())
+}
+
+/// Register a file the in-kernel FUSE daemon will serve.
+pub fn loopback_put(mount_point: &str, name: &str, data: &[u8]) -> Result<u64, &'static str> {
+    let mut lbs = LOOPBACK.lock();
+    let lb = lbs.get_mut(mount_point).ok_or("Not a FUSE mount")?;
+    let ino = lb.next_ino;
+    lb.next_ino += 1;
+    lb.files.insert(String::from(name), (ino, data.to_vec()));
+    Ok(ino)
 }
 
 /// Unmount a FUSE filesystem
@@ -212,6 +237,60 @@ fn send_request(
     Ok(unique)
 }
 
+fn take_response(mount_point: &str, unique: u64) -> Option<Vec<u8>> {
+    let mut mounts = MOUNTS.lock();
+    mounts.get_mut(mount_point)?.responses.remove(&unique)
+}
+
+fn encode_entry(ino: u64, size: u64, mode: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(20);
+    out.extend_from_slice(&ino.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&mode.to_le_bytes());
+    out
+}
+
+/// FUSE entry: ino u64, size u64, mode u32.
+pub fn parse_fuse_entry(data: &[u8]) -> Option<(u64, u64, u32)> {
+    if data.len() < 20 {
+        return None;
+    }
+    let ino = u64::from_le_bytes(data[0..8].try_into().ok()?);
+    let size = u64::from_le_bytes(data[8..16].try_into().ok()?);
+    let mode = u32::from_le_bytes(data[16..20].try_into().ok()?);
+    Some((ino, size, mode))
+}
+
+fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]) {
+    let (ino, size) = {
+        let lbs = LOOPBACK.lock();
+        let Some(lb) = lbs.get(mount_point) else {
+            return;
+        };
+        if opcode != FuseOpcode::Lookup {
+            return;
+        }
+        let name = core::str::from_utf8(req).unwrap_or("");
+        let Some(&(ino, ref data)) = lb.files.get(name) else {
+            return;
+        };
+        (ino, data.len() as u64)
+    };
+    let _ = write_response(mount_point, unique, encode_entry(ino, size, 0o100644));
+}
+
+fn serve_loopback_read(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if let Some((_, data)) = lb.files.values().find(|(ino, _)| *ino == nodeid) {
+        let payload = data.clone();
+        drop(lbs);
+        let _ = write_response(mount_point, unique, payload);
+    }
+}
+
 /// FUSE daemon reads the next pending request (via /dev/fuse read)
 pub fn read_request(mount_point: &str) -> Option<FuseRequest> {
     let mut mounts = MOUNTS.lock();
@@ -236,21 +315,23 @@ pub fn write_response(mount_point: &str, unique: u64, data: Vec<u8>) -> Result<(
 
 /// Handle a VFS lookup through FUSE
 pub fn fuse_lookup(mount_point: &str, parent: u64, name: &str) -> Result<FuseEntry, &'static str> {
-    let _unique = send_request(
+    let unique = send_request(
         mount_point,
         FuseOpcode::Lookup,
         parent,
         name.as_bytes().to_vec(),
     )?;
-    // In a real implementation, wait for the response from the daemon
+    serve_loopback(mount_point, FuseOpcode::Lookup, unique, name.as_bytes());
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    let (ino, size, mode) = parse_fuse_entry(&resp).ok_or("short entry")?;
     Ok(FuseEntry {
-        nodeid: 2,
+        nodeid: ino,
         generation: 1,
         attr: FuseAttr {
-            ino: 2,
-            size: 0,
-            blocks: 0,
-            mode: 0o100644,
+            ino,
+            size,
+            blocks: size.div_ceil(512),
+            mode,
             nlink: 1,
             uid: 0,
             gid: 0,
@@ -273,8 +354,16 @@ pub fn fuse_read(
     let mut data = Vec::with_capacity(16);
     data.extend_from_slice(&offset.to_le_bytes());
     data.extend_from_slice(&(size as u64).to_le_bytes());
-    let _unique = send_request(mount_point, FuseOpcode::Read, nodeid, data)?;
-    Ok(Vec::new()) // Wait for response
+    let unique = send_request(mount_point, FuseOpcode::Read, nodeid, data)?;
+    serve_loopback_read(mount_point, unique, nodeid);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    let start = offset as usize;
+    let end = start.saturating_add(size as usize).min(resp.len());
+    if start >= resp.len() {
+        Ok(Vec::new())
+    } else {
+        Ok(resp[start..end].to_vec())
+    }
 }
 
 /// Handle a VFS write through FUSE
@@ -300,7 +389,49 @@ pub fn list_mounts() -> Vec<(String, u32, bool)> {
         .collect()
 }
 
+pub const GATE_FUSE_MARKER: &str = "GATE_FUSE lookup";
+const GATE_FUSE_PAYLOAD: &[u8] = b"knoxos-fuse\n";
+
+fn lookup_self_test() -> bool {
+    if mount("/mnt/fuse", 1).is_err() {
+        serial_println!("[fuse] GATE_FUSE FAILED: mount");
+        return false;
+    }
+    if loopback_put("/mnt/fuse", "gate.txt", GATE_FUSE_PAYLOAD).is_err() {
+        serial_println!("[fuse] GATE_FUSE FAILED: put");
+        return false;
+    }
+    let entry = match fuse_lookup("/mnt/fuse", 1, "gate.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    match fuse_read("/mnt/fuse", entry.nodeid, 0, 64) {
+        Ok(data)
+            if data == GATE_FUSE_PAYLOAD && entry.attr.size == GATE_FUSE_PAYLOAD.len() as u64 =>
+        {
+            serial_println!(
+                "[fuse] {} (LOOKUP+READ {} bytes ino={})",
+                GATE_FUSE_MARKER,
+                data.len(),
+                entry.nodeid
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[fuse] GATE_FUSE FAILED read_len={}",
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
 /// Initialize FUSE subsystem
 pub fn init() {
     serial_println!("[fuse] Filesystem in Userspace (FUSE) initialized");
+    let _ = lookup_self_test();
 }

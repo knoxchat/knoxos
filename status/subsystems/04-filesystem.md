@@ -84,12 +84,12 @@
 ### Stub
 - [x] **AHCI** — HBA reset, port start, command-list + PRDT DMA read/write (C4); IDENTIFY parsed
 - [x] **NVMe** — controller enable, admin/I/O queues, PRP bounce DMA read/write (C5)
-- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk (`GATE_EXFAT block`). ZFS / CIFS still in-memory or later.
+- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk (`GATE_EXFAT block`). CIFS SMB2 WRITE/READ (`GATE_CIFS smb2`). ZFS uberblock + Fletcher-4 (`GATE_ZFS block`).
 - [x] Btrfs — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`)
 - [x] XFS — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`)
 - [x] JBD2 journal replay — descriptor + data + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount calls the same walker.
 - [x] ext4 default root — second virtio-blk (`mkfs.ext4`) mounted at `/` (`GATE_C9 ext4 root`). `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual.
-- [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE / NFS still not registered.
+- [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE LOOKUP+READ (`GATE_FUSE lookup`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`).
 - [x] inotify — `emit_event` from VFS write/unlink and `open(O_CREAT)`; watch can read (**Gate H3**). Ring 3 `inotify_init1`/`add_watch`/`read` is live (Q3). `fanotify_init` returns ENOSYS (P4).
 - [x] Quotas — `write_file_checked` returns `EDQUOT` when the hard limit is exceeded (`GATE_QUOTA enforce`)
 

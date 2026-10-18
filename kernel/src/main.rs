@@ -46,38 +46,38 @@ use knoxos_kernel::{
     cgroups_v2_advanced, cluster, compiler, coredump, css_engine, deployment, depthcharge,
     desktop_apps_ext, desktop_ops, dm_crypt, federated, fuzz, gamepad, help_system, hw_bringup,
     io_sched, io_uring_advanced, js_engine, k8s, kcov, kdb, keyring, kpanic, ktrace, live_usb,
-    man_pages, memory_pool, multimon, netns, nfs, nfs_server, p9fs, partition, pkg_dist,
-    posix_tests, posix2024, power_events, quic, riscv64_boot, rust_std, rwlock, sched_debug, sctp,
-    secure_boot, security_cert, selfhost, tablet_mode, tokenizer, touchscreen, verify, video_codec,
-    voice, vulkan, webcam, xdp, zfs,
+    man_pages, memory_pool, multimon, netns, nfs_server, p9fs, partition, pkg_dist, posix_tests,
+    posix2024, power_events, quic, riscv64_boot, rust_std, rwlock, sched_debug, sctp, secure_boot,
+    security_cert, selfhost, tablet_mode, tokenizer, touchscreen, verify, video_codec, voice,
+    vulkan, webcam, xdp,
 };
 use knoxos_kernel::{
-    acpi, acpi_tables, ahci, ai, allocator, alsa, apic_timer, arch, audit, battery, bcache,
-    benchmark, block, bluetooth, boot_splash, btrfs, cabi, capabilities, cgroup2, cgroups,
-    chromium_sandbox, clock, close_range, cmdline, container, context, cpio, cpufreq, cred, cron,
-    crypto, dbus, desktop_apps, devfs, dmesg, dpkg, drm, dynlink, e1000, ebpf, elf, epoll, eventfd,
-    exfat, ext2, fanotify, fat32, fd, fifo, file_manager, flock, fontconfig, futex, futex2, gdt,
-    gettext, glibc_compat, gpio, gpu, gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http,
-    huge_pages, hwtest, i2c, i18n, i915, ima, inference_api, init, inotify, input_event,
-    interrupts, io_prio, io_uring, iommu, ipc, journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm,
-    landlock, ldknoxos, libc_funcs, livepatch, llm, media_player, membarrier, memfd, memory, midi,
-    mmap, modules, mount, mount_api, mqueue, multiboot, musl, namespaces, nested_irq,
-    net_production, network_manager, ntfs, ntp, numa, nvme, onnx, oom, ota_update, overlayfs,
-    package_manager, path, pci, pcie_ecam, perf, persist, pgo, pgrp, pidfd, pidns, pipe, posix_ext,
-    posix_timer, power, preempt_rt, println, process, procfs, procfs_extended, procfs_full, ptrace,
-    pty, pulseaudio, quota, random, recovery, release_sign, repo_server, rlimit, rseq, rtc,
-    rtl8139, sched_ext, scheduler, screen_record, seccomp, security, selinux, serial_println,
-    service_manager, session, shell, shell_startup, shm, signalfd, signals, slab, smp,
-    socket_activation, soloader, sound, splice, ssp, stack_guard, strace, stress_test, suspend,
-    swap, sysctl, sysfs, sysinfo, syslog,
+    acpi, acpi_tables, ahci, ai, allocator, alsa, amdgpu, apic_timer, arch, audit, ax211, battery,
+    bcache, benchmark, block, bluetooth, boot_splash, bridge, broadcom_wifi, btrfs, cabi,
+    capabilities, cgroup2, cgroups, chromium_sandbox, cifs, clock, close_range, cmdline, container,
+    context, cpio, cpufreq, cred, cron, crypto, dbus, desktop_apps, devfs, dmesg, dpkg, drm,
+    dynlink, e1000, ebpf, elf, epoll, eventfd, exfat, ext2, fanotify, fat32, fd, fifo,
+    file_manager, flock, fontconfig, fuse, futex, futex2, gdt, gettext, glibc_compat, gpio, gpu,
+    gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http, huge_pages, hwtest, i2c, i18n, i915,
+    ima, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring, iommu, ipc,
+    journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm, landlock, ldknoxos, libc_funcs, livepatch,
+    llm, media_player, membarrier, memfd, memory, midi, mmap, modules, mount, mount_api, mqueue,
+    multiboot, musl, namespaces, nested_irq, net_production, network_manager, ntfs, ntp, numa,
+    nvme, onnx, oom, ota_update, overlayfs, package_manager, path, pci, pcie_ecam, perf, persist,
+    pgo, pgrp, pidfd, pidns, pipe, posix_ext, posix_timer, power, preempt_rt, println, process,
+    procfs, procfs_extended, procfs_full, ptrace, pty, pulseaudio, quota, random, recovery,
+    release_sign, repo_server, rlimit, rseq, rtc, rtl8139, sched_ext, scheduler, screen_record,
+    seccomp, security, selinux, serial_println, service_manager, session, shell, shell_startup,
+    shm, signalfd, signals, slab, smp, socket_activation, soloader, sound, splice, ssp,
+    stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs, sysinfo, syslog,
     task::{Task, executor::Executor, keyboard},
-    terminal, thermal, thp, threads, timerfd, tls, tmpfs, tpm2, tty, uds, usb, usb_hid,
-    userfaultfd, usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu, virtio_input,
-    virtio_tablet, visual_test, vivaldi, vlan, vmm, vterm, wayland, wifi, workqueue, xattr, xdg,
-    xfs,
+    terminal, thermal, thp, threads, thunderbolt, timerfd, tls, tmpfs, tpm2, tty, uds, usb,
+    usb_hid, userfaultfd, usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu,
+    virtio_input, virtio_tablet, visual_test, vivaldi, vlan, vmm, vterm, wayland, wifi, workqueue,
+    wpa3_sae, xattr, xdg, xfs, zfs,
 };
 #[cfg(feature = "net")]
-use knoxos_kernel::{dhcp, dns, firewall, ipv6, net, netfilter, netint, virtio_net};
+use knoxos_kernel::{dhcp, dns, firewall, ipv6, net, netfilter, netint, nfs, virtio_net};
 
 /// Configure the bootloader to map all physical memory
 #[cfg(target_arch = "x86_64")]
@@ -610,6 +610,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize eBPF subsystem
     ebpf::init();
     wifi::init();
+    wpa3_sae::init();
+    bridge::init();
     vlan::init();
 
     // ─── Phase 7: Hardware Drivers & Security Hardening ─────────────
@@ -640,6 +642,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     tpm2::init();
     i2c::init();
     gpio::init();
+    cifs::init();
+    fuse::init();
+    amdgpu::init();
+    ax211::init();
+    broadcom_wifi::boot_init();
+    thunderbolt::init();
 
     // Initialize virtual memory swapping
     swap::init();
@@ -697,6 +705,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize KVM hardware virtualization
     kvm::init();
+    container::init();
 
     // Initialize network namespace support
     #[cfg(feature = "stub-drivers")]
@@ -735,6 +744,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initialize GPU compute shader framework
     gpu_compute::init();
+    llm::init();
 
     // Initialize cluster / distributed computing
     #[cfg(feature = "stub-drivers")]
@@ -758,8 +768,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     video_codec::init();
 
     // Initialize NFS v4 client
-    #[cfg(feature = "stub-drivers")]
-    #[cfg(feature = "stub-drivers")]
+    #[cfg(feature = "net")]
     nfs::init();
 
     // Initialize I/O scheduler subsystem (deadline, CFQ, BFQ, kyber, mq-deadline)
@@ -950,8 +959,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("[KnoxOS] Phase 17: Formal verification, enterprise storage & POSIX.1-2024...");
 
     // Initialize ZFS enterprise filesystem (pools, datasets, snapshots, ARC, RAIDZ)
-    #[cfg(feature = "stub-drivers")]
-    #[cfg(feature = "stub-drivers")]
     zfs::init();
 
     // Initialize formal verification subsystem (invariants, contracts, state machines)
@@ -1009,6 +1016,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     fontconfig::init();
     gui::cjk_font::init();
     gui::complex_text::init();
+    gui::ai_assistant::init();
     gui::ime::init();
     i18n::init();
     gettext::init();

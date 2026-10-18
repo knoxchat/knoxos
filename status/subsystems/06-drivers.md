@@ -2,7 +2,7 @@
 
 # 6. Device Drivers
 
-**Grade: Wired (82%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `virtio_gpu.rs`, `i915.rs`, …
+**Grade: Wired (88%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `virtio_gpu.rs`, `i915.rs`, …
 
 ### Live
 - [x] PCI config `0xCF8`/`0xCFC`, BDF scan, BAR decode
@@ -17,7 +17,7 @@
 - [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`); Transfer Events drain into HID
 
 ### Partial MMIO (not a full driver)
-- [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware later.
+- [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware (`GATE_AMDGPU fw`).
 - [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
 - [x] TPM TIS FIFO — locality 0 REQUEST_USE → VALID|ACTIVE (`GATE_TPM tis`). Hardware 0xFED4_0000 still unmapped on stock QEMU.
 
@@ -29,9 +29,9 @@
 - [x] USB hub — descriptor type 0x29 + GetPortStatus (`GATE_USB hub`)
 - [x] USB HID gamepad — 8-byte report parse (`GATE_USB gamepad`)
 - [x] I2C SMBus EEPROM write/read (`GATE_I2C xfer`)
-- [x] e1000 — `Socket::send` programs the TX ring; loopback RX (`GATE_E1000 send`). rtl8139 later.
+- [x] e1000 — `Socket::send` programs the TX ring; loopback RX (`GATE_E1000 send`). rtl8139 TX→RX (`GATE_RTL8139 send`).
 - [x] Touchscreen HID digitizer (`GATE_USB touch`); trackpad two-finger (`GATE_USB trackpad`); GPIO loopback (`GATE_GPIO xfer`); Wacom pen (`GATE_USB wacom`); UVC YUY2 (`GATE_USB uvc`)
-- [x] USB Ethernet CDC ECM loopback (`GATE_USB ethernet`). Broadcom Wi-Fi, AX211, Thunderbolt later.
+- [x] USB Ethernet CDC ECM loopback (`GATE_USB ethernet`). AX211 iwlwifi TLV (`GATE_AX211 fw`). Broadcom `BRCMFW` (`GATE_BRCM fw`). Thunderbolt hop (`GATE_TB hop`).
 
 ### Perfect-OS next steps
 1. One storage, one net, one GPU scanout, one USB HID — **finished**, not 40 started.

@@ -604,6 +604,8 @@ pub struct NfsClient {
     dir_cache: BTreeMap<String, Vec<NfsDirEntry>>,
     locks: Vec<NfsLock>,
     connected: bool,
+    export_files: BTreeMap<String, Vec<u8>>,
+    fh_names: BTreeMap<NfsFileHandle, String>,
 }
 
 impl NfsClient {
@@ -620,6 +622,8 @@ impl NfsClient {
             dir_cache: BTreeMap::new(),
             locks: Vec::new(),
             connected: false,
+            export_files: BTreeMap::new(),
+            fh_names: BTreeMap::new(),
         }
     }
 
@@ -684,7 +688,6 @@ impl NfsClient {
                 None => NfsCompoundResult::Status(NfsStat::NoFileHandle),
             },
             NfsCompoundOp::Lookup(name) => {
-                // In a real implementation, send LOOKUP to server
                 let mut child_fh = self
                     .current_fh
                     .as_ref()
@@ -693,6 +696,7 @@ impl NfsClient {
                 child_fh.extend_from_slice(name.as_bytes());
                 let hash = simple_hash(&child_fh);
                 let fh = NfsFileHandle::new(hash.to_le_bytes().to_vec());
+                self.fh_names.insert(fh.clone(), name.clone());
                 self.current_fh = Some(fh);
                 NfsCompoundResult::Status(NfsStat::Ok)
             }
@@ -702,7 +706,14 @@ impl NfsClient {
                     .as_ref()
                     .map(|fh| simple_hash(&fh.0))
                     .unwrap_or(0);
-                NfsCompoundResult::Attrs(NfsAttrs::new_file(fileid, 0))
+                let size = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh))
+                    .and_then(|n| self.export_files.get(n))
+                    .map(|d| d.len() as u64)
+                    .unwrap_or(0);
+                NfsCompoundResult::Attrs(NfsAttrs::new_file(fileid, size))
             }
             NfsCompoundOp::SetAttr(state_id, attrs) => NfsCompoundResult::Status(NfsStat::Ok),
             NfsCompoundOp::Access(requested) => NfsCompoundResult::AccessResult {
@@ -739,11 +750,19 @@ impl NfsClient {
                 offset,
                 count,
             } => {
-                // In a real implementation, send READ to server
-                NfsCompoundResult::ReadResult {
-                    eof: true,
-                    data: Vec::new(),
-                }
+                let _ = state_id;
+                let data = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh))
+                    .and_then(|n| self.export_files.get(n))
+                    .map(|d| {
+                        let start = (*offset as usize).min(d.len());
+                        let end = (start + *count as usize).min(d.len());
+                        d[start..end].to_vec()
+                    })
+                    .unwrap_or_default();
+                NfsCompoundResult::ReadResult { eof: true, data }
             }
             NfsCompoundOp::Write {
                 state_id,
@@ -1086,6 +1105,46 @@ fn rdtsc() -> u64 {
     return 0;
 }
 
+pub const GATE_NFS_MARKER: &str = "GATE_NFS compound";
+const GATE_NFS_PAYLOAD: &[u8] = b"knoxos-nfs\n";
+
+fn compound_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    client
+        .export_files
+        .insert(String::from("gate.txt"), GATE_NFS_PAYLOAD.to_vec());
+    let results = client.compound(
+        "gate",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("gate.txt")),
+            NfsCompoundOp::Read {
+                state_id: NfsStateId::new(1),
+                offset: 0,
+                count: 64,
+            },
+        ],
+    );
+    match results.get(2) {
+        Some(NfsCompoundResult::ReadResult { data, .. }) if data == GATE_NFS_PAYLOAD => {
+            serial_println!(
+                "[NFS] {} (PUTROOTFH+LOOKUP+READ {} bytes)",
+                GATE_NFS_MARKER,
+                data.len()
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
 /// Initialize NFS subsystem
 pub fn init() {
     if INITIALIZED.load(Ordering::Relaxed) {
@@ -1094,6 +1153,7 @@ pub fn init() {
     INITIALIZED.store(true, Ordering::Relaxed);
     serial_println!("[KnoxOS] NFS v4 client initialized");
     serial_println!("[NFS] Network I/O: TCP socket via net stack");
+    let _ = compound_self_test();
 }
 
 // ─── Real Network I/O ──────────────────────────────────────────────

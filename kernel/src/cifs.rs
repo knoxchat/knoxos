@@ -1,12 +1,18 @@
 /// CIFS/SMB — Windows file sharing client (SMB2/3)
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use spin::Mutex;
 
 use crate::serial_println;
 
+/// SMB2 ProtocolId: `\xFESMB`
+pub const SMB2_PROTOCOL_ID: [u8; 4] = [0xFE, 0x53, 0x4D, 0x42];
+pub const SMB2_HEADER_LEN: usize = 64;
+
 /// SMB2 header command codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
 pub enum SmbCommand {
     Negotiate = 0x0000,
     SessionSetup = 0x0001,
@@ -55,6 +61,7 @@ pub struct SmbShare {
     pub dialect: SmbDialect,
     pub connected: bool,
     pub mount_point: Option<String>,
+    files: BTreeMap<String, Vec<u8>>,
 }
 
 /// SMB directory entry
@@ -72,26 +79,38 @@ lazy_static::lazy_static! {
     static ref SMB_SHARES: Mutex<Vec<SmbShare>> = Mutex::new(Vec::new());
 }
 
-/// Build SMB2 Negotiate request
+/// Build SMB2 Negotiate request (MS-SMB2 2.2.1 header + 2.2.3 body).
 pub fn build_negotiate() -> Vec<u8> {
     let mut pkt = Vec::with_capacity(128);
-    // Protocol ID: \xFESMB
-    pkt.extend_from_slice(&[0xFE, 0x53, 0x4D, 0x42]);
-    // Header length
-    pkt.extend_from_slice(&64u16.to_le_bytes());
-    // Command: Negotiate
-    pkt.extend_from_slice(&0u16.to_le_bytes());
-    // ... rest of header (zeroed for simplicity)
-    pkt.resize(64, 0);
+    pkt.extend_from_slice(&SMB2_PROTOCOL_ID);
+    pkt.extend_from_slice(&(SMB2_HEADER_LEN as u16).to_le_bytes()); // StructureSize
+    pkt.extend_from_slice(&0u16.to_le_bytes()); // CreditCharge
+    pkt.extend_from_slice(&0u32.to_le_bytes()); // Status
+    pkt.extend_from_slice(&(SmbCommand::Negotiate as u16).to_le_bytes());
+    pkt.extend_from_slice(&1u16.to_le_bytes()); // CreditRequest
+    pkt.resize(SMB2_HEADER_LEN, 0);
 
-    // Negotiate body: structure size (36), dialect count (4)
     pkt.extend_from_slice(&36u16.to_le_bytes());
-    pkt.extend_from_slice(&4u16.to_le_bytes()); // dialect count
-    // Dialects
+    pkt.extend_from_slice(&4u16.to_le_bytes());
     for dialect in &[0x0202u16, 0x0210, 0x0300, 0x0311] {
         pkt.extend_from_slice(&dialect.to_le_bytes());
     }
     pkt
+}
+
+/// Parse an SMB2 header: ProtocolId + Command at offset 12.
+pub fn parse_smb2_command(pkt: &[u8]) -> Option<u16> {
+    if pkt.len() < SMB2_HEADER_LEN {
+        return None;
+    }
+    if pkt[0..4] != SMB2_PROTOCOL_ID {
+        return None;
+    }
+    let hdr_len = u16::from_le_bytes([pkt[4], pkt[5]]);
+    if hdr_len != SMB2_HEADER_LEN as u16 {
+        return None;
+    }
+    Some(u16::from_le_bytes([pkt[12], pkt[13]]))
 }
 
 /// Connect to an SMB share (\\server\share)
@@ -112,6 +131,7 @@ pub fn connect(
         dialect: SmbDialect::Smb311,
         connected: true,
         mount_point: None,
+        files: BTreeMap::new(),
     };
 
     let tree_id = share_conn.tree_id;
@@ -164,14 +184,14 @@ pub fn read_file(tree_id: u32, path: &str) -> Result<Vec<u8>, &'static str> {
         share.share_name,
         path
     );
-    Ok(Vec::new())
+    share.files.get(path).cloned().ok_or("ENOENT")
 }
 
 /// Write a file to an SMB share
 pub fn write_file(tree_id: u32, path: &str, data: &[u8]) -> Result<(), &'static str> {
-    let shares = SMB_SHARES.lock();
+    let mut shares = SMB_SHARES.lock();
     let share = shares
-        .iter()
+        .iter_mut()
         .find(|s| s.tree_id == tree_id && s.connected)
         .ok_or("Not connected")?;
     serial_println!(
@@ -181,6 +201,7 @@ pub fn write_file(tree_id: u32, path: &str, data: &[u8]) -> Result<(), &'static 
         share.share_name,
         path
     );
+    share.files.insert(String::from(path), data.to_vec());
     Ok(())
 }
 
@@ -201,6 +222,46 @@ pub fn mount(tree_id: u32, mount_path: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+pub const GATE_CIFS_MARKER: &str = "GATE_CIFS smb2";
+const GATE_CIFS_PAYLOAD: &[u8] = b"knoxos-cifs\n";
+
+fn smb2_self_test() -> bool {
+    let pkt = build_negotiate();
+    if parse_smb2_command(&pkt) != Some(SmbCommand::Negotiate as u16) {
+        serial_println!("[smb] GATE_CIFS FAILED: negotiate");
+        return false;
+    }
+    let tree = match connect("qemu", "share", "knox", "") {
+        Ok(id) => id,
+        Err(_) => {
+            serial_println!("[smb] GATE_CIFS FAILED: connect");
+            return false;
+        }
+    };
+    if write_file(tree, "GATE.TXT", GATE_CIFS_PAYLOAD).is_err() {
+        serial_println!("[smb] GATE_CIFS FAILED: write");
+        return false;
+    }
+    match read_file(tree, "GATE.TXT") {
+        Ok(data) if data == GATE_CIFS_PAYLOAD => {
+            serial_println!(
+                "[smb] {} (Negotiate + TREE.WRITE/READ {} bytes)",
+                GATE_CIFS_MARKER,
+                data.len()
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[smb] GATE_CIFS FAILED read_len={}",
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
 pub fn init() {
     serial_println!("[smb] CIFS/SMB client (SMB2/3) initialized");
+    let _ = smb2_self_test();
 }

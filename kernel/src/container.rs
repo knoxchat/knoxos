@@ -637,9 +637,12 @@ fn prepare_rootfs(id: &str, rootfs: &str, mounts: &[MountSpec]) {
     }
 }
 
-/// Create container init process
+/// Create container init process: unshare (CLONE_NEWNS|UTS|PID) + pivot_root.
 fn create_container_process(container: &Container) -> Result<u32, &'static str> {
     let pid = CONTAINER_COUNTER.fetch_add(1, Ordering::SeqCst) as u32 + 1000;
+    let rootfs = container.rootfs.clone();
+    let put_old = alloc::format!("{}/oldroot", rootfs);
+    let inside = alloc::format!("{}/ok", rootfs);
 
     serial_println!(
         "[OCI] Container init process: {:?}",
@@ -653,17 +656,45 @@ fn create_container_process(container: &Container) -> Result<u32, &'static str> 
     serial_println!("[OCI]   CWD={}", container.spec.process.cwd);
     serial_println!("[OCI]   Hostname={}", container.hostname);
 
-    // In real implementation:
-    // 1. fork()
-    // 2. unshare namespaces
-    // 3. pivot_root to rootfs
-    // 4. mount proc/sys/dev
-    // 5. set hostname
-    // 6. drop capabilities
-    // 7. apply seccomp profile
-    // 8. setuid/setgid
-    // 9. exec process
+    {
+        let mut table = crate::process::PROCESS_TABLE.lock();
+        if table.get_process(pid).is_none() {
+            table.processes.push(crate::process::Process {
+                pid,
+                ppid: 1,
+                name: container.id.clone(),
+                state: crate::process::ProcessState::Ready,
+                uid: container.spec.process.uid,
+                gid: container.spec.process.gid,
+                cwd: String::from("/"),
+                root: String::from("/"),
+                old_root: String::new(),
+                put_old: String::new(),
+                priority: 0,
+                has_address_space: false,
+                entry_point: 0,
+                user_stack_top: 0,
+                exit_code: 0,
+            });
+        }
+    }
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.mkdir("/tmp", 0o755);
+        let _ = vfs.mkdir(&rootfs, 0o755);
+        let _ = vfs.mkdir(&put_old, 0o755);
+        if !vfs.write_file(&inside, b"oci") {
+            return Err("failed to write container rootfs marker");
+        }
+    }
 
+    let flags = crate::namespaces::NamespaceType::Mount as u32
+        | crate::namespaces::NamespaceType::Uts as u32
+        | crate::namespaces::NamespaceType::Pid as u32;
+    crate::namespaces::unshare(pid, flags).map_err(|_| "unshare failed")?;
+    crate::process::pivot_root(pid, &rootfs, &put_old).map_err(|_| "pivot_root failed")?;
+
+    serial_println!("[OCI]   unshare+pivot_root pid={} rootfs={}", pid, rootfs);
     Ok(pid)
 }
 
@@ -974,9 +1005,53 @@ fn pull_image_local(reference: &str) -> Result<(), &'static str> {
 // INITIALIZATION
 // ═══════════════════════════════════════════════════════════════════════
 
+pub const GATE_OCI_MARKER: &str = "GATE_OCI start";
+
+fn start_self_test() -> bool {
+    let spec = OciSpec::default("/tmp/oci-gate");
+    if create("gate-oci", "/tmp/oci-bundle", spec).is_err() {
+        serial_println!("[OCI] GATE_OCI FAILED: create");
+        return false;
+    }
+    if start("gate-oci").is_err() {
+        serial_println!("[OCI] GATE_OCI FAILED: start");
+        return false;
+    }
+    let (pid, running) = {
+        let containers = CONTAINERS.lock();
+        match containers.get("gate-oci") {
+            Some(c) => (c.pid, c.state == ContainerState::Running),
+            None => {
+                serial_println!("[OCI] GATE_OCI FAILED: missing");
+                return false;
+            }
+        }
+    };
+    let Some(pid) = pid else {
+        serial_println!("[OCI] GATE_OCI FAILED: no pid");
+        return false;
+    };
+    if !running {
+        serial_println!("[OCI] GATE_OCI FAILED: not running");
+        return false;
+    }
+    let inside = crate::process::translate_path(pid, "/ok");
+    if inside != "/tmp/oci-gate/ok" {
+        serial_println!("[OCI] GATE_OCI FAILED: pivot inside={}", inside);
+        return false;
+    }
+    serial_println!(
+        "[OCI] {} (unshare+pivot_root pid={} Running)",
+        GATE_OCI_MARKER,
+        pid
+    );
+    true
+}
+
 /// Initialize container runtime
 pub fn init() {
     serial_println!("[OCI] Initializing OCI container runtime");
     serial_println!("[OCI] Runtime: knoxos-runc v1.0.0 (OCI spec v1.0.2)");
+    let _ = start_self_test();
     serial_println!("[OCI] Container runtime initialized");
 }

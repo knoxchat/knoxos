@@ -207,6 +207,40 @@ pub fn bridge_delete(name: &str) -> bool {
     }
 }
 
+pub const GATE_BRIDGE_MARKER: &str = "GATE_BRIDGE fdb";
+
+fn fdb_self_test() -> bool {
+    if bridge_create("br-gate").is_err() {
+        serial_println!("[bridge] GATE_BRIDGE FAILED: create");
+        return false;
+    }
+    if bridge_add_port("br-gate", "veth0").is_err() || bridge_add_port("br-gate", "veth1").is_err()
+    {
+        serial_println!("[bridge] GATE_BRIDGE FAILED: add_port");
+        return false;
+    }
+    let src = [0x02, 0x00, 0x00, 0x00, 0x00, 0x0A];
+    let dst = [0x02, 0x00, 0x00, 0x00, 0x00, 0x0B];
+    let flood = bridge_forward("br-gate", src, dst, 1);
+    if flood != alloc::vec![2] {
+        serial_println!("[bridge] GATE_BRIDGE FAILED: flood {:?}", flood);
+        return false;
+    }
+    let _ = bridge_forward("br-gate", dst, src, 2);
+    let learned = bridge_forward("br-gate", [0x02, 0x00, 0x00, 0x00, 0x00, 0x0C], src, 2);
+    if learned != alloc::vec![1] {
+        serial_println!("[bridge] GATE_BRIDGE FAILED: fdb {:?}", learned);
+        return false;
+    }
+    serial_println!(
+        "[bridge] {} (learn {} → port 1)",
+        GATE_BRIDGE_MARKER,
+        learned[0]
+    );
+    true
+}
+
 pub fn init() {
     serial_println!("[bridge] Bridge/TAP networking initialized");
+    let _ = fdb_self_test();
 }

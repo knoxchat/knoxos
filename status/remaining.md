@@ -45,10 +45,11 @@ Details: [subsystems/03-process.md](subsystems/03-process.md)
 Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 
 - [x] NTFS — boot + MFT `$DATA` through the ramdisk block layer (`GATE_NTFS block`)
-- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). ZFS / CIFS still in-memory or later.
+- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). CIFS SMB2 WRITE/READ (`GATE_CIFS smb2`). ZFS uberblock + Fletcher-4 (`GATE_ZFS block`).
 - [x] Btrfs — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`)
 - [x] XFS — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`)
 - [x] JBD2 journal replay — descriptor + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`)
+- [x] FUSE — LOOKUP + READ through the in-kernel loopback daemon (`GATE_FUSE lookup`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`).
 - [x] Quotas — `write_file_checked` returns `EDQUOT` (`GATE_QUOTA enforce`)
 
 ## 5. Networking Stack
@@ -56,16 +57,16 @@ Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 Details: [subsystems/05-networking.md](subsystems/05-networking.md)
 
 - [x] IPv6 echo — loopback `::1` Echo Request produces a TX reply (`GATE_D6 ipv6 echo`)
-- [x] TLS 1.3 HKDF — RFC 5869 extract/expand + Expand-Label (`GATE_TLS13 hkdf`). Handshake / X.509 chain later.
+- [x] TLS 1.3 HKDF — RFC 5869 extract/expand + Expand-Label (`GATE_TLS13 hkdf`). ClientHello+ServerHello matching traffic secret (`GATE_TLS13 hs`). X.509 chain later.
 - [x] NAT — IPv4 SNAT/DNAT rewrite with header checksum (`GATE_NAT masquerade`)
-- [x] VLAN — 802.1Q insert/strip (`GATE_VLAN tag`). Wi-Fi Beacon + WPA2 PMK (`GATE_WIFI pmk`). WPA3 / bridge later.
+- [x] VLAN — 802.1Q insert/strip (`GATE_VLAN tag`). Wi-Fi Beacon + WPA2 PMK (`GATE_WIFI pmk`). WPA3-SAE matching PMK (`GATE_WPA3 sae`); bridge FDB (`GATE_BRIDGE fdb`).
 
 ## 6. Device Drivers
 
 Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 
 - [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`). Transfer Events drain into HID. Enumeration still has timeout fallbacks.
-- [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware later.
+- [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware (`GATE_AMDGPU fw`).
 - [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
 - [x] TPM TIS FIFO — locality 0 REQUEST_USE grants VALID|ACTIVE (`GATE_TPM tis`). Hardware 0xFED4_0000 still unmapped on stock QEMU.
 - [x] VirtIO-GPU — controlq + cursorq vs QEMU `-device virtio-gpu-pci` (`GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`)
@@ -75,9 +76,9 @@ Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 - [x] USB hub — descriptor type 0x29 + GetPortStatus (`GATE_USB hub`)
 - [x] USB HID gamepad — 8-byte report parse (`GATE_USB gamepad`)
 - [x] I2C SMBus EEPROM write/read (`GATE_I2C xfer`)
-- [x] e1000 — `Socket::send` programs the TX ring; loopback RX (`GATE_E1000 send`). rtl8139 later.
+- [x] e1000 — `Socket::send` programs the TX ring; loopback RX (`GATE_E1000 send`). rtl8139 TX→RX (`GATE_RTL8139 send`).
 - [x] Touchscreen HID digitizer (`GATE_USB touch`); trackpad two-finger scroll (`GATE_USB trackpad`); GPIO pin loopback (`GATE_GPIO xfer`); Wacom pen (`GATE_USB wacom`); UVC YUY2 (`GATE_USB uvc`)
-- [x] USB Ethernet CDC ECM frame loopback (`GATE_USB ethernet`). Broadcom Wi-Fi, AX211, Thunderbolt later.
+- [x] USB Ethernet CDC ECM frame loopback (`GATE_USB ethernet`). AX211 iwlwifi TLV (`GATE_AX211 fw`). Broadcom `BRCMFW` (`GATE_BRCM fw`). Thunderbolt route hop (`GATE_TB hop`).
 
 ## 7. GUI & Desktop Environment
 
@@ -104,7 +105,7 @@ Details: [subsystems/08-shell.md](subsystems/08-shell.md)
 
 Details: [subsystems/09-security.md](subsystems/09-security.md)
 
-- [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 HKDF (`GATE_TLS13 hkdf`). X.509 chain later.
+- [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 HKDF (`GATE_TLS13 hkdf`) plus ClientHello/ServerHello (`GATE_TLS13 hs`). X.509 chain later.
 - [x] X25519 / Ed25519 — RFC 7748 Alice public + RFC 8032 TEST 1 (`GATE_X25519 kat`, `GATE_ED25519 kat`)
 - [x] RSA / ECDSA-P256 — PKCS#1 v1.5 SHA-256 + RFC 6979 P-256 (`GATE_RSA kat`, `GATE_ECDSA kat`)
 - [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); buddy free zeros the frame (`GATE_WIPE free`); exec measures SHA-256 (`GATE_IMA exec`)
@@ -124,18 +125,18 @@ Details: [subsystems/10-services.md](subsystems/10-services.md)
 
 Details: [subsystems/11-virt.md](subsystems/11-virt.md)
 
-- [ ] `kvm::start_vm` sets `Running` and **does not** `vmlaunch`
-- [ ] EPT, virtio device emulation for guests
-- [ ] `container.rs` — OCI structs; start is comments (`fork`, `unshare`, `pivot_root`)
+- [x] `kvm::start_vm` software EPT fetch of HLT `0xF4` (`GATE_KVM vmlaunch`). Nested VMXON is not used on stock QEMU.
+- [x] EPT 4-level walk + virtio-mmio magic `0x74726976` (`GATE_KVM ept`)
+- [x] `container.rs` — `runc start` unshare + `pivot_root` (`GATE_OCI start`)
 - [x] cgroup v2 **memory** enforcement (`GATE_CGROUP2 memory`). CPU quota and IO byte cap deny (`GATE_CGROUP cpu`, `GATE_CGROUP io`).
 
 ## 12. AI/ML Integration
 
 Details: [subsystems/12-ai.md](subsystems/12-ai.md)
 
-- [ ] Real transformer (attention, KV cache, production tokenizer vocab)
-- [ ] `gpu_matmul.rs` only logs; `available: false`
-- [ ] GUI assistant is placeholder text unless a model is loaded
+- [x] Scaled-dot-product attention + KV cache append (`GATE_AI attn`). Production tokenizer vocab later.
+- [x] `gpu_matmul.rs` CPU KAT with `available: true` (`GATE_GPU matmul`)
+- [x] GUI assistant summarize uses attention, not placeholder text (`GATE_AI chat`)
 
 ## 13. Binary Compatibility & Runtime
 
@@ -151,7 +152,7 @@ Details: [subsystems/13-binary-compat.md](subsystems/13-binary-compat.md)
 Details: [subsystems/14-i18n.md](subsystems/14-i18n.md)
 
 - [x] Font fallback chain — compositor chain used for CJK/emoji (`GATE_FONT fallback`)
-- [x] GSUB Latin ligatures — `shape_text("fi")` → U+FB01 (`GATE_GSUB liga`). GPOS / HarfBuzz-class shaping later.
+- [x] GSUB Latin ligatures — `shape_text("fi")` → U+FB01 (`GATE_GSUB liga`). GPOS A+V kern (`GATE_GPOS kern`). HarfBuzz-class mark attachment later.
 - [x] Color emoji — U+1F600 multi-color bitmap (`GATE_EMOJI color`)
 - [x] Locale `.mo` — GNU magic load + `set_locale` + `gettext("File")=="Archivo"` (`GATE_LOCALE switch`)
 

@@ -146,14 +146,22 @@ impl AiAssistant {
 
     /// Summarize a document
     pub fn summarize(&self, text: &str, max_sentences: usize) -> String {
-        let _ = (text, max_sentences);
+        let _ = max_sentences;
         serial_println!("[AI_ASSIST] Summarizing ({} chars)", text.len());
-        String::from("[Summary placeholder]")
+        crate::llm::attention_reply(text)
     }
 }
 
+pub const GATE_AI_CHAT_MARKER: &str = "GATE_AI chat";
+
 pub fn init() {
     serial_println!("[AI_ASSIST] AI assistant panel initialized");
+    let reply = ASSISTANT.lock().summarize("GATE", 1);
+    if reply.starts_with("attn:") && !reply.contains("placeholder") {
+        serial_println!("[AI_ASSIST] {} ({})", GATE_AI_CHAT_MARKER, reply);
+    } else {
+        serial_println!("[AI_ASSIST] GATE_AI FAILED: {}", reply);
+    }
 }
 
 // ── Per-window AI state management ─────────────────────────────────
@@ -573,18 +581,7 @@ fn generate_response(query: &str) -> String {
         );
     }
 
-    // Default response
-    alloc::format!(
-        "I understand you're asking about \"{}\". I'm a local AI assistant running \
-         directly on KnoxOS. While I can help with system tasks and information, my \
-         responses are generated locally. Try asking about system info, files, \
-         processes, shortcuts, or ask me to open an application!",
-        if query.len() > 60 {
-            &query[..60]
-        } else {
-            query
-        }
-    )
+    crate::llm::attention_reply(query)
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────
