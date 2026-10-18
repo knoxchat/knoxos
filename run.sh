@@ -308,7 +308,7 @@ run_qemu_bios() {
     log_step "Starting KnoxOS in QEMU (BIOS mode)..."
     echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
     echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
-    echo -e "  ${CYAN}Input:${NC}   XHCI USB tablet/keyboard (no PS/2)"
+    echo -e "  ${CYAN}Input:${NC}   virtio-tablet + USB tablet/kbd + PS/2 fallback"
     echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
     echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
     echo -e "  ${CYAN}Storage:${NC}  $PERSISTENT_DISK ($PERSISTENT_DISK_SIZE persistent)"
@@ -331,6 +331,8 @@ run_qemu_bios() {
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
         -device virtio-gpu-pci \
+        -device virtio-tablet-pci \
+        -device virtio-keyboard-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \
@@ -380,7 +382,7 @@ run_qemu_uefi() {
     log_step "Starting KnoxOS in QEMU (UEFI mode)..."
     echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
     echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
-    echo -e "  ${CYAN}Input:${NC}   XHCI USB tablet/keyboard (no PS/2)"
+    echo -e "  ${CYAN}Input:${NC}   virtio-tablet + USB tablet/kbd + PS/2 fallback"
     echo -e "  ${CYAN}OVMF:${NC}    $ovmf"
     echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
     echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
@@ -402,6 +404,8 @@ run_qemu_uefi() {
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
         -device virtio-gpu-pci \
+        -device virtio-tablet-pci \
+        -device virtio-keyboard-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \
@@ -449,6 +453,8 @@ run_qemu_debug() {
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
         -device virtio-gpu-pci \
+        -device virtio-tablet-pci \
+        -device virtio-keyboard-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \

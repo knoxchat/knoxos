@@ -340,7 +340,7 @@ pub fn spawn_ai_app() {
 }
 
 /// Spawn a Ring 3 PTY terminal (start-menu Terminal, not `WindowContentType::Terminal`).
-pub fn spawn_pty_terminal_app() {
+pub fn spawn_pty_terminal_app() -> Option<Pid> {
     let elf = crate::init::pty_terminal_client_elf_data();
-    let _ = spawn_or_log(&elf, "Terminal");
+    spawn_or_log(&elf, "Terminal")
 }

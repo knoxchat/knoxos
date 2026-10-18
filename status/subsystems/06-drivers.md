@@ -13,6 +13,7 @@
 - [x] NVMe admin/I/O queue DMA (C5)
 - [x] VGA/BGA framebuffer from bootloader
 - [x] VirtIO-GPU controlq 2D scanout + cursorq (`GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`)
+- [x] VirtIO-input modern tablet/keyboard (`GATE_VIRTIO input tablet`)
 - [x] RTC, HPET registers (timer path uses APIC + PIT)
 - [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`); Transfer Events drain into HID
 

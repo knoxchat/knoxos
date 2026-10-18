@@ -1264,15 +1264,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize integrated terminal (Fish-style UX, Alacritty-inspired renderer)
     terminal::init();
 
-    // Desktop pointer is USB HID (XHCI Transfer Events). Do not enable the
-    // i8042 aux port — that is the PS/2 fallback we are proving we do not need.
+    // USB HID KAT (does not prove QEMU Transfer Events). Then bind every
+    // live pointer: virtio-tablet absolute, USB digitizer, PS/2 aux fallback.
     let _ = usb_hid::cursor_self_test();
-
-    // Initialize USB tablet / absolute pointer for seamless QEMU cursor
     virtio_tablet::init();
-
-    // Initialize VirtIO mouse input (replaces USB tablet for cursor movement)
     virtio_input::init();
+    gui::input::init_mouse();
 
     // Clear boot splash before transitioning to desktop
     {
@@ -1305,10 +1302,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     );
     serial_println!(
         "[KnoxOS]   Mouse: {} (seamless cursor)",
-        if virtio_tablet::is_active() {
-            "USB Tablet (absolute)"
+        if virtio_input::is_active() {
+            "VirtIO tablet (absolute)"
+        } else if virtio_tablet::is_active() {
+            "USB tablet (absolute)"
         } else {
-            "USB HID (relative, no PS/2)"
+            "PS/2 + USB HID"
         }
     );
     serial_println!("[KnoxOS]   Keyboard active");

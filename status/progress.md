@@ -25,8 +25,8 @@ Memory Mgmt:        ████████████████████
 Process/Sched:      ████████████████████████░  99%  Wired         ← B3–B8 + I2/I3 + J1 + K1 join + L1 TLS + namespaces + eBPF/sched_ext pick (`GATE_EBPF exec`)
 Filesystem:         ████████████████████████░  99%  Wired         ← C1–C8 (`/bin` persist + JBD2 replay) + NTFS/exFAT/XFS/Btrfs/ZFS ramdisk + CIFS SMB2 + FUSE LOOKUP + NFS4 COMPOUND + inotify + VFS syscalls through BL
 Networking:         ██████████████████████░░░  88%  Wired         ← D1–D6 IPv6 echo TX + IPv4 NAT checksum + TLS HKDF/handshake + VLAN + e1000 Socket::send + rtl8139 loopback + Wi-Fi PMK + WPA3-SAE + bridge FDB + TCP send/recv
-Device Drivers:     ██████████████████████░░░  88%  Wired         ← AHCI + NVMe DMA + VirtIO-GPU (F8) + USB HID URB + XHCI MMIO + MSC/hub/gamepad/audio/trackpad/wacom/UVC/ethernet/touch + GPIO + DRM GEM + TPM TIS + I2C + i915 modeset + AMDGPU fw + e1000 + rtl8139 + AX211 + Broadcom + Thunderbolt
-GUI & Desktop:      ████████████████████████░  99%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + wl_display + VirtIO-GPU cursor + VSync + HDR/VRR + Ring 3 Terminal PTY + GATE_GPU scanout + IME pinyin + TTF hint
+Device Drivers:     ██████████████████████░░░  88%  Wired         ← AHCI + NVMe DMA + VirtIO-GPU (F8) + VirtIO-input tablet + USB HID URB + XHCI MMIO + MSC/hub/gamepad/audio/trackpad/wacom/UVC/ethernet/touch + GPIO + DRM GEM + TPM TIS + I2C + i915 modeset + AMDGPU fw + e1000 + rtl8139 + AX211 + Broadcom + Thunderbolt
+GUI & Desktop:      ████████████████████████░  99%  Live          ← F1–F8 SHM clients + Wayland AF_UNIX + wl_display + VirtIO-GPU cursor + VSync + HDR/VRR + Ring 3 Terminal PTY + GATE_GPU scanout + IME pinyin + TTF hint + VirtIO-tablet pointer
 Shell & Terminal:   █████████████████████░░░░  86%  Live          ← sigreturn + SIGTSTP/SIGCONT job control
 Security:           ████████████████████████░  96%  Wired         ← E1–E4 + K4 Landlock + IMA/lockdown/wipe + AES-GCM/Poly1305 + X25519/Ed25519 + RSA/ECDSA-P256
 System Services:    ██████████████████░░░░░░░  72%  Wired         ← K3 /sbin/init + L3 D-Bus + svc restart + cron + udev + NM DHCP + suspend + logind
@@ -35,7 +35,7 @@ AI/ML:              ██████████░░░░░░░░░░
 Binary Compat:      ████████████████████████░  99%  Wired         ← execve + fork + clone + TLS %fs + userspace ld.so (BM1) + VMM dlopen (BM2) + static musl CRT (BM3) + dyn musl (BM4) + 200+ Ring 3 syscalls
 i18n & Fonts:       ███████████████████████░░  93%  Live          ← TTF/CJK/RTL + fallback + GSUB liga + GPOS kern + `.mo` gettext + pinyin IME + color emoji + TTF hint
 Build System:       ████████████████████████░  95%  Live          ← G3 feature flags + flake.nix + workspace (kernel+boot)
-Testing:            ████████████████████████░  98%  Wired         ← 379 QEMU markers + host parser fuzz + RSA/ECDSA/TLS HKDF KATs
+Testing:            ████████████████████████░  98%  Wired         ← 380 QEMU markers + host parser fuzz + RSA/ECDSA/TLS HKDF KATs
 Documentation:      ██████████████████░░░░░░░  70%  Wired         ← BUILDING + CONTRIBUTING + docs/ + CHANGELOG + rustdoc
 CI/CD:              ████████████████░░░░░░░░░  65%  Wired         ← aarch64/riscv64 QEMU boot + Secure Boot + rustdoc + audit + nightly images
 ```

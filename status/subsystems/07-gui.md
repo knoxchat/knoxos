@@ -11,7 +11,7 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 - [x] Window manager: z-order, focus, min/max, snap, workspaces, chrome, shadows, animations
 - [x] Desktop, wallpaper, icons, context menu, pill taskbar, tray, start menu, Alt-Tab, hot corners
 - [x] TTF raster, glyph cache, subpixel/grayscale, CJK, RTL runs, KnoxUI widgets, immediate-mode UI
-- [x] Mouse (click/drag/resize), keyboard focus, shortcuts, theme (dark/light), notifications
+- [x] Mouse (click/drag/resize) via VirtIO-tablet absolute + USB digitizer + PS/2 aux (`GATE_VIRTIO input tablet`), keyboard focus, shortcuts, theme (dark/light), notifications
 - [x] Lock/login screens, screenshot, in-process DnD, blur, night light, on-screen keyboard
 - [x] Clipboard used by terminal/explorer/input (`clipboard.rs`)
 - [x] **In-kernel apps remaining**: none on the start menu. Terminal is Ring 3 `openpty`+SHM (`GATE_TERM pty interactive`). Calculator (F6) and Files (F7) are Ring 3 SHM; Browser/Editor/Settings/Task Manager/AI plus Image Viewer/Logs/Calendar/Disks/Bluetooth/Updater/Software Center/Setup Wizard/Archive launch userspace SHM.
@@ -24,7 +24,7 @@ The compositor is the most complete **product** in the tree. It is not a Unix di
 - [x] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2), AF_UNIX `/run/wayland-0` (F5), and `wl_display` object opcodes (`GATE_WL display protocol`)
 - [x] **GPU compositor** — `gpu_compositor` init + VSync; desktop present flushes through VirtIO-GPU (`GATE_GPU desktop scanout`). VGA blit remains for `-vga std`. VirtIO-GPU 2D scanout of a 64×64 host resource is live (F8).
 - [x] **Client isolation (demo)** — Gate F Ring 3 clients paint SHM (F1–F7); Calculator and Files are Empty+SHM (`GATE_F6 calculator userspace`, `GATE_F7 files userspace`). Browser/Editor/Settings/Task Manager/AI plus Calendar/Logs/Disks launch userspace SHM. Start-menu Terminal is Empty+SHM after Ring 3 `openpty` (`GATE_TERM pty interactive`).
-- [x] Hardware cursor — VirtIO-GPU cursorq; desktop skips software blit (`GATE_F8 hw cursor`)
+- [x] Hardware cursor — VirtIO-GPU cursorq KAT (`GATE_F8 hw cursor`). Software arrow still blits on `-vga std` (the cocoa window); the 64×64 plane is empty and not that scanout.
 - [x] VSync software VBlank on the live present path (`GATE_VSYNC paced`); desktop present also flushes VirtIO-GPU (`GATE_GPU desktop scanout`)
 - [x] Start-menu **Paint / Video Player / Webamp / Doom / ClassiCube / Quake III** removed; Paint is a Ring 3 SHM client (F4)
 - [x] IME — pinyin `"ni"` → `你` (`GATE_IME compose`)

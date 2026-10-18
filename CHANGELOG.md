@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Desktop input** — VirtIO-tablet modern PCI + USB digitizer absolute reports + PS/2 aux fallback (`GATE_VIRTIO input tablet`). `./run.sh` was USB-only; cocoa absolute events never reached the compositor.
+- **Pointer visible** — do not skip the software arrow when VirtIO-GPU cursorq is a transparent 64×64 overlay; cocoa is `-vga std` with `show-cursor=off`.
 - **rtl8139** — TX copies into the RX ring with a Realtek status header (`GATE_RTL8139 send`).
 - **CIFS** — SMB2 Negotiate parse plus TREE WRITE/READ round-trip (`GATE_CIFS smb2`).
 - **GPOS** — pair-adjustment kerning: `shape_text("AV")` shrinks A’s advance (`GATE_GPOS kern`).

@@ -280,6 +280,20 @@ pub fn hid_gamepad_a_pressed(report: &[u8]) -> Option<bool> {
     Some(report[0] & 1 != 0)
 }
 
+/// VirtIO input event: `le16 type, le16 code, le32 value`.
+pub fn parse_virtio_input_event(b: &[u8]) -> Option<(u16, u16, u32)> {
+    if b.len() < 8 {
+        return None;
+    }
+    let typ = u16::from_le_bytes([b[0], b[1]]);
+    let code = u16::from_le_bytes([b[2], b[3]]);
+    let value = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+    if typ == 0 && code == 0 && value == 0 {
+        return None;
+    }
+    Some((typ, code, value))
+}
+
 /// HID digitizer / usb-tablet: `[buttons, x_lo, x_hi, y_lo, y_hi]`.
 pub fn parse_hid_digitizer_xy(report: &[u8]) -> Option<(u16, u16, bool)> {
     if report.len() < 5 {
@@ -1039,6 +1053,12 @@ mod tests {
         assert!(parse_brcm_firmware_sections(b"NOPE").is_none());
         assert_eq!(parse_tb_route(&1u64.to_le_bytes()), Some(1));
         assert!(parse_tb_route(&[0u8; 8]).is_none());
+        let mut vin = [0u8; 8];
+        vin[0] = 3; // EV_ABS
+        vin[4] = 0xFF;
+        vin[5] = 0x3F;
+        assert_eq!(parse_virtio_input_event(&vin), Some((3, 0, 0x3FFF)));
+        assert!(parse_virtio_input_event(&[0u8; 8]).is_none());
     }
 
     #[test]
@@ -1146,6 +1166,7 @@ mod tests {
                 let _ = parse_ept_pte(u64::from_le_bytes(pte));
             }
             let _ = parse_virtio_mmio_magic(&buf);
+            let _ = parse_virtio_input_event(&buf);
             let _ = parse_brcm_firmware_sections(&buf);
             let _ = parse_tb_route(&buf);
         }

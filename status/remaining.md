@@ -86,7 +86,7 @@ Details: [subsystems/07-gui.md](subsystems/07-gui.md)
 
 - [x] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2) plus AF_UNIX `/run/wayland-0` (F5) plus `wl_display` object opcodes (`GATE_WL display protocol`)
 - [x] **GPU compositor** — `gpu_compositor` init + VSync; desktop `present_rect` flushes through VirtIO-GPU (`GATE_GPU desktop scanout`). VGA blit remains for `-vga std`.
-- [x] Hardware cursor — VirtIO-GPU cursorq `UPDATE_CURSOR` / `MOVE_CURSOR`; desktop skips software blit (`GATE_F8 hw cursor`)
+- [x] Hardware cursor — VirtIO-GPU cursorq `UPDATE_CURSOR` / `MOVE_CURSOR` KAT (`GATE_F8 hw cursor`). Software arrow still draws on `-vga std`.
 - [x] VSync — `gpu_compositor` software VBlank flip on the live path (`GATE_VSYNC paced`); desktop still software-blits to VGA
 - [x] IME — pinyin `"ni"` → `你` (`GATE_IME compose`). Full IME framework later.
 - [x] TrueType bytecode hinting — SVTCA/PUSHB/MDAP round-to-grid (`GATE_TTF hint`)

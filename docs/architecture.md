@@ -39,7 +39,7 @@ The default root is still an in-memory VFS. A VirtIO-blk blob store (`KNOXPERSIS
 
 1. Bootloader VGA/BGA framebuffer — software compositor back-buffer, `present_rect` to HW.
 2. VirtIO-GPU controlq — `RESOURCE_CREATE_2D` + `ATTACH_BACKING` + `SET_SCANOUT` + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` (`GATE_F8 virtio-gpu scanout`).
-3. VirtIO-GPU cursorq — `UPDATE_CURSOR` / `MOVE_CURSOR`. When that completes, the desktop skips the software cursor blit (`GATE_F8 hw cursor`).
+3. VirtIO-GPU cursorq — `UPDATE_CURSOR` / `MOVE_CURSOR` (`GATE_F8 hw cursor`). The cocoa window is `-vga std`; the visible pointer is the software arrow.
 
 ## Isolation vs compose
 

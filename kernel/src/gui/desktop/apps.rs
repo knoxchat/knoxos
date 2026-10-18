@@ -25,8 +25,10 @@ pub fn open_application(name: &str, icon_type: IconType) {
             return;
         }
         "Terminal" => {
-            crate::user_task::spawn_pty_terminal_app();
-            return;
+            if crate::user_task::spawn_pty_terminal_app().is_some() {
+                return;
+            }
+            // Ring 3 ELF missing — fall through to the in-kernel emulator.
         }
         "Monaco Editor" | "Text Editor" | "Editor" => {
             crate::user_task::spawn_editor_app();

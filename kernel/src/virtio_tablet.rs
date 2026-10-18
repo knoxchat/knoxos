@@ -272,6 +272,8 @@ pub fn handle_digitizer_report(report: &[u8]) -> bool {
     activate();
     set_position(px, py);
     set_buttons(tip, false, false);
+    #[cfg(feature = "gui")]
+    crate::gui::input::set_absolute_mouse(px, py, tip, false, false, 0);
     true
 }
 

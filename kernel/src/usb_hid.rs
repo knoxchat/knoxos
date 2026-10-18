@@ -232,6 +232,7 @@ impl HidReportDescriptor {
 pub enum HidDeviceType {
     Keyboard,
     Mouse,
+    Tablet,
     Gamepad,
     Joystick,
     Other,
@@ -281,6 +282,32 @@ impl HidDevice {
             poll_interval_ms: 10,
             connected: true,
             boot_protocol: true,
+            key_state: [false; 256],
+            modifier_state: 0,
+            led_state: 0,
+            buttons: 0,
+            x: 0,
+            y: 0,
+            wheel: 0,
+        }
+    }
+
+    pub fn new_tablet(id: u32, vendor_id: u16, product_id: u16, name: String) -> Self {
+        Self {
+            id,
+            device_id: 0,
+            device_type: HidDeviceType::Tablet,
+            usb_slot: 0,
+            interface: 0,
+            endpoint: 1,
+            protocol: HID_PROTOCOL_NONE,
+            vendor_id,
+            product_id,
+            name,
+            report_descriptor: HidReportDescriptor::new(),
+            poll_interval_ms: 8,
+            connected: true,
+            boot_protocol: false,
             key_state: [false; 256],
             modifier_state: 0,
             led_state: 0,
@@ -489,6 +516,41 @@ pub fn deliver_hardware_report(hid_id: u32, slot_id: u8, report: &[u8]) {
         return;
     }
     process_report(id, report);
+}
+
+/// QEMU `usb-tablet` digitizer: `[buttons, x_lo, x_hi, y_lo, y_hi]`, X/Y 0..32767.
+pub fn parse_tablet_report(device: &mut HidDevice, report: &[u8]) {
+    if report.len() < 5 {
+        return;
+    }
+    let buttons = report[0];
+    let x = u16::from_le_bytes([report[1], report[2]]);
+    let y = u16::from_le_bytes([report[3], report[4]]);
+    device.buttons = buttons;
+    device.x = x as i16;
+    device.y = y as i16;
+    #[cfg(feature = "gui")]
+    {
+        let (sw, sh) = crate::gui::cached_screen_size();
+        let px = if sw > 1 {
+            ((x as i64 * sw as i64) / 32767).min(sw as i64 - 1) as i32
+        } else {
+            0
+        };
+        let py = if sh > 1 {
+            ((y as i64 * sh as i64) / 32767).min(sh as i64 - 1) as i32
+        } else {
+            0
+        };
+        crate::gui::input::set_absolute_mouse(
+            px,
+            py,
+            buttons & 1 != 0,
+            buttons & 2 != 0,
+            buttons & 4 != 0,
+            0,
+        );
+    }
 }
 
 /// Parse a USB HID boot protocol mouse report (3-4 bytes)
@@ -749,6 +811,7 @@ pub fn process_report(device_id: u32, report: &[u8]) {
         match device.device_type {
             HidDeviceType::Keyboard => parse_boot_keyboard_report(device, report),
             HidDeviceType::Mouse => parse_boot_mouse_report(device, report),
+            HidDeviceType::Tablet => parse_tablet_report(device, report),
             _ => {}
         }
     }
@@ -786,7 +849,7 @@ pub fn init() {
                             usb_dev.product_id
                         ),
                     ),
-                    _ if usb_dev.vendor_id == 0x0627 => HidDevice::new_mouse(
+                    _ if usb_dev.vendor_id == 0x0627 => HidDevice::new_tablet(
                         id,
                         usb_dev.vendor_id,
                         usb_dev.product_id,

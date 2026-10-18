@@ -9,7 +9,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 1. Bootloader maps physical memory and a 1920×1080 framebuffer.
 2. GDT + TSS, IDT, PIC 8259, LAPIC timer, serial UART TX.
 3. 512 MiB kernel heap (`linked_list_allocator` + slab).
-4. USB HID keyboard/mouse (XHCI Transfer Events). PS/2 mouse init is skipped (`GATE_USB no ps2 cursor`).
+4. Desktop pointer: VirtIO-tablet absolute (`GATE_VIRTIO input tablet`), USB HID digitizer, PS/2 aux fallback. `GATE_USB no ps2 cursor` is a USB URB KAT, not “skip i8042”.
 5. In-memory VFS with Linux FHS layout; **opt-in** VirtIO-blk + ATA PIO; ext4 and FAT32 can use that block layer. **Gate C1** persist blob store round-trips a file through VirtIO-blk (`GATE_C1 persist complete`). **Gate C2** write-ahead log replays a committed record after a simulated crash (`GATE_C2 journal recovered`). **Gate C3** dirty page writeback overlays a 4 KiB range without replacing sibling pages (`GATE_C3 writeback complete`). **Gate C4** AHCI command-list DMA write/read round-trips a sector vs QEMU (`GATE_C4 ahci dma complete`). **Gate C5** NVMe PRP DMA write/read round-trips a sector (`GATE_C5 nvme dma complete`). **Gate C6** `/etc` (outside the old persist prefixes) round-trips through VirtIO-blk (`GATE_C6 vfs persist`).
 6. Software compositor: 32bpp BGRA, damage rects, window manager, taskbar, start menu, 17 in-process apps.
 7. Kernel shell + terminal (parser, pipes, glob, env, 60+ builtins) running **inside the kernel**, not as `/bin/sh` in Ring 3.
@@ -40,7 +40,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 32. **Gate I4 SMP balance** — unpinned Ring 3 `getcpu` runs on idle CPU 1 without claiming BSP CFS current (`GATE_I4 smp balance`).
 33. **Gate G4 audit** — `set_robust_list`/`get_robust_list` round-trip; `madvise` EINVAL; `mlock` records; `readahead`/`fadvise64` return EBADF (`GATE_G4 audit live`).
 34. **Gate F7 Files userspace** — Ring 3 SHM client, not `WindowContentType::FileExplorer` (`GATE_F7 files userspace`). Settings/Task Manager/Editor/Browser/AI spawn the same SHM class.
-35. **Gate F8 VirtIO-GPU** — controlq `RESOURCE_CREATE_2D` + `ATTACH_BACKING` + `SET_SCANOUT` + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` (`GATE_F8 virtio-gpu scanout`). cursorq `UPDATE_CURSOR` (`GATE_F8 hw cursor`); desktop skips the software cursor blit.
+35. **Gate F8 VirtIO-GPU** — controlq `RESOURCE_CREATE_2D` + `ATTACH_BACKING` + `SET_SCANOUT` + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` (`GATE_F8 virtio-gpu scanout`). cursorq `UPDATE_CURSOR` (`GATE_F8 hw cursor`). Software arrow still blits on `-vga std` (cocoa); the 64×64 plane is not that window.
 36. **Gate C8 JBD2** — ramdisk journal: descriptor + data + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount uses the same walker when `fs-ext4` is on.
 37. **USB HID URB** — submit + complete + boot-protocol keyboard parse delivers evdev KEY_A (`GATE_USB hid urb`).
 38. **XHCI MMIO** — BAR0 mapped uncached via `vmm::map_mmio`; rings are buddy DMA frames, not heap pointers (`GATE_USB xhci mmio`). Transfer Events drain into the HID URB handler and the GUI mouse/key path.
@@ -126,4 +126,4 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 115. **NFS** — COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`).
 116. **Broadcom / Thunderbolt** — `BRCMFW` TLV + scan (`GATE_BRCM fw`); TB route hop (`GATE_TB hop`).
 
-Integration: `./tests/run_integration.sh` **379/379** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **380/380** on QEMU (2026-10-18).

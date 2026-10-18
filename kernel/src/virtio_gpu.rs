@@ -1178,6 +1178,9 @@ fn scanout_self_test(gpu: &mut LiveGpu) -> bool {
     if gpu_update_cursor_cmd(gpu, 16, 16, CURSOR_RESOURCE, 0, 0) {
         CURSOR_LIVE.store(true, Ordering::SeqCst);
         serial_println!("[VIRTIO-GPU] {}", GATE_F8_CURSOR);
+        // Hide the empty 64×64 overlay. The visible pointer is the software
+        // arrow on the VGA framebuffer (`-vga std` / cocoa show-cursor=off).
+        let _ = gpu_update_cursor_cmd(gpu, 0, 0, 0, 0, 0);
     } else {
         serial_println!("[VIRTIO-GPU] UPDATE_CURSOR failed");
     }

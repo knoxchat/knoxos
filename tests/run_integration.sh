@@ -106,6 +106,8 @@ QEMU_CMD=(qemu-system-x86_64
     -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$PROJECT_ROOT/tests/d4_http.sh"
     -device virtio-net-pci,netdev=net1,disable-modern=on
     -device virtio-gpu-pci
+    -device virtio-tablet-pci
+    -device virtio-keyboard-pci
     -device qemu-xhci,id=xhci
     -device usb-kbd,bus=xhci.0
     -device usb-tablet,bus=xhci.0
@@ -463,6 +465,7 @@ check_marker "GATE_USB xhci mmio"
 check_marker "GATE_G5 safety comments"
 check_marker "GATE_C9 ext4 root"
 check_marker "GATE_USB no ps2 cursor"
+check_marker "GATE_VIRTIO input tablet"
 check_marker "GATE_D6 ipv6 echo"
 check_marker "GATE_SVC restart"
 check_marker "GATE_UDEV hotplug"

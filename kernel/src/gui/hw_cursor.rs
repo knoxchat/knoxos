@@ -228,8 +228,13 @@ pub fn move_count() -> u64 {
 pub fn init() {
     let available = detect();
     if available {
-        enable();
-        crate::serial_println!("[hw_cursor] Hardware cursor enabled (skip software blit)");
+        // GATE_F8 cursorq is live on a 64×64 VirtIO-GPU resource. `./run.sh`
+        // presents the desktop through `-vga std`; that overlay is not the
+        // cocoa/GTK window, and the KAT resource is transparent. Do not skip
+        // the software arrow or the pointer is invisible (host cursor is off).
+        crate::serial_println!(
+            "[hw_cursor] VirtIO-GPU cursorq live — drawing software arrow on VGA FB"
+        );
     } else {
         crate::serial_println!("[hw_cursor] No hardware cursor — using software cursor");
     }

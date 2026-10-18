@@ -80,6 +80,8 @@ run-kernel: boot ## Run kernel in QEMU (BIOS mode)
 			-global VGA.xres=1920 \
 			-global VGA.yres=1080 \
 			-device virtio-gpu-pci \
+			-device virtio-tablet-pci \
+			-device virtio-keyboard-pci \
 			-display cocoa,show-cursor=off \
 			-usb \
 			-device usb-tablet; \
@@ -103,6 +105,8 @@ run-kernel-uefi: boot ## Run kernel in QEMU (UEFI mode)
 			-global VGA.xres=1920 \
 			-global VGA.yres=1080 \
 			-device virtio-gpu-pci \
+			-device virtio-tablet-pci \
+			-device virtio-keyboard-pci \
 			-display cocoa,show-cursor=off \
 			-usb \
 			-device usb-tablet; \
@@ -122,6 +126,9 @@ run-kernel-gdb: boot ## Run kernel in QEMU with GDB stub
 		-global VGA.vgamem_mb=64 \
 		-global VGA.xres=1920 \
 		-global VGA.yres=1080 \
+		-device virtio-gpu-pci \
+		-device virtio-tablet-pci \
+		-device virtio-keyboard-pci \
 		-usb \
 		-device usb-tablet \
 		-gdb tcp::1234 -S
