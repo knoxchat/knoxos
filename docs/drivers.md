@@ -21,7 +21,7 @@ QEMU flags used by `./run.sh` and `tests/run_integration.sh`: `-drive if=virtio`
 
 ## Wired, not the live input/display path
 
-- USB XHCI: BAR0 mapped uncached (`GATE_USB xhci mmio`). HID URB submit + complete + boot-protocol parse is a software KAT (`GATE_USB hid urb`). QEMU `usb-tablet` reports are 5-byte digitizers (`set_absolute_mouse`). Enumeration still has timeout fallbacks; `./run.sh` pointer is VirtIO-tablet first.
+- USB XHCI: BAR0 mapped uncached (`GATE_USB xhci mmio`). HID URB submit + complete + boot-protocol parse is a software KAT (`GATE_USB hid urb`). QEMU `usb-tablet` reports are 5-byte digitizers (`set_absolute_mouse`). Full enumeration requires live completions (`GATE_USB xhci enum`); `./run.sh` pointer is VirtIO-tablet first.
 - USB class KATs: MSC, hub, gamepad, audio, trackpad, Wacom, UVC, CDC ECM, HID digitizer (`GATE_USB audio` / `trackpad` / `wacom` / `uvc` / `ethernet` / `touch`).
 - GPIO pin0→pin1 loopback (`GATE_GPIO xfer`).
 - i915 modeset in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware + CRTC0 (`GATE_AMDGPU fw`).

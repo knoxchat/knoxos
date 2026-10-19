@@ -2,7 +2,7 @@
 
 # 6. Device Drivers
 
-**Grade: Wired (91%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `virtio_gpu.rs`, `i915.rs`, …
+**Grade: Wired (93%)** · `pci.rs`, `usb.rs`, `ahci.rs`, `nvme.rs`, `virtio_gpu.rs`, `i915.rs`, …
 
 ### Live
 - [x] PCI config `0xCF8`/`0xCFC`, BDF scan, BAR decode
@@ -15,7 +15,7 @@
 - [x] VirtIO-GPU controlq 2D scanout + cursorq (`GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`)
 - [x] VirtIO-input modern tablet/keyboard (`GATE_VIRTIO input tablet`)
 - [x] RTC, HPET registers (timer path uses APIC + PIT)
-- [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`); Enable Slot Command Completion cc=1 (`GATE_USB xhci slot`); GET_DESCRIPTOR Transfer Event (`GATE_USB xhci desc`); Transfer Events drain into HID
+- [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`); Enable Slot Command Completion cc=1 (`GATE_USB xhci slot`); Address Device Command Completion cc=1 (`GATE_USB xhci addr`); GET_DESCRIPTOR Transfer Event (`GATE_USB xhci desc`); SET_CONFIGURATION Transfer Event (`GATE_USB xhci config`); GET_DESCRIPTOR(Configuration) plus full enum with no timeout fallback (`GATE_USB xhci enum`); Transfer Events drain into HID
 
 ### Partial MMIO (not a full driver)
 - [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware (`GATE_AMDGPU fw`).
@@ -39,6 +39,6 @@
 2. Storage: VirtIO-blk production-quality; AHCI DMA live (C4); NVMe DMA live (C5).
 3. Net: VirtIO-net rings + DHCP + DNS/TCP live (D2–D4); e1000 `Socket::send` loopback live (`GATE_E1000 send`).
 4. Display: VirtIO-GPU 2D resource + scanout live (F8); VGA software FB remains the compositor present path.
-5. Input: USB HID URB completion loop is live (`GATE_USB hid urb`). XHCI BAR0 is mapped (`GATE_USB xhci mmio`). Enable Slot Command Completion is live (`GATE_USB xhci slot`). GET_DESCRIPTOR Transfer Event is live (`GATE_USB xhci desc`). Desktop cursor is VirtIO-tablet + USB digitizer + PS/2 aux. Enumeration still has a timeout fallback.
+5. Input: USB HID URB completion loop is live (`GATE_USB hid urb`). XHCI BAR0 is mapped (`GATE_USB xhci mmio`). Enable Slot Command Completion is live (`GATE_USB xhci slot`). Address Device Command Completion is live (`GATE_USB xhci addr`). GET_DESCRIPTOR Transfer Event is live (`GATE_USB xhci desc`). SET_CONFIGURATION Transfer Event is live (`GATE_USB xhci config`). Full enumeration including GET_DESCRIPTOR(Configuration) requires live events (`GATE_USB xhci enum`). Desktop cursor is VirtIO-tablet + USB digitizer + PS/2 aux.
 
 ---

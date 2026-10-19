@@ -16,7 +16,7 @@ QEMU cocoa/GTK generates **absolute** pointer events. Those go to an absolute HI
 | Path | What `./run.sh` presents | What the kernel did | Result |
 |------|--------------------------|---------------------|--------|
 | PS/2 mouse (IRQ12) | Default i8042 still exists | `gui::input::init_mouse()` never called (USB-only experiment) | Aux port never enabled; even relative leftovers never arrive |
-| USB tablet | `-device usb-tablet,bus=xhci.0` | XHCI BAR mapped; enumeration still has timeout fallbacks; HID treats QEMU `0627:0001` as **boot relative mouse** | Reports rarely complete; when they do, 16-bit XY is parsed as `dx/dy` so the cursor is not under the host pointer |
+| USB tablet | `-device usb-tablet,bus=xhci.0` | XHCI BAR mapped; full enum requires live completions (`GATE_USB xhci enum`); HID treats QEMU `0627:0001` as **boot relative mouse** | Reports rarely complete; when they do, 16-bit XY is parsed as `dx/dy` so the cursor is not under the host pointer |
 | VirtIO tablet | **not attached** | `virtio_input` requires PCI subsystem `18` **and** an I/O BAR; modern `0x1052` is skipped (`memory BAR — skipping`) | No absolute virtqueue |
 | USB / VirtIO keyboard | `usb-kbd` on XHCI; default PS/2 kbd | IRQ1 still registered; USB kbd also needs XHCI URBs | Keys may work on PS/2; they do not if cocoa feeds USB only |
 | `virtio_tablet.rs` | fw_cfg `"usb-tablet"` string | Parallel `ABS_X/Y` **not** wired through `set_absolute_mouse` | Digitizer parse did not click windows |
@@ -45,7 +45,7 @@ Screenshot evidence matches this: guest compositor is healthy, host cursor is hi
 
 - [x] **P2.1** Title-bar glyph gap (“Term nal”) — thin `i` clipping / icon overlap. Font/layout, not input. (`GATE_FONT title`)
 - [x] **P2.2** If VirtIO-GPU cursorq is live but the 64×64 plane is empty, force software cursor so the pointer is visible on a dark wallpaper.
-- [x] **P2.3** Enable Slot Command Completion cc=1 plus scratchpad buffers (`GATE_USB xhci slot`). Interrupt-IN URB submit exists. GET_DESCRIPTOR Transfer Event is live (`GATE_USB xhci desc`). Enumeration still has a timeout fallback.
+- [x] **P2.3** Enable Slot Command Completion cc=1 plus scratchpad buffers (`GATE_USB xhci slot`). Interrupt-IN URB submit exists. GET_DESCRIPTOR Transfer Event is live (`GATE_USB xhci desc`). Full enumeration requires live completions (`GATE_USB xhci enum`).
 - [x] **P2.4** Ring 3 PTY client must paint SHM on first frame (brown blob in the Terminal client area is uncommitted SHM). (`GATE_TERM shm paint`)
 
 ## Done when

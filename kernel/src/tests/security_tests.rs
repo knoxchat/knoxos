@@ -60,6 +60,14 @@ fn test_inotify_sees_vfs_mutate() {
 }
 
 #[test_case]
+fn test_fanotify_sees_vfs_mutate() {
+    assert!(
+        crate::fanotify::vfs_watch_self_test(),
+        "fanotify must queue MODIFY/CREATE after a VFS write"
+    );
+}
+
+#[test_case]
 fn test_inotify_read_bytes() {
     assert!(
         crate::inotify::inotify_bytes_self_test(),
@@ -562,6 +570,38 @@ fn test_dbus_unix_socket_roundtrip() {
     assert!(
         crate::dbus::unix_bus_self_test(),
         "AF_UNIX connect to /run/dbus/system_bus_socket must round-trip"
+    );
+}
+
+#[test_case]
+fn test_dbus_hello_method() {
+    assert!(
+        crate::dbus::method_self_test(),
+        "Hello on org.freedesktop.DBus must return a :1. unique name"
+    );
+}
+
+#[test_case]
+fn test_dbus_request_name() {
+    assert!(
+        crate::dbus::name_self_test(),
+        "RequestName must return PRIMARY_OWNER and deny a second claimant"
+    );
+}
+
+#[test_case]
+fn test_pam_unix_password() {
+    assert!(
+        crate::pam::unix_self_test(),
+        "pam_unix must accept a matching hash and deny a wrong token"
+    );
+}
+
+#[test_case]
+fn test_cgroup_freeze_denies_cpu() {
+    assert!(
+        crate::cgroup2::freeze_self_test(),
+        "frozen cgroup must deny CPU charge until thawed"
     );
 }
 

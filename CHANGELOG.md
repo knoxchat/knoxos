@@ -2,8 +2,19 @@
 
 ## Unreleased
 
+- **XHCI enum** — Enable Slot, Address Device, GET_DESCRIPTOR, GET_DESCRIPTOR(Configuration), and SET_CONFIGURATION require live completions; generic control transfers no longer succeed on timeout (`GATE_USB xhci enum`).
+- **Virtual FS persist** — `/dev` `/proc` `/sys` `/run` directories round-trip through VirtIO-blk; generated files under them stay virtual (`GATE_C10 virtfs persist`).
+- **XHCI Address Device** — Command Completion cc=1 is required; input contexts honour HCCPARAMS1 CSZ 32/64 (`GATE_USB xhci addr`).
+- **D-Bus RequestName** — `org.freedesktop.DBus.RequestName` returns PRIMARY_OWNER; a second claimant with `DO_NOT_QUEUE` gets EXISTS (`GATE_DBUS name`).
+- **FUSE WRITE** — WRITE opcode stores bytes that a later READ returns (`GATE_FUSE write`).
+- **PAM unix** — SHA-512 `pam_unix` accepts a matching token and denies a wrong one (`GATE_PAM unix`).
+- **cgroup freeze** — frozen cgroups deny CPU charge; thaw restores it (`GATE_CGROUP freeze`).
+- **io_uring** — FIFO SQE processing; NOP + WRITE complete with matching CQEs (`GATE_IOURING sqe`). Ring 3 `io_uring_setup` stays ENOSYS (`GATE_M4`).
+- **fanotify** — VFS writes emit `FAN_CREATE`/`FAN_MODIFY` into marked instances (`GATE_FANOTIFY modify`). Ring 3 `fanotify_init` stays ENOSYS (`GATE_P4`).
+- **D-Bus method routing** — `org.freedesktop.DBus.Hello` returns a `:1.` unique name (`GATE_DBUS method`). AF_UNIX Hello bytes remain L3.
+- **XHCI SET_CONFIGURATION** — Setup+Status TD; Transfer Event cc=1/13 is required (`GATE_USB xhci config`).
 - **AppArmor** — path MAC on VFS writes: `network-daemon` may write `/run/**` and is denied `/etc` (`GATE_APPARMOR deny`). Default processes stay unconfined.
-- **XHCI GET_DESCRIPTOR** — Setup+Data+Status chained TD; Transfer Event cc=1/13 is required (`GATE_USB xhci desc`). Enumeration still has a timeout fallback.
+- **XHCI GET_DESCRIPTOR** — Setup+Data+Status chained TD; Transfer Event cc=1/13 is required (`GATE_USB xhci desc`).
 - **Service cgroups** — units land in `/system.slice/<name>`; `MemoryMax=` denies over-limit charges (`GATE_SVC cgroup`).
 - **GPOS mark** — mark-to-base attachment: `e` + U+0301 has `x_advance=0` and a positive `y_offset` (`GATE_GPOS mark`).
 - **SELinux** — Enforcing TE on VFS writes: `container_t` may write a `container_t` path and is denied `/etc` (`GATE_SELINUX deny`). Default mode stays Permissive.

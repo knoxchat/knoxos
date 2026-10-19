@@ -1,6 +1,6 @@
 # KnoxOS status
 
-> **Last updated**: 2026-10-18
+> **Last updated**: 2026-10-20
 > **Version**: 0.2.4 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.4)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
 > **Codebase**: 611 Rust files in `kernel/src` · ~347,000 lines · 408 `pub mod` entries
@@ -69,9 +69,9 @@ Read top to bottom if you are choosing work. Skip the archives unless you need e
 | 1 | [01-kernel-core.md](subsystems/01-kernel-core.md) | Wired 86% | High |
 | 2 | [02-memory.md](subsystems/02-memory.md) | Wired 78% | Critical |
 | 3 | [03-process.md](subsystems/03-process.md) | Wired 99% | Critical |
-| 4 | [04-filesystem.md](subsystems/04-filesystem.md) | Wired 99% | Critical |
+| 4 | [04-filesystem.md](subsystems/04-filesystem.md) | Wired 100% | Critical |
 | 5 | [05-networking.md](subsystems/05-networking.md) | Wired 88% | Critical |
-| 6 | [06-drivers.md](subsystems/06-drivers.md) | Wired 91% | Critical |
+| 6 | [06-drivers.md](subsystems/06-drivers.md) | Wired 93% | Critical |
 | 7 | [07-gui.md](subsystems/07-gui.md) | Live 99% | Medium |
 | 8 | [08-shell.md](subsystems/08-shell.md) | Live 86% | Medium |
 | 9 | [09-security.md](subsystems/09-security.md) | Wired 98% | Critical |

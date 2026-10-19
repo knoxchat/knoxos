@@ -366,6 +366,35 @@ pub fn fuse_read(
     }
 }
 
+fn serve_loopback_write(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    if req.len() < 8 {
+        return;
+    }
+    let offset = u64::from_le_bytes(req[0..8].try_into().unwrap_or([0; 8])) as usize;
+    let payload = &req[8..];
+    let written = {
+        let mut lbs = LOOPBACK.lock();
+        let Some(lb) = lbs.get_mut(mount_point) else {
+            return;
+        };
+        let Some((_, data)) = lb.files.values_mut().find(|(ino, _)| *ino == nodeid) else {
+            return;
+        };
+        let end = offset.saturating_add(payload.len());
+        if end > data.len() {
+            data.resize(end, 0);
+        }
+        if offset < end {
+            data[offset..end].copy_from_slice(payload);
+        }
+        payload.len() as u32
+    };
+    let mut resp = Vec::with_capacity(8);
+    resp.extend_from_slice(&written.to_le_bytes());
+    resp.extend_from_slice(&0u32.to_le_bytes());
+    let _ = write_response(mount_point, unique, resp);
+}
+
 /// Handle a VFS write through FUSE
 pub fn fuse_write(
     mount_point: &str,
@@ -376,8 +405,13 @@ pub fn fuse_write(
     let mut req_data = Vec::with_capacity(8 + data.len());
     req_data.extend_from_slice(&offset.to_le_bytes());
     req_data.extend_from_slice(data);
-    let _unique = send_request(mount_point, FuseOpcode::Write, nodeid, req_data)?;
-    Ok(data.len())
+    let unique = send_request(mount_point, FuseOpcode::Write, nodeid, req_data.clone())?;
+    serve_loopback_write(mount_point, unique, nodeid, &req_data);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    if resp.len() < 4 {
+        return Err("short write");
+    }
+    Ok(u32::from_le_bytes(resp[0..4].try_into().map_err(|_| "short write")?) as usize)
 }
 
 /// List FUSE mounts
@@ -430,8 +464,61 @@ fn lookup_self_test() -> bool {
     }
 }
 
+pub const GATE_FUSE_WRITE_MARKER: &str = "GATE_FUSE write";
+const GATE_FUSE_WRITE_PAYLOAD: &[u8] = b"knoxos-fuse-w\n";
+
+/// WRITE opcode must store bytes that a subsequent READ returns.
+pub fn write_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-w";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE write FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "gate.txt", b"old").is_err() {
+        serial_println!("[fuse] GATE_FUSE write FAILED: put");
+        return false;
+    }
+    let entry = match fuse_lookup(MP, 1, "gate.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE write FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let written = match fuse_write(MP, entry.nodeid, 0, GATE_FUSE_WRITE_PAYLOAD) {
+        Ok(n) => n,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE write FAILED: write ({})", e);
+            return false;
+        }
+    };
+    match fuse_read(MP, entry.nodeid, 0, 64) {
+        Ok(data) if data == GATE_FUSE_WRITE_PAYLOAD && written == GATE_FUSE_WRITE_PAYLOAD.len() => {
+            serial_println!(
+                "[fuse] {} (WRITE+READ {} bytes ino={})",
+                GATE_FUSE_WRITE_MARKER,
+                data.len(),
+                entry.nodeid
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[fuse] GATE_FUSE write FAILED written={} read_len={}",
+                written,
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
 /// Initialize FUSE subsystem
 pub fn init() {
     serial_println!("[fuse] Filesystem in Userspace (FUSE) initialized");
     let _ = lookup_self_test();
+    let _ = write_self_test();
 }

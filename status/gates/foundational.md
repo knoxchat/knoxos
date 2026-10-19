@@ -39,8 +39,9 @@ This **is** becoming an OS.
 | C4 | AHCI or NVMe **one** real DMA path | **Done** — AHCI command-list + PRDT write/read round-trip (`GATE_C4 ahci dma complete`). NVMe DMA also live (C5). |
 | C5 | NVMe PRP DMA | **Done** — admin + I/O queues; PRP bounce write/read (`GATE_C5 nvme dma complete`) |
 | C6 | RAM VFS root snapshot | **Done** — `/etc` and the rest of the namespace (except virtual FS) persist (`GATE_C6 vfs persist`) |
-| C7 | Persist `/bin` | **Done** — `/bin/gate_c7` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual. |
+| C7 | Persist `/bin` | **Done** — `/bin/gate_c7` round-trips through VirtIO-blk (`GATE_C7 bin persist`). |
 | C8 | JBD2 journal replay | **Done** — descriptor + data + commit on the ramdisk; committed block applied, torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount uses the same walker when `fs-ext4` is on. |
+| C10 | Virtual FS mount points | **Done** — `/dev` `/proc` `/sys` `/run` directories round-trip through VirtIO-blk; generated files under them stay virtual (`GATE_C10 virtfs persist`) |
 
 ### Gate D — Packets (4–8 weeks)
 

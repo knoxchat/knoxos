@@ -83,6 +83,17 @@ fn test_persist_bin_if_virtio() {
 }
 
 #[test_case]
+fn test_persist_virtfs_dirs_if_virtio() {
+    if !crate::virtio_blk::is_available() {
+        return;
+    }
+    assert!(
+        crate::persist::virtfs_persist_self_test(),
+        "/dev /proc /sys /run directories must round-trip; files under them must not"
+    );
+}
+
+#[test_case]
 fn test_jbd2_replay_if_ramdisk() {
     if crate::block::ramdisk_index().is_none() {
         return;
@@ -139,6 +150,55 @@ fn test_xhci_get_descriptor() {
     assert!(
         crate::usb::descriptor_self_test(),
         "XHCI GET_DESCRIPTOR must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_set_configuration() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::config_self_test(),
+        "XHCI SET_CONFIGURATION must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_address_device() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::addr_self_test(),
+        "XHCI Address Device must complete with cc=1"
+    );
+}
+
+#[test_case]
+fn test_xhci_enum_no_fallback() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::enum_self_test(),
+        "XHCI enumeration must complete every step from a live event"
+    );
+}
+
+#[test_case]
+fn test_fuse_write_roundtrip() {
+    assert!(
+        crate::fuse::write_self_test(),
+        "FUSE WRITE must store bytes that a later READ returns"
+    );
+}
+
+#[test_case]
+fn test_io_uring_nop_write_sqe() {
+    assert!(
+        crate::io_uring::sqe_self_test(),
+        "io_uring NOP+WRITE SQEs must complete with matching CQEs"
     );
 }
 

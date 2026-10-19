@@ -7,7 +7,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::serial_println;
 
 use super::ports::enumerate_ports;
-use super::types::{UsbDevice, UsbDeviceDescriptor, UsbSpeed};
+use super::types::{UsbConfigDescriptor, UsbDevice, UsbDeviceDescriptor, UsbRequestType, UsbSpeed};
 use super::xhci::{
     CMD_RING_SIZE, EVENT_RING_SIZE, TRANSFER_RING_SIZE, TRB_SIZE, TransferRing, Trb, TrbType, XHCI,
     alloc_ring_buffer, dma_virt, xhci_write32,
@@ -29,12 +29,23 @@ static INTERRUPT_URBS: Mutex<Vec<InterruptUrb>> = Mutex::new(Vec::new());
 static SLOT_ENABLE_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when GET_DESCRIPTOR got a Transfer Event (cc=1/13), not a timeout fallback.
 static DESC_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when SET_CONFIGURATION got a Transfer Event (cc=1/13), not a timeout fallback.
+static CONFIG_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Address Device returned Command Completion cc=1 (not a timeout fallback).
+static ADDRESS_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(Configuration) got a Transfer Event (cc=1/13).
+static CONFIG_DESC_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when enumerate_device completed every step from a live event (no fallback).
+static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
 pub const GATE_XHCI_SLOT_MARKER: &str = "GATE_USB xhci slot";
 pub const GATE_XHCI_DESC_MARKER: &str = "GATE_USB xhci desc";
+pub const GATE_XHCI_CONFIG_MARKER: &str = "GATE_USB xhci config";
+pub const GATE_XHCI_ADDR_MARKER: &str = "GATE_USB xhci addr";
+pub const GATE_XHCI_ENUM_MARKER: &str = "GATE_USB xhci enum";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
-const TRB_CH: u32 = 1 << 4;
+pub(super) const TRB_CH: u32 = 1 << 4;
 
 // ═══════════════════════════════════════════════════════════════════════
 // DEVICE ENUMERATION
@@ -189,8 +200,6 @@ pub fn enable_slot() -> Option<u8> {
         }
     } else {
         serial_println!("[XHCI] Enable Slot: no completion event (timeout)");
-        // Fallback: return slot 1 if command ring not yet functional (QEMU quirk)
-        return Some(1);
     }
 
     None
@@ -267,7 +276,13 @@ pub fn address_device(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
     // Allocate Transfer Ring for endpoint 0 (Control)
     let ep0_ring_ptr = allocate_transfer_ring(slot_id, 1); // EP0 = DCI 1
 
-    // Fill Input Control Context: A0=1 (Slot), A1=1 (EP0)
+    let ctx_size = {
+        let xhci = XHCI.lock();
+        xhci.context_size.max(32) as u64
+    };
+
+    // Fill Input Control Context: A0=1 (Slot), A1=1 (EP0).
+    // ICC Add flags live at dword 1 whether CSZ is 32 or 64.
     // SAFETY: input context is a DMA page we own.
     unsafe {
         let icc = dma_virt(input_ctx_ptr) as *mut u32;
@@ -277,8 +292,8 @@ pub fn address_device(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
         *icc.add(1) = 0x03;
     }
 
-    // Fill Slot Context (at offset 0x20 in input context for 32-byte contexts)
-    let slot_ctx_offset = 0x20u64;
+    // Slot Context follows the Input Control Context (32 or 64 bytes).
+    let slot_ctx_offset = ctx_size;
     // SAFETY: slot context sits at a documented offset in the input context.
     unsafe {
         let slot_ctx = (dma_virt(input_ctx_ptr) + slot_ctx_offset) as *mut u32;
@@ -295,8 +310,8 @@ pub fn address_device(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
         *slot_ctx.add(1) = (port as u32) << 16;
     }
 
-    // Fill Endpoint 0 Context (at offset 0x40)
-    let ep0_ctx_offset = 0x40u64;
+    // EP0 Context is Device Context Index 1 (two context strides from ICC).
+    let ep0_ctx_offset = ctx_size * 2;
     // SAFETY: EP0 context sits at a documented offset in the input context.
     unsafe {
         let ep0_ctx = (dma_virt(input_ctx_ptr) + ep0_ctx_offset) as *mut u32;
@@ -333,16 +348,16 @@ pub fn address_device(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
     if let Some(event) = wait_command_completion() {
         let cc = event.completion_code();
         if cc == 1 {
+            ADDRESS_LIVE.store(true, Ordering::Relaxed);
             serial_println!("[XHCI] Address Device succeeded for slot {}", slot_id);
             return true;
         }
         serial_println!("[XHCI] Address Device failed: cc={}", cc);
-        // Still return true for QEMU compatibility (some emulators succeed silently)
-        return true;
+        return false;
     }
 
-    serial_println!("[XHCI] Address Device: timeout (continuing anyway for QEMU)");
-    true
+    serial_println!("[XHCI] Address Device: timeout");
+    false
 }
 
 /// Enqueue TRBs on a transfer ring for a specific slot/endpoint and ring doorbell
@@ -562,8 +577,7 @@ pub fn get_device_descriptor(slot_id: u8) -> Option<UsbDeviceDescriptor> {
     // Submit to EP 0 (DCI 1)
     if !submit_transfer(slot_id, 1, &[setup, data, status]) {
         serial_println!("[XHCI] Failed to submit GET_DESCRIPTOR transfer");
-        // Return a fallback descriptor for QEMU compatibility
-        return Some(fallback_device_descriptor());
+        return None;
     }
 
     // Wait for transfer completion
@@ -591,47 +605,143 @@ pub fn get_device_descriptor(slot_id: u8) -> Option<UsbDeviceDescriptor> {
             return Some(desc);
         }
         serial_println!("[XHCI] GET_DESCRIPTOR completion code: {}", cc);
+        return None;
     }
 
-    // Enumeration may continue with a QEMU-shaped fallback; the gate requires DESC_LIVE.
-    serial_println!("[XHCI] GET_DESCRIPTOR timeout, using fallback");
-    Some(fallback_device_descriptor())
+    serial_println!("[XHCI] GET_DESCRIPTOR timeout");
+    None
 }
 
-/// Fallback device descriptor for QEMU environments
-fn fallback_device_descriptor() -> UsbDeviceDescriptor {
-    UsbDeviceDescriptor {
-        b_length: 18,
-        b_descriptor_type: 1,
-        bcd_usb: 0x0200,
-        b_device_class: 0,
-        b_device_sub_class: 0,
-        b_device_protocol: 0,
-        b_max_packet_size0: 64,
-        id_vendor: 0x0627,  // QEMU
-        id_product: 0x0001, // USB tablet
-        bcd_device: 0x0100,
-        i_manufacturer: 1,
-        i_product: 2,
-        i_serial_number: 3,
-        b_num_configurations: 1,
+/// SET_CONFIGURATION(1) — Setup + Status (no data stage). Requires a Transfer Event.
+pub fn set_configuration(slot_id: u8, config: u8) -> bool {
+    serial_println!("[XHCI] SET_CONFIGURATION({}) for slot {}", config, slot_id);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x00, bRequest=9 (SET_CONFIGURATION), wValue=config
+    setup.param_lo = (UsbRequestType::SetConfiguration as u32) << 8 | (config as u32) << 16;
+    setup.param_hi = 0; // wIndex=0, wLength=0
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    // TRT = 0 (No Data Stage)
+    setup.control |= 1 << 6; // IDT (Immediate Data)
+    setup.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = 1 (IN) for no-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, status]) {
+        serial_println!("[XHCI] Failed to submit SET_CONFIGURATION transfer");
+        return false;
     }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 || cc == 13 {
+            CONFIG_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] SET_CONFIGURATION({}) complete cc={}", config, cc);
+            return true;
+        }
+        serial_println!("[XHCI] SET_CONFIGURATION completion code: {}", cc);
+    } else {
+        serial_println!("[XHCI] SET_CONFIGURATION timeout");
+    }
+    false
 }
 
-/// Full device enumeration sequence
+/// GET_DESCRIPTOR(Configuration) — Setup+Data+Status. Requires a Transfer Event.
+pub fn get_config_descriptor(slot_id: u8) -> Option<UsbConfigDescriptor> {
+    serial_println!("[XHCI] GET_DESCRIPTOR(Configuration) for slot {}", slot_id);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+    const CFG_LEN: u32 = 32;
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x80, bRequest=6, wValue=0x0200 (Configuration)
+    setup.param_lo = 0x80 | (6 << 8) | (0x0200 << 16);
+    setup.param_hi = CFG_LEN << 16; // wIndex=0, wLength=32
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = CFG_LEN;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= 1 << 2; // ISP
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit GET_DESCRIPTOR(Configuration)");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 || cc == 13 {
+            // SAFETY: GET_DESCRIPTOR DMA page is owned by this transfer.
+            let desc = unsafe { core::ptr::read(dma_virt(data_buf) as *const UsbConfigDescriptor) };
+            let blen = desc.b_length;
+            let dtype = desc.b_descriptor_type;
+            let total = desc.w_total_length;
+            let niface = desc.b_num_interfaces;
+            if blen >= 9 && dtype == 2 {
+                CONFIG_DESC_LIVE.store(true, Ordering::Relaxed);
+            }
+            serial_println!(
+                "[XHCI] Config descriptor: len={} type={} total={} interfaces={}",
+                blen,
+                dtype,
+                total,
+                niface
+            );
+            return Some(desc);
+        }
+        serial_println!(
+            "[XHCI] GET_DESCRIPTOR(Configuration) completion code: {}",
+            cc
+        );
+        return None;
+    }
+
+    serial_println!("[XHCI] GET_DESCRIPTOR(Configuration) timeout");
+    None
+}
+
+/// Full device enumeration sequence. Every step requires a live completion.
 pub fn enumerate_device(port: u8, speed: UsbSpeed) -> Option<UsbDevice> {
     serial_println!("[XHCI] Enumerating device on port {} ({:?})", port, speed);
 
-    // Step 1: Enable slot
     let slot_id = enable_slot()?;
 
-    // Step 2: Address device
     if !address_device(slot_id, port, speed) {
         return None;
     }
 
-    // Step 3: Get device descriptor
     let desc = get_device_descriptor(slot_id)?;
+    if !DESC_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] Device descriptor was not a live Transfer Event");
+        return None;
+    }
+
+    let _cfg = get_config_descriptor(slot_id)?;
+    if !CONFIG_DESC_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] Config descriptor was not a live Transfer Event");
+        return None;
+    }
+
+    if !set_configuration(slot_id, 1) {
+        return None;
+    }
 
     let device = UsbDevice {
         slot_id,
@@ -646,17 +756,26 @@ pub fn enumerate_device(port: u8, speed: UsbSpeed) -> Option<UsbDevice> {
         manufacturer: String::from("QEMU"),
         product: String::from("USB Device"),
         serial: String::new(),
-        configured: false,
+        configured: true,
     };
 
     serial_println!(
-        "[XHCI] Device enumerated: slot={} vendor={:#06x} product={:#06x}",
+        "[XHCI] Device enumerated: slot={} vendor={:#06x} product={:#06x} configured={}",
         slot_id,
         device.vendor_id,
-        device.product_id
+        device.product_id,
+        device.configured
     );
 
-    // Register with XHCI controller
+    if SLOT_ENABLE_LIVE.load(Ordering::Relaxed)
+        && ADDRESS_LIVE.load(Ordering::Relaxed)
+        && DESC_LIVE.load(Ordering::Relaxed)
+        && CONFIG_DESC_LIVE.load(Ordering::Relaxed)
+        && CONFIG_LIVE.load(Ordering::Relaxed)
+    {
+        ENUM_LIVE.store(true, Ordering::Relaxed);
+    }
+
     XHCI.lock().devices.push(device.clone());
 
     Some(device)
@@ -722,5 +841,93 @@ pub fn descriptor_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_DESC_MARKER);
+    true
+}
+
+/// Prove SET_CONFIGURATION got a Transfer Event, not a timeout fallback.
+pub fn config_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci config skipped (no controller)");
+        return true;
+    }
+    if !CONFIG_LIVE.load(Ordering::Relaxed) {
+        let ports = enumerate_ports();
+        let port = ports
+            .iter()
+            .find(|p| p.connected)
+            .map(|p| (p.port_num, p.speed));
+        if let Some(slot_id) = enable_slot() {
+            if let Some((port_num, speed)) = port {
+                let _ = address_device(slot_id, port_num, speed);
+            } else {
+                let _ = address_device(slot_id, 1, UsbSpeed::High);
+            }
+            let _ = get_device_descriptor(slot_id);
+            let _ = set_configuration(slot_id, 1);
+        }
+    }
+    if !CONFIG_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SET_CONFIGURATION had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_CONFIG_MARKER);
+    true
+}
+
+/// Prove Address Device got a Command Completion (cc=1), not a timeout fallback.
+pub fn addr_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci addr skipped (no controller)");
+        return true;
+    }
+    if !ADDRESS_LIVE.load(Ordering::Relaxed) {
+        let ports = enumerate_ports();
+        let port = ports
+            .iter()
+            .find(|p| p.connected)
+            .map(|p| (p.port_num, p.speed));
+        if let Some(slot_id) = enable_slot() {
+            if let Some((port_num, speed)) = port {
+                let _ = address_device(slot_id, port_num, speed);
+            } else {
+                let _ = address_device(slot_id, 1, UsbSpeed::High);
+            }
+        }
+    }
+    if !ADDRESS_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Address Device had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_ADDR_MARKER);
+    true
+}
+
+/// Prove full enumeration used live completions for every step, including
+/// GET_DESCRIPTOR(Configuration). No timeout fallback.
+pub fn enum_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci enum skipped (no controller)");
+        return true;
+    }
+    if !ENUM_LIVE.load(Ordering::Relaxed) {
+        enumerate_all_devices();
+    }
+    if !ENUM_LIVE.load(Ordering::Relaxed) {
+        let ports = enumerate_ports();
+        if let Some(port) = ports.iter().find(|p| p.connected) {
+            let _ = enumerate_device(port.port_num, port.speed);
+        }
+    }
+    if !ENUM_LIVE.load(Ordering::Relaxed)
+        || !CONFIG_DESC_LIVE.load(Ordering::Relaxed)
+        || !SLOT_ENABLE_LIVE.load(Ordering::Relaxed)
+        || !ADDRESS_LIVE.load(Ordering::Relaxed)
+        || !DESC_LIVE.load(Ordering::Relaxed)
+        || !CONFIG_LIVE.load(Ordering::Relaxed)
+    {
+        serial_println!("[XHCI] GATE_USB FAILED: enumeration used a timeout fallback");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_ENUM_MARKER);
     true
 }

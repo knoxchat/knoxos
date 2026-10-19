@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **396/396**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **407/407**.
 
 ---
 
@@ -28,7 +28,7 @@ The leftover inventory that was still wireable on QEMU is also landed: memory cg
 
 These are the unfinished rows in [blockers.md](blockers.md). Do them with Gate G, not instead of it.
 
-1. **Persist `/bin`** — **Done** (C7). Virtual FS (`/dev` `/proc` `/sys` `/run`) is still rebuilt at boot. [04-filesystem.md](subsystems/04-filesystem.md)
+1. **Persist `/bin`** — **Done** (C7). **Virtual FS mount points** — **Done** (C10): `/dev` `/proc` `/sys` `/run` directories round-trip; generated files under them stay virtual. [04-filesystem.md](subsystems/04-filesystem.md)
 2. **Move desktop apps to Ring 3** — Calculator (F6) and Files (F7) are Ring 3 SHM. Settings/Task Manager/Editor/Browser/AI plus Calendar/Image Viewer/Logs/Disks/Bluetooth/Updater/Software Center/Setup Wizard/Archive also spawn userspace SHM, not new `WindowContentType`. Start-menu Terminal is Ring 3 `openpty`+SHM (`GATE_TERM pty interactive`). [07-gui.md](subsystems/07-gui.md)
 3. **SMP load balance** — **Done** (I4): per-CPU CFS `current`; APs do not steal the BSP desktop; an unpinned Ring 3 task runs on an idle AP (`GATE_I4 smp balance`). [01-kernel-core.md](subsystems/01-kernel-core.md)
 4. **Wayland over a Unix socket** — **Done** (F5 + WL): compositor `bind`+`listen`s `/run/wayland-0`; a Ring 3 client `connect`s and either `sendto`s a SHM vaddr (`GATE_F5 wayland unix`) or speaks `wl_display` object opcodes (`GATE_WL display protocol`). [07-gui.md](subsystems/07-gui.md)
@@ -62,7 +62,10 @@ Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md]
 - X.509 RSA over TBS (`GATE_TLS13 x509`); dpkg ar+tar (`GATE_DPKG deb`); TPM PCR extend (`GATE_TPM pcr`); BPE `"the"` (`GATE_AI vocab`); CPIO newc (`GATE_CPIO newc`); title `'i'` (`GATE_FONT title`); Terminal SHM glyphs (`GATE_TERM shm paint`)
 - SELinux VFS deny (`GATE_SELINUX deny`); XHCI Enable Slot cc=1 (`GATE_USB xhci slot`); NTP offset (`GATE_NTP apply`); Bluetooth HCI Reset (`GATE_BT hci`); dm-verity Merkle (`GATE_VERITY root`)
 - AppArmor VFS deny (`GATE_APPARMOR deny`); XHCI GET_DESCRIPTOR Transfer Event (`GATE_USB xhci desc`); unit MemoryMax cgroup (`GATE_SVC cgroup`); GPOS mark-to-base (`GATE_GPOS mark`)
+- io_uring NOP+WRITE SQE (`GATE_IOURING sqe`); fanotify VFS MODIFY (`GATE_FANOTIFY modify`); D-Bus Hello unique name (`GATE_DBUS method`); XHCI SET_CONFIGURATION (`GATE_USB xhci config`)
 - USB Audio / trackpad / Wacom / UVC / Ethernet / touch / GPIO (`GATE_USB audio`, `GATE_USB trackpad`, `GATE_USB wacom`, `GATE_USB uvc`, `GATE_USB ethernet`, `GATE_USB touch`, `GATE_GPIO xfer`)
+- XHCI Address Device cc=1 (`GATE_USB xhci addr`); D-Bus RequestName (`GATE_DBUS name`); FUSE WRITE (`GATE_FUSE write`); PAM unix (`GATE_PAM unix`); cgroup freeze (`GATE_CGROUP freeze`)
+- XHCI full enum with no timeout fallback (`GATE_USB xhci enum`); virtual-FS mount-point persist (`GATE_C10 virtfs persist`)
 - TLS 1.3 HKDF (`GATE_TLS13 hkdf`); HDR/VRR (`GATE_HDR pq`, `GATE_VRR range`); e1000 `Socket::send` (`GATE_E1000 send`); eBPF/sched_ext (`GATE_EBPF exec`); Wi-Fi Beacon+PMK (`GATE_WIFI pmk`); i915 modeset (`GATE_I915 modeset`); Btrfs ramdisk (`GATE_BTRFS block`); VLAN 802.1Q (`GATE_VLAN tag`)
 
 Earlier in this section:

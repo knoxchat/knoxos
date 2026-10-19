@@ -34,18 +34,24 @@ const JRNL_HEADER_SIZE: usize = 40;
 /// This prevents OOM when persisting very large files like 125MB .deb packages
 const MAX_PERSIST_SIZE: usize = 64 * 1024 * 1024; // 64 MB
 
-/// Paths that should NOT be persisted (virtual FS rebuilt at boot).
-/// `/bin` and `/sbin` round-trip so user-installed ELFs survive reboot (C7).
+/// Generated **files** under virtual FS stay ephemeral.
+/// Mount-point directories (`/dev`, `/proc`, `/sys`, `/run`) persist so they
+/// survive restore instead of being recreated only by `VirtualFS::new` (C10).
 const SKIP_PREFIXES: &[&str] = &["/dev/", "/proc/", "/sys/", "/run/"];
 
 /// Check if a path should be persisted across reboot.
 fn should_persist(path: &str) -> bool {
+    should_persist_entry(path, false)
+}
+
+/// Directories on the virtual-FS prefixes persist; files under them do not.
+fn should_persist_entry(path: &str, is_dir: bool) -> bool {
     if path == "/" || path.is_empty() {
         return false;
     }
     for skip in SKIP_PREFIXES {
         if path.starts_with(skip) || path == skip.trim_end_matches('/') {
-            return false;
+            return is_dir;
         }
     }
     true
@@ -344,7 +350,7 @@ pub fn persist_file(path: &str, data: &[u8], permissions: u16) {
 
 /// Persist a directory entry
 pub fn persist_directory(path: &str, permissions: u16) {
-    if !should_persist(path) {
+    if !should_persist_entry(path, true) {
         return;
     }
     if !crate::virtio_blk::is_available() {
@@ -630,10 +636,14 @@ fn collect_persistable_paths() -> Vec<(String, Vec<u8>, u16)> {
 pub fn init() {
     crate::serial_println!("[persist] Initializing persistent storage...");
     restore_all();
+    for mount in ["/dev", "/proc", "/sys", "/run"] {
+        persist_directory(mount, 0o755);
+    }
     let _ = roundtrip_self_test();
     let _ = journal_recovery_self_test();
     let _ = root_persist_self_test();
     let _ = bin_persist_self_test();
+    let _ = virtfs_persist_self_test();
 }
 
 /// Serial marker the integration test waits for once a file has been written
@@ -873,4 +883,96 @@ pub fn bin_persist_self_test() -> bool {
             false
         }
     }
+}
+
+pub const GATE_C10_MARKER: &str = "GATE_C10 virtfs persist";
+const GATE_C10_DIR: &str = "/run/knoxos-c10";
+const GATE_C10_FILE: &str = "/run/knoxos-c10/ephemeral";
+const GATE_C10_PAYLOAD: &[u8] = b"virtual\n";
+
+/// Persist `/dev` `/proc` `/sys` `/run` as directories so they survive restore.
+/// Generated files under those prefixes stay virtual and must not round-trip.
+pub fn virtfs_persist_self_test() -> bool {
+    if !crate::virtio_blk::is_available() {
+        crate::serial_println!("[persist] Gate C10 skipped: no virtio-blk");
+        return false;
+    }
+
+    for mount in ["/dev", "/proc", "/sys", "/run"] {
+        if !should_persist_entry(mount, true) {
+            crate::serial_println!(
+                "[persist] Gate C10 FAILED: {} directory still skipped",
+                mount
+            );
+            return false;
+        }
+        persist_directory(mount, 0o755);
+    }
+    if should_persist_entry("/dev/null", false)
+        || should_persist_entry("/proc/version", false)
+        || should_persist_entry(GATE_C10_FILE, false)
+    {
+        crate::serial_println!("[persist] Gate C10 FAILED: virtual FS files would persist");
+        return false;
+    }
+    if !should_persist_entry(GATE_C10_DIR, true) {
+        crate::serial_println!("[persist] Gate C10 FAILED: {} still skipped", GATE_C10_DIR);
+        return false;
+    }
+
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.unlink(GATE_C10_FILE);
+        let _ = vfs.rmdir(GATE_C10_DIR);
+        if vfs.mkdir(GATE_C10_DIR, 0o755).is_err() {
+            crate::serial_println!("[persist] Gate C10 FAILED: mkdir {}", GATE_C10_DIR);
+            return false;
+        }
+    }
+    persist_directory(GATE_C10_DIR, 0o755);
+
+    if !crate::vfs::write_file_dispatch(GATE_C10_FILE, GATE_C10_PAYLOAD) {
+        crate::serial_println!("[persist] Gate C10 FAILED: write {}", GATE_C10_FILE);
+        return false;
+    }
+    persist_file(GATE_C10_FILE, GATE_C10_PAYLOAD, 0o644);
+    if crate::vfs::remove_dispatch(GATE_C10_FILE).is_err() {
+        crate::serial_println!("[persist] Gate C10 FAILED: unlink {}", GATE_C10_FILE);
+        return false;
+    }
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        if vfs.rmdir(GATE_C10_DIR).is_err() {
+            crate::serial_println!("[persist] Gate C10 FAILED: rmdir {}", GATE_C10_DIR);
+            return false;
+        }
+        if vfs.stat(GATE_C10_DIR).is_ok() {
+            crate::serial_println!("[persist] Gate C10 FAILED: RAM directory survived rmdir");
+            return false;
+        }
+    }
+
+    restore_all();
+
+    let dir_ok = {
+        let vfs = crate::vfs::VFS.lock();
+        matches!(
+            vfs.stat(GATE_C10_DIR),
+            Ok(st) if st.file_type == crate::vfs::FileType::Directory
+        )
+    };
+    if !dir_ok {
+        crate::serial_println!(
+            "[persist] Gate C10 FAILED: {} missing after restore",
+            GATE_C10_DIR
+        );
+        return false;
+    }
+    if crate::vfs::read_file_dispatch(GATE_C10_FILE).is_some() {
+        crate::serial_println!("[persist] Gate C10 FAILED: virtual FS file round-tripped");
+        return false;
+    }
+
+    crate::serial_println!("[persist] {}", GATE_C10_MARKER);
+    true
 }

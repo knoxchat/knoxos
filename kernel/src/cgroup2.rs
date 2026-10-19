@@ -568,6 +568,9 @@ pub fn charge_cpu(pid: u64, usec: u64) -> Result<(), Cgroup2Error> {
     else {
         return Ok(());
     };
+    if cg.frozen {
+        return Err(Cgroup2Error::PermDenied);
+    }
     cg.cpu.stat_usage = cg.cpu.stat_usage.saturating_add(usec);
     let (quota, period) = cg.cpu.max;
     if quota != u64::MAX && period > 0 && cg.cpu.stat_usage > quota {
@@ -745,4 +748,49 @@ pub fn init() {
     crate::cgroups::enforce_self_test();
     let _ = cpu_self_test();
     let _ = io_self_test();
+    let _ = freeze_self_test();
+}
+
+pub const GATE_CGROUP_FREEZE_MARKER: &str = "GATE_CGROUP freeze";
+
+/// Frozen cgroups must deny CPU charge; thaw restores it.
+pub fn freeze_self_test() -> bool {
+    const GATE_PID: u64 = 424_246;
+    match mkdir("/gate.freeze") {
+        Ok(_) | Err(Cgroup2Error::AlreadyExists) => {}
+        Err(_) => {
+            crate::serial_println!("[cgroup2] GATE_CGROUP freeze FAILED: mkdir");
+            return false;
+        }
+    }
+    if attach_process("/gate.freeze", GATE_PID).is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP freeze FAILED: attach");
+        return false;
+    }
+    if set_frozen("/gate.freeze", true).is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP freeze FAILED: freeze");
+        return false;
+    }
+    let denied = charge_cpu(GATE_PID, 1000) == Err(Cgroup2Error::PermDenied);
+    if set_frozen("/gate.freeze", false).is_err() {
+        crate::serial_println!("[cgroup2] GATE_CGROUP freeze FAILED: thaw");
+        return false;
+    }
+    let allowed = charge_cpu(GATE_PID, 1000).is_ok();
+    let _ = attach_process("/", GATE_PID);
+    let _ = rmdir("/gate.freeze");
+    if denied && allowed {
+        crate::serial_println!(
+            "[cgroup2] {} (charge denied while frozen)",
+            GATE_CGROUP_FREEZE_MARKER
+        );
+        true
+    } else {
+        crate::serial_println!(
+            "[cgroup2] GATE_CGROUP freeze FAILED: denied={} allowed={}",
+            denied,
+            allowed
+        );
+        false
+    }
 }

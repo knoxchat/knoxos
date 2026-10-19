@@ -660,6 +660,32 @@ pub fn auth_attempt_count() -> u32 {
     AUTH_ATTEMPTS.load(Ordering::Relaxed)
 }
 
+pub const GATE_PAM_MARKER: &str = "GATE_PAM unix";
+
+/// `pam_unix` must accept a matching SHA-512 hash and deny a wrong token.
+pub fn unix_self_test() -> bool {
+    const USER: &str = "gatepam";
+    const PASS: &str = "s3cret";
+    add_user(USER, 1100, 1100, "/home/gatepam", "/bin/sh");
+    if !set_password(USER, PASS) {
+        serial_println!("[PAM] GATE_PAM FAILED: set_password");
+        return false;
+    }
+    let mut ok_h = PamHandle::new("su", USER);
+    ok_h.set_auth_token(PASS);
+    let ok = pam_authenticate(&mut ok_h) == PamResult::Success;
+    let mut bad_h = PamHandle::new("su", USER);
+    bad_h.set_auth_token("wrong");
+    let denied = pam_authenticate(&mut bad_h) == PamResult::AuthError;
+    if ok && denied {
+        serial_println!("[PAM] {} (pam_unix hash success + deny)", GATE_PAM_MARKER);
+        true
+    } else {
+        serial_println!("[PAM] GATE_PAM FAILED: ok={} denied={}", ok, denied);
+        false
+    }
+}
+
 /// Initialize PAM subsystem
 pub fn init() {
     serial_println!("[PAM] Pluggable Authentication Modules initialized");
@@ -669,4 +695,6 @@ pub fn init() {
     );
     let users = USERS.lock();
     serial_println!("[PAM] users: {}", users.len());
+    drop(users);
+    let _ = unix_self_test();
 }

@@ -163,6 +163,8 @@ pub struct XhciController {
     pub transfer_rings: BTreeMap<u8, Vec<TransferRing>>,
     /// Page size reported by controller
     pub page_size: u32,
+    /// Device/input context size: 32 or 64 bytes from HCCPARAMS1 CSZ.
+    pub context_size: u32,
 }
 
 /// A transfer ring for a specific endpoint
@@ -224,6 +226,7 @@ impl XhciController {
             event_ring_cycle: true,
             transfer_rings: BTreeMap::new(),
             page_size: 4096,
+            context_size: 32,
         }
     }
 }
@@ -443,7 +446,12 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
         db_offset = xhci_read32(mmio_base, 0x14);
         rts_offset = xhci_read32(mmio_base, 0x18);
     }
-    let _ = hcc_params1;
+    // HCCPARAMS1 CSZ (bit 2): 1 means 64-byte Device/Input Contexts.
+    let context_size = if hcc_params1 & (1 << 2) != 0 {
+        64u32
+    } else {
+        32
+    };
 
     let max_slots = (hcs_params1 & 0xFF) as u8;
     let max_intrs = ((hcs_params1 >> 8) & 0x7FF) as u16;
@@ -456,15 +464,17 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     xhci.max_slots = max_slots;
     xhci.max_ports = max_ports;
     xhci.max_intrs = max_intrs;
+    xhci.context_size = context_size;
 
     serial_println!(
-        "[XHCI] HCI v{}.{}, CapLen={}, MaxSlots={}, MaxPorts={}, MaxIntrs={}",
+        "[XHCI] HCI v{}.{}, CapLen={}, MaxSlots={}, MaxPorts={}, MaxIntrs={}, Ctx={}B",
         hci_version >> 8,
         hci_version & 0xFF,
         cap_length,
         max_slots,
         max_ports,
-        max_intrs
+        max_intrs,
+        context_size
     );
 
     let op_base = xhci.op_base;

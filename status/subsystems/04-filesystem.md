@@ -2,7 +2,7 @@
 
 # 4. Filesystem & Storage
 
-**Grade: Wired (99%)** · `vfs.rs`, `block.rs`, `virtio_blk.rs`, `ext4.rs`, `fat32.rs`, `persist.rs`, `partition.rs`, `page_cache.rs`, `ahci.rs`, `nvme.rs`
+**Grade: Wired (100%)** · `vfs.rs`, `block.rs`, `virtio_blk.rs`, `ext4.rs`, `fat32.rs`, `persist.rs`, `partition.rs`, `page_cache.rs`, `ahci.rs`, `nvme.rs`
 
 ### Live
 - [x] In-memory VFS (FHS tree, path walk, fds, metadata)
@@ -19,7 +19,8 @@
 - [x] **Gate C4 AHCI DMA** — command list + PRDT write then read a marker sector (`GATE_C4 ahci dma complete`)
 - [x] **Gate C5 NVMe DMA** — admin + I/O queues; PRP1 bounce write/read round-trip (`GATE_C5 nvme dma complete`)
 - [x] **Gate C6 VFS root persist** — `/etc` (and the rest of the RAM namespace except virtual FS) round-trips through VirtIO-blk (`GATE_C6 vfs persist`)
-- [x] **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual.
+- [x] **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`).
+- [x] **Gate C10 virtual FS mount points** — `/dev` `/proc` `/sys` `/run` directories round-trip; generated files under them stay virtual (`GATE_C10 virtfs persist`)
 - [x] 4 MB ramdisk always created
 
 ### Wired / partial
@@ -88,13 +89,13 @@
 - [x] Btrfs — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`)
 - [x] XFS — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`)
 - [x] JBD2 journal replay — descriptor + data + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount calls the same walker.
-- [x] ext4 default root — second virtio-blk (`mkfs.ext4`) mounted at `/` (`GATE_C9 ext4 root`). `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual.
-- [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE LOOKUP+READ (`GATE_FUSE lookup`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`).
-- [x] inotify — `emit_event` from VFS write/unlink and `open(O_CREAT)`; watch can read (**Gate H3**). Ring 3 `inotify_init1`/`add_watch`/`read` is live (Q3). `fanotify_init` returns ENOSYS (P4).
+- [x] ext4 default root — second virtio-blk (`mkfs.ext4`) mounted at `/` (`GATE_C9 ext4 root`). Generated files under `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual; the mount-point directories persist (C10).
+- [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE LOOKUP+READ (`GATE_FUSE lookup`). FUSE WRITE then READ (`GATE_FUSE write`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`).
+- [x] inotify — `emit_event` from VFS write/unlink and `open(O_CREAT)`; watch can read (**Gate H3**). Ring 3 `inotify_init1`/`add_watch`/`read` is live (Q3). fanotify MODIFY/CREATE on VFS write (`GATE_FANOTIFY modify`). Ring 3 `fanotify_init` returns ENOSYS (P4). io_uring NOP+WRITE (`GATE_IOURING sqe`); Ring 3 `io_uring_setup` returns ENOSYS (M4).
 - [x] Quotas — `write_file_checked` returns `EDQUOT` when the hard limit is exceeded (`GATE_QUOTA enforce`)
 
 ### Perfect-OS next steps
-1. ~~Make ext4 the root on VirtIO-blk by default.~~ **Done** (`GATE_C9 ext4 root`). Second virtio-blk is `mkfs.ext4` and mounted at `/`. `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual. Persist blob stays on vda (C1–C7).
+1. ~~Make ext4 the root on VirtIO-blk by default.~~ **Done** (`GATE_C9 ext4 root`). Second virtio-blk is `mkfs.ext4` and mounted at `/`. Mount-point directories persist (C10); generated files under `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual. Persist blob stays on vda (C1–C7, C10).
 2. ~~Journal commit + crash recovery that is tested by killing QEMU mid-write.~~ **Done** for the persist blob WAL (C2) and JBD2 (C8: committed transaction applied, torn descriptor discarded).
 3. ~~Complete VirtIO-blk DMA (guest-physical, not heap pointers).~~ **Done** — contiguous buddy frames + bounce buffer. ~~AHCI DMA still missing.~~ **C4 done.** ~~NVMe DMA still missing.~~ **C5 done.**
 4. ~~Hook inotify on VFS mutate.~~ **Done** (H3). Page-cache writeback (C3) overlays dirty pages.

@@ -394,8 +394,51 @@ pub fn generate_event(mask: u64, path: &str, pid: u32) {
     FANOTIFY.lock().generate_event(mask, path, pid);
 }
 
+pub const GATE_FANOTIFY_MARKER: &str = "GATE_FANOTIFY modify";
+
+/// Mark a path, write through VFS, and prove a MODIFY/CREATE event is queued.
+pub fn vfs_watch_self_test() -> bool {
+    const PATH: &str = "/tmp/gate_fanotify";
+    let Ok(fd) = fanotify_init(0, 0) else {
+        serial_println!("[FANOTIFY] GATE_FANOTIFY FAILED: init");
+        return false;
+    };
+    if fanotify_mark(fd, FAN_MARK_ADD, FAN_MODIFY | FAN_CREATE, PATH).is_err() {
+        serial_println!("[FANOTIFY] GATE_FANOTIFY FAILED: mark");
+        let _ = FANOTIFY.lock().close(fd);
+        return false;
+    }
+    let _ = read_events(fd, 16);
+    if !crate::vfs::write_file_dispatch(PATH, b"ok") {
+        serial_println!("[FANOTIFY] GATE_FANOTIFY FAILED: write");
+        let _ = FANOTIFY.lock().close(fd);
+        return false;
+    }
+    let events = read_events(fd, 8).unwrap_or_default();
+    let ok = events
+        .iter()
+        .any(|e| e.path == PATH && e.mask & (FAN_MODIFY | FAN_CREATE) != 0);
+    let _ = FANOTIFY.lock().close(fd);
+    let _ = crate::vfs::remove_dispatch(PATH);
+    if ok {
+        serial_println!(
+            "[FANOTIFY] {} (VFS write queued an event)",
+            GATE_FANOTIFY_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[FANOTIFY] GATE_FANOTIFY FAILED: events={} first={:?}",
+            events.len(),
+            events.first().map(|e| e.mask)
+        );
+        false
+    }
+}
+
 pub fn init() {
     serial_println!(
         "[FANOTIFY] Filesystem notification subsystem initialized (permission events, FID mode, directory events)"
     );
+    let _ = vfs_watch_self_test();
 }

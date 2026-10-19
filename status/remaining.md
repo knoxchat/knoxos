@@ -48,9 +48,9 @@ Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 - [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). CIFS SMB2 WRITE/READ (`GATE_CIFS smb2`). ZFS uberblock + Fletcher-4 (`GATE_ZFS block`).
 - [x] Btrfs — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`)
 - [x] XFS — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`)
-- [x] JBD2 journal replay — descriptor + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`)
-- [x] FUSE — LOOKUP + READ through the in-kernel loopback daemon (`GATE_FUSE lookup`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`). CPIO newc (`GATE_CPIO newc`). dpkg ar+tar (`GATE_DPKG deb`).
-- [x] Quotas — `write_file_checked` returns `EDQUOT` (`GATE_QUOTA enforce`)
+- [x] JBD2 journal replay — descriptor + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). Virtual-FS mount-point directories persist (`GATE_C10 virtfs persist`).
+- [x] FUSE — LOOKUP + READ through the in-kernel loopback daemon (`GATE_FUSE lookup`). WRITE stores bytes a later READ returns (`GATE_FUSE write`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`). CPIO newc (`GATE_CPIO newc`). dpkg ar+tar (`GATE_DPKG deb`).
+- [x] Quotas — `write_file_checked` returns `EDQUOT` (`GATE_QUOTA enforce`). fanotify MODIFY/CREATE on VFS write (`GATE_FANOTIFY modify`); Ring 3 `fanotify_init` stays ENOSYS. io_uring NOP+WRITE (`GATE_IOURING sqe`); Ring 3 `io_uring_setup` stays ENOSYS.
 
 ## 5. Networking Stack
 
@@ -65,7 +65,7 @@ Details: [subsystems/05-networking.md](subsystems/05-networking.md)
 
 Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 
-- [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`). Enable Slot Command Completion cc=1 (`GATE_USB xhci slot`). GET_DESCRIPTOR Transfer Event (`GATE_USB xhci desc`). Transfer Events drain into HID. Enumeration still has a timeout fallback.
+- [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`). Enable Slot Command Completion cc=1 (`GATE_USB xhci slot`). Address Device Command Completion cc=1 (`GATE_USB xhci addr`). GET_DESCRIPTOR Transfer Event (`GATE_USB xhci desc`). SET_CONFIGURATION Transfer Event (`GATE_USB xhci config`). GET_DESCRIPTOR(Configuration) Transfer Event plus full enum with no timeout fallback (`GATE_USB xhci enum`). Transfer Events drain into HID.
 - [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware (`GATE_AMDGPU fw`).
 - [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
 - [x] TPM TIS FIFO — locality 0 REQUEST_USE grants VALID|ACTIVE (`GATE_TPM tis`). Software SHA-256 PCR extend (`GATE_TPM pcr`). Hardware 0xFED4_0000 still unmapped on stock QEMU.
@@ -116,7 +116,7 @@ Details: [subsystems/09-security.md](subsystems/09-security.md)
 
 Details: [subsystems/10-services.md](subsystems/10-services.md)
 
-- [x] Crash restart of failed units (`GATE_SVC restart`). Unit `MemoryMax=` cgroup (`GATE_SVC cgroup`).
+- [x] Crash restart of failed units (`GATE_SVC restart`). Unit `MemoryMax=` cgroup (`GATE_SVC cgroup`). D-Bus `Hello` unique name (`GATE_DBUS method`). `RequestName` PRIMARY_OWNER (`GATE_DBUS name`). PAM unix SHA-512 (`GATE_PAM unix`).
 - [x] NTP — fixture Server-mode packet applies a 1000 ms offset (`GATE_NTP apply`)
 - [x] Bluetooth HCI — virtual adapter Reset Command Complete (`GATE_BT hci`)
 - [x] Cron `@reboot` plus PIT/APIC due-flag (`GATE_CRON reboot`)
@@ -132,7 +132,7 @@ Details: [subsystems/11-virt.md](subsystems/11-virt.md)
 - [x] `kvm::start_vm` software EPT fetch of HLT `0xF4` (`GATE_KVM vmlaunch`). Nested VMXON is not used on stock QEMU.
 - [x] EPT 4-level walk + virtio-mmio magic `0x74726976` (`GATE_KVM ept`)
 - [x] `container.rs` — `runc start` unshare + `pivot_root` (`GATE_OCI start`)
-- [x] cgroup v2 **memory** enforcement (`GATE_CGROUP2 memory`). CPU quota and IO byte cap deny (`GATE_CGROUP cpu`, `GATE_CGROUP io`).
+- [x] cgroup v2 **memory** enforcement (`GATE_CGROUP2 memory`). CPU quota and IO byte cap deny (`GATE_CGROUP cpu`, `GATE_CGROUP io`). Frozen cgroup denies CPU charge (`GATE_CGROUP freeze`).
 
 ## 12. AI/ML Integration
 

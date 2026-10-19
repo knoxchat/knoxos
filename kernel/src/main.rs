@@ -63,13 +63,13 @@ use knoxos_kernel::{
     journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm, landlock, ldknoxos, libc_funcs, livepatch,
     llm, media_player, membarrier, memfd, memory, midi, mmap, modules, mount, mount_api, mqueue,
     multiboot, musl, namespaces, nested_irq, net_production, network_manager, ntfs, ntp, numa,
-    nvme, onnx, oom, ota_update, overlayfs, package_manager, path, pci, pcie_ecam, perf, persist,
-    pgo, pgrp, pidfd, pidns, pipe, posix_ext, posix_timer, power, preempt_rt, println, process,
-    procfs, procfs_extended, procfs_full, ptrace, pty, pulseaudio, quota, random, recovery,
-    release_sign, repo_server, rlimit, rseq, rtc, rtl8139, sched_ext, scheduler, screen_record,
-    seccomp, security, selinux, serial_println, service_manager, session, shell, shell_startup,
-    shm, signalfd, signals, slab, smp, socket_activation, soloader, sound, splice, ssp,
-    stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs, sysinfo, syslog,
+    nvme, onnx, oom, ota_update, overlayfs, package_manager, pam, path, pci, pcie_ecam, perf,
+    persist, pgo, pgrp, pidfd, pidns, pipe, posix_ext, posix_timer, power, preempt_rt, println,
+    process, procfs, procfs_extended, procfs_full, ptrace, pty, pulseaudio, quota, random,
+    recovery, release_sign, repo_server, rlimit, rseq, rtc, rtl8139, sched_ext, scheduler,
+    screen_record, seccomp, security, selinux, serial_println, service_manager, session, shell,
+    shell_startup, shm, signalfd, signals, slab, smp, socket_activation, soloader, sound, splice,
+    ssp, stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs, sysinfo, syslog,
     task::{Task, executor::Executor, keyboard},
     terminal, thermal, thp, threads, thunderbolt, timerfd, tls, tmpfs, tokenizer, tpm2, tty, uds,
     usb, usb_hid, userfaultfd, usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu,
@@ -1006,6 +1006,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // D-Bus message bus (system + session)
     dbus::init();
+
+    // PAM unix password stack (login / su)
+    pam::init();
 
     // Debian package manager (dpkg .deb support)
     dpkg::init();

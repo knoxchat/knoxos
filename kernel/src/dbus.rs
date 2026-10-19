@@ -436,7 +436,10 @@ pub fn disconnect(bus_type: BusType, conn_id: ConnectionId) {
 /// Request a well-known bus name
 pub fn request_name(bus_type: BusType, conn_id: ConnectionId, name: &str, flags: u32) -> u32 {
     let mut bus = get_bus(bus_type).lock();
+    request_name_on_bus(&mut bus, conn_id, name, flags)
+}
 
+fn request_name_on_bus(bus: &mut BusState, conn_id: ConnectionId, name: &str, flags: u32) -> u32 {
     // Check if name is already owned
     if let Some(&current_owner) = bus.names.get(name) {
         if current_owner == conn_id {
@@ -502,8 +505,13 @@ pub fn send_message(bus_type: BusType, from: ConnectionId, msg: Message) -> u32 
     // Route the message
     match msg.header.message_type {
         MessageType::MethodCall => {
-            // Route to destination
-            if let Some(ref dest) = msg.destination {
+            let dest = msg.destination.as_deref().unwrap_or("");
+            let iface = msg.interface.as_deref().unwrap_or("");
+            // Bus daemon methods must not be queued to the owner of the
+            // well-known name `org.freedesktop.DBus` — they are handled here.
+            if dest == "org.freedesktop.DBus" || iface == "org.freedesktop.DBus" {
+                handle_bus_method(&mut bus, from, &msg);
+            } else if let Some(ref dest) = msg.destination {
                 let target_id = if dest.starts_with(':') {
                     // Direct connection name
                     bus.connections
@@ -520,7 +528,6 @@ pub fn send_message(bus_type: BusType, from: ConnectionId, msg: Message) -> u32 
                         conn.message_queue.push(msg);
                     }
                 } else {
-                    // Handle internally if it's a bus method
                     handle_bus_method(&mut bus, from, &msg);
                 }
             }
@@ -620,7 +627,21 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 }
             }
             "RequestName" => {
-                // Already handled by request_name()
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.clone(),
+                    _ => return,
+                };
+                let flags = match msg.body.get(1) {
+                    Some(DbusValue::Uint32(f)) => *f,
+                    _ => 0,
+                };
+                let code = request_name_on_bus(bus, from, &name, flags);
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::Uint32(code)];
+                reply.signature = Some(String::from("u"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
             }
             "ListNames" => {
                 let names: Vec<DbusValue> = bus
@@ -1048,6 +1069,8 @@ pub fn init() {
         SESSION_BUS.lock().names.len()
     );
     let _ = unix_bus_self_test();
+    let _ = method_self_test();
+    let _ = name_self_test();
 }
 
 /// Bind + listen `/run/dbus/system_bus_socket` once.
@@ -1101,4 +1124,138 @@ pub fn unix_bus_self_test() -> bool {
     }
     serial_println!("[dbus] {}", GATE_L3_MARKER);
     true
+}
+
+pub const GATE_DBUS_METHOD_MARKER: &str = "GATE_DBUS method";
+
+/// `Hello` on `org.freedesktop.DBus` must return a `:1.` unique name.
+pub fn method_self_test() -> bool {
+    let client = connect(BusType::System, 0xDB05, 1000);
+    let hello = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "Hello",
+    );
+    let serial = send_message(BusType::System, client, hello);
+    let Some(reply) = receive_message(BusType::System, client) else {
+        serial_println!("[dbus] GATE_DBUS FAILED: no Hello reply");
+        disconnect(BusType::System, client);
+        return false;
+    };
+    let unique_ok = matches!(
+        reply.body.first(),
+        Some(DbusValue::String(s)) if s.starts_with(":1.")
+    );
+    let ok = reply.header.message_type == MessageType::MethodReturn
+        && reply.reply_serial == Some(serial)
+        && unique_ok;
+    disconnect(BusType::System, client);
+    if ok {
+        serial_println!(
+            "[dbus] {} (Hello → MethodReturn unique name)",
+            GATE_DBUS_METHOD_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: type={:?} reply_serial={:?} body={:?}",
+            reply.header.message_type,
+            reply.reply_serial,
+            reply.body.first()
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_NAME_MARKER: &str = "GATE_DBUS name";
+
+/// `RequestName` must return PRIMARY_OWNER and deny a second claimant.
+pub fn name_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.Gate";
+    let owner = connect(BusType::System, 0xDB06, 1000);
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let serial = send_message(BusType::System, owner, req);
+    let Some(reply) = receive_message(BusType::System, owner) else {
+        serial_println!("[dbus] GATE_DBUS FAILED: no RequestName reply");
+        disconnect(BusType::System, owner);
+        return false;
+    };
+    let primary = reply.header.message_type == MessageType::MethodReturn
+        && reply.reply_serial == Some(serial)
+        && matches!(reply.body.first(), Some(DbusValue::Uint32(1)));
+
+    let challenger = connect(BusType::System, 0xDB07, 1000);
+    let mut clash = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    clash.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(DBUS_NAME_FLAG_DO_NOT_QUEUE),
+    ];
+    clash.signature = Some(String::from("su"));
+    let clash_serial = send_message(BusType::System, challenger, clash);
+    let Some(clash_reply) = receive_message(BusType::System, challenger) else {
+        serial_println!("[dbus] GATE_DBUS FAILED: no RequestName EXISTS reply");
+        disconnect(BusType::System, owner);
+        disconnect(BusType::System, challenger);
+        return false;
+    };
+    let exists = clash_reply.header.message_type == MessageType::MethodReturn
+        && clash_reply.reply_serial == Some(clash_serial)
+        && matches!(clash_reply.body.first(), Some(DbusValue::Uint32(3)));
+
+    let mut get = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetNameOwner",
+    );
+    get.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    get.signature = Some(String::from("s"));
+    let get_serial = send_message(BusType::System, challenger, get);
+    let owner_name = receive_message(BusType::System, challenger).and_then(|msg| {
+        if msg.reply_serial == Some(get_serial) {
+            match msg.body.first() {
+                Some(DbusValue::String(s)) => Some(s.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    });
+    disconnect(BusType::System, owner);
+    disconnect(BusType::System, challenger);
+    let owned = owner_name
+        .as_deref()
+        .map(|s| s.starts_with(":1."))
+        .unwrap_or(false);
+    if primary && exists && owned {
+        serial_println!(
+            "[dbus] {} (RequestName PRIMARY_OWNER, second EXISTS)",
+            GATE_DBUS_NAME_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: primary={} exists={} owner={:?}",
+            primary,
+            exists,
+            owner_name
+        );
+        false
+    }
 }

@@ -33,7 +33,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 25. **Gate BM2 real `dlopen`** — a static Ring 3 program `open`s `/lib/libgate_bm.so`, `mmap`s it through the VMM, walks dynsym for `gate_hello`, calls it (`0x42`), and writes the marker (`GATE_BM2 dlopen complete`).
 26. **Gate BM3 static musl CRT** — a Ring 3 binary that is not the hello fixture: musl `crt1` `_start` calls `__libc_start_main`, which calls `main` (`GATE_BM3 musl abi`).
 27. **Gate BM4 dynamically linked musl** — PT_INTERP `/lib/ld-knoxos.so`, DT_NEEDED `/lib/libc.so`; crt1 `_start` calls `__libc_start_main@plt`, which calls `main` (`GATE_BM4 musl dynlink`). Generated in-kernel (same class as BM1–BM3), not a host musl-gcc binary.
-28. **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`). `/dev` `/proc` `/sys` `/run` stay virtual.
+28. **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`).
 29. **Gate G3 feature flags** — default kernel is `gui`+`net`; `stub-drivers` and `fs-ext4` are off (`GATE_G3 features live`).
 30. **Gate G4 honesty** — `adjtimex` returns `-ENOSYS` from Ring 3 (`GATE_G4 enosys`); `sched_setaffinity` writes a real mask.
 31. **Gate F6 calculator userspace** — Ring 3 SHM client, not `WindowContentType::Calculator` (`GATE_F6 calculator userspace`).
@@ -45,7 +45,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 37. **USB HID URB** — submit + complete + boot-protocol keyboard parse delivers evdev KEY_A (`GATE_USB hid urb`).
 38. **XHCI MMIO** — BAR0 mapped uncached via `vmm::map_mmio`; rings are buddy DMA frames, not heap pointers (`GATE_USB xhci mmio`). Transfer Events drain into the HID URB handler and the GUI mouse/key path.
 39. **Gate G5** — every `unsafe {` has a `// SAFETY:` comment; `undocumented_unsafe_blocks = deny` (`GATE_G5 safety comments`).
-40. **Gate C9 ext4 root** — second virtio-blk is `mkfs.ext4` and mounted at `/`; `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual (`GATE_C9 ext4 root`).
+40. **Gate C9 ext4 root** — second virtio-blk is `mkfs.ext4` and mounted at `/`; generated files under `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual (`GATE_C9 ext4 root`). Mount-point directories persist (C10).
 41. **USB HID cursor without PS/2** — boot-protocol mouse URB moves `MOUSE.x/y`; i8042 aux is not enabled (`GATE_USB no ps2 cursor`).
 42. **Secure Boot QEMU** — host `scripts/qemu-secure-boot.sh` enrolls PK/KEK/db and boots a signed EFI (`GATE_SB ovmf boot`).
 43. **Cross-arch QEMU boot** — aarch64/riscv64 `_start` prints `GATE_ARCH aarch64 boot` / `GATE_ARCH riscv64 boot` and idles.
@@ -141,5 +141,16 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 130. **XHCI GET_DESCRIPTOR** — chained Setup+Data+Status TD; Transfer Event required (`GATE_USB xhci desc`).
 131. **Service cgroup** — unit `MemoryMax=4KiB` denies 8KiB (`GATE_SVC cgroup`).
 132. **GPOS mark** — `e` + combining acute attaches with zero mark advance (`GATE_GPOS mark`).
+133. **io_uring** — FIFO SQE; NOP + WRITE CQEs (`GATE_IOURING sqe`). Ring 3 stays ENOSYS (M4).
+134. **fanotify** — VFS write queues `FAN_CREATE`/`FAN_MODIFY` (`GATE_FANOTIFY modify`). Ring 3 stays ENOSYS (P4).
+135. **D-Bus Hello** — `org.freedesktop.DBus.Hello` returns a `:1.` unique name (`GATE_DBUS method`).
+136. **XHCI SET_CONFIGURATION** — Setup+Status Transfer Event (`GATE_USB xhci config`).
+137. **XHCI Address Device** — Command Completion cc=1 (`GATE_USB xhci addr`).
+138. **D-Bus RequestName** — PRIMARY_OWNER plus second claimant EXISTS (`GATE_DBUS name`).
+139. **FUSE WRITE** — WRITE then READ round-trip (`GATE_FUSE write`).
+140. **PAM unix** — matching SHA-512 token succeeds; wrong token is AuthError (`GATE_PAM unix`).
+141. **cgroup freeze** — frozen cgroup denies CPU charge (`GATE_CGROUP freeze`).
+142. **XHCI enum** — Enable Slot, Address Device, GET_DESCRIPTOR, GET_DESCRIPTOR(Configuration), and SET_CONFIGURATION each require a live completion; timeout fallbacks are gone (`GATE_USB xhci enum`).
+143. **Virtual FS persist** — `/dev` `/proc` `/sys` `/run` directories round-trip through VirtIO-blk; generated files under them stay virtual (`GATE_C10 virtfs persist`).
 
-Integration: `./tests/run_integration.sh` **396/396** on QEMU (2026-10-19).
+Integration: `./tests/run_integration.sh` **407/407** on QEMU (2026-10-20).

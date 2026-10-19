@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use crate::serial_println;
 
-use super::enumerate::{submit_transfer, wait_command_completion};
+use super::enumerate::{TRB_CH, submit_transfer, wait_command_completion};
 use super::types::{UsbDevice, UsbSetupPacket, UsbSpeed};
 use super::xhci::{Trb, TrbType, XHCI, alloc_ring_buffer, dma_virt};
 
@@ -40,6 +40,7 @@ pub fn control_transfer(
     setup_trb.status = 8;
     setup_trb.set_type(TrbType::SetupStage);
     setup_trb.control |= 1 << 6; // IDT
+    setup_trb.control |= TRB_CH;
     if w_length > 0 {
         setup_trb.control |= if is_in { 3 << 16 } else { 2 << 16 }; // TRT
     }
@@ -71,8 +72,10 @@ pub fn control_transfer(
         data_trb.param_hi = (ptr >> 32) as u32;
         data_trb.status = buf.len() as u32;
         data_trb.set_type(TrbType::DataStage);
+        data_trb.control |= TRB_CH;
         if is_in {
             data_trb.control |= 1 << 16; // DIR = IN
+            data_trb.control |= 1 << 2; // ISP
         }
         trbs.push(data_trb);
     } else {
@@ -85,9 +88,10 @@ pub fn control_transfer(
     status_trb.set_type(TrbType::StatusStage);
     status_trb.control |= 1 << 5; // IOC
     if data.is_some() && is_in {
-        // Status direction is opposite of data direction (OUT for IN data)
-    } else if data.is_some() {
-        status_trb.control |= 1 << 16; // DIR = IN
+        // Status DIR = OUT (default) when data was IN
+    } else {
+        // No-data or OUT data: status stage is IN
+        status_trb.control |= 1 << 16;
     }
     trbs.push(status_trb);
 
@@ -116,13 +120,11 @@ pub fn control_transfer(
             return Ok(0);
         }
         serial_println!("[XHCI] Control transfer completion code: {}", cc);
+        return Err("control transfer failed");
     }
 
-    if let Some(buf) = data {
-        Ok(buf.len())
-    } else {
-        Ok(0)
-    }
+    serial_println!("[XHCI] Control transfer timeout");
+    Err("control transfer timeout")
 }
 
 // ═══════════════════════════════════════════════════════════════════════

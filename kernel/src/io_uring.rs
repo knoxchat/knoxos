@@ -182,11 +182,12 @@ impl IoUringInstance {
         Ok(())
     }
 
-    /// Process all pending submissions and generate completions
+    /// Process all pending submissions and generate completions (FIFO).
     pub fn process(&mut self) -> u32 {
+        let pending = core::mem::take(&mut self.sq);
         let mut completed = 0u32;
 
-        while let Some(sqe) = self.sq.pop() {
+        for sqe in pending {
             let res = self.execute_sqe(&sqe);
             self.cq.push(IoUringCqe {
                 user_data: sqe.user_data,
@@ -493,7 +494,84 @@ pub struct IoUringStats {
     pub flags: u32,
 }
 
+pub const GATE_IOURING_MARKER: &str = "GATE_IOURING sqe";
+
+/// Setup a ring, submit NOP + WRITE, and prove CQE results plus the file bytes.
+pub fn sqe_self_test() -> bool {
+    const PATH: &str = "/tmp/gate_iouring";
+    const PAYLOAD: &[u8] = b"sqe";
+    if !crate::vfs::write_file_dispatch(PATH, b"") {
+        crate::serial_println!("[io_uring] GATE_IOURING FAILED: create");
+        return false;
+    }
+    let flags = crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR);
+    let Ok(fd) = crate::fd::sys_open(PATH, flags, crate::fd::FileType::Regular) else {
+        crate::serial_println!("[io_uring] GATE_IOURING FAILED: open");
+        return false;
+    };
+    let Ok(ring) = sys_io_uring_setup(8, 0) else {
+        crate::serial_println!("[io_uring] GATE_IOURING FAILED: setup");
+        let _ = crate::fd::sys_close(fd);
+        return false;
+    };
+    if submit_sqe(ring, IoUringSqe::new(IoUringOp::Nop, -1, 1)).is_err() {
+        crate::serial_println!("[io_uring] GATE_IOURING FAILED: nop sqe");
+        io_uring_destroy(ring);
+        let _ = crate::fd::sys_close(fd);
+        return false;
+    }
+    let mut write = IoUringSqe::new(IoUringOp::Write, fd, 2);
+    write.addr = PAYLOAD.as_ptr() as u64;
+    write.len = PAYLOAD.len() as u32;
+    if submit_sqe(ring, write).is_err() {
+        crate::serial_println!("[io_uring] GATE_IOURING FAILED: write sqe");
+        io_uring_destroy(ring);
+        let _ = crate::fd::sys_close(fd);
+        return false;
+    }
+    let Ok(n) = sys_io_uring_enter(ring, 2, 2, IORING_ENTER_GETEVENTS) else {
+        crate::serial_println!("[io_uring] GATE_IOURING FAILED: enter");
+        io_uring_destroy(ring);
+        let _ = crate::fd::sys_close(fd);
+        return false;
+    };
+    let Ok(cqes) = reap_cqes(ring, 8) else {
+        crate::serial_println!("[io_uring] GATE_IOURING FAILED: reap");
+        io_uring_destroy(ring);
+        let _ = crate::fd::sys_close(fd);
+        return false;
+    };
+    let nop_ok = cqes.iter().any(|c| c.user_data == 1 && c.res == 0);
+    let write_ok = cqes
+        .iter()
+        .any(|c| c.user_data == 2 && c.res == PAYLOAD.len() as i32);
+    let _ = crate::fd::sys_lseek(fd, 0, 0);
+    let mut buf = [0u8; 8];
+    let read_n = crate::fd::sys_read(fd, &mut buf).unwrap_or(0);
+    io_uring_destroy(ring);
+    let _ = crate::fd::sys_close(fd);
+    let _ = crate::vfs::remove_dispatch(PATH);
+    if n == 2 && nop_ok && write_ok && read_n == PAYLOAD.len() && &buf[..PAYLOAD.len()] == PAYLOAD {
+        crate::serial_println!(
+            "[io_uring] {} (NOP+WRITE CQE, {} bytes)",
+            GATE_IOURING_MARKER,
+            PAYLOAD.len()
+        );
+        true
+    } else {
+        crate::serial_println!(
+            "[io_uring] GATE_IOURING FAILED: enter={} nop={} write={} read={}",
+            n,
+            nop_ok,
+            write_ok,
+            read_n
+        );
+        false
+    }
+}
+
 /// Initialize io_uring subsystem
 pub fn init() {
     crate::serial_println!("  io_uring subsystem initialized (40 opcodes, SQ/CQ ring buffers)");
+    let _ = sqe_self_test();
 }

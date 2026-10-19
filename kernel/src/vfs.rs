@@ -83,6 +83,7 @@ impl VirtualFS {
         let _proc = vfs.create_dir_under(root, "proc", 0o555);
         let _sbin = vfs.create_dir_under(root, "sbin", 0o755);
         let _sys = vfs.create_dir_under(root, "sys", 0o555);
+        let _run = vfs.create_dir_under(root, "run", 0o755);
         let tmp = vfs.create_dir_under(root, "tmp", 0o1777);
         let _usr = vfs.create_dir_under(root, "usr", 0o755);
         let _var = vfs.create_dir_under(root, "var", 0o755);
@@ -1193,6 +1194,12 @@ pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
             crate::inotify::IN_CREATE
         };
         crate::inotify::emit_event(path, mask, name);
+        let fan_mask = if existed {
+            crate::fanotify::FAN_MODIFY
+        } else {
+            crate::fanotify::FAN_CREATE
+        };
+        crate::fanotify::generate_event(fan_mask, path, 0);
     }
     ok
 }
@@ -1259,6 +1266,7 @@ pub fn remove_dispatch(path: &str) -> Result<(), i32> {
     if result.is_ok() {
         let name = path.rsplit('/').next().filter(|s| !s.is_empty());
         crate::inotify::emit_event(path, crate::inotify::IN_DELETE, name);
+        crate::fanotify::generate_event(crate::fanotify::FAN_DELETE, path, 0);
     }
     result
 }

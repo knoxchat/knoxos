@@ -2,7 +2,7 @@
 
 # 10. System Services
 
-**Grade: Wired (80%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`, `ntp.rs`
+**Grade: Wired (84%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`, `ntp.rs`
 
 ### Wired
 - [x] Init searches standard paths; can map a built-in ELF blob
@@ -20,7 +20,8 @@
 ### Stub
 - [x] Init `iretq`s to `/sbin/init` (K3); Failed units restart (`GATE_SVC restart`)
 - [x] Crash restart of Failed units (`GATE_SVC restart`). Unit `MemoryMax=` cgroup (`GATE_SVC cgroup`).
-- [x] D-Bus listens on `AF_UNIX` `/run/dbus/system_bus_socket` (L3); not a full bus daemon
+- [x] D-Bus listens on `AF_UNIX` `/run/dbus/system_bus_socket` (L3); `Hello` returns a `:1.` unique name (`GATE_DBUS method`). `RequestName` returns PRIMARY_OWNER (`GATE_DBUS name`). Not a full bus daemon.
+- [x] PAM unix SHA-512: matching token succeeds; wrong token is AuthError (`GATE_PAM unix`)
 - [x] Cron `@reboot` + PIT/APIC due-flag (`GATE_CRON reboot`)
 - [x] udev-style hotplug → `/dev` from PCI (`GATE_UDEV hotplug`)
 - [x] NetworkManager `activate` copies live `eth0` DHCP (`GATE_NM dhcp`)

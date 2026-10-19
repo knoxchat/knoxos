@@ -580,7 +580,9 @@ fn probe_ext4_magic(dev_idx: usize) -> bool {
 
 #[cfg(feature = "fs-ext4")]
 fn seed_ext4_fhs(fs_idx: usize) {
-    for name in ["etc", "bin", "home", "var", "usr", "opt", "root"] {
+    for name in [
+        "etc", "bin", "home", "var", "usr", "opt", "root", "dev", "proc", "sys", "run", "tmp",
+    ] {
         let _ = crate::ext4::mkdir(fs_idx, "/", name);
     }
     let _ = crate::ext4::mkdir(fs_idx, "/var", "lib");
