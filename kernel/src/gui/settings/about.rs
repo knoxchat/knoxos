@@ -79,7 +79,7 @@ pub(super) fn draw_about_tab(fb: &mut FrameBuffer, x: i32, y: i32, w: i32) -> i3
         x,
         info_y + 136,
         w as u32,
-        "KnoxOS: An AI-native operating system written entirely in Rust.",
+        "KnoxOS: An SI-native operating system written entirely in Rust.",
         13,
         Pixel::rgb(120, 120, 120),
     );

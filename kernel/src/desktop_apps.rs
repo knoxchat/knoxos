@@ -1200,7 +1200,7 @@ impl SettingsState {
         let mut s = String::new();
         s.push_str("╔═══════════════════════════════════╗\n");
         s.push_str("║        KnoxOS v0.2.4              ║\n");
-        s.push_str("║   AI-Native Operating System      ║\n");
+        s.push_str("║   SI-native Operating System      ║\n");
         s.push_str("╚═══════════════════════════════════╝\n\n");
         s.push_str("Built with Rust • Linux Compatible\n\n");
         s.push_str(&format!("Hostname: {}\n", self.hostname));

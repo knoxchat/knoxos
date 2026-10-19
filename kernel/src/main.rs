@@ -42,7 +42,7 @@ use knoxos_kernel::ext4;
 use knoxos_kernel::gui;
 #[cfg(feature = "stub-drivers")]
 use knoxos_kernel::{
-    aarch64_boot, ai_suggest, aio, app_store, apparmor, binfmt, cgroup_psi, cgroup_v2_controllers,
+    aarch64_boot, ai_suggest, aio, app_store, binfmt, cgroup_psi, cgroup_v2_controllers,
     cgroups_v2_advanced, cluster, compiler, coredump, css_engine, deployment, depthcharge,
     desktop_apps_ext, desktop_ops, dm_crypt, federated, fuzz, gamepad, help_system, hw_bringup,
     io_sched, io_uring_advanced, js_engine, k8s, kcov, kdb, keyring, kpanic, ktrace, live_usb,
@@ -52,8 +52,8 @@ use knoxos_kernel::{
     xdp,
 };
 use knoxos_kernel::{
-    acpi, acpi_tables, ahci, ai, allocator, alsa, amdgpu, apic_timer, arch, audit, ax211, battery,
-    bcache, benchmark, block, bluetooth, boot_splash, bridge, broadcom_wifi, btrfs, cabi,
+    acpi, acpi_tables, ahci, ai, allocator, alsa, amdgpu, apic_timer, apparmor, arch, audit, ax211,
+    battery, bcache, benchmark, block, bluetooth, boot_splash, bridge, broadcom_wifi, btrfs, cabi,
     capabilities, cgroup2, cgroups, chromium_sandbox, cifs, clock, close_range, cmdline, container,
     context, cpio, cpufreq, cred, cron, crypto, dbus, desktop_apps, devfs, dm_verity, dmesg, dpkg,
     drm, dynlink, e1000, ebpf, elf, epoll, eventfd, exfat, ext2, fanotify, fat32, fd, fifo,
@@ -106,7 +106,7 @@ entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("╔══════════════════════════════════════════════════════╗");
     serial_println!("║  KnoxOS - AI Operating System v0.2.4                 ║");
-    serial_println!("║  Linux-compatible | Rust-powered | AI-native         ║");
+    serial_println!("║  Linux-compatible | Rust-powered | SI-native         ║");
     serial_println!("╚══════════════════════════════════════════════════════╝");
     serial_println!("[KnoxOS] Booting KnoxOS...");
     serial_println!(
@@ -860,8 +860,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     libc_funcs::init();
 
     // Initialize AppArmor MAC subsystem
-    #[cfg(feature = "stub-drivers")]
-    #[cfg(feature = "stub-drivers")]
     apparmor::init();
 
     // Initialize kernel tracing infrastructure (ftrace/kprobes)
@@ -1116,6 +1114,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("[KnoxOS] Phase 30: service_manager boot...");
     crate::service_manager::SERVICE_MANAGER.lock().boot();
     crate::service_manager::restart_self_test();
+    crate::service_manager::cgroup_self_test();
     serial_println!("[KnoxOS] Phase 30: cron::init...");
     cron::init();
     serial_println!("[KnoxOS] Phase 30: session::init...");

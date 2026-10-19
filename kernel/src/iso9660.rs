@@ -1162,7 +1162,7 @@ impl KnoxOsIsoBuilder {
         self.builder.add_file("/install/install.sh", installer);
 
         // Add OS metadata
-        let readme = b"KnoxOS - AI-Native Operating System\n\nVersion: 0.2.4\nDate: February 2026\n\nTo install:\n  1. Boot from this ISO\n  2. Run /install/install.sh\n  3. Follow the prompts\n\nFor more information: https://knoxos.org\n";
+        let readme = b"KnoxOS - SI-native Operating System\n\nVersion: 0.2.4\nDate: February 2026\n\nTo install:\n  1. Boot from this ISO\n  2. Run /install/install.sh\n  3. Follow the prompts\n\nFor more information: https://knoxos.org\n";
         self.builder.add_file("/README.TXT", readme.to_vec());
 
         // Add license
@@ -1207,7 +1207,7 @@ error() { echo "${RED}[ERROR]${NC} $1"; }
 
 echo "================================================"
 echo "  KnoxOS Installer v${VERSION}"
-echo "  AI-Native Operating System"
+echo "  SI-native Operating System"
 echo "  Written in Rust — x86_64 bare metal"
 echo "================================================"
 echo ""
@@ -1345,7 +1345,7 @@ cat > /mnt/etc/os-release << 'EOF'
 NAME="KnoxOS"
 VERSION="0.2.4"
 ID=knoxos
-PRETTY_NAME="KnoxOS 0.2.4 (AI-Native)"
+PRETTY_NAME="KnoxOS 0.2.4 (SI-native)"
 VERSION_ID=0.2.4
 HOME_URL="https://knoxos.org"
 EOF

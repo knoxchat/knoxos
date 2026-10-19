@@ -107,7 +107,7 @@ pub fn draw_splash(fb: &mut FrameBuffer) {
     );
 
     // ── Tagline ─────────────────────────────────────────────────────
-    let tagline = "AI-native Operating System";
+    let tagline = "SI-native Operating System";
     let tl_scale = 2u32;
     let tl_w = tagline.len() as i32 * fonts::FONT_WIDTH as i32 * tl_scale as i32;
     let tl_x = (w - tl_w) / 2;

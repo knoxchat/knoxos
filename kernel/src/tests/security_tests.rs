@@ -102,6 +102,14 @@ fn test_selinux_denies_vfs_write() {
 }
 
 #[test_case]
+fn test_apparmor_denies_vfs_write() {
+    assert!(
+        crate::apparmor::mac_self_test(),
+        "AppArmor Enforce must deny network-daemon writes to /etc"
+    );
+}
+
+#[test_case]
 fn test_dm_verity_merkle_root() {
     assert!(
         crate::dm_verity::verity_self_test(),

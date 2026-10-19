@@ -1,4 +1,4 @@
-/// Aurora Command Center — AI-Native App Launcher & Command Hub
+/// Aurora Command Center — SI-native App Launcher & Command Hub
 ///
 /// This is the primary interaction surface for KnoxOS. It replaces the traditional
 /// "Start Menu" with a fully-featured command center that combines:

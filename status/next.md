@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **392/392**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **396/396**.
 
 ---
 
@@ -61,6 +61,7 @@ Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md]
 - KVM software EPT+HLT (`GATE_KVM ept`, `GATE_KVM vmlaunch`); OCI unshare+pivot_root (`GATE_OCI start`); ZFS uberblock (`GATE_ZFS block`); WPA3-SAE (`GATE_WPA3 sae`); bridge FDB (`GATE_BRIDGE fdb`); TLS 1.3 handshake (`GATE_TLS13 hs`); GPU matmul (`GATE_GPU matmul`); SDPA+KV (`GATE_AI attn`); assistant chat (`GATE_AI chat`); NFS4 COMPOUND (`GATE_NFS compound`); Broadcom `BRCMFW` (`GATE_BRCM fw`); Thunderbolt hop (`GATE_TB hop`)
 - X.509 RSA over TBS (`GATE_TLS13 x509`); dpkg ar+tar (`GATE_DPKG deb`); TPM PCR extend (`GATE_TPM pcr`); BPE `"the"` (`GATE_AI vocab`); CPIO newc (`GATE_CPIO newc`); title `'i'` (`GATE_FONT title`); Terminal SHM glyphs (`GATE_TERM shm paint`)
 - SELinux VFS deny (`GATE_SELINUX deny`); XHCI Enable Slot cc=1 (`GATE_USB xhci slot`); NTP offset (`GATE_NTP apply`); Bluetooth HCI Reset (`GATE_BT hci`); dm-verity Merkle (`GATE_VERITY root`)
+- AppArmor VFS deny (`GATE_APPARMOR deny`); XHCI GET_DESCRIPTOR Transfer Event (`GATE_USB xhci desc`); unit MemoryMax cgroup (`GATE_SVC cgroup`); GPOS mark-to-base (`GATE_GPOS mark`)
 - USB Audio / trackpad / Wacom / UVC / Ethernet / touch / GPIO (`GATE_USB audio`, `GATE_USB trackpad`, `GATE_USB wacom`, `GATE_USB uvc`, `GATE_USB ethernet`, `GATE_USB touch`, `GATE_GPIO xfer`)
 - TLS 1.3 HKDF (`GATE_TLS13 hkdf`); HDR/VRR (`GATE_HDR pq`, `GATE_VRR range`); e1000 `Socket::send` (`GATE_E1000 send`); eBPF/sched_ext (`GATE_EBPF exec`); Wi-Fi Beacon+PMK (`GATE_WIFI pmk`); i915 modeset (`GATE_I915 modeset`); Btrfs ramdisk (`GATE_BTRFS block`); VLAN 802.1Q (`GATE_VLAN tag`)
 

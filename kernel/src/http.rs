@@ -698,7 +698,7 @@ fn default_index(_req: &HttpRequest) -> HttpResponse {
         <style>body{font-family:sans-serif;margin:40px;background:#1a1a2e;color:#e0e0e0;}\
         h1{color:#00d4ff;}a{color:#00d4ff;}</style></head>\
         <body><h1>Welcome to KnoxOS</h1>\
-        <p>KnoxOS v0.2.4 - AI-Native Operating System</p>\
+        <p>KnoxOS v0.2.4 - SI-native Operating System</p>\
         <ul>\
         <li><a href=\"/api/info\">System Info</a></li>\
         <li><a href=\"/api/processes\">Process List</a></li>\

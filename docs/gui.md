@@ -13,7 +13,7 @@ The compositor is an in-kernel software desktop, not a Unix display server. Prod
 
 ## What is not
 
-- Full IME framework, HarfBuzz-class GPOS mark attachment. SCM_RIGHTS / memfd `wl_shm.create_pool` (GATE_WL uses a KnoxOS vaddr create_pool).
+- Full IME framework. GPOS mark-to-base is live (`GATE_GPOS mark`). SCM_RIGHTS / memfd `wl_shm.create_pool` (GATE_WL uses a KnoxOS vaddr create_pool).
 
 ## Client rule
 

@@ -27,8 +27,14 @@ static INTERRUPT_URBS: Mutex<Vec<InterruptUrb>> = Mutex::new(Vec::new());
 
 /// True only when Enable Slot returned Command Completion cc=1 (not a timeout fallback).
 static SLOT_ENABLE_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR got a Transfer Event (cc=1/13), not a timeout fallback.
+static DESC_LIVE: AtomicBool = AtomicBool::new(false);
 
 pub const GATE_XHCI_SLOT_MARKER: &str = "GATE_USB xhci slot";
+pub const GATE_XHCI_DESC_MARKER: &str = "GATE_USB xhci desc";
+
+/// TRB chain bit — required so Setup+Data+Status are one TD.
+const TRB_CH: u32 = 1 << 4;
 
 // ═══════════════════════════════════════════════════════════════════════
 // DEVICE ENUMERATION
@@ -537,6 +543,7 @@ pub fn get_device_descriptor(slot_id: u8) -> Option<UsbDeviceDescriptor> {
     setup.set_type(TrbType::SetupStage);
     setup.control |= 3 << 16; // TRT = 3 (IN Data Stage)
     setup.control |= 1 << 6; // IDT (Immediate Data)
+    setup.control |= TRB_CH; // chain to Data Stage
 
     let mut data = Trb::new();
     data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
@@ -544,6 +551,8 @@ pub fn get_device_descriptor(slot_id: u8) -> Option<UsbDeviceDescriptor> {
     data.status = 18; // Transfer Length = 18
     data.set_type(TrbType::DataStage);
     data.control |= 1 << 16; // DIR = 1 (IN)
+    data.control |= 1 << 2; // ISP (Interrupt on Short Packet)
+    data.control |= TRB_CH; // chain to Status Stage
 
     let mut status = Trb::new();
     status.set_type(TrbType::StatusStage);
@@ -565,6 +574,11 @@ pub fn get_device_descriptor(slot_id: u8) -> Option<UsbDeviceDescriptor> {
             // Read descriptor from DMA buffer
             // SAFETY: GET_DESCRIPTOR DMA page is owned by this transfer.
             let desc = unsafe { core::ptr::read(dma_virt(data_buf) as *const UsbDeviceDescriptor) };
+            let blen = desc.b_length;
+            let dtype = desc.b_descriptor_type;
+            if blen == 18 && dtype == 1 {
+                DESC_LIVE.store(true, Ordering::Relaxed);
+            }
             let vid = desc.id_vendor;
             let pid = desc.id_product;
             let cls = desc.b_device_class;
@@ -579,7 +593,7 @@ pub fn get_device_descriptor(slot_id: u8) -> Option<UsbDeviceDescriptor> {
         serial_println!("[XHCI] GET_DESCRIPTOR completion code: {}", cc);
     }
 
-    // Fallback for environments where XHCI event ring may not work perfectly
+    // Enumeration may continue with a QEMU-shaped fallback; the gate requires DESC_LIVE.
     serial_println!("[XHCI] GET_DESCRIPTOR timeout, using fallback");
     Some(fallback_device_descriptor())
 }
@@ -679,5 +693,34 @@ pub fn slot_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_SLOT_MARKER);
+    true
+}
+
+/// Prove GET_DESCRIPTOR got a Transfer Event, not a timeout fallback.
+pub fn descriptor_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci desc skipped (no controller)");
+        return true;
+    }
+    if !DESC_LIVE.load(Ordering::Relaxed) {
+        let ports = enumerate_ports();
+        let port = ports
+            .iter()
+            .find(|p| p.connected)
+            .map(|p| (p.port_num, p.speed));
+        if let Some(slot_id) = enable_slot() {
+            if let Some((port_num, speed)) = port {
+                let _ = address_device(slot_id, port_num, speed);
+            } else {
+                let _ = address_device(slot_id, 1, UsbSpeed::High);
+            }
+            let _ = get_device_descriptor(slot_id);
+        }
+    }
+    if !DESC_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_DESCRIPTOR had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_DESC_MARKER);
     true
 }

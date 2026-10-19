@@ -52,7 +52,7 @@ pub fn query(prompt: &str) -> String {
         String::from("Network interfaces: lo (127.0.0.1, UP), eth0 (10.0.2.15, DOWN)")
     } else if prompt_lower.contains("knoxos") || prompt_lower.contains("operating system") {
         String::from(
-            "KnoxOS is an AI-native operating system written in Rust. \
+            "KnoxOS is an SI-native operating system written in Rust. \
              It features a graphical desktop environment, Linux-compatible syscalls, \
              and built-in AI inference capabilities.",
         )

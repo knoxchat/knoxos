@@ -133,9 +133,13 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 122. **Title `'i'`** — UiBold falls back so `"Terminal"` keeps the stem (`GATE_FONT title`).
 123. **Terminal SHM paint** — first frame glyphs, scaled into the client area (`GATE_TERM shm paint`).
 124. **SELinux** — Enforcing TE on VFS: `container_t` writes a `container_t` path and is denied `/etc` (`GATE_SELINUX deny`). Default remains Permissive.
-125. **XHCI Enable Slot** — scratchpad + Command Completion cc=1 (`GATE_USB xhci slot`). GET_DESCRIPTOR still has a timeout fallback.
+125. **XHCI Enable Slot** — scratchpad + Command Completion cc=1 (`GATE_USB xhci slot`).
 126. **NTP** — Server-mode fixture applies a 1000 ms offset (`GATE_NTP apply`).
 127. **Bluetooth HCI** — virtual adapter HCI Reset Command Complete (`GATE_BT hci`).
 128. **dm-verity** — SHA-256 Merkle leaf equals root; tamper is rejected (`GATE_VERITY root`).
+129. **AppArmor** — `network-daemon` writes `/run` and is denied `/etc` (`GATE_APPARMOR deny`). Default processes stay unconfined.
+130. **XHCI GET_DESCRIPTOR** — chained Setup+Data+Status TD; Transfer Event required (`GATE_USB xhci desc`).
+131. **Service cgroup** — unit `MemoryMax=4KiB` denies 8KiB (`GATE_SVC cgroup`).
+132. **GPOS mark** — `e` + combining acute attaches with zero mark advance (`GATE_GPOS mark`).
 
-Integration: `./tests/run_integration.sh` **392/392** on QEMU (2026-10-19).
+Integration: `./tests/run_integration.sh` **396/396** on QEMU (2026-10-19).

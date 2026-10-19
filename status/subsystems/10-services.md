@@ -2,7 +2,7 @@
 
 # 10. System Services
 
-**Grade: Wired (75%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`, `ntp.rs`
+**Grade: Wired (80%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`, `ntp.rs`
 
 ### Wired
 - [x] Init searches standard paths; can map a built-in ELF blob
@@ -19,7 +19,7 @@
 
 ### Stub
 - [x] Init `iretq`s to `/sbin/init` (K3); Failed units restart (`GATE_SVC restart`)
-- [x] Crash restart of Failed units (`GATE_SVC restart`). No cgroup limits on units.
+- [x] Crash restart of Failed units (`GATE_SVC restart`). Unit `MemoryMax=` cgroup (`GATE_SVC cgroup`).
 - [x] D-Bus listens on `AF_UNIX` `/run/dbus/system_bus_socket` (L3); not a full bus daemon
 - [x] Cron `@reboot` + PIT/APIC due-flag (`GATE_CRON reboot`)
 - [x] udev-style hotplug → `/dev` from PCI (`GATE_UDEV hotplug`)

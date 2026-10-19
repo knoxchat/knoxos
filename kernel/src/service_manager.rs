@@ -106,6 +106,8 @@ pub struct ServiceUnit {
     pub watchdog_sec: Option<u64>,
     pub wanted_by: Option<String>,
     pub required_by: Option<String>,
+    /// MemoryMax= bytes for the unit cgroup (`None` = unlimited).
+    pub memory_max: Option<u64>,
 }
 
 impl ServiceUnit {
@@ -135,8 +137,48 @@ impl ServiceUnit {
             watchdog_sec: None,
             wanted_by: None,
             required_by: None,
+            memory_max: None,
         }
     }
+}
+
+/// Place a unit PID into `/system.slice/<name>` and apply MemoryMax when set.
+fn place_unit_in_cgroup(name: &str, pid: u32, memory_max: Option<u64>) {
+    let path = alloc::format!("/system.slice/{}", name);
+    let _ = crate::cgroups::create(&path);
+    if let Some(max) = memory_max {
+        let _ = crate::cgroups::set_memory_limit(&path, max as i64);
+    }
+    if crate::cgroups::attach_pid(&path, pid).is_ok() {
+        serial_println!(
+            "[ServiceManager] {} cgroup {} pid={} memory_max={:?}",
+            name,
+            path,
+            pid,
+            memory_max
+        );
+    }
+}
+
+/// Parse systemd MemoryMax= (`4096`, `4K`, `4M`, `infinity`).
+fn parse_memory_max(value: &str) -> Option<u64> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("infinity") {
+        return None;
+    }
+    let (num, mul) = if let Some(n) = value.strip_suffix(['K', 'k']) {
+        (n, 1024u64)
+    } else if let Some(n) = value.strip_suffix(['M', 'm']) {
+        (n, 1024 * 1024)
+    } else if let Some(n) = value.strip_suffix(['G', 'g']) {
+        (n, 1024 * 1024 * 1024)
+    } else {
+        (value, 1)
+    };
+    num.trim()
+        .parse::<u64>()
+        .ok()
+        .map(|v| v.saturating_mul(mul))
 }
 
 /// Target unit — groups related services
@@ -260,6 +302,8 @@ impl ServiceManager {
                             if let Some(pid) =
                                 crate::process::exec_elf(&elf_data, &exec_path, argv, &envp_refs)
                             {
+                                let memory_max =
+                                    self.services.get(&svc_name).and_then(|s| s.memory_max);
                                 if let Some(svc) = self.services.get_mut(&svc_name) {
                                     svc.state = ServiceState::Running;
                                     svc.pid = Some(pid);
@@ -270,6 +314,7 @@ impl ServiceManager {
                                         pid
                                     );
                                 }
+                                place_unit_in_cgroup(&svc_name, pid, memory_max);
                                 return Ok(());
                             }
                         }
@@ -283,10 +328,19 @@ impl ServiceManager {
 
             // Fallback: mark as running in simulation mode (no real binary)
             // This allows the service framework to track state for built-in services
-            if let Some(svc) = self.services.get_mut(&svc_name) {
+            let (pid, memory_max) = if let Some(svc) = self.services.get_mut(&svc_name) {
                 svc.state = ServiceState::Running;
                 svc.start_time = crate::interrupts::get_ticks();
+                if svc.pid.is_none() {
+                    svc.pid = Some(0x5356_0000 | svc.id);
+                }
                 serial_println!("[ServiceManager] {} started (built-in/simulated)", svc_name);
+                (svc.pid, svc.memory_max)
+            } else {
+                (None, None)
+            };
+            if let Some(pid) = pid {
+                place_unit_in_cgroup(&svc_name, pid, memory_max);
             }
             Ok(())
         } else {
@@ -408,6 +462,7 @@ lazy_static::lazy_static! {
 }
 
 pub const GATE_SVC_MARKER: &str = "GATE_SVC restart";
+pub const GATE_SVC_CGROUP_MARKER: &str = "GATE_SVC cgroup";
 
 /// Fail a unit and prove `check_service_health` brings it back.
 pub fn restart_self_test() -> bool {
@@ -430,6 +485,45 @@ pub fn restart_self_test() -> bool {
             );
             false
         }
+    }
+}
+
+/// Start a unit with MemoryMax=4KiB and prove the unit cgroup denies 8KiB.
+pub fn cgroup_self_test() -> bool {
+    let mut mgr = SERVICE_MANAGER.lock();
+    let mut unit = ServiceUnit::new("gate-svc-mem.service", "Gate SVC cgroup", "/bin/true");
+    unit.memory_max = Some(4096);
+    mgr.add_service(unit);
+    if mgr.start_service("gate-svc-mem.service").is_err() {
+        serial_println!("[svc] GATE_SVC cgroup FAILED: start");
+        return false;
+    }
+    let pid = match mgr.services.get("gate-svc-mem.service").and_then(|s| s.pid) {
+        Some(pid) => pid,
+        None => {
+            serial_println!("[svc] GATE_SVC cgroup FAILED: no pid");
+            return false;
+        }
+    };
+    drop(mgr);
+    let denied_over = crate::cgroups::try_charge(pid, 8192).is_err();
+    let allowed = crate::cgroups::try_charge(pid, 4096).is_ok();
+    let denied_next = crate::cgroups::try_charge(pid, 1).is_err();
+    crate::cgroups::uncharge(pid, 4096);
+    if denied_over && allowed && denied_next {
+        serial_println!(
+            "[svc] {} (ENOMEM on 8KiB > MemoryMax=4KiB)",
+            GATE_SVC_CGROUP_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[svc] GATE_SVC cgroup FAILED: over={} ok4k={} next={}",
+            denied_over,
+            allowed,
+            denied_next
+        );
+        false
     }
 }
 
@@ -607,6 +701,9 @@ pub fn parse_unit_file(content: &str) -> Option<ServiceUnit> {
                     }
                     "WatchdogSec" => {
                         unit.watchdog_sec = value.parse::<u64>().ok();
+                    }
+                    "MemoryMax" => {
+                        unit.memory_max = parse_memory_max(value);
                     }
                     _ => {}
                 },

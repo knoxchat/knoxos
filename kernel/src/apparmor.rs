@@ -649,9 +649,60 @@ fn create_default_profiles() {
 
 // ─── Init ───────────────────────────────────────────────────────────
 
+/// VFS write check: Enforce/Kill deny when the confined profile does not allow it.
+/// Unconfined processes (no profile) are allowed.
+pub fn check_vfs_write(pid: u64, path: &str) -> bool {
+    !matches!(
+        check_file_access(
+            pid as u32,
+            path,
+            FilePermission::WRITE | FilePermission::CREATE,
+        ),
+        AccessDecision::Deny
+    )
+}
+
+pub const GATE_APPARMOR_MARKER: &str = "GATE_APPARMOR deny";
+
+const GATE_APPARMOR_PID: u32 = 0x0000_4141;
+const GATE_APPARMOR_ALLOW: &str = "/run/apparmor_ok";
+const GATE_APPARMOR_DENY: &str = "/etc/knoxos/apparmor_denied";
+
+/// `network-daemon` may write `/run/**` and is denied `/etc` writes in Enforce.
+pub fn mac_self_test() -> bool {
+    if !confine_process(GATE_APPARMOR_PID, "network-daemon") {
+        serial_println!("[AppArmor] GATE_APPARMOR FAILED: confine");
+        return false;
+    }
+    let allowed = crate::landlock::with_check_pid(GATE_APPARMOR_PID as u64, || {
+        crate::vfs::write_file_dispatch(GATE_APPARMOR_ALLOW, b"ok")
+    });
+    let denied = crate::landlock::with_check_pid(GATE_APPARMOR_PID as u64, || {
+        crate::vfs::write_file_dispatch(GATE_APPARMOR_DENY, b"no")
+    });
+    release_process(GATE_APPARMOR_PID);
+    let _ = crate::vfs::remove_dispatch(GATE_APPARMOR_ALLOW);
+    if crate::vfs::read_file_dispatch(GATE_APPARMOR_DENY).is_some() {
+        let _ = crate::vfs::remove_dispatch(GATE_APPARMOR_DENY);
+        serial_println!("[AppArmor] GATE_APPARMOR FAILED: denied write still landed");
+        return false;
+    }
+    if !allowed || denied {
+        serial_println!(
+            "[AppArmor] GATE_APPARMOR FAILED: vfs allow={} deny_wrote={}",
+            allowed,
+            denied
+        );
+        return false;
+    }
+    serial_println!("[AppArmor] {}", GATE_APPARMOR_MARKER);
+    true
+}
+
 pub fn init() {
     serial_println!("[KnoxOS] AppArmor MAC subsystem initialized");
     create_default_profiles();
     serial_println!("[KnoxOS]   {} default profiles loaded", profile_count());
     serial_println!("[KnoxOS]   Modes: enforce, complain, unconfined, kill");
+    let _ = mac_self_test();
 }

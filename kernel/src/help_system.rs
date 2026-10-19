@@ -61,7 +61,7 @@ fn register_builtin_help() {
             title: String::from("Getting Started with KnoxOS"),
             category: HelpCategory::General,
             content: String::from(
-                "Welcome to KnoxOS! This is a desktop operating system with AI-native features.\n\n\
+                "Welcome to KnoxOS! This is a desktop operating system with SI-native features.\n\n\
                  • Double-click desktop icons to open applications\n\
                  • Right-click the desktop for a context menu\n\
                  • Click the dock at the bottom to switch applications\n\

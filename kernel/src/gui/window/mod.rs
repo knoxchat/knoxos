@@ -1,7 +1,7 @@
 /// Window Manager — "Aurora" Design
 /// Frosted glass windows with holographic accent edges, pill controls on the left,
 /// ambient glow on focused windows, and large corner radius for a futuristic feel.
-/// Nothing like Windows, macOS, or Linux — designed for an AI-native experience.
+/// Nothing like Windows, macOS, or Linux — designed for an SI-native experience.
 mod apps;
 mod browser_content;
 mod content;

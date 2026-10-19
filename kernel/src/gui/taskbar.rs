@@ -1,4 +1,4 @@
-/// Taskbar — "Aurora Dock" — AI-native centered pill-shaped dock
+/// Taskbar — "Aurora Dock" — SI-native centered pill-shaped dock
 /// Unlike any traditional OS taskbar. Floats as a translucent capsule at
 /// the bottom center of the screen with warm app indicators.
 use alloc::string::String;

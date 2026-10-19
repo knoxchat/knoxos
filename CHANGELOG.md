@@ -2,8 +2,12 @@
 
 ## Unreleased
 
+- **AppArmor** — path MAC on VFS writes: `network-daemon` may write `/run/**` and is denied `/etc` (`GATE_APPARMOR deny`). Default processes stay unconfined.
+- **XHCI GET_DESCRIPTOR** — Setup+Data+Status chained TD; Transfer Event cc=1/13 is required (`GATE_USB xhci desc`). Enumeration still has a timeout fallback.
+- **Service cgroups** — units land in `/system.slice/<name>`; `MemoryMax=` denies over-limit charges (`GATE_SVC cgroup`).
+- **GPOS mark** — mark-to-base attachment: `e` + U+0301 has `x_advance=0` and a positive `y_offset` (`GATE_GPOS mark`).
 - **SELinux** — Enforcing TE on VFS writes: `container_t` may write a `container_t` path and is denied `/etc` (`GATE_SELINUX deny`). Default mode stays Permissive.
-- **XHCI Enable Slot** — scratchpad buffers in DCBAA[0]; Command Completion cc=1 is required (`GATE_USB xhci slot`). GET_DESCRIPTOR still has a timeout fallback.
+- **XHCI Enable Slot** — scratchpad buffers in DCBAA[0]; Command Completion cc=1 is required (`GATE_USB xhci slot`).
 - **NTP** — fixture Server-mode packet applies a 1000 ms clock offset (`GATE_NTP apply`).
 - **Bluetooth HCI** — virtual adapter HCI Reset plus Command Complete status 0 (`GATE_BT hci`).
 - **dm-verity** — SHA-256 Merkle leaf equals root; a flipped byte is rejected (`GATE_VERITY root`).

@@ -17,3 +17,11 @@ fn test_restart_policies() {
     assert_ne!(RestartPolicy::No, RestartPolicy::Always);
     assert_ne!(RestartPolicy::OnFailure, RestartPolicy::OnAbnormal);
 }
+
+#[test_case]
+fn test_unit_cgroup_memory() {
+    assert!(
+        crate::service_manager::cgroup_self_test(),
+        "unit MemoryMax=4KiB must ENOMEM on an 8KiB charge"
+    );
+}

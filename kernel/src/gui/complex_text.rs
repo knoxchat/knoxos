@@ -109,6 +109,15 @@ pub struct KernPair {
     pub value: i16,
 }
 
+/// GPOS mark-to-base attachment (HARFBUZZ `mark` lookup).
+#[derive(Debug, Clone, Copy)]
+pub struct MarkAttach {
+    pub base: u16,
+    pub mark: u16,
+    pub x_offset: i16,
+    pub y_offset: i16,
+}
+
 /// Simple ligature: sequence of glyph IDs → replacement glyph
 #[derive(Debug, Clone)]
 pub struct Ligature {
@@ -139,6 +148,8 @@ struct ShapingState {
     enabled: bool,
     /// Loaded kern pairs
     kern_pairs: Vec<KernPair>,
+    /// Loaded GPOS mark-to-base pairs
+    mark_pairs: Vec<MarkAttach>,
     /// Loaded GSUB lookups
     gsub_lookups: Vec<GsubLookup>,
 }
@@ -163,6 +174,7 @@ impl ShapingState {
             ],
             enabled: true,
             kern_pairs: Vec::new(),
+            mark_pairs: Vec::new(),
             gsub_lookups: Vec::new(),
         }
     }
@@ -393,6 +405,59 @@ const BUILTIN_KERN: &[(u16, u16, i16)] = &[
     (b'T' as u16, b'o' as u16, -2),
 ];
 
+/// Built-in GPOS mark-to-base: `e` + combining acute (U+0301).
+const BUILTIN_MARKS: &[MarkAttach] = &[MarkAttach {
+    base: b'e' as u16,
+    mark: 0x0301,
+    x_offset: 2,
+    y_offset: 8,
+}];
+
+fn is_combining_mark(glyph_id: u16) -> bool {
+    (0x0300..=0x036F).contains(&glyph_id)
+}
+
+/// Look up mark-to-base attachment for a base+mark pair.
+pub fn get_mark_attachment(base: u16, mark: u16) -> Option<(i16, i16)> {
+    {
+        let state = SHAPING.lock();
+        for m in &state.mark_pairs {
+            if m.base == base && m.mark == mark {
+                return Some((m.x_offset, m.y_offset));
+            }
+        }
+    }
+    for m in BUILTIN_MARKS {
+        if m.base == base && m.mark == mark {
+            return Some((m.x_offset, m.y_offset));
+        }
+    }
+    None
+}
+
+/// Load mark-to-base pairs from compiled font data.
+pub fn load_mark_pairs(pairs: &[MarkAttach]) {
+    let mut state = SHAPING.lock();
+    state.mark_pairs.clear();
+    state.mark_pairs.extend_from_slice(pairs);
+}
+
+fn apply_mark_attachment(glyphs: &mut [ShapedGlyph]) {
+    if glyphs.len() < 2 {
+        return;
+    }
+    for i in 1..glyphs.len() {
+        if !is_combining_mark(glyphs[i].glyph_id) || is_combining_mark(glyphs[i - 1].glyph_id) {
+            continue;
+        }
+        let (x_off, y_off) =
+            get_mark_attachment(glyphs[i - 1].glyph_id, glyphs[i].glyph_id).unwrap_or((0, 8));
+        glyphs[i].x_advance = 0;
+        glyphs[i].x_offset = x_off as i32;
+        glyphs[i].y_offset = y_off as i32;
+    }
+}
+
 /// Look up kerning value for a glyph pair
 pub fn get_kerning(left: u16, right: u16) -> i16 {
     {
@@ -515,6 +580,8 @@ pub fn shape_text(text: &str, font_size_px: u32) -> Vec<ShapedGlyph> {
         }
     }
 
+    apply_mark_attachment(&mut glyphs);
+
     glyphs
 }
 
@@ -569,6 +636,7 @@ pub fn build_clusters(text: &str, glyphs: &[ShapedGlyph]) -> Vec<TextCluster> {
 
 pub const GATE_GSUB_MARKER: &str = "GATE_GSUB liga";
 pub const GATE_GPOS_MARKER: &str = "GATE_GPOS kern";
+pub const GATE_GPOS_MARK_MARKER: &str = "GATE_GPOS mark";
 
 fn gsub_self_test() -> bool {
     set_enabled(true);
@@ -616,12 +684,43 @@ fn gpos_self_test() -> bool {
     ok
 }
 
+fn gpos_mark_self_test() -> bool {
+    set_enabled(true);
+    load_mark_pairs(BUILTIN_MARKS);
+    let e = shape_text("e", 16);
+    let acute = shape_text("e\u{0301}", 16);
+    let att = get_mark_attachment(b'e' as u16, 0x0301);
+    let ok = e.len() == 1
+        && acute.len() == 2
+        && att == Some((2, 8))
+        && acute[1].x_advance == 0
+        && acute[1].y_offset == 8
+        && acute[1].x_offset == 2
+        && acute[0].x_advance == e[0].x_advance;
+    if ok {
+        crate::serial_println!(
+            "[ComplexText] {} (e+U+0301 y_offset={} x_advance=0)",
+            GATE_GPOS_MARK_MARKER,
+            acute[1].y_offset
+        );
+    } else {
+        crate::serial_println!(
+            "[ComplexText] GATE_GPOS mark FAILED len={} mark_adv={:?} y={:?}",
+            acute.len(),
+            acute.get(1).map(|g| g.x_advance),
+            acute.get(1).map(|g| g.y_offset)
+        );
+    }
+    ok
+}
+
 /// Initialize complex text layout engine
 pub fn init() {
     COMPLEX_TEXT_INITIALIZED.store(true, Ordering::Relaxed);
-    crate::serial_println!("[ComplexText] Initialized (BiDi + ligatures + kerning)");
+    crate::serial_println!("[ComplexText] Initialized (BiDi + ligatures + kerning + marks)");
     let _ = gsub_self_test();
     let _ = gpos_self_test();
+    let _ = gpos_mark_self_test();
 }
 
 /// Enable or disable text shaping

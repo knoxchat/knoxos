@@ -1,5 +1,5 @@
 /// ONNX Machine Learning Runtime
-/// Provides in-kernel ONNX model inference for AI-native OS features
+/// Provides in-kernel ONNX model inference for SI-native OS features
 ///
 /// Features:
 /// - ONNX model format parsing (protobuf-like binary)

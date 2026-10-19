@@ -28,9 +28,9 @@ pub use audio::*;
 pub use cdc::*;
 pub use control::*;
 pub use enumerate::{
-    GATE_XHCI_SLOT_MARKER, address_device, enable_slot, enumerate_all_devices, enumerate_device,
-    get_device_descriptor, poll_events, poll_transfer_event, slot_self_test, submit_interrupt_urb,
-    submit_interrupt_urb_for_hid,
+    GATE_XHCI_DESC_MARKER, GATE_XHCI_SLOT_MARKER, address_device, descriptor_self_test,
+    enable_slot, enumerate_all_devices, enumerate_device, get_device_descriptor, poll_events,
+    poll_transfer_event, slot_self_test, submit_interrupt_urb, submit_interrupt_urb_for_hid,
 };
 pub use ethernet::*;
 pub use gamepad::*;
@@ -75,6 +75,7 @@ pub fn init() {
             // Enumerate connected devices via real PORTSC polling
             enumerate_all_devices();
             let _ = slot_self_test();
+            let _ = descriptor_self_test();
 
             let dev_count = device_count();
             serial_println!("[XHCI] {} USB device(s) enumerated", dev_count);

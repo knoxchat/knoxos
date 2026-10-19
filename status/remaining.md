@@ -65,7 +65,7 @@ Details: [subsystems/05-networking.md](subsystems/05-networking.md)
 
 Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 
-- [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`). Enable Slot Command Completion cc=1 (`GATE_USB xhci slot`). Transfer Events drain into HID. GET_DESCRIPTOR still has a timeout fallback.
+- [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`). Enable Slot Command Completion cc=1 (`GATE_USB xhci slot`). GET_DESCRIPTOR Transfer Event (`GATE_USB xhci desc`). Transfer Events drain into HID. Enumeration still has a timeout fallback.
 - [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware (`GATE_AMDGPU fw`).
 - [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
 - [x] TPM TIS FIFO — locality 0 REQUEST_USE grants VALID|ACTIVE (`GATE_TPM tis`). Software SHA-256 PCR extend (`GATE_TPM pcr`). Hardware 0xFED4_0000 still unmapped on stock QEMU.
@@ -109,14 +109,14 @@ Details: [subsystems/09-security.md](subsystems/09-security.md)
 - [x] X25519 / Ed25519 — RFC 7748 Alice public + RFC 8032 TEST 1 (`GATE_X25519 kat`, `GATE_ED25519 kat`)
 - [x] RSA / ECDSA-P256 — PKCS#1 v1.5 SHA-256 + RFC 6979 P-256 (`GATE_RSA kat`, `GATE_ECDSA kat`)
 - [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); buddy free zeros the frame (`GATE_WIPE free`); exec measures SHA-256 (`GATE_IMA exec`)
-- [x] SELinux — Enforcing TE on VFS writes (`GATE_SELINUX deny`). Default stays Permissive. AppArmor still unused.
+- [x] SELinux — Enforcing TE on VFS writes (`GATE_SELINUX deny`). Default stays Permissive. AppArmor path MAC on VFS writes (`GATE_APPARMOR deny`).
 - [x] dm-verity — SHA-256 Merkle leaf equals root; tamper rejected (`GATE_VERITY root`)
 
 ## 10. System Services
 
 Details: [subsystems/10-services.md](subsystems/10-services.md)
 
-- [x] Crash restart of failed units (`GATE_SVC restart`). No cgroup limits on units.
+- [x] Crash restart of failed units (`GATE_SVC restart`). Unit `MemoryMax=` cgroup (`GATE_SVC cgroup`).
 - [x] NTP — fixture Server-mode packet applies a 1000 ms offset (`GATE_NTP apply`)
 - [x] Bluetooth HCI — virtual adapter Reset Command Complete (`GATE_BT hci`)
 - [x] Cron `@reboot` plus PIT/APIC due-flag (`GATE_CRON reboot`)
@@ -156,7 +156,7 @@ Details: [subsystems/13-binary-compat.md](subsystems/13-binary-compat.md)
 Details: [subsystems/14-i18n.md](subsystems/14-i18n.md)
 
 - [x] Font fallback chain — compositor chain used for CJK/emoji (`GATE_FONT fallback`)
-- [x] GSUB Latin ligatures — `shape_text("fi")` → U+FB01 (`GATE_GSUB liga`). GPOS A+V kern (`GATE_GPOS kern`). HarfBuzz-class mark attachment later.
+- [x] GSUB Latin ligatures — `shape_text("fi")` → U+FB01 (`GATE_GSUB liga`). GPOS A+V kern (`GATE_GPOS kern`). GPOS mark-to-base `e`+U+0301 (`GATE_GPOS mark`).
 - [x] Color emoji — U+1F600 multi-color bitmap (`GATE_EMOJI color`)
 - [x] Locale `.mo` — GNU magic load + `set_locale` + `gettext("File")=="Archivo"` (`GATE_LOCALE switch`)
 

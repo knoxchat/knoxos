@@ -132,6 +132,17 @@ fn test_xhci_enable_slot() {
 }
 
 #[test_case]
+fn test_xhci_get_descriptor() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::descriptor_self_test(),
+        "XHCI GET_DESCRIPTOR must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_page_cache_writeback() {
     assert!(
         crate::page_cache::writeback_self_test(),

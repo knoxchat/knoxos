@@ -304,7 +304,6 @@ pub mod selfhost;
 
 // Phase 14+ modules — Full Linux binary compat, production features, conformance
 pub mod acpi_tables;
-#[cfg(feature = "stub-drivers")]
 pub mod apparmor;
 #[cfg(feature = "stub-drivers")]
 pub mod dm_crypt;
