@@ -27,7 +27,7 @@
 ### Stub / unused
 - [x] **NMI** — IDT handler logs and returns
 - [x] **MCE** — IDT handler logs and panics
-- [x] **ACPI AML / DSDT** — DSDT mapped; `Name(_S5)` SLP_TYP extracted (`GATE_AML dsdt`)
+- [x] **ACPI AML / DSDT** — DSDT mapped; `Name(_S5)` SLP_TYP extracted (`GATE_AML dsdt`). `acpi::shutdown` writes PM1a_CNT (`GATE_ACPI s5`)
 - [x] **UEFI runtime** — `GetTime` from CMOS RTC; `SetVariable`/`GetVariable` round-trip (`GATE_UEFI time`)
 - [x] **Kernel modules** — ELF ET_REL `.ko` load + reloc + `init_module` (`GATE_KO load`)
 - [x] **IOMMU** — root table from buddy; `enable_translation` called (`GATE_IOMMU translation`)

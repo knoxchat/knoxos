@@ -265,7 +265,28 @@ pub fn mount(
         }
         FilesystemType::Ext2 => {
             let dev_idx = resolve_device_name(source);
-            (None, dev_idx)
+            if let Some(idx) = dev_idx {
+                drop(table);
+                match crate::ext2::mount(idx) {
+                    Ok(fs_idx) => {
+                        serial_println!(
+                            "[mount] ext2: device {} mounted as fs_index={}",
+                            source,
+                            fs_idx
+                        );
+                        table = MOUNT_TABLE.lock();
+                        (Some(fs_idx), Some(idx))
+                    }
+                    Err(e) => {
+                        serial_println!("[mount] ext2 mount failed for {}: {:?}", source, e);
+                        table = MOUNT_TABLE.lock();
+                        (None, Some(idx))
+                    }
+                }
+            } else {
+                serial_println!("[mount] device not found: {}", source);
+                (None, None)
+            }
         }
         FilesystemType::Fat32 => {
             let dev_idx = resolve_device_name(source);

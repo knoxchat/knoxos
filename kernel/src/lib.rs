@@ -398,7 +398,6 @@ pub mod arch_port;
 pub mod bt_hci_usb;
 #[cfg(feature = "stub-drivers")]
 pub mod formal_verify;
-#[cfg(feature = "stub-drivers")]
 pub mod iso9660;
 pub mod timezone;
 pub mod virtio_wifi;

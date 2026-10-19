@@ -28,11 +28,12 @@ pub use audio::*;
 pub use cdc::*;
 pub use control::*;
 pub use enumerate::{
-    GATE_XHCI_ADDR_MARKER, GATE_XHCI_CONFIG_MARKER, GATE_XHCI_DESC_MARKER, GATE_XHCI_ENUM_MARKER,
-    GATE_XHCI_SLOT_MARKER, addr_self_test, address_device, config_self_test, descriptor_self_test,
-    enable_slot, enum_self_test, enumerate_all_devices, enumerate_device, get_config_descriptor,
-    get_device_descriptor, poll_events, poll_transfer_event, set_configuration, slot_self_test,
-    submit_interrupt_urb, submit_interrupt_urb_for_hid,
+    GATE_XHCI_ADDR_MARKER, GATE_XHCI_CONFIG_MARKER, GATE_XHCI_DESC_MARKER, GATE_XHCI_EP_MARKER,
+    GATE_XHCI_ENUM_MARKER, GATE_XHCI_SLOT_MARKER, addr_self_test, address_device, config_self_test,
+    configure_endpoint, descriptor_self_test, enable_slot, enum_self_test, enumerate_all_devices,
+    enumerate_device, ep_self_test, get_config_descriptor, get_device_descriptor, poll_events,
+    poll_transfer_event, set_configuration, slot_self_test, submit_interrupt_urb,
+    submit_interrupt_urb_for_hid,
 };
 pub use ethernet::*;
 pub use gamepad::*;
@@ -80,6 +81,7 @@ pub fn init() {
             let _ = addr_self_test();
             let _ = descriptor_self_test();
             let _ = config_self_test();
+            let _ = ep_self_test();
             let _ = enum_self_test();
 
             let dev_count = device_count();

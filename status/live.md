@@ -151,6 +151,13 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 140. **PAM unix** — matching SHA-512 token succeeds; wrong token is AuthError (`GATE_PAM unix`).
 141. **cgroup freeze** — frozen cgroup denies CPU charge (`GATE_CGROUP freeze`).
 142. **XHCI enum** — Enable Slot, Address Device, GET_DESCRIPTOR, GET_DESCRIPTOR(Configuration), and SET_CONFIGURATION each require a live completion; timeout fallbacks are gone (`GATE_USB xhci enum`).
-143. **Virtual FS persist** — `/dev` `/proc` `/sys` `/run` directories round-trip through VirtIO-blk; generated files under them stay virtual (`GATE_C10 virtfs persist`).
+143. **Virtual FS persist** — `/dev` `/proc` `/sys` `/run` `/tmp` directories round-trip through VirtIO-blk; generated files under them stay virtual (`GATE_C10 virtfs persist`).
+144. **ACPI S5** — `acpi::shutdown` writes PM1a_CNT with DSDT `_S5` SLP_TYP|SLP_EN (`GATE_ACPI s5`).
+145. **FAT32** — BPB + directory `$DATA` through the ramdisk (`GATE_FAT32 block`).
+146. **ext2** — superblock + inode `$DATA` through the ramdisk (`GATE_EXT2 block`).
+147. **ISO9660** — PVD + directory `$DATA` through the ramdisk (`GATE_ISO9660 block`).
+148. **XHCI Configure Endpoint** — Command Completion cc=1 (`GATE_USB xhci ep`).
+149. **D-Bus ReleaseName** — ownership drop then PRIMARY_OWNER (`GATE_DBUS release`).
+150. **FUSE UNLINK** — LOOKUP fails after UNLINK (`GATE_FUSE unlink`).
 
-Integration: `./tests/run_integration.sh` **407/407** on QEMU (2026-10-20).
+Integration: `./tests/run_integration.sh` **414/414** on QEMU (2026-10-20).

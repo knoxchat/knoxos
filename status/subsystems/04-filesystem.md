@@ -20,12 +20,12 @@
 - [x] **Gate C5 NVMe DMA** — admin + I/O queues; PRP1 bounce write/read round-trip (`GATE_C5 nvme dma complete`)
 - [x] **Gate C6 VFS root persist** — `/etc` (and the rest of the RAM namespace except virtual FS) round-trips through VirtIO-blk (`GATE_C6 vfs persist`)
 - [x] **Gate C7 `/bin` persist** — a file under `/bin` round-trips through VirtIO-blk (`GATE_C7 bin persist`).
-- [x] **Gate C10 virtual FS mount points** — `/dev` `/proc` `/sys` `/run` directories round-trip; generated files under them stay virtual (`GATE_C10 virtfs persist`)
+- [x] **Gate C10 virtual FS mount points** — `/dev` `/proc` `/sys` `/run` `/tmp` directories round-trip; generated files under them stay virtual (`GATE_C10 virtfs persist`)
 - [x] 4 MB ramdisk always created
 
 ### Wired / partial
 - [x] Page cache is an in-RAM `BTreeMap`; write-back overlays dirty pages via `pwrite_file` (C3)
-- [x] Mount table: `unshare(CLONE_NEWNS)` isolates bind mounts (N1); ext4 really mounts; several FS types only `mkdir`
+- [x] Mount table: `unshare(CLONE_NEWNS)` isolates bind mounts (N1); ext4 and ext2 really mount; FAT32 still resolve-only
 - [x] flock — Ring 3 `flock(LOCK_EX)` then `LOCK_UN` on a VFS file (R3). xattr `setxattr`/`getxattr` live on in-kernel maps (U2)
 - [x] `sendfile` — Ring 3 file-to-pipe byte copy (S2)
 - [x] `tee` — Ring 3 pipe duplicate without consuming the source (S3)
@@ -90,7 +90,7 @@
 - [x] XFS — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`)
 - [x] JBD2 journal replay — descriptor + data + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount calls the same walker.
 - [x] ext4 default root — second virtio-blk (`mkfs.ext4`) mounted at `/` (`GATE_C9 ext4 root`). Generated files under `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual; the mount-point directories persist (C10).
-- [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE LOOKUP+READ (`GATE_FUSE lookup`). FUSE WRITE then READ (`GATE_FUSE write`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`).
+- [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE LOOKUP+READ (`GATE_FUSE lookup`). FUSE WRITE then READ (`GATE_FUSE write`). FUSE UNLINK (`GATE_FUSE unlink`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`). FAT32 / ext2 / ISO9660 ramdisk (`GATE_FAT32 block`, `GATE_EXT2 block`, `GATE_ISO9660 block`).
 - [x] inotify — `emit_event` from VFS write/unlink and `open(O_CREAT)`; watch can read (**Gate H3**). Ring 3 `inotify_init1`/`add_watch`/`read` is live (Q3). fanotify MODIFY/CREATE on VFS write (`GATE_FANOTIFY modify`). Ring 3 `fanotify_init` returns ENOSYS (P4). io_uring NOP+WRITE (`GATE_IOURING sqe`); Ring 3 `io_uring_setup` returns ENOSYS (M4).
 - [x] Quotas — `write_file_checked` returns `EDQUOT` when the hard limit is exceeded (`GATE_QUOTA enforce`)
 

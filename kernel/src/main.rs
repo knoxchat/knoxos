@@ -60,7 +60,7 @@ use knoxos_kernel::{
     file_manager, flock, fontconfig, fuse, futex, futex2, gdt, gettext, glibc_compat, gpio, gpu,
     gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http, huge_pages, hwtest, i2c, i18n, i915,
     ima, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring, iommu, ipc,
-    journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm, landlock, ldknoxos, libc_funcs, livepatch,
+    iso9660, journal_replay, kaslr, kcmp, kobject, kpm, ksm, kvm, landlock, ldknoxos, libc_funcs, livepatch,
     llm, media_player, membarrier, memfd, memory, midi, mmap, modules, mount, mount_api, mqueue,
     multiboot, musl, namespaces, nested_irq, net_production, network_manager, ntfs, ntp, numa,
     nvme, onnx, oom, ota_update, overlayfs, package_manager, pam, path, pci, pcie_ecam, perf,
@@ -422,6 +422,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     exfat::init();
     xfs::init();
     btrfs::init();
+    iso9660::init();
 
     // Initialize ext4 filesystem (journal + extents)
     #[cfg(feature = "fs-ext4")]

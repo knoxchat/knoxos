@@ -35,13 +35,18 @@ const JRNL_HEADER_SIZE: usize = 40;
 const MAX_PERSIST_SIZE: usize = 64 * 1024 * 1024; // 64 MB
 
 /// Generated **files** under virtual FS stay ephemeral.
-/// Mount-point directories (`/dev`, `/proc`, `/sys`, `/run`) persist so they
+/// Mount-point directories (`/dev`, `/proc`, `/sys`, `/run`, `/tmp`) persist so they
 /// survive restore instead of being recreated only by `VirtualFS::new` (C10).
-const SKIP_PREFIXES: &[&str] = &["/dev/", "/proc/", "/sys/", "/run/"];
+const SKIP_PREFIXES: &[&str] = &["/dev/", "/proc/", "/sys/", "/run/", "/tmp/"];
 
 /// Check if a path should be persisted across reboot.
 fn should_persist(path: &str) -> bool {
     should_persist_entry(path, false)
+}
+
+/// True when persist would store this file (not a virtual-FS generated file).
+pub fn path_should_persist(path: &str) -> bool {
+    should_persist(path)
 }
 
 /// Directories on the virtual-FS prefixes persist; files under them do not.
@@ -636,7 +641,7 @@ fn collect_persistable_paths() -> Vec<(String, Vec<u8>, u16)> {
 pub fn init() {
     crate::serial_println!("[persist] Initializing persistent storage...");
     restore_all();
-    for mount in ["/dev", "/proc", "/sys", "/run"] {
+    for mount in ["/dev", "/proc", "/sys", "/run", "/tmp"] {
         persist_directory(mount, 0o755);
     }
     let _ = roundtrip_self_test();
@@ -890,7 +895,7 @@ const GATE_C10_DIR: &str = "/run/knoxos-c10";
 const GATE_C10_FILE: &str = "/run/knoxos-c10/ephemeral";
 const GATE_C10_PAYLOAD: &[u8] = b"virtual\n";
 
-/// Persist `/dev` `/proc` `/sys` `/run` as directories so they survive restore.
+/// Persist `/dev` `/proc` `/sys` `/run` `/tmp` as directories so they survive restore.
 /// Generated files under those prefixes stay virtual and must not round-trip.
 pub fn virtfs_persist_self_test() -> bool {
     if !crate::virtio_blk::is_available() {
@@ -898,7 +903,7 @@ pub fn virtfs_persist_self_test() -> bool {
         return false;
     }
 
-    for mount in ["/dev", "/proc", "/sys", "/run"] {
+    for mount in ["/dev", "/proc", "/sys", "/run", "/tmp"] {
         if !should_persist_entry(mount, true) {
             crate::serial_println!(
                 "[persist] Gate C10 FAILED: {} directory still skipped",
@@ -910,6 +915,7 @@ pub fn virtfs_persist_self_test() -> bool {
     }
     if should_persist_entry("/dev/null", false)
         || should_persist_entry("/proc/version", false)
+        || should_persist_entry("/tmp/ephemeral", false)
         || should_persist_entry(GATE_C10_FILE, false)
     {
         crate::serial_println!("[persist] Gate C10 FAILED: virtual FS files would persist");

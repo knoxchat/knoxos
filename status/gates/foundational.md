@@ -41,7 +41,7 @@ This **is** becoming an OS.
 | C6 | RAM VFS root snapshot | **Done** — `/etc` and the rest of the namespace (except virtual FS) persist (`GATE_C6 vfs persist`) |
 | C7 | Persist `/bin` | **Done** — `/bin/gate_c7` round-trips through VirtIO-blk (`GATE_C7 bin persist`). |
 | C8 | JBD2 journal replay | **Done** — descriptor + data + commit on the ramdisk; committed block applied, torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount uses the same walker when `fs-ext4` is on. |
-| C10 | Virtual FS mount points | **Done** — `/dev` `/proc` `/sys` `/run` directories round-trip through VirtIO-blk; generated files under them stay virtual (`GATE_C10 virtfs persist`) |
+| C10 | Virtual FS mount points | **Done** — `/dev` `/proc` `/sys` `/run` `/tmp` directories round-trip through VirtIO-blk; generated files under them stay virtual (`GATE_C10 virtfs persist`) |
 
 ### Gate D — Packets (4–8 weeks)
 

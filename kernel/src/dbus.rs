@@ -322,6 +322,9 @@ pub const DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER: u32 = 1;
 pub const DBUS_REQUEST_NAME_REPLY_IN_QUEUE: u32 = 2;
 pub const DBUS_REQUEST_NAME_REPLY_EXISTS: u32 = 3;
 pub const DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER: u32 = 4;
+pub const DBUS_RELEASE_NAME_REPLY_RELEASED: u32 = 1;
+pub const DBUS_RELEASE_NAME_REPLY_NON_EXISTENT: u32 = 2;
+pub const DBUS_RELEASE_NAME_REPLY_NOT_OWNER: u32 = 3;
 
 // ═══════════════════════════════════════════════════════════════════════
 // BUS STATE
@@ -478,18 +481,23 @@ fn request_name_on_bus(bus: &mut BusState, conn_id: ConnectionId, name: &str, fl
     DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER
 }
 
-/// Release a bus name
+/// Release a bus name. True when this connection was the owner.
 pub fn release_name(bus_type: BusType, conn_id: ConnectionId, name: &str) -> bool {
     let mut bus = get_bus(bus_type).lock();
+    release_name_on_bus(&mut bus, conn_id, name) == DBUS_RELEASE_NAME_REPLY_RELEASED
+}
 
-    if bus.names.get(name).copied() == Some(conn_id) {
-        bus.names.remove(name);
-        if let Some(conn) = bus.connections.get_mut(&conn_id) {
-            conn.owned_names.retain(|n| n != name);
+fn release_name_on_bus(bus: &mut BusState, conn_id: ConnectionId, name: &str) -> u32 {
+    match bus.names.get(name).copied() {
+        Some(owner) if owner == conn_id => {
+            bus.names.remove(name);
+            if let Some(conn) = bus.connections.get_mut(&conn_id) {
+                conn.owned_names.retain(|n| n != name);
+            }
+            DBUS_RELEASE_NAME_REPLY_RELEASED
         }
-        true
-    } else {
-        false
+        Some(_) => DBUS_RELEASE_NAME_REPLY_NOT_OWNER,
+        None => DBUS_RELEASE_NAME_REPLY_NON_EXISTENT,
     }
 }
 
@@ -636,6 +644,19 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                     _ => 0,
                 };
                 let code = request_name_on_bus(bus, from, &name, flags);
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::Uint32(code)];
+                reply.signature = Some(String::from("u"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
+            "ReleaseName" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.clone(),
+                    _ => return,
+                };
+                let code = release_name_on_bus(bus, from, &name);
                 let mut reply = Message::method_return(msg.header.serial);
                 reply.body = vec![DbusValue::Uint32(code)];
                 reply.signature = Some(String::from("u"));
@@ -1071,6 +1092,7 @@ pub fn init() {
     let _ = unix_bus_self_test();
     let _ = method_self_test();
     let _ = name_self_test();
+    let _ = release_self_test();
 }
 
 /// Bind + listen `/run/dbus/system_bus_socket` once.
@@ -1255,6 +1277,102 @@ pub fn name_self_test() -> bool {
             primary,
             exists,
             owner_name
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_RELEASE_MARKER: &str = "GATE_DBUS release";
+
+/// `ReleaseName` must drop ownership so a later claimant can take PRIMARY_OWNER.
+pub fn release_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateRel";
+    let owner = connect(BusType::System, 0xDB08, 1000);
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let Some(owned) = receive_message(BusType::System, owner) else {
+        serial_println!("[dbus] GATE_DBUS FAILED: no RequestName before release");
+        disconnect(BusType::System, owner);
+        return false;
+    };
+    let got_name = matches!(owned.body.first(), Some(DbusValue::Uint32(1)));
+
+    let mut rel = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ReleaseName",
+    );
+    rel.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    rel.signature = Some(String::from("s"));
+    let rel_serial = send_message(BusType::System, owner, rel);
+    let Some(rel_reply) = receive_message(BusType::System, owner) else {
+        serial_println!("[dbus] GATE_DBUS FAILED: no ReleaseName reply");
+        disconnect(BusType::System, owner);
+        return false;
+    };
+    let released = rel_reply.header.message_type == MessageType::MethodReturn
+        && rel_reply.reply_serial == Some(rel_serial)
+        && matches!(rel_reply.body.first(), Some(DbusValue::Uint32(1)));
+
+    let mut has = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameHasOwner",
+    );
+    has.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    has.signature = Some(String::from("s"));
+    let has_serial = send_message(BusType::System, owner, has);
+    let vacant = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(has_serial)
+                && matches!(msg.body.first(), Some(DbusValue::Boolean(false)))
+        })
+        .unwrap_or(false);
+
+    let challenger = connect(BusType::System, 0xDB09, 1000);
+    let mut again = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    again.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    again.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, challenger, again);
+    let retaken = receive_message(BusType::System, challenger)
+        .map(|msg| matches!(msg.body.first(), Some(DbusValue::Uint32(1))))
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    disconnect(BusType::System, challenger);
+    if got_name && released && vacant && retaken {
+        serial_println!(
+            "[dbus] {} (ReleaseName then PRIMARY_OWNER)",
+            GATE_DBUS_RELEASE_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: got={} released={} vacant={} retaken={}",
+            got_name,
+            released,
+            vacant,
+            retaken
         );
         false
     }

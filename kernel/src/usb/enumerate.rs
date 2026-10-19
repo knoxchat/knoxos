@@ -35,6 +35,8 @@ static CONFIG_LIVE: AtomicBool = AtomicBool::new(false);
 static ADDRESS_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when GET_DESCRIPTOR(Configuration) got a Transfer Event (cc=1/13).
 static CONFIG_DESC_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Configure Endpoint returned Command Completion cc=1.
+static CONFIG_EP_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -43,6 +45,7 @@ pub const GATE_XHCI_DESC_MARKER: &str = "GATE_USB xhci desc";
 pub const GATE_XHCI_CONFIG_MARKER: &str = "GATE_USB xhci config";
 pub const GATE_XHCI_ADDR_MARKER: &str = "GATE_USB xhci addr";
 pub const GATE_XHCI_ENUM_MARKER: &str = "GATE_USB xhci enum";
+pub const GATE_XHCI_EP_MARKER: &str = "GATE_USB xhci ep";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -357,6 +360,101 @@ pub fn address_device(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
     }
 
     serial_println!("[XHCI] Address Device: timeout");
+    false
+}
+
+/// Configure Endpoint Command. Adds HID interrupt IN (DCI 3 / EP1 IN).
+/// Requires Command Completion cc=1 (no timeout fallback). A1 (EP0) stays 0.
+pub fn configure_endpoint(slot_id: u8) -> bool {
+    let from_dev = {
+        let xhci = XHCI.lock();
+        xhci.devices
+            .iter()
+            .find(|d| d.slot_id == slot_id)
+            .map(|d| (d.port, d.speed))
+    };
+    let (port, speed) = from_dev.unwrap_or_else(|| {
+        enumerate_ports()
+            .into_iter()
+            .find(|p| p.connected)
+            .map(|p| (p.port_num, p.speed))
+            .unwrap_or((1, UsbSpeed::High))
+    });
+    configure_interrupt_ep(slot_id, port, speed)
+}
+
+fn configure_interrupt_ep(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
+    serial_println!(
+        "[XHCI] Configure Endpoint for slot {} port {} ({:?})",
+        slot_id,
+        port,
+        speed
+    );
+
+    // DCI 3 = EP1 IN (HID interrupt). EP0 is already live from Address Device.
+    let ep1_ring_ptr = allocate_transfer_ring(slot_id, 3);
+    if ep1_ring_ptr == 0 {
+        serial_println!("[XHCI] Configure Endpoint: no EP1 ring");
+        return false;
+    }
+
+    let ctx_size = {
+        let xhci = XHCI.lock();
+        xhci.context_size.max(32) as u64
+    };
+    let (input_ctx_ptr, _input_layout) = alloc_ring_buffer(4096);
+    let speed_val = match speed {
+        UsbSpeed::Full => 1u32,
+        UsbSpeed::Low => 2,
+        UsbSpeed::High => 3,
+        UsbSpeed::Super => 4,
+        UsbSpeed::SuperPlus => 5,
+    };
+    let interval = match speed {
+        UsbSpeed::Low | UsbSpeed::Full => 8u32,
+        _ => 4,
+    };
+    const MAX_PACKET: u32 = 8;
+    // SAFETY: input context is a DMA page we own; offsets follow XHCI 6.2.
+    unsafe {
+        core::ptr::write_bytes(dma_virt(input_ctx_ptr) as *mut u8, 0, 4096);
+        let icc = dma_virt(input_ctx_ptr) as *mut u32;
+        *icc = 0;
+        // QEMU (and XHCI 4.6.6): A0=1, A1=0. A3 adds DCI 3 (EP1 IN).
+        *icc.add(1) = (1 << 0) | (1 << 3);
+        let slot_ctx = (dma_virt(input_ctx_ptr) + ctx_size) as *mut u32;
+        *slot_ctx = (3 << 27) | (speed_val << 20);
+        *slot_ctx.add(1) = (port as u32) << 16;
+        let ep1_ctx = (dma_virt(input_ctx_ptr) + ctx_size * 4) as *mut u32;
+        *ep1_ctx = interval << 16;
+        // CErr=3, EP Type=7 (Interrupt IN), Max Packet Size=8.
+        *ep1_ctx.add(1) = (3 << 1) | (7 << 3) | (MAX_PACKET << 16);
+        *ep1_ctx.add(2) = ((ep1_ring_ptr & 0xFFFFFFFF) as u32) | 1;
+        *ep1_ctx.add(3) = (ep1_ring_ptr >> 32) as u32;
+        *ep1_ctx.add(4) = MAX_PACKET | (MAX_PACKET << 16);
+    }
+
+    let mut trb = Trb::new();
+    trb.param_lo = (input_ctx_ptr & 0xFFFFFFFF) as u32;
+    trb.param_hi = (input_ctx_ptr >> 32) as u32;
+    trb.set_type(TrbType::ConfigureEndpoint);
+    trb.control |= (slot_id as u32) << 24;
+
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue Configure Endpoint");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            CONFIG_EP_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] Configure Endpoint succeeded for slot {}", slot_id);
+            return true;
+        }
+        serial_println!("[XHCI] Configure Endpoint failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Configure Endpoint: timeout");
     false
 }
 
@@ -743,6 +841,8 @@ pub fn enumerate_device(port: u8, speed: UsbSpeed) -> Option<UsbDevice> {
         return None;
     }
 
+    let _ = configure_interrupt_ep(slot_id, port, speed);
+
     let device = UsbDevice {
         slot_id,
         port,
@@ -929,5 +1029,38 @@ pub fn enum_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_ENUM_MARKER);
+    true
+}
+
+/// Prove Configure Endpoint got a Command Completion (cc=1), not a timeout fallback.
+pub fn ep_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci ep skipped (no controller)");
+        return true;
+    }
+    if !CONFIG_EP_LIVE.load(Ordering::Relaxed) {
+        let slot = XHCI
+            .lock()
+            .devices
+            .first()
+            .map(|d| (d.slot_id, d.port, d.speed));
+        if let Some((slot_id, port, speed)) = slot {
+            let _ = configure_interrupt_ep(slot_id, port, speed);
+        } else if let Some(slot_id) = enable_slot() {
+            let ports = enumerate_ports();
+            let (port_num, speed) = ports
+                .iter()
+                .find(|p| p.connected)
+                .map(|p| (p.port_num, p.speed))
+                .unwrap_or((1, UsbSpeed::High));
+            let _ = address_device(slot_id, port_num, speed);
+            let _ = configure_interrupt_ep(slot_id, port_num, speed);
+        }
+    }
+    if !CONFIG_EP_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Configure Endpoint had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_EP_MARKER);
     true
 }

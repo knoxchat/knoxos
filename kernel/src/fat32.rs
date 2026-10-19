@@ -9,6 +9,7 @@
 ///
 /// This driver works with any block device (virtio-blk, ATA, ramdisk).
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use spin::Mutex;
 
@@ -1379,12 +1380,129 @@ pub fn sync() -> bool {
     FAT32_FS.lock().sync_fsinfo()
 }
 
+fn build_gate_volume(payload: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    let bpb = Fat32BootSector {
+        jump_boot: [0xEB, 0x58, 0x90],
+        oem_name: *b"MSWIN4.1",
+        bytes_per_sector: 512,
+        sectors_per_cluster: 1,
+        reserved_sectors: 32,
+        num_fats: 1,
+        root_entry_count: 0,
+        total_sectors_16: 0,
+        media_type: 0xF8,
+        fat_size_16: 0,
+        sectors_per_track: 32,
+        num_heads: 2,
+        hidden_sectors: 0,
+        total_sectors_32: 64,
+        fat_size_32: 1,
+        ext_flags: 0,
+        fs_version: 0,
+        root_cluster: 2,
+        fs_info_sector: 1,
+        backup_boot_sector: 6,
+        reserved: [0; 12],
+        drive_number: 0x80,
+        reserved1: 0,
+        boot_sig: 0x29,
+        volume_id: 0x4B4E4F58,
+        volume_label: *b"KNOXOS     ",
+        fs_type: *b"FAT32   ",
+    };
+    let mut boot = vec![0u8; 512];
+    // SAFETY: `boot` is 512 bytes; Fat32BootSector is a packed on-disk BPB smaller than that.
+    unsafe {
+        core::ptr::write(boot.as_mut_ptr() as *mut Fat32BootSector, bpb);
+    }
+    boot[510] = 0x55;
+    boot[511] = 0xAA;
+
+    let mut fat = vec![0u8; 512];
+    fat[0..4].copy_from_slice(&0x0FFFFFF8u32.to_le_bytes());
+    fat[4..8].copy_from_slice(&0x0FFFFFFFu32.to_le_bytes());
+    fat[8..12].copy_from_slice(&0x0FFFFFF8u32.to_le_bytes());
+    fat[12..16].copy_from_slice(&0x0FFFFFF8u32.to_le_bytes());
+
+    let mut dir = vec![0u8; 512];
+    dir[0..8].copy_from_slice(b"GATE    ");
+    dir[8..11].copy_from_slice(b"TXT");
+    dir[11] = ATTR_ARCHIVE;
+    dir[26] = 3;
+    dir[28..32].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+
+    let mut data = vec![0u8; 512];
+    data[..payload.len()].copy_from_slice(payload);
+    (boot, fat, dir, data)
+}
+
+pub const GATE_FAT32_MARKER: &str = "GATE_FAT32 block";
+const GATE_FAT32_PAYLOAD: &[u8] = b"knoxos-fat32\n";
+
+pub fn block_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    let (boot, fat, dir, data) = build_gate_volume(GATE_FAT32_PAYLOAD);
+    if crate::block::write_blocks(device, 0, 1, &boot).is_err() {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: boot write");
+        return false;
+    }
+    if crate::block::write_blocks(device, 32, 1, &fat).is_err() {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: fat write");
+        return false;
+    }
+    if crate::block::write_blocks(device, 33, 1, &dir).is_err() {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: dir write");
+        return false;
+    }
+    if crate::block::write_blocks(device, 34, 1, &data).is_err() {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: data write");
+        return false;
+    }
+
+    let mut boot_in = vec![0u8; 512];
+    if crate::block::read_blocks(device, 0, 1, &mut boot_in).is_err() {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: boot read");
+        return false;
+    }
+    let Some(bpb) = Fat32BootSector::from_bytes(&boot_in) else {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: parse boot");
+        return false;
+    };
+    if bpb.root_cluster != 2 || bpb.fat_size_32 != 1 {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: bpb fields");
+        return false;
+    }
+
+    let mut dir_in = vec![0u8; 512];
+    if crate::block::read_blocks(device, 33, 1, &mut dir_in).is_err() {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: dir read");
+        return false;
+    }
+    let entries = parse_directory_entries(&dir_in);
+    let Some(entry) = entries.iter().find(|e| e.short_name.eq_ignore_ascii_case("GATE.TXT"))
+    else {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: GATE.TXT missing");
+        return false;
+    };
+    let mut file = vec![0u8; 512];
+    if crate::block::read_blocks(device, 34, 1, &mut file).is_err() {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: file read");
+        return false;
+    }
+    let n = entry.size as usize;
+    if file.get(..n) != Some(GATE_FAT32_PAYLOAD) {
+        serial_println!("[FAT32] GATE_FAT32 FAILED: payload");
+        return false;
+    }
+    serial_println!(
+        "[FAT32] {} (directory $DATA via ramdisk)",
+        GATE_FAT32_MARKER
+    );
+    true
+}
+
 /// Initialize FAT32 driver
 pub fn init() {
     serial_println!("[FAT32] FAT32 filesystem driver initialized");
-
-    // Try to auto-mount if a block device is available
-    if crate::virtio_blk::is_available() && mount("/mnt") {
-        serial_println!("[FAT32] Auto-mounted virtio-blk at /mnt");
-    }
+    let _ = block_self_test();
 }

@@ -590,6 +590,22 @@ fn test_dbus_request_name() {
 }
 
 #[test_case]
+fn test_dbus_release_name() {
+    assert!(
+        crate::dbus::release_self_test(),
+        "ReleaseName must drop ownership so a later RequestName is PRIMARY_OWNER"
+    );
+}
+
+#[test_case]
+fn test_acpi_s5_pm1a() {
+    assert!(
+        crate::acpi::s5_self_test(),
+        "ACPI S5 must program PM1a_CNT from DSDT _S5, not QEMU 0x604"
+    );
+}
+
+#[test_case]
 fn test_pam_unix_password() {
     assert!(
         crate::pam::unix_self_test(),

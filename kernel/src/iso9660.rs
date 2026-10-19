@@ -1467,10 +1467,188 @@ pub fn build_live_iso(kernel_binary: &[u8]) -> Vec<u8> {
 /// Global ISO builder state
 static ISO_BUILDER_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+fn both_u32(buf: &mut [u8], v: u32) {
+    buf[0..4].copy_from_slice(&v.to_le_bytes());
+    buf[4..8].copy_from_slice(&v.to_be_bytes());
+}
+
+fn both_u16(buf: &mut [u8], v: u16) {
+    buf[0..2].copy_from_slice(&v.to_le_bytes());
+    buf[2..4].copy_from_slice(&v.to_be_bytes());
+}
+
+fn dir_record(extent: u32, data_len: u32, flags: u8, name: &[u8]) -> Vec<u8> {
+    let name_len = name.len().max(1);
+    let mut rec_len = 33 + name_len;
+    if rec_len % 2 == 1 {
+        rec_len += 1;
+    }
+    let mut r = vec![0u8; rec_len];
+    r[0] = rec_len as u8;
+    both_u32(&mut r[2..10], extent);
+    both_u32(&mut r[10..18], data_len);
+    r[25] = flags;
+    both_u16(&mut r[28..32], 1);
+    r[32] = name_len as u8;
+    if name.is_empty() {
+        r[33] = 0;
+    } else {
+        r[33..33 + name.len()].copy_from_slice(name);
+    }
+    r
+}
+
+fn parse_dir_records(data: &[u8]) -> Vec<(String, u32, u32, bool)> {
+    let mut out = Vec::new();
+    let mut off = 0;
+    while off + 34 <= data.len() {
+        let rec_len = data[off] as usize;
+        if rec_len < 34 {
+            break;
+        }
+        if off + rec_len > data.len() {
+            break;
+        }
+        let extent = u32::from_le_bytes([
+            data[off + 2],
+            data[off + 3],
+            data[off + 4],
+            data[off + 5],
+        ]);
+        let data_len = u32::from_le_bytes([
+            data[off + 10],
+            data[off + 11],
+            data[off + 12],
+            data[off + 13],
+        ]);
+        let flags = data[off + 25];
+        let name_len = data[off + 32] as usize;
+        let name_bytes = &data[off + 33..off + 33 + name_len];
+        let raw = if name_bytes == [0] {
+            String::from(".")
+        } else if name_bytes == [1] {
+            String::from("..")
+        } else {
+            let s = core::str::from_utf8(name_bytes).unwrap_or("");
+            String::from(s.split(';').next().unwrap_or(s))
+        };
+        out.push((raw, extent, data_len, flags & 2 != 0));
+        off += rec_len;
+    }
+    out
+}
+
+fn build_gate_iso(payload: &[u8]) -> Vec<u8> {
+    const ROOT_LBA: u32 = 18;
+    const FILE_LBA: u32 = 19;
+    let mut image = vec![0u8; 20 * ISO_SECTOR_SIZE];
+    let pvd = 16 * ISO_SECTOR_SIZE;
+    image[pvd] = VD_PRIMARY;
+    image[pvd + 1..pvd + 6].copy_from_slice(ISO_STANDARD_ID);
+    image[pvd + 6] = ISO_VERSION;
+    image[pvd + 40..pvd + 48].copy_from_slice(b"KNOXOS  ");
+    both_u32(&mut image[pvd + 80..pvd + 88], 20);
+    both_u16(&mut image[pvd + 120..pvd + 124], 1);
+    both_u16(&mut image[pvd + 124..pvd + 128], 1);
+    both_u16(&mut image[pvd + 128..pvd + 132], ISO_SECTOR_SIZE as u16);
+    let root_rec = dir_record(ROOT_LBA, ISO_SECTOR_SIZE as u32, DE_FLAG_DIRECTORY, &[]);
+    image[pvd + 156..pvd + 156 + root_rec.len()].copy_from_slice(&root_rec);
+
+    let term = 17 * ISO_SECTOR_SIZE;
+    image[term] = VD_TERMINATOR;
+    image[term + 1..term + 6].copy_from_slice(ISO_STANDARD_ID);
+    image[term + 6] = ISO_VERSION;
+
+    let mut root = Vec::new();
+    root.extend_from_slice(&dir_record(
+        ROOT_LBA,
+        ISO_SECTOR_SIZE as u32,
+        DE_FLAG_DIRECTORY,
+        &[0],
+    ));
+    root.extend_from_slice(&dir_record(
+        ROOT_LBA,
+        ISO_SECTOR_SIZE as u32,
+        DE_FLAG_DIRECTORY,
+        &[1],
+    ));
+    root.extend_from_slice(&dir_record(
+        FILE_LBA,
+        payload.len() as u32,
+        0,
+        b"GATE.TXT;1",
+    ));
+    let root_off = ROOT_LBA as usize * ISO_SECTOR_SIZE;
+    image[root_off..root_off + root.len()].copy_from_slice(&root);
+
+    let file_off = FILE_LBA as usize * ISO_SECTOR_SIZE;
+    image[file_off..file_off + payload.len()].copy_from_slice(payload);
+    image
+}
+
+fn iso_lba_to_hdd(lba: u32) -> u64 {
+    lba as u64 * (ISO_SECTOR_SIZE as u64 / 512)
+}
+
+pub const GATE_ISO9660_MARKER: &str = "GATE_ISO9660 block";
+const GATE_ISO9660_PAYLOAD: &[u8] = b"knoxos-iso\n";
+
+pub fn block_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    let image = build_gate_iso(GATE_ISO9660_PAYLOAD);
+    let sectors = image.len() / 512;
+    for i in 0..sectors {
+        let off = i * 512;
+        if crate::block::write_blocks(device, i as u64, 1, &image[off..off + 512]).is_err() {
+            serial_println!("[ISO9660] GATE_ISO9660 FAILED: write {}", i);
+            return false;
+        }
+    }
+
+    let mut pvd = vec![0u8; ISO_SECTOR_SIZE];
+    let pvd_lba = iso_lba_to_hdd(16);
+    if crate::block::read_blocks(device, pvd_lba, 4, &mut pvd).is_err() {
+        serial_println!("[ISO9660] GATE_ISO9660 FAILED: pvd read");
+        return false;
+    }
+    if pvd[0] != VD_PRIMARY || &pvd[1..6] != ISO_STANDARD_ID {
+        serial_println!("[ISO9660] GATE_ISO9660 FAILED: pvd");
+        return false;
+    }
+    let root_extent = u32::from_le_bytes([pvd[158], pvd[159], pvd[160], pvd[161]]);
+    let mut dir = vec![0u8; ISO_SECTOR_SIZE];
+    if crate::block::read_blocks(device, iso_lba_to_hdd(root_extent), 4, &mut dir).is_err() {
+        serial_println!("[ISO9660] GATE_ISO9660 FAILED: dir read");
+        return false;
+    }
+    let entries = parse_dir_records(&dir);
+    let Some((_, extent, data_len, _)) = entries.iter().find(|(n, _, _, d)| n == "GATE.TXT" && !*d)
+    else {
+        serial_println!("[ISO9660] GATE_ISO9660 FAILED: GATE.TXT missing");
+        return false;
+    };
+    let mut file = vec![0u8; ISO_SECTOR_SIZE];
+    if crate::block::read_blocks(device, iso_lba_to_hdd(*extent), 4, &mut file).is_err() {
+        serial_println!("[ISO9660] GATE_ISO9660 FAILED: file read");
+        return false;
+    }
+    let n = *data_len as usize;
+    if file.get(..n) != Some(GATE_ISO9660_PAYLOAD) {
+        serial_println!("[ISO9660] GATE_ISO9660 FAILED: payload");
+        return false;
+    }
+    serial_println!(
+        "[ISO9660] {} (PVD + directory $DATA via ramdisk)",
+        GATE_ISO9660_MARKER
+    );
+    true
+}
+
 /// Initialize the ISO 9660 subsystem
 pub fn init() {
     serial_println!("[ISO9660] ISO 9660 image builder initialized");
     ISO_BUILDER_INITIALIZED.store(true, Ordering::SeqCst);
+    let _ = block_self_test();
 }
 
 /// Build a KnoxOS bootable ISO image

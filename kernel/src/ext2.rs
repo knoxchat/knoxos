@@ -534,7 +534,143 @@ pub fn list_mounts() -> Vec<String> {
     result
 }
 
+fn put_u16(buf: &mut [u8], off: usize, v: u16) {
+    buf[off..off + 2].copy_from_slice(&v.to_le_bytes());
+}
+
+fn put_u32(buf: &mut [u8], off: usize, v: u32) {
+    buf[off..off + 4].copy_from_slice(&v.to_le_bytes());
+}
+
+fn build_gate_volume(payload: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    let mut sb = vec![0u8; 1024];
+    put_u32(&mut sb, 0, 32); // s_inodes_count
+    put_u32(&mut sb, 4, 16); // s_blocks_count
+    put_u32(&mut sb, 16, 16); // s_free_inodes_count
+    put_u32(&mut sb, 20, 1); // s_first_data_block
+    put_u32(&mut sb, 24, 0); // s_log_block_size = 1024
+    put_u32(&mut sb, 32, 16); // s_blocks_per_group
+    put_u32(&mut sb, 40, 32); // s_inodes_per_group
+    put_u16(&mut sb, 56, EXT2_MAGIC);
+    put_u32(&mut sb, 76, 1); // s_rev_level
+    put_u32(&mut sb, 84, 11); // s_first_ino
+    put_u16(&mut sb, 88, 128); // s_inode_size
+
+    let mut bgd = vec![0u8; 1024];
+    put_u32(&mut bgd, 0, 3); // block bitmap
+    put_u32(&mut bgd, 4, 4); // inode bitmap
+    put_u32(&mut bgd, 8, 5); // inode table
+    put_u16(&mut bgd, 12, 4);
+    put_u16(&mut bgd, 14, 20);
+    put_u16(&mut bgd, 16, 1);
+
+    // Two 1024-byte inode-table blocks (inodes 1-16 in block 5, 17-24 unused).
+    let mut it0 = vec![0u8; 1024];
+    // Inode 2 (root) at offset 128
+    put_u16(&mut it0, 128, EXT2_S_IFDIR | 0o755);
+    put_u32(&mut it0, 132, 1024); // i_size
+    put_u16(&mut it0, 154, 2); // i_links_count
+    put_u32(&mut it0, 156, 2); // i_blocks (512-byte units)
+    put_u32(&mut it0, 168, 9); // i_block[0] = 9
+    // Inode 11 (file) at offset 10*128 = 1280, which is in the second table block.
+    let mut it1 = vec![0u8; 1024];
+    let file_off = 1280 - 1024;
+    put_u16(&mut it1, file_off, EXT2_S_IFREG | 0o644);
+    put_u32(&mut it1, file_off + 4, payload.len() as u32);
+    put_u16(&mut it1, file_off + 26, 1); // i_links_count
+    put_u32(&mut it1, file_off + 28, 2); // i_blocks
+    put_u32(&mut it1, file_off + 40, 10); // i_block[0] = 10
+
+    let mut root = vec![0u8; 1024];
+    // "."
+    put_u32(&mut root, 0, 2);
+    put_u16(&mut root, 4, 12);
+    root[6] = 1;
+    root[7] = EXT2_FT_DIR;
+    root[8] = b'.';
+    // ".."
+    put_u32(&mut root, 12, 2);
+    put_u16(&mut root, 16, 12);
+    root[18] = 2;
+    root[19] = EXT2_FT_DIR;
+    root[20] = b'.';
+    root[21] = b'.';
+    // GATE.TXT
+    put_u32(&mut root, 24, 11);
+    put_u16(&mut root, 28, 1000);
+    root[30] = 8;
+    root[31] = EXT2_FT_REG_FILE;
+    root[32..40].copy_from_slice(b"GATE.TXT");
+
+    let mut file = vec![0u8; 1024];
+    file[..payload.len()].copy_from_slice(payload);
+    (sb, bgd, it0, it1, {
+        let mut rest = vec![0u8; 2048];
+        rest[..1024].copy_from_slice(&root);
+        rest[1024..].copy_from_slice(&file);
+        rest
+    })
+}
+
+pub const GATE_EXT2_MARKER: &str = "GATE_EXT2 block";
+const GATE_EXT2_PAYLOAD: &[u8] = b"knoxos-ext2\n";
+
+pub fn block_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    let (sb, bgd, it0, it1, data) = build_gate_volume(GATE_EXT2_PAYLOAD);
+    // Superblock at byte 1024 = LBA 2.
+    if crate::block::write_blocks(device, 2, 2, &sb).is_err() {
+        crate::serial_println!("[ext2] GATE_EXT2 FAILED: sb write");
+        return false;
+    }
+    // Block 2 GDT = LBA 4
+    if crate::block::write_blocks(device, 4, 2, &bgd).is_err() {
+        crate::serial_println!("[ext2] GATE_EXT2 FAILED: bgd write");
+        return false;
+    }
+    // Inode table block 5-6 = LBA 10
+    if crate::block::write_blocks(device, 10, 2, &it0).is_err() {
+        crate::serial_println!("[ext2] GATE_EXT2 FAILED: it0 write");
+        return false;
+    }
+    if crate::block::write_blocks(device, 12, 2, &it1).is_err() {
+        crate::serial_println!("[ext2] GATE_EXT2 FAILED: it1 write");
+        return false;
+    }
+    // Root dir block 9 = LBA 18, file block 10 = LBA 20
+    if crate::block::write_blocks(device, 18, 4, &data).is_err() {
+        crate::serial_println!("[ext2] GATE_EXT2 FAILED: data write");
+        return false;
+    }
+
+    let fs_idx = match mount(device) {
+        Ok(i) => i,
+        Err(e) => {
+            crate::serial_println!("[ext2] GATE_EXT2 FAILED: mount ({:?})", e);
+            return false;
+        }
+    };
+    match read_file(fs_idx, "/GATE.TXT") {
+        Ok(got) if got == GATE_EXT2_PAYLOAD => {
+            crate::serial_println!(
+                "[ext2] {} (inode $DATA via ramdisk)",
+                GATE_EXT2_MARKER
+            );
+            true
+        }
+        Ok(got) => {
+            crate::serial_println!("[ext2] GATE_EXT2 FAILED: payload len={}", got.len());
+            false
+        }
+        Err(e) => {
+            crate::serial_println!("[ext2] GATE_EXT2 FAILED: read ({:?})", e);
+            false
+        }
+    }
+}
+
 /// Initialize the ext2 driver
 pub fn init() {
     crate::serial_println!("[KnoxOS] ext2 filesystem driver loaded");
+    let _ = block_self_test();
 }

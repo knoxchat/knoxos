@@ -6,40 +6,43 @@ use crate::arch_compat::instructions::port::Port;
 #[cfg(not(target_arch = "x86_64"))]
 use crate::arch_compat::instructions::port::Port;
 
-/// ACPI shutdown using various methods
+/// PM1a port and SLP_TYP|SLP_EN value for S5. None when FADT/DSDT is missing.
+pub fn s5_pm1a_write() -> Option<(u16, u16)> {
+    let pm1a = crate::suspend::pm1a_control_block();
+    if pm1a == 0 || pm1a > 0xFFFF {
+        return None;
+    }
+    let slp = (*S5_SLP_TYP.lock()).or_else(|| {
+        let v = crate::suspend::slp_typ_s5();
+        if v == 0 {
+            None
+        } else {
+            Some(v)
+        }
+    })?;
+    Some((pm1a as u16, ((slp as u16) << 10) | (1 << 13)))
+}
+
+/// ACPI S5 through PM1a_CNT. No QEMU/Bochs/VirtualBox I/O-port fallbacks.
 pub fn shutdown() -> ! {
     crate::serial_println!("[KnoxOS] Initiating system shutdown...");
 
-    // Method 1: QEMU debug exit (for testing)
-    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
-    unsafe {
-        let mut port = Port::<u32>::new(0x604);
-        port.write(0x2000);
+    if let Some((port, value)) = s5_pm1a_write() {
+        crate::serial_println!(
+            "[KnoxOS] ACPI S5 PM1a={:#x} value={:#x}",
+            port,
+            value
+        );
+        // SAFETY: PM1a_CNT comes from the mapped FADT; SLP_TYP is the DSDT _S5 integer.
+        unsafe {
+            let mut pm1a = Port::<u16>::new(port);
+            pm1a.write(value);
+        }
+    } else {
+        crate::serial_println!("[KnoxOS] ACPI S5 skipped: no PM1a/_S5");
     }
 
-    // Method 2: Bochs/older QEMU
-    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
-    unsafe {
-        let mut port = Port::<u16>::new(0xB004);
-        port.write(0x2000);
-    }
-
-    // Method 3: QEMU newer versions
-    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
-    unsafe {
-        let mut port = Port::<u16>::new(0x604);
-        port.write(0x2000);
-    }
-
-    // Method 4: VirtualBox
-    // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
-    unsafe {
-        let mut port = Port::<u16>::new(0x4004);
-        port.write(0x3400);
-    }
-
-    // If all methods fail, halt
-    crate::serial_println!("[KnoxOS] Shutdown failed, halting CPU");
+    crate::serial_println!("[KnoxOS] Shutdown: halting CPU");
     crate::hlt_loop();
 }
 
@@ -266,6 +269,7 @@ fn dsdt_bytes() -> Option<alloc::vec::Vec<u8>> {
 }
 
 pub const GATE_AML_MARKER: &str = "GATE_AML dsdt";
+pub const GATE_ACPI_S5_MARKER: &str = "GATE_ACPI s5";
 
 fn aml_self_test() -> bool {
     let Some(dsdt) = dsdt_bytes() else {
@@ -301,6 +305,23 @@ pub fn init() {
     crate::serial_println!("[KnoxOS] ACPI power management initialized");
 }
 
+pub fn s5_self_test() -> bool {
+    match s5_pm1a_write() {
+        Some((port, value)) if value & (1 << 13) != 0 && port != 0 => {
+            crate::serial_println!(
+                "[KnoxOS] {} (PM1a={:#x} SLP_EN)",
+                GATE_ACPI_S5_MARKER,
+                port
+            );
+            true
+        }
+        other => {
+            crate::serial_println!("[KnoxOS] GATE_ACPI s5 FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
 /// Parse DSDT AML after `acpi_tables::init` has mapped firmware tables.
 pub fn interpret_dsdt() {
     let _ = aml_self_test();
@@ -310,4 +331,5 @@ pub fn interpret_dsdt() {
             crate::suspend::set_pm_registers(fadt.pm1a_control_block as u64, 5, 6, slp_s5);
         }
     }
+    let _ = s5_self_test();
 }

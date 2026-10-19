@@ -414,6 +414,29 @@ pub fn fuse_write(
     Ok(u32::from_le_bytes(resp[0..4].try_into().map_err(|_| "short write")?) as usize)
 }
 
+fn serve_loopback_unlink(mount_point: &str, unique: u64, name: &str) {
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    lb.files.remove(name);
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+
+/// Handle a VFS unlink through FUSE.
+pub fn fuse_unlink(mount_point: &str, parent: u64, name: &str) -> Result<(), &'static str> {
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::Unlink,
+        parent,
+        name.as_bytes().to_vec(),
+    )?;
+    serve_loopback_unlink(mount_point, unique, name);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+
 /// List FUSE mounts
 pub fn list_mounts() -> Vec<(String, u32, bool)> {
     MOUNTS
@@ -517,8 +540,45 @@ pub fn write_self_test() -> bool {
 }
 
 /// Initialize FUSE subsystem
+pub const GATE_FUSE_UNLINK_MARKER: &str = "GATE_FUSE unlink";
+
+/// UNLINK must drop the name so a later LOOKUP fails.
+pub fn unlink_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-u";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE unlink FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "gone.txt", b"x").is_err() {
+        serial_println!("[fuse] GATE_FUSE unlink FAILED: put");
+        return false;
+    }
+    if fuse_lookup(MP, 1, "gone.txt").is_err() {
+        serial_println!("[fuse] GATE_FUSE unlink FAILED: lookup before");
+        return false;
+    }
+    if let Err(e) = fuse_unlink(MP, 1, "gone.txt") {
+        serial_println!("[fuse] GATE_FUSE unlink FAILED: unlink ({})", e);
+        return false;
+    }
+    if fuse_lookup(MP, 1, "gone.txt").is_ok() {
+        serial_println!("[fuse] GATE_FUSE unlink FAILED: name still present");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (UNLINK then LOOKUP ENOENT)",
+        GATE_FUSE_UNLINK_MARKER
+    );
+    true
+}
+
+/// Initialize FUSE subsystem
 pub fn init() {
     serial_println!("[fuse] Filesystem in Userspace (FUSE) initialized");
     let _ = lookup_self_test();
     let _ = write_self_test();
+    let _ = unlink_self_test();
 }

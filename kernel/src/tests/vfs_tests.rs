@@ -187,10 +187,53 @@ fn test_xhci_enum_no_fallback() {
 }
 
 #[test_case]
+fn test_xhci_configure_endpoint() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::ep_self_test(),
+        "XHCI Configure Endpoint must complete with cc=1"
+    );
+}
+
+#[test_case]
 fn test_fuse_write_roundtrip() {
     assert!(
         crate::fuse::write_self_test(),
         "FUSE WRITE must store bytes that a later READ returns"
+    );
+}
+
+#[test_case]
+fn test_fuse_unlink_drops_name() {
+    assert!(
+        crate::fuse::unlink_self_test(),
+        "FUSE UNLINK must drop the name so LOOKUP fails"
+    );
+}
+
+#[test_case]
+fn test_fat32_ramdisk() {
+    assert!(
+        crate::fat32::block_self_test(),
+        "FAT32 BPB + directory $DATA must round-trip through the ramdisk"
+    );
+}
+
+#[test_case]
+fn test_ext2_ramdisk() {
+    assert!(
+        crate::ext2::block_self_test(),
+        "ext2 superblock + inode $DATA must round-trip through the ramdisk"
+    );
+}
+
+#[test_case]
+fn test_iso9660_ramdisk() {
+    assert!(
+        crate::iso9660::block_self_test(),
+        "ISO9660 PVD + directory $DATA must round-trip through the ramdisk"
     );
 }
 

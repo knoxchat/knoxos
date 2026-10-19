@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **ACPI S5** — `acpi::shutdown` writes PM1a_CNT with DSDT `_S5` SLP_TYP|SLP_EN; QEMU/Bochs/VirtualBox I/O-port fallbacks are gone (`GATE_ACPI s5`).
+- **FAT32 / ext2 / ISO9660** — BPB/superblock/PVD plus directory `$DATA` through the ramdisk (`GATE_FAT32 block`, `GATE_EXT2 block`, `GATE_ISO9660 block`). `mount -t ext2` calls `ext2::mount`.
+- **XHCI Configure Endpoint** — Command Completion cc=1 (`GATE_USB xhci ep`).
+- **D-Bus ReleaseName** — drops ownership so a later `RequestName` is PRIMARY_OWNER (`GATE_DBUS release`).
+- **FUSE UNLINK** — drops the name so a later LOOKUP fails (`GATE_FUSE unlink`).
+- **Virtual FS persist** — `/tmp` directories persist; generated files under `/tmp` stay virtual (C10).
 - **XHCI enum** — Enable Slot, Address Device, GET_DESCRIPTOR, GET_DESCRIPTOR(Configuration), and SET_CONFIGURATION require live completions; generic control transfers no longer succeed on timeout (`GATE_USB xhci enum`).
 - **Virtual FS persist** — `/dev` `/proc` `/sys` `/run` directories round-trip through VirtIO-blk; generated files under them stay virtual (`GATE_C10 virtfs persist`).
 - **XHCI Address Device** — Command Completion cc=1 is required; input contexts honour HCCPARAMS1 CSZ 32/64 (`GATE_USB xhci addr`).

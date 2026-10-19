@@ -778,7 +778,8 @@ pub fn writeback_self_test() -> bool {
         }
     }
 
-    if crate::virtio_blk::is_available() {
+    // `/tmp` is a virtual FS (C10): generated files do not round-trip.
+    if crate::virtio_blk::is_available() && crate::persist::path_should_persist(GATE_C3_PATH) {
         if crate::vfs::remove_dispatch(GATE_C3_PATH).is_err() {
             serial_println!("[page_cache] Gate C3 FAILED: unlink");
             return false;

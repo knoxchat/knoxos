@@ -91,6 +91,16 @@ static SLP_TYPA_S3: AtomicU8 = AtomicU8::new(0);
 static SLP_TYPA_S4: AtomicU8 = AtomicU8::new(0);
 static SLP_TYPA_S5: AtomicU8 = AtomicU8::new(0);
 
+/// FADT PM1a_CNT address programmed by DSDT `_S5` interpretation.
+pub fn pm1a_control_block() -> u64 {
+    PM1A_CTL_BLK.load(Ordering::Relaxed)
+}
+
+/// SLP_TYPa for S5 from DSDT, or 0 if unset.
+pub fn slp_typ_s5() -> u8 {
+    SLP_TYPA_S5.load(Ordering::Relaxed)
+}
+
 /// Set PM register addresses (called during ACPI init)
 pub fn set_pm_registers(pm1a_ctl: u64, slp_s3: u8, slp_s4: u8, slp_s5: u8) {
     PM1A_CTL_BLK.store(pm1a_ctl, Ordering::Relaxed);
