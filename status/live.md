@@ -159,5 +159,17 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 148. **XHCI Configure Endpoint** — Command Completion cc=1 (`GATE_USB xhci ep`).
 149. **D-Bus ReleaseName** — ownership drop then PRIMARY_OWNER (`GATE_DBUS release`).
 150. **FUSE UNLINK** — LOOKUP fails after UNLINK (`GATE_FUSE unlink`).
+151. **FUSE MKDIR** — LOOKUP returns `S_IFDIR` (`GATE_FUSE mkdir`).
+152. **D-Bus ListNames** — well-known name is in the array after `RequestName` (`GATE_DBUS list`).
+153. **XHCI GET_STATUS** — Setup+Data+Status Transfer Event (`GATE_USB xhci status`).
+154. **FAT32 mount** — `mount -t vfat` parses the BPB and reads `$DATA` (`GATE_FAT32 mount`).
+155. **NFS WRITE** — LOOKUP+WRITE then READ round-trip (`GATE_NFS write`).
+156. **FUSE RMDIR** — LOOKUP fails after RMDIR (`GATE_FUSE rmdir`).
+157. **FUSE RENAME** — LOOKUP finds the new name (`GATE_FUSE rename`).
+158. **D-Bus GetConnectionUnixProcessID** — unique and well-known names return the pid (`GATE_DBUS pid`).
+159. **XHCI SET_INTERFACE** — Setup+Status Transfer Event (`GATE_USB xhci iface`).
+160. **ISO9660 mount** — `mount -t iso9660` parses the PVD and reads `$DATA` (`GATE_ISO9660 mount`).
+161. **NTFS mount** — `mount -t ntfs` parses the BPB and reads `$DATA` (`GATE_NTFS mount`).
+162. **NFS REMOVE** — REMOVE then LOOKUP is `NFS4ERR_NOENT` (`GATE_NFS remove`).
 
-Integration: `./tests/run_integration.sh` **414/414** on QEMU (2026-10-20).
+Integration: `./tests/run_integration.sh` **426/426** on QEMU (2026-10-20).

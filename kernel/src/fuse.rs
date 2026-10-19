@@ -130,10 +130,11 @@ pub struct FuseRequest {
     pub data: Vec<u8>,
 }
 
-/// In-kernel loopback daemon: path → (ino, bytes).
+/// In-kernel loopback daemon: path → (ino, bytes) plus directory inos.
 #[derive(Debug, Default)]
 struct LoopbackFs {
     files: BTreeMap<String, (u64, Vec<u8>)>,
+    dirs: BTreeMap<String, u64>,
     next_ino: u64,
 }
 
@@ -175,6 +176,7 @@ pub fn mount(mount_point: &str, daemon_pid: u32) -> Result<(), &'static str> {
         String::from(mount_point),
         LoopbackFs {
             files: BTreeMap::new(),
+            dirs: BTreeMap::new(),
             next_ino: 2,
         },
     );
@@ -262,21 +264,24 @@ pub fn parse_fuse_entry(data: &[u8]) -> Option<(u64, u64, u32)> {
 }
 
 fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]) {
-    let (ino, size) = {
+    if opcode != FuseOpcode::Lookup {
+        return;
+    }
+    let name = core::str::from_utf8(req).unwrap_or("");
+    let (ino, size, mode) = {
         let lbs = LOOPBACK.lock();
         let Some(lb) = lbs.get(mount_point) else {
             return;
         };
-        if opcode != FuseOpcode::Lookup {
+        if let Some(&ino) = lb.dirs.get(name) {
+            (ino, 0u64, 0o040755)
+        } else if let Some(&(ino, ref data)) = lb.files.get(name) {
+            (ino, data.len() as u64, 0o100644)
+        } else {
             return;
         }
-        let name = core::str::from_utf8(req).unwrap_or("");
-        let Some(&(ino, ref data)) = lb.files.get(name) else {
-            return;
-        };
-        (ino, data.len() as u64)
     };
-    let _ = write_response(mount_point, unique, encode_entry(ino, size, 0o100644));
+    let _ = write_response(mount_point, unique, encode_entry(ino, size, mode));
 }
 
 fn serve_loopback_read(mount_point: &str, unique: u64, nodeid: u64) {
@@ -437,6 +442,111 @@ pub fn fuse_unlink(mount_point: &str, parent: u64, name: &str) -> Result<(), &'s
     Ok(())
 }
 
+fn serve_loopback_mkdir(mount_point: &str, unique: u64, name: &str) {
+    let entry = {
+        let mut lbs = LOOPBACK.lock();
+        let Some(lb) = lbs.get_mut(mount_point) else {
+            return;
+        };
+        let ino = lb.next_ino;
+        lb.next_ino += 1;
+        lb.dirs.insert(String::from(name), ino);
+        encode_entry(ino, 0, 0o040755)
+    };
+    let _ = write_response(mount_point, unique, entry);
+}
+
+/// Handle a VFS mkdir through FUSE.
+pub fn fuse_mkdir(mount_point: &str, parent: u64, name: &str) -> Result<FuseEntry, &'static str> {
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::Mkdir,
+        parent,
+        name.as_bytes().to_vec(),
+    )?;
+    serve_loopback_mkdir(mount_point, unique, name);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    let (ino, size, mode) = parse_fuse_entry(&resp).ok_or("short entry")?;
+    Ok(FuseEntry {
+        nodeid: ino,
+        generation: 1,
+        attr: FuseAttr {
+            ino,
+            size,
+            blocks: 0,
+            mode,
+            nlink: 2,
+            uid: 0,
+            gid: 0,
+            atime: 0,
+            mtime: 0,
+            ctime: 0,
+        },
+        attr_valid_secs: 1,
+        entry_valid_secs: 1,
+    })
+}
+
+fn serve_loopback_rmdir(mount_point: &str, unique: u64, name: &str) {
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    lb.dirs.remove(name);
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+
+/// Handle a VFS rmdir through FUSE.
+pub fn fuse_rmdir(mount_point: &str, parent: u64, name: &str) -> Result<(), &'static str> {
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::Rmdir,
+        parent,
+        name.as_bytes().to_vec(),
+    )?;
+    serve_loopback_rmdir(mount_point, unique, name);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+
+fn serve_loopback_rename(mount_point: &str, unique: u64, req: &[u8]) {
+    let Ok(s) = core::str::from_utf8(req) else {
+        return;
+    };
+    let Some((old, new)) = s.split_once('\0') else {
+        return;
+    };
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    if let Some(file) = lb.files.remove(old) {
+        lb.files.insert(String::from(new), file);
+    } else if let Some(ino) = lb.dirs.remove(old) {
+        lb.dirs.insert(String::from(new), ino);
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+
+/// Handle a VFS rename through FUSE. Request body is `old\0new`.
+pub fn fuse_rename(
+    mount_point: &str,
+    parent: u64,
+    old: &str,
+    new: &str,
+) -> Result<(), &'static str> {
+    let mut data = Vec::with_capacity(old.len() + new.len() + 1);
+    data.extend_from_slice(old.as_bytes());
+    data.push(0);
+    data.extend_from_slice(new.as_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Rename, parent, data.clone())?;
+    serve_loopback_rename(mount_point, unique, &data);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+
 /// List FUSE mounts
 pub fn list_mounts() -> Vec<(String, u32, bool)> {
     MOUNTS
@@ -575,10 +685,151 @@ pub fn unlink_self_test() -> bool {
     true
 }
 
+pub const GATE_FUSE_MKDIR_MARKER: &str = "GATE_FUSE mkdir";
+
+/// MKDIR must create a directory that LOOKUP returns with S_IFDIR.
+pub fn mkdir_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-m";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE mkdir FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    let entry = match fuse_mkdir(MP, 1, "gatedir") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE mkdir FAILED: mkdir ({})", e);
+            return false;
+        }
+    };
+    if entry.attr.mode & 0o170000 != 0o040000 {
+        serial_println!(
+            "[fuse] GATE_FUSE mkdir FAILED: mode={:#o} (want S_IFDIR)",
+            entry.attr.mode
+        );
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "gatedir") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE mkdir FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    if looked.nodeid != entry.nodeid || looked.attr.mode & 0o170000 != 0o040000 {
+        serial_println!(
+            "[fuse] GATE_FUSE mkdir FAILED: lookup ino={} mode={:#o}",
+            looked.nodeid,
+            looked.attr.mode
+        );
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (MKDIR+LOOKUP S_IFDIR ino={})",
+        GATE_FUSE_MKDIR_MARKER,
+        entry.nodeid
+    );
+    true
+}
+
+pub const GATE_FUSE_RMDIR_MARKER: &str = "GATE_FUSE rmdir";
+
+/// RMDIR must drop the directory so a later LOOKUP fails.
+pub fn rmdir_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-rm";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE rmdir FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if fuse_mkdir(MP, 1, "gone").is_err() {
+        serial_println!("[fuse] GATE_FUSE rmdir FAILED: mkdir");
+        return false;
+    }
+    if fuse_lookup(MP, 1, "gone").is_err() {
+        serial_println!("[fuse] GATE_FUSE rmdir FAILED: lookup before");
+        return false;
+    }
+    if let Err(e) = fuse_rmdir(MP, 1, "gone") {
+        serial_println!("[fuse] GATE_FUSE rmdir FAILED: rmdir ({})", e);
+        return false;
+    }
+    if fuse_lookup(MP, 1, "gone").is_ok() {
+        serial_println!("[fuse] GATE_FUSE rmdir FAILED: name still present");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (RMDIR then LOOKUP ENOENT)",
+        GATE_FUSE_RMDIR_MARKER
+    );
+    true
+}
+
+pub const GATE_FUSE_RENAME_MARKER: &str = "GATE_FUSE rename";
+
+/// RENAME must move the name so LOOKUP finds the new one.
+pub fn rename_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-rn";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE rename FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "old.txt", b"rn").is_err() {
+        serial_println!("[fuse] GATE_FUSE rename FAILED: put");
+        return false;
+    }
+    let before = match fuse_lookup(MP, 1, "old.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE rename FAILED: lookup old ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_rename(MP, 1, "old.txt", "new.txt") {
+        serial_println!("[fuse] GATE_FUSE rename FAILED: rename ({})", e);
+        return false;
+    }
+    if fuse_lookup(MP, 1, "old.txt").is_ok() {
+        serial_println!("[fuse] GATE_FUSE rename FAILED: old name still present");
+        return false;
+    }
+    let after = match fuse_lookup(MP, 1, "new.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE rename FAILED: lookup new ({})", e);
+            return false;
+        }
+    };
+    if after.nodeid != before.nodeid {
+        serial_println!(
+            "[fuse] GATE_FUSE rename FAILED: ino {} -> {}",
+            before.nodeid,
+            after.nodeid
+        );
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (RENAME old→new ino={})",
+        GATE_FUSE_RENAME_MARKER,
+        after.nodeid
+    );
+    true
+}
+
 /// Initialize FUSE subsystem
 pub fn init() {
     serial_println!("[fuse] Filesystem in Userspace (FUSE) initialized");
     let _ = lookup_self_test();
     let _ = write_self_test();
     let _ = unlink_self_test();
+    let _ = mkdir_self_test();
+    let _ = rmdir_self_test();
+    let _ = rename_self_test();
 }

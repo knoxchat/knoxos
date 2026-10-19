@@ -1644,11 +1644,96 @@ pub fn block_self_test() -> bool {
     true
 }
 
+/// Block-layer device index for the mounted ISO9660 volume.
+static ISO_DEVICE: AtomicU64 = AtomicU64::new(0);
+static ISO_MOUNTED: AtomicBool = AtomicBool::new(false);
+
+fn write_gate_iso(device: usize, payload: &[u8]) -> bool {
+    let image = build_gate_iso(payload);
+    let sectors = image.len() / 512;
+    for i in 0..sectors {
+        let off = i * 512;
+        if crate::block::write_blocks(device, i as u64, 1, &image[off..off + 512]).is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+/// Mount ISO9660 from a block-layer device: PVD must parse.
+pub fn mount_device(device_index: usize, mount_point: &str) -> bool {
+    let mut pvd = vec![0u8; ISO_SECTOR_SIZE];
+    if crate::block::read_blocks(device_index, iso_lba_to_hdd(16), 4, &mut pvd).is_err() {
+        serial_println!("[ISO9660] mount: PVD read failed");
+        return false;
+    }
+    if pvd[0] != VD_PRIMARY || &pvd[1..6] != ISO_STANDARD_ID {
+        serial_println!("[ISO9660] mount: invalid PVD");
+        return false;
+    }
+    ISO_DEVICE.store(device_index as u64, Ordering::Relaxed);
+    ISO_MOUNTED.store(true, Ordering::Relaxed);
+    serial_println!("[ISO9660] Mounted at {}", mount_point);
+    true
+}
+
+/// Read a file from the mounted ISO9660 volume through the block layer.
+pub fn read_file(path: &str) -> Option<Vec<u8>> {
+    if !ISO_MOUNTED.load(Ordering::Relaxed) {
+        return None;
+    }
+    let device = ISO_DEVICE.load(Ordering::Relaxed) as usize;
+    let name = path.trim_start_matches('/');
+    let mut pvd = vec![0u8; ISO_SECTOR_SIZE];
+    crate::block::read_blocks(device, iso_lba_to_hdd(16), 4, &mut pvd).ok()?;
+    let root_extent = u32::from_le_bytes([pvd[158], pvd[159], pvd[160], pvd[161]]);
+    let mut dir = vec![0u8; ISO_SECTOR_SIZE];
+    crate::block::read_blocks(device, iso_lba_to_hdd(root_extent), 4, &mut dir).ok()?;
+    let entries = parse_dir_records(&dir);
+    let (_, extent, data_len, _) = entries.iter().find(|(n, _, _, d)| n == name && !*d)?;
+    let mut file = vec![0u8; ISO_SECTOR_SIZE];
+    crate::block::read_blocks(device, iso_lba_to_hdd(*extent), 4, &mut file).ok()?;
+    let n = (*data_len as usize).min(file.len());
+    Some(file[..n].to_vec())
+}
+
+pub const GATE_ISO9660_MOUNT_MARKER: &str = "GATE_ISO9660 mount";
+
+/// `mount -t iso9660` must parse the PVD and read GATE.TXT.
+pub fn mount_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    if !write_gate_iso(device, GATE_ISO9660_PAYLOAD) {
+        serial_println!("[ISO9660] GATE_ISO9660 mount FAILED: write");
+        return false;
+    }
+    if !mount_device(device, "/mnt/iso") {
+        serial_println!("[ISO9660] GATE_ISO9660 mount FAILED: mount");
+        return false;
+    }
+    match read_file("GATE.TXT") {
+        Some(got) if got == GATE_ISO9660_PAYLOAD => {
+            serial_println!(
+                "[ISO9660] {} (iso9660 mount + GATE.TXT)",
+                GATE_ISO9660_MOUNT_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[ISO9660] GATE_ISO9660 mount FAILED: payload len={}",
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
 /// Initialize the ISO 9660 subsystem
 pub fn init() {
     serial_println!("[ISO9660] ISO 9660 image builder initialized");
     ISO_BUILDER_INITIALIZED.store(true, Ordering::SeqCst);
     let _ = block_self_test();
+    let _ = mount_self_test();
 }
 
 /// Build a KnoxOS bootable ISO image

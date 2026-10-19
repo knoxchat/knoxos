@@ -11,6 +11,7 @@
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::Mutex;
 
 use crate::serial_println;
@@ -1299,24 +1300,17 @@ fn parse_directory_entries(data: &[u8]) -> Vec<FatDirEntry> {
 
 // ─── Block Device I/O ───────────────────────────────────────────────────
 
-/// Read a sector from the block device
+/// Block-layer device index used by the mounted FAT32 volume.
+static FAT32_DEVICE: AtomicUsize = AtomicUsize::new(0);
+
+/// Read a sector from the mounted FAT32 block device.
 fn read_block_device(sector: u64, buffer: &mut [u8]) -> bool {
-    // Try virtio-blk first, then fall back to ramdisk
-    if crate::virtio_blk::is_available() {
-        crate::virtio_blk::read(sector, 1, buffer)
-    } else {
-        // Use ramdisk from block.rs
-        crate::block::read_blocks(0, sector, 1, buffer).is_ok()
-    }
+    crate::block::read_blocks(FAT32_DEVICE.load(Ordering::Relaxed), sector, 1, buffer).is_ok()
 }
 
-/// Write a sector to the block device
+/// Write a sector to the mounted FAT32 block device.
 fn write_block_device(sector: u64, data: &[u8]) -> bool {
-    if crate::virtio_blk::is_available() {
-        crate::virtio_blk::write(sector, 1, data)
-    } else {
-        crate::block::write_blocks(0, sector, 1, data).is_ok()
-    }
+    crate::block::write_blocks(FAT32_DEVICE.load(Ordering::Relaxed), sector, 1, data).is_ok()
 }
 
 // ─── Global Filesystem Instance ─────────────────────────────────────────
@@ -1325,8 +1319,14 @@ lazy_static::lazy_static! {
     pub static ref FAT32_FS: Mutex<Fat32Fs> = Mutex::new(Fat32Fs::new());
 }
 
-/// Mount FAT32 filesystem
+/// Mount FAT32 filesystem on the currently selected block device.
 pub fn mount(mount_point: &str) -> bool {
+    FAT32_FS.lock().mount(mount_point)
+}
+
+/// Mount FAT32 from a specific block-layer device index.
+pub fn mount_device(device_index: usize, mount_point: &str) -> bool {
+    FAT32_DEVICE.store(device_index, Ordering::Relaxed);
     FAT32_FS.lock().mount(mount_point)
 }
 
@@ -1501,8 +1501,45 @@ pub fn block_self_test() -> bool {
     true
 }
 
+pub const GATE_FAT32_MOUNT_MARKER: &str = "GATE_FAT32 mount";
+
+/// `mount -t vfat` must parse the BPB through the block layer and read `$DATA`.
+pub fn mount_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    let (boot, fat, dir, data) = build_gate_volume(GATE_FAT32_PAYLOAD);
+    if crate::block::write_blocks(device, 0, 1, &boot).is_err()
+        || crate::block::write_blocks(device, 32, 1, &fat).is_err()
+        || crate::block::write_blocks(device, 33, 1, &dir).is_err()
+        || crate::block::write_blocks(device, 34, 1, &data).is_err()
+    {
+        serial_println!("[FAT32] GATE_FAT32 mount FAILED: write");
+        return false;
+    }
+    if !mount_device(device, "/mnt/fat32") {
+        serial_println!("[FAT32] GATE_FAT32 mount FAILED: mount");
+        return false;
+    }
+    match read_file("GATE.TXT") {
+        Some(got) if got == GATE_FAT32_PAYLOAD => {
+            serial_println!(
+                "[FAT32] {} (vfat mount + GATE.TXT)",
+                GATE_FAT32_MOUNT_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[FAT32] GATE_FAT32 mount FAILED: payload len={}",
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
 /// Initialize FAT32 driver
 pub fn init() {
     serial_println!("[FAT32] FAT32 filesystem driver initialized");
     let _ = block_self_test();
+    let _ = mount_self_test();
 }

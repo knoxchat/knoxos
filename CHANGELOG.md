@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **FUSE RMDIR** — RMDIR drops the directory so a later LOOKUP fails (`GATE_FUSE rmdir`).
+- **FUSE RENAME** — RENAME moves the name so LOOKUP finds the new one (`GATE_FUSE rename`).
+- **D-Bus GetConnectionUnixProcessID** — unique and well-known names return the connection pid (`GATE_DBUS pid`).
+- **XHCI SET_INTERFACE** — Setup+Status Transfer Event for SET_INTERFACE(0,0) (`GATE_USB xhci iface`).
+- **ISO9660 mount** — `mount -t iso9660` parses the PVD and reads `GATE.TXT` (`GATE_ISO9660 mount`).
+- **NTFS mount** — `mount -t ntfs` parses the BPB and reads `GATE.TXT` `$DATA` (`GATE_NTFS mount`).
+- **NFS REMOVE** — COMPOUND REMOVE then LOOKUP is `NFS4ERR_NOENT` (`GATE_NFS remove`).
+- **FUSE MKDIR** — MKDIR creates a directory that LOOKUP returns with `S_IFDIR` (`GATE_FUSE mkdir`).
+- **D-Bus ListNames** — `org.freedesktop.DBus.ListNames` includes a well-known name after `RequestName` (`GATE_DBUS list`).
+- **XHCI GET_STATUS** — Setup+Data+Status Transfer Event for GET_STATUS(device) (`GATE_USB xhci status`).
+- **FAT32 mount** — `mount -t vfat` parses the BPB through the block layer and reads `$DATA` (`GATE_FAT32 mount`).
+- **NFS WRITE** — COMPOUND LOOKUP+WRITE stores bytes a later READ returns (`GATE_NFS write`).
 - **ACPI S5** — `acpi::shutdown` writes PM1a_CNT with DSDT `_S5` SLP_TYP|SLP_EN; QEMU/Bochs/VirtualBox I/O-port fallbacks are gone (`GATE_ACPI s5`).
 - **FAT32 / ext2 / ISO9660** — BPB/superblock/PVD plus directory `$DATA` through the ramdisk (`GATE_FAT32 block`, `GATE_EXT2 block`, `GATE_ISO9660 block`). `mount -t ext2` calls `ext2::mount`.
 - **XHCI Configure Endpoint** — Command Completion cc=1 (`GATE_USB xhci ep`).

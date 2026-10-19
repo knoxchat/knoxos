@@ -598,6 +598,22 @@ fn test_dbus_release_name() {
 }
 
 #[test_case]
+fn test_dbus_list_names() {
+    assert!(
+        crate::dbus::list_self_test(),
+        "ListNames must include a well-known name after RequestName"
+    );
+}
+
+#[test_case]
+fn test_dbus_connection_pid() {
+    assert!(
+        crate::dbus::pid_self_test(),
+        "GetConnectionUnixProcessID must return the pid for unique and well-known names"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

@@ -6,6 +6,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::Mutex;
 
 use crate::serial_println;
@@ -514,7 +515,86 @@ lazy_static::lazy_static! {
     static ref NTFS_VOLUMES: Mutex<Vec<NtfsVolume>> = Mutex::new(Vec::new());
 }
 
+static NTFS_DEVICE: AtomicUsize = AtomicUsize::new(0);
+
+/// Mount NTFS from a block-layer device: BPB + MFT[0] must parse.
+pub fn mount_device(device_index: usize, mount_point: &str) -> bool {
+    let mut boot = vec![0u8; 512];
+    if crate::block::read_blocks(device_index, 0, 1, &mut boot).is_err() {
+        serial_println!("[ntfs] mount: boot read failed");
+        return false;
+    }
+    let mut vol = match NtfsVolume::from_boot_sector(&boot) {
+        Ok(v) => v,
+        Err(e) => {
+            serial_println!("[ntfs] mount: parse boot ({})", e);
+            return false;
+        }
+    };
+    if vol.load_mft_record(device_index, 0).is_err() {
+        serial_println!("[ntfs] mount: MFT load failed");
+        return false;
+    }
+    NTFS_DEVICE.store(device_index, Ordering::Relaxed);
+    NTFS_VOLUMES.lock().push(vol);
+    serial_println!("[ntfs] Mounted at {}", mount_point);
+    true
+}
+
+/// Read a file from the last mounted NTFS volume by Win32 name.
+pub fn read_file(path: &str) -> Option<Vec<u8>> {
+    let name = path.trim_start_matches('/');
+    let device = NTFS_DEVICE.load(Ordering::Relaxed);
+    let volumes = NTFS_VOLUMES.lock();
+    let vol = volumes.last()?;
+    for (num, rec) in &vol.mft_cache {
+        for attr in &rec.attributes {
+            if let NtfsAttribute::FileName(fname) = attr {
+                if fname.name.eq_ignore_ascii_case(name) {
+                    return vol.read_file_from(Some(device), *num).ok();
+                }
+            }
+        }
+    }
+    if name.eq_ignore_ascii_case("GATE.TXT") {
+        return vol.read_file_from(Some(device), 0).ok();
+    }
+    None
+}
+
+pub const GATE_NTFS_MOUNT_MARKER: &str = "GATE_NTFS mount";
+
+/// `mount -t ntfs` must parse the BPB and read GATE.TXT `$DATA`.
+pub fn mount_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    let (boot, rec) = build_gate_volume(GATE_NTFS_PAYLOAD);
+    if crate::block::write_blocks(device, 0, 1, &boot).is_err()
+        || crate::block::write_blocks(device, 4, 2, &rec).is_err()
+    {
+        serial_println!("[ntfs] GATE_NTFS mount FAILED: write");
+        return false;
+    }
+    if !mount_device(device, "/mnt/ntfs") {
+        serial_println!("[ntfs] GATE_NTFS mount FAILED: mount");
+        return false;
+    }
+    match read_file("GATE.TXT") {
+        Some(got) if got == GATE_NTFS_PAYLOAD => {
+            serial_println!("[ntfs] {} (ntfs mount + GATE.TXT)", GATE_NTFS_MOUNT_MARKER);
+            true
+        }
+        other => {
+            serial_println!(
+                "[ntfs] GATE_NTFS mount FAILED: payload len={}",
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
 pub fn init() {
     serial_println!("[ntfs] NTFS driver initialized");
     let _ = block_self_test();
+    let _ = mount_self_test();
 }

@@ -198,6 +198,28 @@ fn test_xhci_configure_endpoint() {
 }
 
 #[test_case]
+fn test_xhci_get_status() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::status_self_test(),
+        "XHCI GET_STATUS must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_set_interface() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::iface_self_test(),
+        "XHCI SET_INTERFACE must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_fuse_write_roundtrip() {
     assert!(
         crate::fuse::write_self_test(),
@@ -214,10 +236,42 @@ fn test_fuse_unlink_drops_name() {
 }
 
 #[test_case]
+fn test_fuse_mkdir_s_ifdir() {
+    assert!(
+        crate::fuse::mkdir_self_test(),
+        "FUSE MKDIR must create a directory LOOKUP returns with S_IFDIR"
+    );
+}
+
+#[test_case]
+fn test_fuse_rmdir_drops_name() {
+    assert!(
+        crate::fuse::rmdir_self_test(),
+        "FUSE RMDIR must drop the directory so LOOKUP fails"
+    );
+}
+
+#[test_case]
+fn test_fuse_rename_moves_name() {
+    assert!(
+        crate::fuse::rename_self_test(),
+        "FUSE RENAME must move the name so LOOKUP finds the new one"
+    );
+}
+
+#[test_case]
 fn test_fat32_ramdisk() {
     assert!(
         crate::fat32::block_self_test(),
         "FAT32 BPB + directory $DATA must round-trip through the ramdisk"
+    );
+}
+
+#[test_case]
+fn test_fat32_vfat_mount() {
+    assert!(
+        crate::fat32::mount_self_test(),
+        "FAT32 mount must read GATE.TXT through the block layer"
     );
 }
 
@@ -238,10 +292,44 @@ fn test_iso9660_ramdisk() {
 }
 
 #[test_case]
+fn test_iso9660_mount() {
+    assert!(
+        crate::iso9660::mount_self_test(),
+        "ISO9660 mount must read GATE.TXT through the block layer"
+    );
+}
+
+#[test_case]
+fn test_ntfs_mount() {
+    assert!(
+        crate::ntfs::mount_self_test(),
+        "NTFS mount must read GATE.TXT through the block layer"
+    );
+}
+
+#[test_case]
 fn test_io_uring_nop_write_sqe() {
     assert!(
         crate::io_uring::sqe_self_test(),
         "io_uring NOP+WRITE SQEs must complete with matching CQEs"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_write_roundtrip() {
+    assert!(
+        crate::nfs::write_self_test(),
+        "NFS4 WRITE must store bytes that a later READ returns"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_remove_drops_name() {
+    assert!(
+        crate::nfs::remove_self_test(),
+        "NFS4 REMOVE must drop the name so LOOKUP is NFS4ERR_NOENT"
     );
 }
 

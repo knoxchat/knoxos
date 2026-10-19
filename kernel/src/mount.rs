@@ -66,6 +66,8 @@ pub enum FilesystemType {
     Ext2,
     Ext4,
     Fat32,
+    Iso9660,
+    Ntfs,
     Tmpfs,
     Procfs,
     Sysfs,
@@ -87,6 +89,8 @@ impl FilesystemType {
             "ext2" => FilesystemType::Ext2,
             "ext4" => FilesystemType::Ext4,
             "vfat" | "fat32" | "msdos" => FilesystemType::Fat32,
+            "iso9660" | "cd9660" | "iso" => FilesystemType::Iso9660,
+            "ntfs" => FilesystemType::Ntfs,
             "tmpfs" => FilesystemType::Tmpfs,
             "proc" => FilesystemType::Procfs,
             "sysfs" => FilesystemType::Sysfs,
@@ -108,6 +112,8 @@ impl FilesystemType {
             FilesystemType::Ext2 => "ext2",
             FilesystemType::Ext4 => "ext4",
             FilesystemType::Fat32 => "vfat",
+            FilesystemType::Iso9660 => "iso9660",
+            FilesystemType::Ntfs => "ntfs",
             FilesystemType::Tmpfs => "tmpfs",
             FilesystemType::Procfs => "proc",
             FilesystemType::Sysfs => "sysfs",
@@ -290,7 +296,57 @@ pub fn mount(
         }
         FilesystemType::Fat32 => {
             let dev_idx = resolve_device_name(source);
-            (None, dev_idx)
+            if let Some(idx) = dev_idx {
+                drop(table);
+                if crate::fat32::mount_device(idx, target) {
+                    serial_println!("[mount] fat32: device {} mounted at {}", source, target);
+                    table = MOUNT_TABLE.lock();
+                    (Some(0), Some(idx))
+                } else {
+                    serial_println!("[mount] fat32 mount failed for {}", source);
+                    table = MOUNT_TABLE.lock();
+                    (None, Some(idx))
+                }
+            } else {
+                serial_println!("[mount] device not found: {}", source);
+                (None, None)
+            }
+        }
+        FilesystemType::Iso9660 => {
+            let dev_idx = resolve_device_name(source);
+            if let Some(idx) = dev_idx {
+                drop(table);
+                if crate::iso9660::mount_device(idx, target) {
+                    serial_println!("[mount] iso9660: device {} mounted at {}", source, target);
+                    table = MOUNT_TABLE.lock();
+                    (Some(0), Some(idx))
+                } else {
+                    serial_println!("[mount] iso9660 mount failed for {}", source);
+                    table = MOUNT_TABLE.lock();
+                    (None, Some(idx))
+                }
+            } else {
+                serial_println!("[mount] device not found: {}", source);
+                (None, None)
+            }
+        }
+        FilesystemType::Ntfs => {
+            let dev_idx = resolve_device_name(source);
+            if let Some(idx) = dev_idx {
+                drop(table);
+                if crate::ntfs::mount_device(idx, target) {
+                    serial_println!("[mount] ntfs: device {} mounted at {}", source, target);
+                    table = MOUNT_TABLE.lock();
+                    (Some(0), Some(idx))
+                } else {
+                    serial_println!("[mount] ntfs mount failed for {}", source);
+                    table = MOUNT_TABLE.lock();
+                    (None, Some(idx))
+                }
+            } else {
+                serial_println!("[mount] device not found: {}", source);
+                (None, None)
+            }
         }
         _ => (None, None),
     };

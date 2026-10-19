@@ -688,6 +688,9 @@ impl NfsClient {
                 None => NfsCompoundResult::Status(NfsStat::NoFileHandle),
             },
             NfsCompoundOp::Lookup(name) => {
+                if !self.export_files.contains_key(name) {
+                    return NfsCompoundResult::Status(NfsStat::Noent);
+                }
                 let mut child_fh = self
                     .current_fh
                     .as_ref()
@@ -726,6 +729,7 @@ impl NfsClient {
                 name,
                 create,
             } => {
+                let _ = (share_access, share_deny);
                 let mut fh_data = self
                     .current_fh
                     .as_ref()
@@ -736,6 +740,10 @@ impl NfsClient {
                 let fh = NfsFileHandle::new(hash.to_le_bytes().to_vec());
                 let state_id = NfsStateId::new(1);
                 self.open_files.insert(fh.clone(), state_id);
+                self.fh_names.insert(fh.clone(), name.clone());
+                if *create {
+                    self.export_files.entry(name.clone()).or_default();
+                }
                 self.current_fh = Some(fh.clone());
                 NfsCompoundResult::OpenResult { state_id, fh }
             }
@@ -769,10 +777,31 @@ impl NfsClient {
                 offset,
                 data,
                 stable,
-            } => NfsCompoundResult::WriteResult {
-                count: data.len() as u32,
-                committed: *stable,
-            },
+            } => {
+                let _ = state_id;
+                let count = if let Some(name) = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh).cloned())
+                {
+                    let file = self.export_files.entry(name).or_default();
+                    let start = *offset as usize;
+                    let end = start.saturating_add(data.len());
+                    if end > file.len() {
+                        file.resize(end, 0);
+                    }
+                    if start < end {
+                        file[start..end].copy_from_slice(data);
+                    }
+                    data.len() as u32
+                } else {
+                    0
+                };
+                NfsCompoundResult::WriteResult {
+                    count,
+                    committed: *stable,
+                }
+            }
             NfsCompoundOp::ReadDir {
                 cookie,
                 dircount,
@@ -781,7 +810,14 @@ impl NfsClient {
                 entries: Vec::new(),
                 eof: true,
             },
-            NfsCompoundOp::Remove(name) => NfsCompoundResult::Status(NfsStat::Ok),
+            NfsCompoundOp::Remove(name) => {
+                if self.export_files.remove(name).is_none() {
+                    NfsCompoundResult::Status(NfsStat::Noent)
+                } else {
+                    self.fh_names.retain(|_, n| n != name);
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                }
+            }
             NfsCompoundOp::Rename { old_name, new_name } => NfsCompoundResult::Status(NfsStat::Ok),
             NfsCompoundOp::Create {
                 name,
@@ -1145,6 +1181,108 @@ fn compound_self_test() -> bool {
     }
 }
 
+pub const GATE_NFS_WRITE_MARKER: &str = "GATE_NFS write";
+const GATE_NFS_WRITE_PAYLOAD: &[u8] = b"knoxos-nfs-w\n";
+
+/// WRITE must store bytes that a later READ in the same compound returns.
+pub fn write_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let results = client.compound(
+        "write",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-w.txt"),
+                create: true,
+            },
+            NfsCompoundOp::Write {
+                state_id: NfsStateId::new(1),
+                offset: 0,
+                data: GATE_NFS_WRITE_PAYLOAD.to_vec(),
+                stable: true,
+            },
+            NfsCompoundOp::Read {
+                state_id: NfsStateId::new(1),
+                offset: 0,
+                count: 64,
+            },
+        ],
+    );
+    let written = matches!(
+        results.get(2),
+        Some(NfsCompoundResult::WriteResult { count, .. })
+            if *count == GATE_NFS_WRITE_PAYLOAD.len() as u32
+    );
+    match results.get(3) {
+        Some(NfsCompoundResult::ReadResult { data, .. })
+            if written && data == GATE_NFS_WRITE_PAYLOAD =>
+        {
+            serial_println!(
+                "[NFS] {} (OPEN+WRITE+READ {} bytes)",
+                GATE_NFS_WRITE_MARKER,
+                data.len()
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS write FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_REMOVE_MARKER: &str = "GATE_NFS remove";
+
+/// REMOVE must drop the name so a later LOOKUP is NFS4ERR_NOENT.
+pub fn remove_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    client
+        .export_files
+        .insert(String::from("gone.txt"), b"x".to_vec());
+    let removed = client.compound(
+        "remove",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("gone.txt")),
+            NfsCompoundOp::Remove(String::from("gone.txt")),
+        ],
+    );
+    let drop_ok = matches!(
+        removed.get(2),
+        Some(NfsCompoundResult::Status(NfsStat::Ok))
+    );
+    let after = client.compound(
+        "lookup-gone",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("gone.txt")),
+        ],
+    );
+    match after.get(1) {
+        Some(NfsCompoundResult::Status(NfsStat::Noent)) if drop_ok => {
+            serial_println!(
+                "[NFS] {} (REMOVE then LOOKUP NFS4ERR_NOENT)",
+                GATE_NFS_REMOVE_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS remove FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
 /// Initialize NFS subsystem
 pub fn init() {
     if INITIALIZED.load(Ordering::Relaxed) {
@@ -1154,6 +1292,8 @@ pub fn init() {
     serial_println!("[KnoxOS] NFS v4 client initialized");
     serial_println!("[NFS] Network I/O: TCP socket via net stack");
     let _ = compound_self_test();
+    let _ = write_self_test();
+    let _ = remove_self_test();
 }
 
 // ─── Real Network I/O ──────────────────────────────────────────────
