@@ -25,7 +25,7 @@
 - [x] **VirtIO-net RX** — walks the used ring and re-arms buffers
 - [x] **DHCP apply** — writes interface IP + DNS + default route
 - [x] IPv6 echo — loopback TX reply (`GATE_D6 ipv6 echo`); off-box 0x86DD uses VirtIO-net
-- [x] TLS 1.3 HKDF — RFC 5869 extract/expand + Expand-Label (`GATE_TLS13 hkdf`). ClientHello+ServerHello matching `c hs traffic` (`GATE_TLS13 hs`). DER + RSA PKCS#1 over TBS (`GATE_TLS13 x509`). NFS4 WRITE then READ (`GATE_NFS write`). NFS4 REMOVE then LOOKUP `NFS4ERR_NOENT` (`GATE_NFS remove`).
+- [x] TLS 1.3 HKDF — RFC 5869 extract/expand + Expand-Label (`GATE_TLS13 hkdf`). ClientHello+ServerHello matching `c hs traffic` (`GATE_TLS13 hs`). DER + RSA PKCS#1 over TBS (`GATE_TLS13 x509`). NFS4 WRITE then READ (`GATE_NFS write`). NFS4 REMOVE then LOOKUP `NFS4ERR_NOENT` (`GATE_NFS remove`). NFS4 RENAME then LOOKUP (`GATE_NFS rename`).
 - [x] NAT — IPv4 SNAT/DNAT rewrite with header checksum (`GATE_NAT masquerade`)
 - [x] VLAN — 802.1Q insert/strip (`GATE_VLAN tag`). Wi-Fi Beacon + WPA2 PMK (`GATE_WIFI pmk`). WPA3-SAE matching PMK (`GATE_WPA3 sae`); bridge FDB (`GATE_BRIDGE fdb`).
 

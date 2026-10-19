@@ -614,6 +614,14 @@ fn test_dbus_connection_pid() {
 }
 
 #[test_case]
+fn test_dbus_get_name_owner() {
+    assert!(
+        crate::dbus::owner_self_test(),
+        "GetNameOwner must return the unique name of a well-known name's owner"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

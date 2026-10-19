@@ -45,11 +45,11 @@ Details: [subsystems/03-process.md](subsystems/03-process.md)
 Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 
 - [x] NTFS — boot + MFT `$DATA` through the ramdisk block layer (`GATE_NTFS block`). `mount -t ntfs` reads `$DATA` (`GATE_NTFS mount`).
-- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). CIFS SMB2 WRITE/READ (`GATE_CIFS smb2`). ZFS uberblock + Fletcher-4 (`GATE_ZFS block`).
-- [x] Btrfs — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`)
+- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk block layer (`GATE_EXFAT block`). `mount -t exfat` reads `$DATA` (`GATE_EXFAT mount`). CIFS SMB2 WRITE/READ (`GATE_CIFS smb2`). ZFS uberblock + Fletcher-4 (`GATE_ZFS block`).
+- [x] Btrfs — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`). `mount -t btrfs` reads `$DATA` (`GATE_BTRFS mount`).
 - [x] XFS — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`)
 - [x] JBD2 journal replay — descriptor + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). Virtual-FS mount-point directories persist (`GATE_C10 virtfs persist`) including `/tmp`. FAT32 / ext2 / ISO9660 through the ramdisk (`GATE_FAT32 block`, `GATE_EXT2 block`, `GATE_ISO9660 block`). FAT32 `mount -t vfat` reads `$DATA` (`GATE_FAT32 mount`). ISO9660 `mount -t iso9660` reads `$DATA` (`GATE_ISO9660 mount`).
-- [x] FUSE — LOOKUP + READ through the in-kernel loopback daemon (`GATE_FUSE lookup`). WRITE stores bytes a later READ returns (`GATE_FUSE write`). UNLINK drops the name (`GATE_FUSE unlink`). MKDIR LOOKUP returns `S_IFDIR` (`GATE_FUSE mkdir`). RMDIR drops the directory (`GATE_FUSE rmdir`). RENAME moves the name (`GATE_FUSE rename`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`). WRITE stores bytes a later READ returns (`GATE_NFS write`). REMOVE then LOOKUP is `NFS4ERR_NOENT` (`GATE_NFS remove`). CPIO newc (`GATE_CPIO newc`). dpkg ar+tar (`GATE_DPKG deb`).
+- [x] FUSE — LOOKUP + READ through the in-kernel loopback daemon (`GATE_FUSE lookup`). WRITE stores bytes a later READ returns (`GATE_FUSE write`). UNLINK drops the name (`GATE_FUSE unlink`). MKDIR LOOKUP returns `S_IFDIR` (`GATE_FUSE mkdir`). RMDIR drops the directory (`GATE_FUSE rmdir`). RENAME moves the name (`GATE_FUSE rename`). SYMLINK LOOKUP returns `S_IFLNK` and READLINK returns the target (`GATE_FUSE symlink`). LINK LOOKUP finds the same inode (`GATE_FUSE link`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`). WRITE stores bytes a later READ returns (`GATE_NFS write`). REMOVE then LOOKUP is `NFS4ERR_NOENT` (`GATE_NFS remove`). RENAME then LOOKUP finds the new name (`GATE_NFS rename`). CPIO newc (`GATE_CPIO newc`). dpkg ar+tar (`GATE_DPKG deb`).
 - [x] Quotas — `write_file_checked` returns `EDQUOT` (`GATE_QUOTA enforce`). fanotify MODIFY/CREATE on VFS write (`GATE_FANOTIFY modify`); Ring 3 `fanotify_init` stays ENOSYS. io_uring NOP+WRITE (`GATE_IOURING sqe`); Ring 3 `io_uring_setup` stays ENOSYS.
 
 ## 5. Networking Stack
@@ -57,7 +57,7 @@ Details: [subsystems/04-filesystem.md](subsystems/04-filesystem.md)
 Details: [subsystems/05-networking.md](subsystems/05-networking.md)
 
 - [x] IPv6 echo — loopback `::1` Echo Request produces a TX reply (`GATE_D6 ipv6 echo`)
-- [x] TLS 1.3 HKDF — RFC 5869 extract/expand + Expand-Label (`GATE_TLS13 hkdf`). ClientHello+ServerHello matching traffic secret (`GATE_TLS13 hs`). DER + RSA PKCS#1 over TBS (`GATE_TLS13 x509`). NFS4 WRITE then READ (`GATE_NFS write`). NFS4 REMOVE then LOOKUP `NFS4ERR_NOENT` (`GATE_NFS remove`).
+- [x] TLS 1.3 HKDF — RFC 5869 extract/expand + Expand-Label (`GATE_TLS13 hkdf`). ClientHello+ServerHello matching traffic secret (`GATE_TLS13 hs`). DER + RSA PKCS#1 over TBS (`GATE_TLS13 x509`). NFS4 WRITE then READ (`GATE_NFS write`). NFS4 REMOVE then LOOKUP `NFS4ERR_NOENT` (`GATE_NFS remove`). NFS4 RENAME then LOOKUP (`GATE_NFS rename`).
 - [x] NAT — IPv4 SNAT/DNAT rewrite with header checksum (`GATE_NAT masquerade`)
 - [x] VLAN — 802.1Q insert/strip (`GATE_VLAN tag`). Wi-Fi Beacon + WPA2 PMK (`GATE_WIFI pmk`). WPA3-SAE matching PMK (`GATE_WPA3 sae`); bridge FDB (`GATE_BRIDGE fdb`).
 
@@ -65,7 +65,7 @@ Details: [subsystems/05-networking.md](subsystems/05-networking.md)
 
 Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 
-- [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`). Enable Slot Command Completion cc=1 (`GATE_USB xhci slot`). Address Device Command Completion cc=1 (`GATE_USB xhci addr`). GET_DESCRIPTOR Transfer Event (`GATE_USB xhci desc`). SET_CONFIGURATION Transfer Event (`GATE_USB xhci config`). Configure Endpoint Command Completion cc=1 (`GATE_USB xhci ep`). GET_DESCRIPTOR(Configuration) Transfer Event plus full enum with no timeout fallback (`GATE_USB xhci enum`). GET_STATUS Transfer Event (`GATE_USB xhci status`). SET_INTERFACE Transfer Event (`GATE_USB xhci iface`). Transfer Events drain into HID.
+- [x] XHCI BAR0 mapped uncached + buddy DMA rings (`GATE_USB xhci mmio`). Enable Slot Command Completion cc=1 (`GATE_USB xhci slot`). Address Device Command Completion cc=1 (`GATE_USB xhci addr`). GET_DESCRIPTOR Transfer Event (`GATE_USB xhci desc`). SET_CONFIGURATION Transfer Event (`GATE_USB xhci config`). Configure Endpoint Command Completion cc=1 (`GATE_USB xhci ep`). GET_DESCRIPTOR(Configuration) Transfer Event plus full enum with no timeout fallback (`GATE_USB xhci enum`). GET_STATUS Transfer Event (`GATE_USB xhci status`). SET_INTERFACE Transfer Event (`GATE_USB xhci iface`). GET_CONFIGURATION Transfer Event (`GATE_USB xhci getcfg`). Transfer Events drain into HID.
 - [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware (`GATE_AMDGPU fw`).
 - [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
 - [x] TPM TIS FIFO — locality 0 REQUEST_USE grants VALID|ACTIVE (`GATE_TPM tis`). Software SHA-256 PCR extend (`GATE_TPM pcr`). Hardware 0xFED4_0000 still unmapped on stock QEMU.
@@ -116,7 +116,7 @@ Details: [subsystems/09-security.md](subsystems/09-security.md)
 
 Details: [subsystems/10-services.md](subsystems/10-services.md)
 
-- [x] Crash restart of failed units (`GATE_SVC restart`). Unit `MemoryMax=` cgroup (`GATE_SVC cgroup`). D-Bus `Hello` unique name (`GATE_DBUS method`). `RequestName` PRIMARY_OWNER (`GATE_DBUS name`). `ReleaseName` drops ownership (`GATE_DBUS release`). `ListNames` includes the well-known name (`GATE_DBUS list`). `GetConnectionUnixProcessID` returns the pid (`GATE_DBUS pid`). PAM unix SHA-512 (`GATE_PAM unix`).
+- [x] Crash restart of failed units (`GATE_SVC restart`). Unit `MemoryMax=` cgroup (`GATE_SVC cgroup`). D-Bus `Hello` unique name (`GATE_DBUS method`). `RequestName` PRIMARY_OWNER (`GATE_DBUS name`). `ReleaseName` drops ownership (`GATE_DBUS release`). `ListNames` includes the well-known name (`GATE_DBUS list`). `GetConnectionUnixProcessID` returns the pid (`GATE_DBUS pid`). `GetNameOwner` returns the unique name (`GATE_DBUS owner`). PAM unix SHA-512 (`GATE_PAM unix`).
 - [x] NTP — fixture Server-mode packet applies a 1000 ms offset (`GATE_NTP apply`)
 - [x] Bluetooth HCI — virtual adapter Reset Command Complete (`GATE_BT hci`)
 - [x] Cron `@reboot` plus PIT/APIC due-flag (`GATE_CRON reboot`)

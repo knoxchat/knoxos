@@ -818,7 +818,19 @@ impl NfsClient {
                     NfsCompoundResult::Status(NfsStat::Ok)
                 }
             }
-            NfsCompoundOp::Rename { old_name, new_name } => NfsCompoundResult::Status(NfsStat::Ok),
+            NfsCompoundOp::Rename { old_name, new_name } => {
+                if let Some(data) = self.export_files.remove(old_name) {
+                    self.export_files.insert(new_name.clone(), data);
+                    for name in self.fh_names.values_mut() {
+                        if name == old_name {
+                            *name = new_name.clone();
+                        }
+                    }
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::Noent)
+                }
+            }
             NfsCompoundOp::Create {
                 name,
                 file_type,
@@ -1257,10 +1269,7 @@ pub fn remove_self_test() -> bool {
             NfsCompoundOp::Remove(String::from("gone.txt")),
         ],
     );
-    let drop_ok = matches!(
-        removed.get(2),
-        Some(NfsCompoundResult::Status(NfsStat::Ok))
-    );
+    let drop_ok = matches!(removed.get(2), Some(NfsCompoundResult::Status(NfsStat::Ok)));
     let after = client.compound(
         "lookup-gone",
         &[
@@ -1283,6 +1292,60 @@ pub fn remove_self_test() -> bool {
     }
 }
 
+pub const GATE_NFS_RENAME_MARKER: &str = "GATE_NFS rename";
+
+/// RENAME must move the name so a later LOOKUP finds the new one.
+pub fn rename_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    client
+        .export_files
+        .insert(String::from("old.txt"), b"rn".to_vec());
+    let renamed = client.compound(
+        "rename",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("old.txt")),
+            NfsCompoundOp::Rename {
+                old_name: String::from("old.txt"),
+                new_name: String::from("new.txt"),
+            },
+        ],
+    );
+    let drop_ok = matches!(renamed.get(2), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let after = client.compound(
+        "lookup-new",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("new.txt")),
+        ],
+    );
+    let found = matches!(after.get(1), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let gone = client.compound(
+        "lookup-old",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("old.txt")),
+        ],
+    );
+    match gone.get(1) {
+        Some(NfsCompoundResult::Status(NfsStat::Noent)) if drop_ok && found => {
+            serial_println!(
+                "[NFS] {} (RENAME old→new then LOOKUP NFS4ERR_NOENT)",
+                GATE_NFS_RENAME_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS rename FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
 /// Initialize NFS subsystem
 pub fn init() {
     if INITIALIZED.load(Ordering::Relaxed) {
@@ -1294,6 +1357,7 @@ pub fn init() {
     let _ = compound_self_test();
     let _ = write_self_test();
     let _ = remove_self_test();
+    let _ = rename_self_test();
 }
 
 // ─── Real Network I/O ──────────────────────────────────────────────

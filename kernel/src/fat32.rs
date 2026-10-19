@@ -1479,7 +1479,9 @@ pub fn block_self_test() -> bool {
         return false;
     }
     let entries = parse_directory_entries(&dir_in);
-    let Some(entry) = entries.iter().find(|e| e.short_name.eq_ignore_ascii_case("GATE.TXT"))
+    let Some(entry) = entries
+        .iter()
+        .find(|e| e.short_name.eq_ignore_ascii_case("GATE.TXT"))
     else {
         serial_println!("[FAT32] GATE_FAT32 FAILED: GATE.TXT missing");
         return false;

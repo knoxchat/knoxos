@@ -17,6 +17,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::Mutex;
 
 use crate::serial_println;
@@ -1018,6 +1019,91 @@ fn block_self_test() -> bool {
     }
 }
 
+lazy_static::lazy_static! {
+    static ref BTRFS_VOLUMES: Mutex<Vec<BtrfsVolume>> = Mutex::new(Vec::new());
+}
+
+static BTRFS_DEVICE: AtomicUsize = AtomicUsize::new(0);
+
+/// Mount Btrfs from a block-layer device: superblock + inode must parse.
+pub fn mount_device(device_index: usize, mount_point: &str) -> bool {
+    let mut sb = vec![0u8; 512];
+    if crate::block::read_blocks(device_index, 0, 1, &mut sb).is_err() {
+        serial_println!("[btrfs] mount: superblock read failed");
+        return false;
+    }
+    let vol = match BtrfsVolume::from_superblock(&sb) {
+        Ok(v) => v,
+        Err(e) => {
+            serial_println!("[btrfs] mount: parse superblock ({})", e);
+            return false;
+        }
+    };
+    let mut inode = vec![0u8; 512];
+    if crate::block::read_blocks(device_index, vol.root, 1, &mut inode).is_err() {
+        serial_println!("[btrfs] mount: inode read failed");
+        return false;
+    }
+    if BtrfsVolume::parse_inode(&inode).is_err() {
+        serial_println!("[btrfs] mount: parse inode failed");
+        return false;
+    }
+    BTRFS_DEVICE.store(device_index, Ordering::Relaxed);
+    BTRFS_VOLUMES.lock().push(vol);
+    serial_println!("[btrfs] Mounted at {}", mount_point);
+    true
+}
+
+/// Read GATE.TXT from the last mounted Btrfs volume.
+pub fn read_mounted_file(path: &str) -> Option<Vec<u8>> {
+    let name = path.trim_start_matches('/');
+    if !name.eq_ignore_ascii_case("GATE.TXT") {
+        return None;
+    }
+    let device = BTRFS_DEVICE.load(Ordering::Relaxed);
+    let volumes = BTRFS_VOLUMES.lock();
+    let vol = volumes.last()?;
+    let mut inode = vec![0u8; 512];
+    crate::block::read_blocks(device, vol.root, 1, &mut inode).ok()?;
+    let (size, start, count) = BtrfsVolume::parse_inode(&inode).ok()?;
+    vol.read_file(device, size, start, count).ok()
+}
+
+pub const GATE_BTRFS_MOUNT_MARKER: &str = "GATE_BTRFS mount";
+
+/// `mount -t btrfs` must parse the superblock and read GATE.TXT `$DATA`.
+pub fn mount_self_test() -> bool {
+    let device = crate::block::create_ramdisk(1);
+    let (sb, inode, data) = build_gate_volume(GATE_BTRFS_PAYLOAD);
+    if crate::block::write_blocks(device, 0, 1, &sb).is_err()
+        || crate::block::write_blocks(device, 8, 1, &inode).is_err()
+        || crate::block::write_blocks(device, 16, 1, &data).is_err()
+    {
+        serial_println!("[btrfs] GATE_BTRFS mount FAILED: write");
+        return false;
+    }
+    if !mount_device(device, "/mnt/btrfs") {
+        serial_println!("[btrfs] GATE_BTRFS mount FAILED: mount");
+        return false;
+    }
+    match read_mounted_file("GATE.TXT") {
+        Some(got) if got == GATE_BTRFS_PAYLOAD => {
+            serial_println!(
+                "[btrfs] {} (btrfs mount + GATE.TXT)",
+                GATE_BTRFS_MOUNT_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[btrfs] GATE_BTRFS mount FAILED: payload len={}",
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
 /// Initialize Btrfs subsystem
 pub fn init() {
     serial_println!(
@@ -1025,6 +1111,7 @@ pub fn init() {
     );
     serial_println!("[Btrfs] Block I/O backend: virtio-blk + AHCI + NVMe");
     let _ = block_self_test();
+    let _ = mount_self_test();
 }
 
 // ═══════════════════════════════════════════════════════════════════════

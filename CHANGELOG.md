@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **FUSE SYMLINK** — SYMLINK creates a link LOOKUP returns with `S_IFLNK`; READLINK returns the target (`GATE_FUSE symlink`).
+- **FUSE LINK** — LINK adds a name LOOKUP finds with the same inode (`GATE_FUSE link`).
+- **D-Bus GetNameOwner** — a well-known name returns the owner's unique name (`GATE_DBUS owner`).
+- **XHCI GET_CONFIGURATION** — Setup+Data+Status Transfer Event for GET_CONFIGURATION (`GATE_USB xhci getcfg`).
+- **exFAT mount** — `mount -t exfat` parses the VBR and reads `GATE.TXT` (`GATE_EXFAT mount`).
+- **Btrfs mount** — `mount -t btrfs` parses the superblock and reads `GATE.TXT` (`GATE_BTRFS mount`).
+- **NFS RENAME** — COMPOUND RENAME then LOOKUP finds the new name (`GATE_NFS rename`).
 - **FUSE RMDIR** — RMDIR drops the directory so a later LOOKUP fails (`GATE_FUSE rmdir`).
 - **FUSE RENAME** — RENAME moves the name so LOOKUP finds the new one (`GATE_FUSE rename`).
 - **D-Bus GetConnectionUnixProcessID** — unique and well-known names return the connection pid (`GATE_DBUS pid`).

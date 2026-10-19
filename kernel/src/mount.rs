@@ -68,6 +68,8 @@ pub enum FilesystemType {
     Fat32,
     Iso9660,
     Ntfs,
+    Exfat,
+    Btrfs,
     Tmpfs,
     Procfs,
     Sysfs,
@@ -91,6 +93,8 @@ impl FilesystemType {
             "vfat" | "fat32" | "msdos" => FilesystemType::Fat32,
             "iso9660" | "cd9660" | "iso" => FilesystemType::Iso9660,
             "ntfs" => FilesystemType::Ntfs,
+            "exfat" => FilesystemType::Exfat,
+            "btrfs" => FilesystemType::Btrfs,
             "tmpfs" => FilesystemType::Tmpfs,
             "proc" => FilesystemType::Procfs,
             "sysfs" => FilesystemType::Sysfs,
@@ -114,6 +118,8 @@ impl FilesystemType {
             FilesystemType::Fat32 => "vfat",
             FilesystemType::Iso9660 => "iso9660",
             FilesystemType::Ntfs => "ntfs",
+            FilesystemType::Exfat => "exfat",
+            FilesystemType::Btrfs => "btrfs",
             FilesystemType::Tmpfs => "tmpfs",
             FilesystemType::Procfs => "proc",
             FilesystemType::Sysfs => "sysfs",
@@ -340,6 +346,42 @@ pub fn mount(
                     (Some(0), Some(idx))
                 } else {
                     serial_println!("[mount] ntfs mount failed for {}", source);
+                    table = MOUNT_TABLE.lock();
+                    (None, Some(idx))
+                }
+            } else {
+                serial_println!("[mount] device not found: {}", source);
+                (None, None)
+            }
+        }
+        FilesystemType::Exfat => {
+            let dev_idx = resolve_device_name(source);
+            if let Some(idx) = dev_idx {
+                drop(table);
+                if crate::exfat::mount_device(idx, target) {
+                    serial_println!("[mount] exfat: device {} mounted at {}", source, target);
+                    table = MOUNT_TABLE.lock();
+                    (Some(0), Some(idx))
+                } else {
+                    serial_println!("[mount] exfat mount failed for {}", source);
+                    table = MOUNT_TABLE.lock();
+                    (None, Some(idx))
+                }
+            } else {
+                serial_println!("[mount] device not found: {}", source);
+                (None, None)
+            }
+        }
+        FilesystemType::Btrfs => {
+            let dev_idx = resolve_device_name(source);
+            if let Some(idx) = dev_idx {
+                drop(table);
+                if crate::btrfs::mount_device(idx, target) {
+                    serial_println!("[mount] btrfs: device {} mounted at {}", source, target);
+                    table = MOUNT_TABLE.lock();
+                    (Some(0), Some(idx))
+                } else {
+                    serial_println!("[mount] btrfs mount failed for {}", source);
                     table = MOUNT_TABLE.lock();
                     (None, Some(idx))
                 }

@@ -14,11 +14,7 @@ pub fn s5_pm1a_write() -> Option<(u16, u16)> {
     }
     let slp = (*S5_SLP_TYP.lock()).or_else(|| {
         let v = crate::suspend::slp_typ_s5();
-        if v == 0 {
-            None
-        } else {
-            Some(v)
-        }
+        if v == 0 { None } else { Some(v) }
     })?;
     Some((pm1a as u16, ((slp as u16) << 10) | (1 << 13)))
 }
@@ -28,11 +24,7 @@ pub fn shutdown() -> ! {
     crate::serial_println!("[KnoxOS] Initiating system shutdown...");
 
     if let Some((port, value)) = s5_pm1a_write() {
-        crate::serial_println!(
-            "[KnoxOS] ACPI S5 PM1a={:#x} value={:#x}",
-            port,
-            value
-        );
+        crate::serial_println!("[KnoxOS] ACPI S5 PM1a={:#x} value={:#x}", port, value);
         // SAFETY: PM1a_CNT comes from the mapped FADT; SLP_TYP is the DSDT _S5 integer.
         unsafe {
             let mut pm1a = Port::<u16>::new(port);
@@ -308,11 +300,7 @@ pub fn init() {
 pub fn s5_self_test() -> bool {
     match s5_pm1a_write() {
         Some((port, value)) if value & (1 << 13) != 0 && port != 0 => {
-            crate::serial_println!(
-                "[KnoxOS] {} (PM1a={:#x} SLP_EN)",
-                GATE_ACPI_S5_MARKER,
-                port
-            );
+            crate::serial_println!("[KnoxOS] {} (PM1a={:#x} SLP_EN)", GATE_ACPI_S5_MARKER, port);
             true
         }
         other => {

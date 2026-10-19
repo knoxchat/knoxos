@@ -1121,6 +1121,7 @@ pub fn init() {
     let _ = release_self_test();
     let _ = list_self_test();
     let _ = pid_self_test();
+    let _ = owner_self_test();
 }
 
 /// Bind + listen `/run/dbus/system_bus_socket` once.
@@ -1538,6 +1539,57 @@ pub fn pid_self_test() -> bool {
             unique_ok,
             well_known_ok
         );
+        false
+    }
+}
+
+pub const GATE_DBUS_OWNER_MARKER: &str = "GATE_DBUS owner";
+
+/// `GetNameOwner` must return the unique name of a well-known name's owner.
+pub fn owner_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateOwner";
+    let owner = connect(BusType::System, 0xDB0C, 1000);
+    let unique = format!(":1.{}", owner);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut get_owner = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetNameOwner",
+    );
+    get_owner.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    get_owner.signature = Some(String::from("s"));
+    let serial = send_message(BusType::System, owner, get_owner);
+    let owned = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(serial)
+                && matches!(msg.body.first(), Some(DbusValue::String(s)) if s == &unique)
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if owned {
+        serial_println!(
+            "[dbus] {} (GetNameOwner well-known → unique)",
+            GATE_DBUS_OWNER_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: GetNameOwner unique={}", unique);
         false
     }
 }

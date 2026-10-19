@@ -41,6 +41,8 @@ static CONFIG_EP_LIVE: AtomicBool = AtomicBool::new(false);
 static STATUS_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when SET_INTERFACE got a Transfer Event (cc=1/13).
 static IFACE_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_CONFIGURATION got a Transfer Event (cc=1/13).
+static GETCFG_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -52,6 +54,7 @@ pub const GATE_XHCI_ENUM_MARKER: &str = "GATE_USB xhci enum";
 pub const GATE_XHCI_EP_MARKER: &str = "GATE_USB xhci ep";
 pub const GATE_XHCI_STATUS_MARKER: &str = "GATE_USB xhci status";
 pub const GATE_XHCI_IFACE_MARKER: &str = "GATE_USB xhci iface";
+pub const GATE_XHCI_GETCFG_MARKER: &str = "GATE_USB xhci getcfg";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -852,6 +855,61 @@ pub fn set_interface(slot_id: u8, iface: u8, alt: u8) -> bool {
     false
 }
 
+/// GET_CONFIGURATION — Setup+Data+Status. Requires a Transfer Event.
+pub fn get_configuration(slot_id: u8) -> Option<u8> {
+    serial_println!("[XHCI] GET_CONFIGURATION for slot {}", slot_id);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x80, bRequest=8 (GET_CONFIGURATION), wValue=0, wIndex=0, wLength=1
+    setup.param_lo = 0x80 | (UsbRequestType::GetConfiguration as u32) << 8;
+    setup.param_hi = 1 << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = 1;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= 1 << 2; // ISP
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit GET_CONFIGURATION transfer");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 || cc == 13 {
+            // SAFETY: GET_CONFIGURATION DMA page is owned by this transfer.
+            let value = unsafe { core::ptr::read(dma_virt(data_buf) as *const u8) };
+            GETCFG_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] GET_CONFIGURATION complete cc={} value={}",
+                cc,
+                value
+            );
+            return Some(value);
+        }
+        serial_println!("[XHCI] GET_CONFIGURATION completion code: {}", cc);
+        return None;
+    }
+
+    serial_println!("[XHCI] GET_CONFIGURATION timeout");
+    None
+}
+
 /// GET_DESCRIPTOR(Configuration) — Setup+Data+Status. Requires a Transfer Event.
 pub fn get_config_descriptor(slot_id: u8) -> Option<UsbConfigDescriptor> {
     serial_println!("[XHCI] GET_DESCRIPTOR(Configuration) for slot {}", slot_id);
@@ -1228,5 +1286,36 @@ pub fn iface_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_IFACE_MARKER);
+    true
+}
+
+/// Prove GET_CONFIGURATION got a Transfer Event, not a timeout fallback.
+pub fn getcfg_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci getcfg skipped (no controller)");
+        return true;
+    }
+    if !GETCFG_LIVE.load(Ordering::Relaxed) {
+        let slot = XHCI.lock().devices.first().map(|d| d.slot_id);
+        if let Some(slot_id) = slot {
+            let _ = get_configuration(slot_id);
+        } else if let Some(slot_id) = enable_slot() {
+            let ports = enumerate_ports();
+            let (port_num, speed) = ports
+                .iter()
+                .find(|p| p.connected)
+                .map(|p| (p.port_num, p.speed))
+                .unwrap_or((1, UsbSpeed::High));
+            let _ = address_device(slot_id, port_num, speed);
+            let _ = get_device_descriptor(slot_id);
+            let _ = set_configuration(slot_id, 1);
+            let _ = get_configuration(slot_id);
+        }
+    }
+    if !GETCFG_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_CONFIGURATION had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_GETCFG_MARKER);
     true
 }

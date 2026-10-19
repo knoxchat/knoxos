@@ -25,7 +25,7 @@
 
 ### Wired / partial
 - [x] Page cache is an in-RAM `BTreeMap`; write-back overlays dirty pages via `pwrite_file` (C3)
-- [x] Mount table: `unshare(CLONE_NEWNS)` isolates bind mounts (N1); ext4, ext2, FAT32 (`vfat`), ISO9660, and NTFS really mount (`GATE_FAT32 mount`, `GATE_ISO9660 mount`, `GATE_NTFS mount`)
+- [x] Mount table: `unshare(CLONE_NEWNS)` isolates bind mounts (N1); ext4, ext2, FAT32 (`vfat`), ISO9660, NTFS, exFAT, and Btrfs really mount (`GATE_FAT32 mount`, `GATE_ISO9660 mount`, `GATE_NTFS mount`, `GATE_EXFAT mount`, `GATE_BTRFS mount`)
 - [x] flock — Ring 3 `flock(LOCK_EX)` then `LOCK_UN` on a VFS file (R3). xattr `setxattr`/`getxattr` live on in-kernel maps (U2)
 - [x] `sendfile` — Ring 3 file-to-pipe byte copy (S2)
 - [x] `tee` — Ring 3 pipe duplicate without consuming the source (S3)
@@ -85,12 +85,12 @@
 ### Stub
 - [x] **AHCI** — HBA reset, port start, command-list + PRDT DMA read/write (C4); IDENTIFY parsed
 - [x] **NVMe** — controller enable, admin/I/O queues, PRP bounce DMA read/write (C5)
-- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk (`GATE_EXFAT block`). CIFS SMB2 WRITE/READ (`GATE_CIFS smb2`). ZFS uberblock + Fletcher-4 (`GATE_ZFS block`).
-- [x] Btrfs — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`)
+- [x] exFAT — VBR + FAT + directory `$DATA` through the ramdisk (`GATE_EXFAT block`). `mount -t exfat` reads `$DATA` (`GATE_EXFAT mount`). CIFS SMB2 WRITE/READ (`GATE_CIFS smb2`). ZFS uberblock + Fletcher-4 (`GATE_ZFS block`).
+- [x] Btrfs — superblock + inode + extent `$DATA` through the ramdisk (`GATE_BTRFS block`). `mount -t btrfs` reads `$DATA` (`GATE_BTRFS mount`).
 - [x] XFS — superblock + inode + extent `$DATA` through the ramdisk (`GATE_XFS block`)
 - [x] JBD2 journal replay — descriptor + data + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount calls the same walker.
 - [x] ext4 default root — second virtio-blk (`mkfs.ext4`) mounted at `/` (`GATE_C9 ext4 root`). Generated files under `/dev` `/proc` `/sys` `/run` `/tmp` stay virtual; the mount-point directories persist (C10).
-- [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE LOOKUP+READ (`GATE_FUSE lookup`). FUSE WRITE then READ (`GATE_FUSE write`). FUSE UNLINK (`GATE_FUSE unlink`). FUSE MKDIR LOOKUP `S_IFDIR` (`GATE_FUSE mkdir`). FUSE RMDIR (`GATE_FUSE rmdir`). FUSE RENAME (`GATE_FUSE rename`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`). NFS WRITE then READ (`GATE_NFS write`). NFS REMOVE then LOOKUP `NFS4ERR_NOENT` (`GATE_NFS remove`). FAT32 / ext2 / ISO9660 ramdisk (`GATE_FAT32 block`, `GATE_EXT2 block`, `GATE_ISO9660 block`). FAT32 vfat / ISO9660 / NTFS mount (`GATE_FAT32 mount`, `GATE_ISO9660 mount`, `GATE_NTFS mount`).
+- [x] OverlayFS — VFS-backed lower+upper merge + whiteout, isolated to the caller's mount ns (**Gate W1**). FUSE LOOKUP+READ (`GATE_FUSE lookup`). FUSE WRITE then READ (`GATE_FUSE write`). FUSE UNLINK (`GATE_FUSE unlink`). FUSE MKDIR LOOKUP `S_IFDIR` (`GATE_FUSE mkdir`). FUSE RMDIR (`GATE_FUSE rmdir`). FUSE RENAME (`GATE_FUSE rename`). FUSE SYMLINK LOOKUP `S_IFLNK` (`GATE_FUSE symlink`). FUSE LINK same inode (`GATE_FUSE link`). NFS4 COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`). NFS WRITE then READ (`GATE_NFS write`). NFS REMOVE then LOOKUP `NFS4ERR_NOENT` (`GATE_NFS remove`). NFS RENAME then LOOKUP (`GATE_NFS rename`). FAT32 / ext2 / ISO9660 ramdisk (`GATE_FAT32 block`, `GATE_EXT2 block`, `GATE_ISO9660 block`). FAT32 vfat / ISO9660 / NTFS / exFAT / Btrfs mount (`GATE_FAT32 mount`, `GATE_ISO9660 mount`, `GATE_NTFS mount`, `GATE_EXFAT mount`, `GATE_BTRFS mount`).
 - [x] inotify — `emit_event` from VFS write/unlink and `open(O_CREAT)`; watch can read (**Gate H3**). Ring 3 `inotify_init1`/`add_watch`/`read` is live (Q3). fanotify MODIFY/CREATE on VFS write (`GATE_FANOTIFY modify`). Ring 3 `fanotify_init` returns ENOSYS (P4). io_uring NOP+WRITE (`GATE_IOURING sqe`); Ring 3 `io_uring_setup` returns ENOSYS (M4).
 - [x] Quotas — `write_file_checked` returns `EDQUOT` when the hard limit is exceeded (`GATE_QUOTA enforce`)
 

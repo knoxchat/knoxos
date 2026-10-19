@@ -652,10 +652,7 @@ pub fn block_self_test() -> bool {
     };
     match read_file(fs_idx, "/GATE.TXT") {
         Ok(got) if got == GATE_EXT2_PAYLOAD => {
-            crate::serial_println!(
-                "[ext2] {} (inode $DATA via ramdisk)",
-                GATE_EXT2_MARKER
-            );
+            crate::serial_println!("[ext2] {} (inode $DATA via ramdisk)", GATE_EXT2_MARKER);
             true
         }
         Ok(got) => {

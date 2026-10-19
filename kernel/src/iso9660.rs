@@ -1509,12 +1509,8 @@ fn parse_dir_records(data: &[u8]) -> Vec<(String, u32, u32, bool)> {
         if off + rec_len > data.len() {
             break;
         }
-        let extent = u32::from_le_bytes([
-            data[off + 2],
-            data[off + 3],
-            data[off + 4],
-            data[off + 5],
-        ]);
+        let extent =
+            u32::from_le_bytes([data[off + 2], data[off + 3], data[off + 4], data[off + 5]]);
         let data_len = u32::from_le_bytes([
             data[off + 10],
             data[off + 11],

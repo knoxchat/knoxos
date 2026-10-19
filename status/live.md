@@ -171,5 +171,12 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 160. **ISO9660 mount** — `mount -t iso9660` parses the PVD and reads `$DATA` (`GATE_ISO9660 mount`).
 161. **NTFS mount** — `mount -t ntfs` parses the BPB and reads `$DATA` (`GATE_NTFS mount`).
 162. **NFS REMOVE** — REMOVE then LOOKUP is `NFS4ERR_NOENT` (`GATE_NFS remove`).
+163. **FUSE SYMLINK** — LOOKUP returns `S_IFLNK`; READLINK returns the target (`GATE_FUSE symlink`).
+164. **FUSE LINK** — LOOKUP finds the new name with the same inode (`GATE_FUSE link`).
+165. **D-Bus GetNameOwner** — well-known name returns the owner's unique name (`GATE_DBUS owner`).
+166. **XHCI GET_CONFIGURATION** — Setup+Data+Status Transfer Event (`GATE_USB xhci getcfg`).
+167. **exFAT mount** — `mount -t exfat` parses the VBR and reads `$DATA` (`GATE_EXFAT mount`).
+168. **Btrfs mount** — `mount -t btrfs` parses the superblock and reads `$DATA` (`GATE_BTRFS mount`).
+169. **NFS RENAME** — RENAME then LOOKUP finds the new name (`GATE_NFS rename`).
 
-Integration: `./tests/run_integration.sh` **426/426** on QEMU (2026-10-20).
+Integration: `./tests/run_integration.sh` **433/433** on QEMU (2026-10-20).

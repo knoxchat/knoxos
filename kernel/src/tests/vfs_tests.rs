@@ -220,6 +220,17 @@ fn test_xhci_set_interface() {
 }
 
 #[test_case]
+fn test_xhci_get_configuration() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::getcfg_self_test(),
+        "XHCI GET_CONFIGURATION must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_fuse_write_roundtrip() {
     assert!(
         crate::fuse::write_self_test(),
@@ -256,6 +267,22 @@ fn test_fuse_rename_moves_name() {
     assert!(
         crate::fuse::rename_self_test(),
         "FUSE RENAME must move the name so LOOKUP finds the new one"
+    );
+}
+
+#[test_case]
+fn test_fuse_symlink_readlink() {
+    assert!(
+        crate::fuse::symlink_self_test(),
+        "FUSE SYMLINK must create a link LOOKUP returns with S_IFLNK and READLINK returns the target"
+    );
+}
+
+#[test_case]
+fn test_fuse_link_same_ino() {
+    assert!(
+        crate::fuse::link_self_test(),
+        "FUSE LINK must add a name LOOKUP finds with the same inode"
     );
 }
 
@@ -308,6 +335,22 @@ fn test_ntfs_mount() {
 }
 
 #[test_case]
+fn test_exfat_mount() {
+    assert!(
+        crate::exfat::mount_self_test(),
+        "exFAT mount must read GATE.TXT through the block layer"
+    );
+}
+
+#[test_case]
+fn test_btrfs_mount() {
+    assert!(
+        crate::btrfs::mount_self_test(),
+        "Btrfs mount must read GATE.TXT through the block layer"
+    );
+}
+
+#[test_case]
 fn test_io_uring_nop_write_sqe() {
     assert!(
         crate::io_uring::sqe_self_test(),
@@ -330,6 +373,15 @@ fn test_nfs_remove_drops_name() {
     assert!(
         crate::nfs::remove_self_test(),
         "NFS4 REMOVE must drop the name so LOOKUP is NFS4ERR_NOENT"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_rename_moves_name() {
+    assert!(
+        crate::nfs::rename_self_test(),
+        "NFS4 RENAME must move the name so LOOKUP finds the new one"
     );
 }
 

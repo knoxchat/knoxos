@@ -130,11 +130,13 @@ pub struct FuseRequest {
     pub data: Vec<u8>,
 }
 
-/// In-kernel loopback daemon: path → (ino, bytes) plus directory inos.
+/// In-kernel loopback daemon: path → (ino, bytes) plus directory and symlink inos.
 #[derive(Debug, Default)]
 struct LoopbackFs {
     files: BTreeMap<String, (u64, Vec<u8>)>,
     dirs: BTreeMap<String, u64>,
+    /// name → (ino, target)
+    links: BTreeMap<String, (u64, String)>,
     next_ino: u64,
 }
 
@@ -177,6 +179,7 @@ pub fn mount(mount_point: &str, daemon_pid: u32) -> Result<(), &'static str> {
         LoopbackFs {
             files: BTreeMap::new(),
             dirs: BTreeMap::new(),
+            links: BTreeMap::new(),
             next_ino: 2,
         },
     );
@@ -277,6 +280,8 @@ fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]
             (ino, 0u64, 0o040755)
         } else if let Some(&(ino, ref data)) = lb.files.get(name) {
             (ino, data.len() as u64, 0o100644)
+        } else if let Some(&(ino, ref target)) = lb.links.get(name) {
+            (ino, target.len() as u64, 0o120777)
         } else {
             return;
         }
@@ -425,6 +430,7 @@ fn serve_loopback_unlink(mount_point: &str, unique: u64, name: &str) {
         return;
     };
     lb.files.remove(name);
+    lb.links.remove(name);
     drop(lbs);
     let _ = write_response(mount_point, unique, Vec::new());
 }
@@ -525,6 +531,8 @@ fn serve_loopback_rename(mount_point: &str, unique: u64, req: &[u8]) {
         lb.files.insert(String::from(new), file);
     } else if let Some(ino) = lb.dirs.remove(old) {
         lb.dirs.insert(String::from(new), ino);
+    } else if let Some(link) = lb.links.remove(old) {
+        lb.links.insert(String::from(new), link);
     }
     drop(lbs);
     let _ = write_response(mount_point, unique, Vec::new());
@@ -543,6 +551,115 @@ pub fn fuse_rename(
     data.extend_from_slice(new.as_bytes());
     let unique = send_request(mount_point, FuseOpcode::Rename, parent, data.clone())?;
     serve_loopback_rename(mount_point, unique, &data);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+
+fn serve_loopback_symlink(mount_point: &str, unique: u64, req: &[u8]) {
+    let Ok(s) = core::str::from_utf8(req) else {
+        return;
+    };
+    let Some((name, target)) = s.split_once('\0') else {
+        return;
+    };
+    let entry = {
+        let mut lbs = LOOPBACK.lock();
+        let Some(lb) = lbs.get_mut(mount_point) else {
+            return;
+        };
+        let ino = lb.next_ino;
+        lb.next_ino += 1;
+        lb.links
+            .insert(String::from(name), (ino, String::from(target)));
+        encode_entry(ino, target.len() as u64, 0o120777)
+    };
+    let _ = write_response(mount_point, unique, entry);
+}
+
+/// Handle a VFS symlink through FUSE. Request body is `name\0target`.
+pub fn fuse_symlink(
+    mount_point: &str,
+    parent: u64,
+    name: &str,
+    target: &str,
+) -> Result<FuseEntry, &'static str> {
+    let mut data = Vec::with_capacity(name.len() + target.len() + 1);
+    data.extend_from_slice(name.as_bytes());
+    data.push(0);
+    data.extend_from_slice(target.as_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Symlink, parent, data.clone())?;
+    serve_loopback_symlink(mount_point, unique, &data);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    let (ino, size, mode) = parse_fuse_entry(&resp).ok_or("short entry")?;
+    Ok(FuseEntry {
+        nodeid: ino,
+        generation: 1,
+        attr: FuseAttr {
+            ino,
+            size,
+            blocks: 0,
+            mode,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            atime: 0,
+            mtime: 0,
+            ctime: 0,
+        },
+        attr_valid_secs: 1,
+        entry_valid_secs: 1,
+    })
+}
+
+fn serve_loopback_readlink(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if let Some((_, target)) = lb.links.values().find(|(ino, _)| *ino == nodeid) {
+        let payload = target.as_bytes().to_vec();
+        drop(lbs);
+        let _ = write_response(mount_point, unique, payload);
+    }
+}
+
+/// Handle a VFS readlink through FUSE.
+pub fn fuse_readlink(mount_point: &str, nodeid: u64) -> Result<Vec<u8>, &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Readlink, nodeid, Vec::new())?;
+    serve_loopback_readlink(mount_point, unique, nodeid);
+    take_response(mount_point, unique).ok_or("would block")
+}
+
+fn serve_loopback_link(mount_point: &str, unique: u64, req: &[u8]) {
+    let Ok(s) = core::str::from_utf8(req) else {
+        return;
+    };
+    let Some((old, new)) = s.split_once('\0') else {
+        return;
+    };
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    if let Some(file) = lb.files.get(old).cloned() {
+        lb.files.insert(String::from(new), file);
+    } else if let Some(&ino) = lb.dirs.get(old) {
+        lb.dirs.insert(String::from(new), ino);
+    } else if let Some(link) = lb.links.get(old).cloned() {
+        lb.links.insert(String::from(new), link);
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+
+/// Handle a VFS hard link through FUSE. Request body is `old\0new`.
+pub fn fuse_link(mount_point: &str, parent: u64, old: &str, new: &str) -> Result<(), &'static str> {
+    let mut data = Vec::with_capacity(old.len() + new.len() + 1);
+    data.extend_from_slice(old.as_bytes());
+    data.push(0);
+    data.extend_from_slice(new.as_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Link, parent, data.clone())?;
+    serve_loopback_link(mount_point, unique, &data);
     take_response(mount_point, unique).ok_or("would block")?;
     Ok(())
 }
@@ -823,6 +940,121 @@ pub fn rename_self_test() -> bool {
     true
 }
 
+pub const GATE_FUSE_SYMLINK_MARKER: &str = "GATE_FUSE symlink";
+
+/// SYMLINK must create a link that LOOKUP returns with S_IFLNK and READLINK returns the target.
+pub fn symlink_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-sl";
+    const TARGET: &str = "/tmp/gate-target";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE symlink FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    let entry = match fuse_symlink(MP, 1, "gate.link", TARGET) {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE symlink FAILED: symlink ({})", e);
+            return false;
+        }
+    };
+    if entry.attr.mode & 0o170000 != 0o120000 {
+        serial_println!(
+            "[fuse] GATE_FUSE symlink FAILED: mode={:#o} (want S_IFLNK)",
+            entry.attr.mode
+        );
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "gate.link") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE symlink FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    if looked.nodeid != entry.nodeid || looked.attr.mode & 0o170000 != 0o120000 {
+        serial_println!(
+            "[fuse] GATE_FUSE symlink FAILED: lookup ino={} mode={:#o}",
+            looked.nodeid,
+            looked.attr.mode
+        );
+        return false;
+    }
+    match fuse_readlink(MP, entry.nodeid) {
+        Ok(got) if got == TARGET.as_bytes() => {
+            serial_println!(
+                "[fuse] {} (SYMLINK+READLINK ino={})",
+                GATE_FUSE_SYMLINK_MARKER,
+                entry.nodeid
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[fuse] GATE_FUSE symlink FAILED: target len={}",
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_FUSE_LINK_MARKER: &str = "GATE_FUSE link";
+
+/// LINK must add a name that LOOKUP finds with the same inode.
+pub fn link_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-ln";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE link FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "old.txt", b"ln").is_err() {
+        serial_println!("[fuse] GATE_FUSE link FAILED: put");
+        return false;
+    }
+    let before = match fuse_lookup(MP, 1, "old.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE link FAILED: lookup old ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_link(MP, 1, "old.txt", "new.txt") {
+        serial_println!("[fuse] GATE_FUSE link FAILED: link ({})", e);
+        return false;
+    }
+    let after = match fuse_lookup(MP, 1, "new.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE link FAILED: lookup new ({})", e);
+            return false;
+        }
+    };
+    if after.nodeid != before.nodeid {
+        serial_println!(
+            "[fuse] GATE_FUSE link FAILED: ino {} -> {}",
+            before.nodeid,
+            after.nodeid
+        );
+        return false;
+    }
+    if fuse_lookup(MP, 1, "old.txt").is_err() {
+        serial_println!("[fuse] GATE_FUSE link FAILED: old name missing");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (LINK old+new ino={})",
+        GATE_FUSE_LINK_MARKER,
+        after.nodeid
+    );
+    true
+}
+
 /// Initialize FUSE subsystem
 pub fn init() {
     serial_println!("[fuse] Filesystem in Userspace (FUSE) initialized");
@@ -832,4 +1064,6 @@ pub fn init() {
     let _ = mkdir_self_test();
     let _ = rmdir_self_test();
     let _ = rename_self_test();
+    let _ = symlink_self_test();
+    let _ = link_self_test();
 }
