@@ -487,6 +487,7 @@ pub enum NfsCompoundOp {
         name: String,
         file_type: NfsFileType,
         attrs: NfsAttrs,
+        link_text: String,
     },
     Link {
         new_name: String,
@@ -542,6 +543,9 @@ pub enum NfsCompoundResult {
     },
     LinkResult {
         name: String,
+    },
+    ReadLinkResult {
+        target: String,
     },
 }
 
@@ -605,6 +609,7 @@ pub struct NfsClient {
     locks: Vec<NfsLock>,
     connected: bool,
     export_files: BTreeMap<String, Vec<u8>>,
+    export_links: BTreeMap<String, String>,
     fh_names: BTreeMap<NfsFileHandle, String>,
 }
 
@@ -623,6 +628,7 @@ impl NfsClient {
             locks: Vec::new(),
             connected: false,
             export_files: BTreeMap::new(),
+            export_links: BTreeMap::new(),
             fh_names: BTreeMap::new(),
         }
     }
@@ -688,7 +694,7 @@ impl NfsClient {
                 None => NfsCompoundResult::Status(NfsStat::NoFileHandle),
             },
             NfsCompoundOp::Lookup(name) => {
-                if !self.export_files.contains_key(name) {
+                if !self.export_files.contains_key(name) && !self.export_links.contains_key(name) {
                     return NfsCompoundResult::Status(NfsStat::Noent);
                 }
                 let mut child_fh = self
@@ -718,7 +724,23 @@ impl NfsClient {
                     .unwrap_or(0);
                 NfsCompoundResult::Attrs(NfsAttrs::new_file(fileid, size))
             }
-            NfsCompoundOp::SetAttr(state_id, attrs) => NfsCompoundResult::Status(NfsStat::Ok),
+            NfsCompoundOp::SetAttr(state_id, attrs) => {
+                let _ = state_id;
+                let name = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh).cloned());
+                match name {
+                    Some(n) if self.export_files.contains_key(&n) => {
+                        if let Some(file) = self.export_files.get_mut(&n) {
+                            file.resize(attrs.size as usize, 0);
+                        }
+                        NfsCompoundResult::Status(NfsStat::Ok)
+                    }
+                    Some(_) => NfsCompoundResult::Status(NfsStat::Inval),
+                    None => NfsCompoundResult::Status(NfsStat::NoFileHandle),
+                }
+            }
             NfsCompoundOp::Access(requested) => NfsCompoundResult::AccessResult {
                 supported: *requested,
                 access: *requested,
@@ -806,12 +828,47 @@ impl NfsClient {
                 cookie,
                 dircount,
                 maxcount,
-            } => NfsCompoundResult::DirEntries {
-                entries: Vec::new(),
-                eof: true,
-            },
+            } => {
+                let _ = (dircount, maxcount);
+                let mut entries = Vec::new();
+                let mut next = 1u64;
+                for (name, data) in &self.export_files {
+                    if next > *cookie {
+                        entries.push(NfsDirEntry {
+                            name: name.clone(),
+                            fileid: simple_hash(name.as_bytes()),
+                            cookie: next,
+                            attrs: NfsAttrs::new_file(
+                                simple_hash(name.as_bytes()),
+                                data.len() as u64,
+                            ),
+                        });
+                    }
+                    next += 1;
+                }
+                for (name, target) in &self.export_links {
+                    if self.export_files.contains_key(name) {
+                        continue;
+                    }
+                    if next > *cookie {
+                        entries.push(NfsDirEntry {
+                            name: name.clone(),
+                            fileid: simple_hash(name.as_bytes()),
+                            cookie: next,
+                            attrs: NfsAttrs::new_file(
+                                simple_hash(name.as_bytes()),
+                                target.len() as u64,
+                            ),
+                        });
+                    }
+                    next += 1;
+                }
+                NfsCompoundResult::DirEntries { entries, eof: true }
+            }
             NfsCompoundOp::Remove(name) => {
-                if self.export_files.remove(name).is_none() {
+                let file = self.export_files.remove(name);
+                let link = self.export_links.remove(name);
+                if file.is_none() && link.is_none() {
                     NfsCompoundResult::Status(NfsStat::Noent)
                 } else {
                     self.fh_names.retain(|_, n| n != name);
@@ -819,25 +876,94 @@ impl NfsClient {
                 }
             }
             NfsCompoundOp::Rename { old_name, new_name } => {
-                if let Some(data) = self.export_files.remove(old_name) {
-                    self.export_files.insert(new_name.clone(), data);
+                let file = self.export_files.remove(old_name);
+                let link = self.export_links.remove(old_name);
+                if file.is_none() && link.is_none() {
+                    NfsCompoundResult::Status(NfsStat::Noent)
+                } else {
+                    if let Some(data) = file {
+                        self.export_files.insert(new_name.clone(), data);
+                    }
+                    if let Some(target) = link {
+                        self.export_links.insert(new_name.clone(), target);
+                    }
                     for name in self.fh_names.values_mut() {
                         if name == old_name {
                             *name = new_name.clone();
                         }
                     }
                     NfsCompoundResult::Status(NfsStat::Ok)
-                } else {
-                    NfsCompoundResult::Status(NfsStat::Noent)
                 }
             }
             NfsCompoundOp::Create {
                 name,
                 file_type,
                 attrs,
-            } => NfsCompoundResult::Status(NfsStat::Ok),
-            NfsCompoundOp::Link { new_name } => NfsCompoundResult::Status(NfsStat::Ok),
-            NfsCompoundOp::ReadLink => NfsCompoundResult::Status(NfsStat::Ok),
+                link_text,
+            } => {
+                let _ = attrs;
+                if self.export_files.contains_key(name) || self.export_links.contains_key(name) {
+                    NfsCompoundResult::Status(NfsStat::Exist)
+                } else {
+                    if matches!(file_type, NfsFileType::SymLink) {
+                        self.export_links.insert(name.clone(), link_text.clone());
+                        self.export_files
+                            .insert(name.clone(), link_text.as_bytes().to_vec());
+                    } else {
+                        self.export_files.insert(name.clone(), Vec::new());
+                    }
+                    let mut child_fh = self
+                        .current_fh
+                        .as_ref()
+                        .map(|fh| fh.0.clone())
+                        .unwrap_or_default();
+                    child_fh.extend_from_slice(name.as_bytes());
+                    let hash = simple_hash(&child_fh);
+                    let fh = NfsFileHandle::new(hash.to_le_bytes().to_vec());
+                    self.fh_names.insert(fh.clone(), name.clone());
+                    self.current_fh = Some(fh);
+                    if matches!(file_type, NfsFileType::Directory) {
+                        NfsCompoundResult::Attrs(NfsAttrs::new_dir(hash))
+                    } else {
+                        NfsCompoundResult::Status(NfsStat::Ok)
+                    }
+                }
+            }
+            NfsCompoundOp::Link { new_name } => {
+                let src_name = self
+                    .saved_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh).cloned());
+                match src_name {
+                    Some(src)
+                        if self.export_files.contains_key(&src)
+                            || self.export_links.contains_key(&src) =>
+                    {
+                        if let Some(data) = self.export_files.get(&src).cloned() {
+                            self.export_files.insert(new_name.clone(), data);
+                        }
+                        if let Some(target) = self.export_links.get(&src).cloned() {
+                            self.export_links.insert(new_name.clone(), target);
+                        }
+                        NfsCompoundResult::LinkResult {
+                            name: new_name.clone(),
+                        }
+                    }
+                    Some(_) => NfsCompoundResult::Status(NfsStat::Noent),
+                    None => NfsCompoundResult::Status(NfsStat::NoFileHandle),
+                }
+            }
+            NfsCompoundOp::ReadLink => {
+                let target = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh))
+                    .and_then(|n| self.export_links.get(n).cloned());
+                match target {
+                    Some(t) => NfsCompoundResult::ReadLinkResult { target: t },
+                    None => NfsCompoundResult::Status(NfsStat::Inval),
+                }
+            }
             NfsCompoundOp::Commit { offset, count } => NfsCompoundResult::Status(NfsStat::Ok),
             NfsCompoundOp::Lock(lock) => {
                 self.locks.push(lock.clone());
@@ -1041,6 +1167,7 @@ impl NfsClient {
             name: String::from(*parts.last().unwrap()),
             file_type: NfsFileType::Directory,
             attrs: NfsAttrs::new_dir(0),
+            link_text: String::new(),
         });
 
         let results = self.compound("mkdir", &ops);
@@ -1346,6 +1473,275 @@ pub fn rename_self_test() -> bool {
     }
 }
 
+pub const GATE_NFS_CREATE_MARKER: &str = "GATE_NFS create";
+
+/// CREATE must add a name so a later LOOKUP finds it.
+pub fn create_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let created = client.compound(
+        "create",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Create {
+                name: String::from("gatedir"),
+                file_type: NfsFileType::Directory,
+                attrs: NfsAttrs::new_dir(1),
+                link_text: String::new(),
+            },
+        ],
+    );
+    let make_ok = matches!(created.get(1), Some(NfsCompoundResult::Attrs(a)) if a.file_type == NfsFileType::Directory);
+    let after = client.compound(
+        "lookup-created",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("gatedir")),
+        ],
+    );
+    match after.get(1) {
+        Some(NfsCompoundResult::Status(NfsStat::Ok)) if make_ok => {
+            serial_println!("[NFS] {} (CREATE dir then LOOKUP)", GATE_NFS_CREATE_MARKER);
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS create FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_LINK_MARKER: &str = "GATE_NFS link";
+
+/// LINK must add a name so a later LOOKUP finds it while the old name remains.
+pub fn link_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    client
+        .export_files
+        .insert(String::from("old.txt"), b"ln".to_vec());
+    let linked = client.compound(
+        "link",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("old.txt")),
+            NfsCompoundOp::SaveFh,
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Link {
+                new_name: String::from("new.txt"),
+            },
+        ],
+    );
+    let make_ok = matches!(
+        linked.get(4),
+        Some(NfsCompoundResult::LinkResult { name }) if name == "new.txt"
+    );
+    let after = client.compound(
+        "lookup-new",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("new.txt")),
+        ],
+    );
+    let found = matches!(after.get(1), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let still = client.compound(
+        "lookup-old",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("old.txt")),
+        ],
+    );
+    match still.get(1) {
+        Some(NfsCompoundResult::Status(NfsStat::Ok)) if make_ok && found => {
+            serial_println!(
+                "[NFS] {} (SAVEFH+LINK then LOOKUP old+new)",
+                GATE_NFS_LINK_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS link FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_READLINK_MARKER: &str = "GATE_NFS readlink";
+const GATE_NFS_READLINK_TARGET: &str = "/tmp/gate-target";
+
+/// CREATE NF4LNK then READLINK must return the target.
+pub fn readlink_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let created = client.compound(
+        "symlink",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Create {
+                name: String::from("gate.link"),
+                file_type: NfsFileType::SymLink,
+                attrs: NfsAttrs::new_file(1, GATE_NFS_READLINK_TARGET.len() as u64),
+                link_text: String::from(GATE_NFS_READLINK_TARGET),
+            },
+        ],
+    );
+    let make_ok = matches!(created.get(1), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let after = client.compound(
+        "readlink",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("gate.link")),
+            NfsCompoundOp::ReadLink,
+        ],
+    );
+    match after.get(2) {
+        Some(NfsCompoundResult::ReadLinkResult { target })
+            if make_ok && target == GATE_NFS_READLINK_TARGET =>
+        {
+            serial_println!(
+                "[NFS] {} (CREATE NF4LNK then READLINK)",
+                GATE_NFS_READLINK_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS readlink FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_SETATTR_MARKER: &str = "GATE_NFS setattr";
+const GATE_NFS_SETATTR_PAYLOAD: &[u8] = b"knoxos-nfs-sa\n";
+const GATE_NFS_SETATTR_SIZE: u64 = 5;
+
+/// SETATTR must change size so a later GETATTR/READ sees the new length.
+pub fn setattr_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    client
+        .export_files
+        .insert(String::from("sattr.txt"), GATE_NFS_SETATTR_PAYLOAD.to_vec());
+    let looked = client.compound(
+        "lookup",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("sattr.txt")),
+        ],
+    );
+    let found = matches!(looked.get(1), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let mut attrs = NfsAttrs::new_file(1, GATE_NFS_SETATTR_SIZE);
+    attrs.size = GATE_NFS_SETATTR_SIZE;
+    let set = client.compound(
+        "setattr",
+        &[NfsCompoundOp::SetAttr(NfsStateId::anonymous(), attrs)],
+    );
+    let set_ok = matches!(set.first(), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let after = client.compound("getattr", &[NfsCompoundOp::GetAttr(vec![0, 1])]);
+    let size_ok = matches!(
+        after.first(),
+        Some(NfsCompoundResult::Attrs(a)) if a.size == GATE_NFS_SETATTR_SIZE
+    );
+    let read = client.compound(
+        "read",
+        &[NfsCompoundOp::Read {
+            state_id: NfsStateId::anonymous(),
+            offset: 0,
+            count: 64,
+        }],
+    );
+    match read.first() {
+        Some(NfsCompoundResult::ReadResult { data, .. })
+            if found
+                && set_ok
+                && size_ok
+                && data == &GATE_NFS_SETATTR_PAYLOAD[..GATE_NFS_SETATTR_SIZE as usize] =>
+        {
+            serial_println!(
+                "[NFS] {} (SETATTR size={} then GETATTR/READ)",
+                GATE_NFS_SETATTR_MARKER,
+                GATE_NFS_SETATTR_SIZE
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS setattr FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_READDIR_MARKER: &str = "GATE_NFS readdir";
+
+/// READDIR of the export root must list created files and directories.
+pub fn readdir_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    client
+        .export_files
+        .insert(String::from("a.txt"), b"a".to_vec());
+    let created = client.compound(
+        "create-dir",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Create {
+                name: String::from("bdir"),
+                file_type: NfsFileType::Directory,
+                attrs: NfsAttrs::new_dir(1),
+                link_text: String::new(),
+            },
+        ],
+    );
+    let make_ok = matches!(
+        created.get(1),
+        Some(NfsCompoundResult::Attrs(a)) if a.file_type == NfsFileType::Directory
+    );
+    let listed = client.compound(
+        "readdir",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::ReadDir {
+                cookie: 0,
+                dircount: 8192,
+                maxcount: 32768,
+            },
+        ],
+    );
+    match listed.get(1) {
+        Some(NfsCompoundResult::DirEntries { entries, eof: true })
+            if make_ok
+                && entries.iter().any(|e| e.name == "a.txt")
+                && entries.iter().any(|e| e.name == "bdir") =>
+        {
+            serial_println!(
+                "[NFS] {} (READDIR {} names)",
+                GATE_NFS_READDIR_MARKER,
+                entries.len()
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS readdir FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
 /// Initialize NFS subsystem
 pub fn init() {
     if INITIALIZED.load(Ordering::Relaxed) {
@@ -1358,6 +1754,11 @@ pub fn init() {
     let _ = write_self_test();
     let _ = remove_self_test();
     let _ = rename_self_test();
+    let _ = create_self_test();
+    let _ = link_self_test();
+    let _ = readlink_self_test();
+    let _ = setattr_self_test();
+    let _ = readdir_self_test();
 }
 
 // ─── Real Network I/O ──────────────────────────────────────────────

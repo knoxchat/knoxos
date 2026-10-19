@@ -231,6 +231,61 @@ fn test_xhci_get_configuration() {
 }
 
 #[test_case]
+fn test_xhci_get_interface() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::getiface_self_test(),
+        "XHCI GET_INTERFACE must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_clear_feature() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::clear_self_test(),
+        "XHCI CLEAR_FEATURE must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_bulk_out() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::bulk_self_test(),
+        "XHCI bulk OUT must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_set_feature() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::set_self_test(),
+        "XHCI SET_FEATURE must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_bulk_in() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::bulk_in_self_test(),
+        "XHCI bulk IN must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_fuse_write_roundtrip() {
     assert!(
         crate::fuse::write_self_test(),
@@ -283,6 +338,54 @@ fn test_fuse_link_same_ino() {
     assert!(
         crate::fuse::link_self_test(),
         "FUSE LINK must add a name LOOKUP finds with the same inode"
+    );
+}
+
+#[test_case]
+fn test_fuse_create_s_ifreg() {
+    assert!(
+        crate::fuse::create_self_test(),
+        "FUSE CREATE must create a file LOOKUP returns with S_IFREG"
+    );
+}
+
+#[test_case]
+fn test_fuse_getattr_size() {
+    assert!(
+        crate::fuse::getattr_self_test(),
+        "FUSE GETATTR must return size and S_IFREG for a created file"
+    );
+}
+
+#[test_case]
+fn test_fuse_setattr_size() {
+    assert!(
+        crate::fuse::setattr_self_test(),
+        "FUSE SETATTR must change size so GETATTR/READ see the new length"
+    );
+}
+
+#[test_case]
+fn test_fuse_readdir_names() {
+    assert!(
+        crate::fuse::readdir_self_test(),
+        "FUSE READDIR must list created files and directories"
+    );
+}
+
+#[test_case]
+fn test_fuse_mknod_s_ifchr() {
+    assert!(
+        crate::fuse::mknod_self_test(),
+        "FUSE MKNOD must create a special file LOOKUP returns with S_IFCHR"
+    );
+}
+
+#[test_case]
+fn test_fuse_statfs_bsize() {
+    assert!(
+        crate::fuse::statfs_self_test(),
+        "FUSE STATFS must report bsize 4096 and count created names"
     );
 }
 
@@ -351,6 +454,22 @@ fn test_btrfs_mount() {
 }
 
 #[test_case]
+fn test_xfs_mount() {
+    assert!(
+        crate::xfs::mount_self_test(),
+        "XFS mount must read GATE.TXT through the block layer"
+    );
+}
+
+#[test_case]
+fn test_zfs_mount() {
+    assert!(
+        crate::zfs::mount_self_test(),
+        "ZFS mount must read GATE.TXT through the block layer"
+    );
+}
+
+#[test_case]
 fn test_io_uring_nop_write_sqe() {
     assert!(
         crate::io_uring::sqe_self_test(),
@@ -382,6 +501,51 @@ fn test_nfs_rename_moves_name() {
     assert!(
         crate::nfs::rename_self_test(),
         "NFS4 RENAME must move the name so LOOKUP finds the new one"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_create_then_lookup() {
+    assert!(
+        crate::nfs::create_self_test(),
+        "NFS4 CREATE must add a name so LOOKUP finds it"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_link_then_lookup() {
+    assert!(
+        crate::nfs::link_self_test(),
+        "NFS4 LINK must add a name so LOOKUP finds it while the old name remains"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_readlink_target() {
+    assert!(
+        crate::nfs::readlink_self_test(),
+        "NFS4 CREATE NF4LNK then READLINK must return the target"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_setattr_size() {
+    assert!(
+        crate::nfs::setattr_self_test(),
+        "NFS4 SETATTR must change size so GETATTR/READ see the new length"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_readdir_names() {
+    assert!(
+        crate::nfs::readdir_self_test(),
+        "NFS4 READDIR must list created files and directories"
     );
 }
 

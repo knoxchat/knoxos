@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **FUSE MKNOD** — MKNOD creates a special file LOOKUP returns with `S_IFCHR` (`GATE_FUSE mknod`).
+- **FUSE STATFS** — STATFS reports `bsize` 4096 and counts created names (`GATE_FUSE statfs`).
+- **D-Bus RemoveMatch** — method return, then matching signals are no longer delivered (`GATE_DBUS remove`).
+- **D-Bus GetId** — `org.freedesktop.DBus.GetId` returns the 32-hex machine UUID (`GATE_DBUS id`).
+- **XHCI SET_FEATURE** — Setup+Status Transfer Event for SET_FEATURE(ENDPOINT_HALT) (`GATE_USB xhci set`).
+- **XHCI bulk IN** — Configure Endpoint bulk IN plus Normal TRB Transfer Event (`GATE_USB xhci bulkin`).
+- **NFS SETATTR** — COMPOUND SETATTR changes size so GETATTR/READ see the new length (`GATE_NFS setattr`).
+- **NFS READDIR** — COMPOUND READDIR of the export root lists created names (`GATE_NFS readdir`).
+- **FUSE SETATTR** — SETATTR changes size so GETATTR/READ see the new length (`GATE_FUSE setattr`).
+- **FUSE READDIR** — READDIR of the root lists created files and directories (`GATE_FUSE readdir`).
+- **D-Bus GetConnectionUnixUser** — unique and well-known names return the connection uid (`GATE_DBUS uid`).
+- **D-Bus AddMatch** — method return, then matching signals are delivered (`GATE_DBUS match`).
+- **XHCI CLEAR_FEATURE** — Setup+Status Transfer Event for CLEAR_FEATURE(ENDPOINT_HALT) (`GATE_USB xhci clear`).
+- **XHCI bulk** — Configure Endpoint bulk OUT plus Normal TRB Transfer Event (`GATE_USB xhci bulk`).
+- **NFS LINK** — COMPOUND SAVEFH+LINK then LOOKUP finds both names (`GATE_NFS link`).
+- **NFS READLINK** — COMPOUND CREATE NF4LNK then READLINK returns the target (`GATE_NFS readlink`).
+- **FUSE CREATE** — CREATE makes a regular file LOOKUP returns with `S_IFREG` (`GATE_FUSE create`).
+- **FUSE GETATTR** — GETATTR returns size and `S_IFREG` for a created file (`GATE_FUSE getattr`).
+- **D-Bus NameHasOwner** — false before `RequestName`, true after (`GATE_DBUS hasowner`).
+- **XHCI GET_INTERFACE** — Setup+Data+Status Transfer Event for GET_INTERFACE (`GATE_USB xhci getiface`).
+- **XFS mount** — `mount -t xfs` parses the superblock and reads `GATE.TXT` (`GATE_XFS mount`).
+- **ZFS mount** — `mount -t zfs` parses the uberblock and reads `GATE.TXT` (`GATE_ZFS mount`).
+- **NFS CREATE** — COMPOUND CREATE then LOOKUP finds the new name (`GATE_NFS create`).
 - **FUSE SYMLINK** — SYMLINK creates a link LOOKUP returns with `S_IFLNK`; READLINK returns the target (`GATE_FUSE symlink`).
 - **FUSE LINK** — LINK adds a name LOOKUP finds with the same inode (`GATE_FUSE link`).
 - **D-Bus GetNameOwner** — a well-known name returns the owner's unique name (`GATE_DBUS owner`).

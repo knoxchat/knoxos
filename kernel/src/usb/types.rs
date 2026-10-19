@@ -52,6 +52,7 @@ pub enum UsbRequestType {
     SetDescriptor = 7,
     GetConfiguration = 8,
     SetConfiguration = 9,
+    GetInterface = 10,
     SetInterface = 11,
 }
 

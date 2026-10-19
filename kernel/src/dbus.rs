@@ -301,7 +301,7 @@ pub struct Connection {
 }
 
 /// Signal match rule
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchRule {
     pub rule_type: Option<MessageType>,
     pub sender: Option<String>,
@@ -343,6 +343,7 @@ struct BusState {
     names: BTreeMap<String, ConnectionId>, // well-known name → owner
     name_queues: BTreeMap<String, Vec<ConnectionId>>, // queued ownership
     services: BTreeMap<String, ServiceInfo>, // registered service handlers
+    machine_id: String,
 }
 
 /// A registered D-Bus service handler
@@ -355,12 +356,16 @@ struct ServiceInfo {
     properties: BTreeMap<String, DbusValue>,
 }
 
+/// Stable 32-hex machine UUID returned by `org.freedesktop.DBus.GetId`.
+pub const MACHINE_ID: &str = "0123456789abcdef0123456789abcdef";
+
 lazy_static::lazy_static! {
     static ref SYSTEM_BUS: Mutex<BusState> = Mutex::new(BusState {
         connections: BTreeMap::new(),
         names: BTreeMap::new(),
         name_queues: BTreeMap::new(),
         services: BTreeMap::new(),
+        machine_id: String::from(MACHINE_ID),
     });
 
     static ref SESSION_BUS: Mutex<BusState> = Mutex::new(BusState {
@@ -368,6 +373,7 @@ lazy_static::lazy_static! {
         names: BTreeMap::new(),
         name_queues: BTreeMap::new(),
         services: BTreeMap::new(),
+        machine_id: String::from(MACHINE_ID),
     });
 }
 
@@ -606,6 +612,11 @@ fn matches_signal(conn: &Connection, msg: &Message) -> bool {
                 matches = false;
             }
         }
+        if let Some(ref t) = rule.rule_type {
+            if msg.header.message_type != *t {
+                matches = false;
+            }
+        }
 
         if matches {
             return true;
@@ -708,11 +719,55 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 }
             }
             "AddMatch" => {
-                // Parse match rule and add to connection
-                if let Some(DbusValue::String(rule_str)) = msg.body.first() {
-                    let rule = parse_match_rule(rule_str);
-                    if let Some(conn) = bus.connections.get_mut(&from) {
-                        conn.match_rules.push(rule);
+                if let Some(conn) = bus.connections.get_mut(&from) {
+                    if let Some(DbusValue::String(rule_str)) = msg.body.first() {
+                        conn.match_rules.push(parse_match_rule(rule_str));
+                    }
+                    conn.message_queue
+                        .push(Message::method_return(msg.header.serial));
+                }
+            }
+            "RemoveMatch" => {
+                if let Some(conn) = bus.connections.get_mut(&from) {
+                    if let Some(DbusValue::String(rule_str)) = msg.body.first() {
+                        let parsed = parse_match_rule(rule_str);
+                        if let Some(idx) = conn.match_rules.iter().position(|r| r == &parsed) {
+                            conn.match_rules.remove(idx);
+                        }
+                    }
+                    conn.message_queue
+                        .push(Message::method_return(msg.header.serial));
+                }
+            }
+            "GetId" => {
+                let id = bus.machine_id.clone();
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::String(id)];
+                reply.signature = Some(String::from("s"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
+            "GetConnectionUnixUser" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let owner_id = bus.names.get(name).copied().or_else(|| {
+                    bus.connections
+                        .values()
+                        .find(|c| c.unique_name == name)
+                        .map(|c| c.id)
+                });
+                if let Some(id) = owner_id {
+                    let uid = bus.connections.get(&id).map(|c| c.uid);
+                    if let Some(uid) = uid {
+                        let mut reply = Message::method_return(msg.header.serial);
+                        reply.body = vec![DbusValue::Uint32(uid)];
+                        reply.signature = Some(String::from("u"));
+                        if let Some(c) = bus.connections.get_mut(&from) {
+                            c.message_queue.push(reply);
+                        }
                     }
                 }
             }
@@ -804,6 +859,17 @@ pub fn add_match(bus_type: BusType, conn_id: ConnectionId, rule: &str) {
     let mut bus = get_bus(bus_type).lock();
     if let Some(conn) = bus.connections.get_mut(&conn_id) {
         conn.match_rules.push(parsed);
+    }
+}
+
+/// Remove a signal match rule
+pub fn remove_match(bus_type: BusType, conn_id: ConnectionId, rule: &str) {
+    let parsed = parse_match_rule(rule);
+    let mut bus = get_bus(bus_type).lock();
+    if let Some(conn) = bus.connections.get_mut(&conn_id) {
+        if let Some(idx) = conn.match_rules.iter().position(|r| r == &parsed) {
+            conn.match_rules.remove(idx);
+        }
     }
 }
 
@@ -1122,6 +1188,11 @@ pub fn init() {
     let _ = list_self_test();
     let _ = pid_self_test();
     let _ = owner_self_test();
+    let _ = has_owner_self_test();
+    let _ = uid_self_test();
+    let _ = add_match_self_test();
+    let _ = remove_match_self_test();
+    let _ = get_id_self_test();
 }
 
 /// Bind + listen `/run/dbus/system_bus_socket` once.
@@ -1590,6 +1661,304 @@ pub fn owner_self_test() -> bool {
         true
     } else {
         serial_println!("[dbus] GATE_DBUS FAILED: GetNameOwner unique={}", unique);
+        false
+    }
+}
+
+pub const GATE_DBUS_HAS_OWNER_MARKER: &str = "GATE_DBUS hasowner";
+
+/// `NameHasOwner` is false before `RequestName` and true after.
+pub fn has_owner_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateHasOwner";
+    let owner = connect(BusType::System, 0xDB0D, 1000);
+
+    let mut missing = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameHasOwner",
+    );
+    missing.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    missing.signature = Some(String::from("s"));
+    let miss_serial = send_message(BusType::System, owner, missing);
+    let vacant = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(miss_serial)
+                && matches!(msg.body.first(), Some(DbusValue::Boolean(false)))
+        })
+        .unwrap_or(false);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut present = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameHasOwner",
+    );
+    present.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    present.signature = Some(String::from("s"));
+    let hit_serial = send_message(BusType::System, owner, present);
+    let owned = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(hit_serial)
+                && matches!(msg.body.first(), Some(DbusValue::Boolean(true)))
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if vacant && owned {
+        serial_println!(
+            "[dbus] {} (NameHasOwner false then true)",
+            GATE_DBUS_HAS_OWNER_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: NameHasOwner vacant={} owned={}",
+            vacant,
+            owned
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_UID_MARKER: &str = "GATE_DBUS uid";
+
+/// `GetConnectionUnixUser` must return the connection uid for unique and well-known names.
+pub fn uid_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateUid";
+    const PID: u32 = 0xDB0E;
+    const UID: u32 = 1000;
+    let owner = connect(BusType::System, PID, UID);
+    let unique = format!(":1.{}", owner);
+
+    let mut get_unique = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionUnixUser",
+    );
+    get_unique.body = vec![DbusValue::String(unique)];
+    get_unique.signature = Some(String::from("s"));
+    let uniq_serial = send_message(BusType::System, owner, get_unique);
+    let unique_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(uniq_serial)
+                && matches!(msg.body.first(), Some(DbusValue::Uint32(u)) if *u == UID)
+        })
+        .unwrap_or(false);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut get_wk = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionUnixUser",
+    );
+    get_wk.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    get_wk.signature = Some(String::from("s"));
+    let wk_serial = send_message(BusType::System, owner, get_wk);
+    let well_known_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(wk_serial)
+                && matches!(msg.body.first(), Some(DbusValue::Uint32(u)) if *u == UID)
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if unique_ok && well_known_ok {
+        serial_println!(
+            "[dbus] {} (GetConnectionUnixUser unique+well-known)",
+            GATE_DBUS_UID_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: uid unique={} well_known={}",
+            unique_ok,
+            well_known_ok
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_MATCH_MARKER: &str = "GATE_DBUS match";
+
+/// `AddMatch` must reply, then matching signals are delivered and others are not.
+pub fn add_match_self_test() -> bool {
+    const RULE: &str = "type='signal',interface='org.knoxos.GateMatch',member='Ping'";
+    let listener = connect(BusType::System, 0xDB0F, 1000);
+    let emitter = connect(BusType::System, 0xDB10, 1000);
+
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let add_serial = send_message(BusType::System, listener, add);
+    let replied = receive_message(BusType::System, listener)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(add_serial)
+        })
+        .unwrap_or(false);
+
+    let ping = Message::signal("/org/knoxos/Gate", "org.knoxos.GateMatch", "Ping");
+    let _ = send_message(BusType::System, emitter, ping);
+    let matched = receive_message(BusType::System, listener)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.interface.as_deref() == Some("org.knoxos.GateMatch")
+                && msg.member.as_deref() == Some("Ping")
+        })
+        .unwrap_or(false);
+
+    let other = Message::signal("/org/knoxos/Gate", "org.knoxos.Other", "Ping");
+    let _ = send_message(BusType::System, emitter, other);
+    let ignored = receive_message(BusType::System, listener).is_none();
+
+    disconnect(BusType::System, listener);
+    disconnect(BusType::System, emitter);
+    if replied && matched && ignored {
+        serial_println!(
+            "[dbus] {} (AddMatch then matching signal)",
+            GATE_DBUS_MATCH_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: AddMatch replied={} matched={} ignored={}",
+            replied,
+            matched,
+            ignored
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_REMOVE_MARKER: &str = "GATE_DBUS remove";
+
+/// `RemoveMatch` must reply, then the same signal is no longer delivered.
+pub fn remove_match_self_test() -> bool {
+    const RULE: &str = "type='signal',interface='org.knoxos.GateUnmatch',member='Ping'";
+    let listener = connect(BusType::System, 0xDB11, 1000);
+    let emitter = connect(BusType::System, 0xDB12, 1000);
+
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, listener, add);
+    let _ = receive_message(BusType::System, listener);
+
+    let ping = Message::signal("/org/knoxos/Gate", "org.knoxos.GateUnmatch", "Ping");
+    let _ = send_message(BusType::System, emitter, ping.clone());
+    let matched = receive_message(BusType::System, listener)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.interface.as_deref() == Some("org.knoxos.GateUnmatch")
+        })
+        .unwrap_or(false);
+
+    let mut rem = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RemoveMatch",
+    );
+    rem.body = vec![DbusValue::String(String::from(RULE))];
+    rem.signature = Some(String::from("s"));
+    let rem_serial = send_message(BusType::System, listener, rem);
+    let replied = receive_message(BusType::System, listener)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(rem_serial)
+        })
+        .unwrap_or(false);
+
+    let _ = send_message(BusType::System, emitter, ping);
+    let ignored = receive_message(BusType::System, listener).is_none();
+
+    disconnect(BusType::System, listener);
+    disconnect(BusType::System, emitter);
+    if replied && matched && ignored {
+        serial_println!(
+            "[dbus] {} (RemoveMatch then no matching signal)",
+            GATE_DBUS_REMOVE_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: RemoveMatch replied={} matched={} ignored={}",
+            replied,
+            matched,
+            ignored
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_ID_MARKER: &str = "GATE_DBUS id";
+
+/// `GetId` must return the 32-hex machine UUID.
+pub fn get_id_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB13, 1000);
+    let get = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetId",
+    );
+    let serial = send_message(BusType::System, conn, get);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::String(id)) if id == MACHINE_ID && id.len() == 32
+                )
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok {
+        serial_println!("[dbus] {} (GetId {})", GATE_DBUS_ID_MARKER, MACHINE_ID);
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: GetId");
         false
     }
 }

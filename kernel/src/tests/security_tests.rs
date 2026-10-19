@@ -622,6 +622,46 @@ fn test_dbus_get_name_owner() {
 }
 
 #[test_case]
+fn test_dbus_name_has_owner() {
+    assert!(
+        crate::dbus::has_owner_self_test(),
+        "NameHasOwner must be false before RequestName and true after"
+    );
+}
+
+#[test_case]
+fn test_dbus_connection_uid() {
+    assert!(
+        crate::dbus::uid_self_test(),
+        "GetConnectionUnixUser must return the uid for unique and well-known names"
+    );
+}
+
+#[test_case]
+fn test_dbus_add_match() {
+    assert!(
+        crate::dbus::add_match_self_test(),
+        "AddMatch must reply and deliver matching signals"
+    );
+}
+
+#[test_case]
+fn test_dbus_remove_match() {
+    assert!(
+        crate::dbus::remove_match_self_test(),
+        "RemoveMatch must reply and stop delivering matching signals"
+    );
+}
+
+#[test_case]
+fn test_dbus_get_id() {
+    assert!(
+        crate::dbus::get_id_self_test(),
+        "GetId must return the 32-hex machine UUID"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

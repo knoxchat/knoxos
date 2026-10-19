@@ -178,5 +178,28 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 167. **exFAT mount** — `mount -t exfat` parses the VBR and reads `$DATA` (`GATE_EXFAT mount`).
 168. **Btrfs mount** — `mount -t btrfs` parses the superblock and reads `$DATA` (`GATE_BTRFS mount`).
 169. **NFS RENAME** — RENAME then LOOKUP finds the new name (`GATE_NFS rename`).
+170. **FUSE CREATE** — LOOKUP returns `S_IFREG` (`GATE_FUSE create`).
+171. **FUSE GETATTR** — size and `S_IFREG` for a created file (`GATE_FUSE getattr`).
+172. **D-Bus NameHasOwner** — false before `RequestName`, true after (`GATE_DBUS hasowner`).
+173. **XHCI GET_INTERFACE** — Setup+Data+Status Transfer Event (`GATE_USB xhci getiface`).
+174. **XFS mount** — `mount -t xfs` parses the superblock and reads `$DATA` (`GATE_XFS mount`).
+175. **ZFS mount** — `mount -t zfs` parses the uberblock and reads `$DATA` (`GATE_ZFS mount`).
+176. **NFS CREATE** — CREATE then LOOKUP finds the new name (`GATE_NFS create`).
+177. **FUSE SETATTR** — size change then GETATTR/READ (`GATE_FUSE setattr`).
+178. **FUSE READDIR** — root lists created names (`GATE_FUSE readdir`).
+179. **D-Bus GetConnectionUnixUser** — unique and well-known names return the uid (`GATE_DBUS uid`).
+180. **D-Bus AddMatch** — matching signals are delivered (`GATE_DBUS match`).
+181. **XHCI CLEAR_FEATURE** — Setup+Status Transfer Event (`GATE_USB xhci clear`).
+182. **XHCI bulk** — bulk OUT Normal TRB Transfer Event (`GATE_USB xhci bulk`).
+183. **NFS LINK** — SAVEFH+LINK then LOOKUP finds both names (`GATE_NFS link`).
+184. **NFS READLINK** — CREATE NF4LNK then READLINK returns the target (`GATE_NFS readlink`).
+185. **FUSE MKNOD** — LOOKUP returns `S_IFCHR` (`GATE_FUSE mknod`).
+186. **FUSE STATFS** — `bsize` 4096 and created-name count (`GATE_FUSE statfs`).
+187. **D-Bus RemoveMatch** — matching signals stop after the inverse of AddMatch (`GATE_DBUS remove`).
+188. **D-Bus GetId** — 32-hex machine UUID (`GATE_DBUS id`).
+189. **XHCI SET_FEATURE** — Setup+Status Transfer Event (`GATE_USB xhci set`).
+190. **XHCI bulk IN** — bulk IN Normal TRB Transfer Event (`GATE_USB xhci bulkin`).
+191. **NFS SETATTR** — size change then GETATTR/READ (`GATE_NFS setattr`).
+192. **NFS READDIR** — export root lists created names (`GATE_NFS readdir`).
 
-Integration: `./tests/run_integration.sh` **433/433** on QEMU (2026-10-20).
+Integration: `./tests/run_integration.sh` **456/456** on QEMU (2026-10-20).
