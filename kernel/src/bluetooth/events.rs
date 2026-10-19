@@ -1,6 +1,11 @@
+use core::sync::atomic::{AtomicU8, AtomicU16, Ordering};
+
 use crate::serial_println;
 
 use super::adapter::{ConnectionState, HCI_ADAPTERS};
+
+pub(super) static LAST_COMPLETE_OPCODE: AtomicU16 = AtomicU16::new(0);
+pub(super) static LAST_COMPLETE_STATUS: AtomicU8 = AtomicU8::new(0xFF);
 
 // ═══════════════════════════════════════════════════════════════════════
 // HCI EVENT PROCESSING
@@ -21,6 +26,8 @@ pub fn process_event(adapter_id: u32, event_data: &[u8]) {
             if event_data.len() >= 6 {
                 let opcode = u16::from_le_bytes([event_data[3], event_data[4]]);
                 let status = event_data[5];
+                LAST_COMPLETE_OPCODE.store(opcode, Ordering::Relaxed);
+                LAST_COMPLETE_STATUS.store(status, Ordering::Relaxed);
                 serial_println!(
                     "[BT] Command Complete: opcode=0x{:04X} status=0x{:02X}",
                     opcode,

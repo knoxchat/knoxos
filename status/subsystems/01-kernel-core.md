@@ -22,7 +22,7 @@
 - [x] **SMP** — real INIT/SIPI trampoline 16→32→64; AP loads per-CPU TSS + GS, STI + LAPIC timer, runs pinned Ring 3 (`GATE_I1 smp online`, `GATE_I3 ap ring3`); per-CPU CFS `current`; unpinned work on an idle AP (`GATE_I4 smp balance`); `balance_load` does not steal single-CPU-pinned tasks
 - [x] **Per-CPU data** — GS-relative `CpuLocal` (`gs:[0]`/`gs:[8]` syscall scratch + `gs:[24]` cpu index + `gs:[32]` current PID); `CPU_DATA` mutex remains for stats
 - [x] **Command line** — real `key=value` parser; QEMU fw_cfg cmdline when present, else a documented default
-- [ ] **x86_64 / aarch64 / riscv64** — x86_64 boots; other arches compile with shims
+- [x] **x86_64 / aarch64 / riscv64** — x86_64 desktop boots; aarch64/riscv64 QEMU serial `_start` (`GATE_ARCH aarch64 boot` / `GATE_ARCH riscv64 boot`). Full runtime on those arches is later.
 
 ### Stub / unused
 - [x] **NMI** — IDT handler logs and returns

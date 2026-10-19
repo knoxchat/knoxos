@@ -48,15 +48,15 @@ use knoxos_kernel::{
     io_sched, io_uring_advanced, js_engine, k8s, kcov, kdb, keyring, kpanic, ktrace, live_usb,
     man_pages, memory_pool, multimon, netns, nfs_server, p9fs, partition, pkg_dist, posix_tests,
     posix2024, power_events, quic, riscv64_boot, rust_std, rwlock, sched_debug, sctp, secure_boot,
-    security_cert, selfhost, tablet_mode, tokenizer, touchscreen, verify, video_codec, voice,
-    vulkan, webcam, xdp,
+    security_cert, selfhost, tablet_mode, touchscreen, verify, video_codec, voice, vulkan, webcam,
+    xdp,
 };
 use knoxos_kernel::{
     acpi, acpi_tables, ahci, ai, allocator, alsa, amdgpu, apic_timer, arch, audit, ax211, battery,
     bcache, benchmark, block, bluetooth, boot_splash, bridge, broadcom_wifi, btrfs, cabi,
     capabilities, cgroup2, cgroups, chromium_sandbox, cifs, clock, close_range, cmdline, container,
-    context, cpio, cpufreq, cred, cron, crypto, dbus, desktop_apps, devfs, dmesg, dpkg, drm,
-    dynlink, e1000, ebpf, elf, epoll, eventfd, exfat, ext2, fanotify, fat32, fd, fifo,
+    context, cpio, cpufreq, cred, cron, crypto, dbus, desktop_apps, devfs, dm_verity, dmesg, dpkg,
+    drm, dynlink, e1000, ebpf, elf, epoll, eventfd, exfat, ext2, fanotify, fat32, fd, fifo,
     file_manager, flock, fontconfig, fuse, futex, futex2, gdt, gettext, glibc_compat, gpio, gpu,
     gpu_compute, gpu_hw, hardening, hda, hlt_loop, hpet, http, huge_pages, hwtest, i2c, i18n, i915,
     ima, inference_api, init, inotify, input_event, interrupts, io_prio, io_uring, iommu, ipc,
@@ -71,8 +71,8 @@ use knoxos_kernel::{
     shm, signalfd, signals, slab, smp, socket_activation, soloader, sound, splice, ssp,
     stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs, sysinfo, syslog,
     task::{Task, executor::Executor, keyboard},
-    terminal, thermal, thp, threads, thunderbolt, timerfd, tls, tmpfs, tpm2, tty, uds, usb,
-    usb_hid, userfaultfd, usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu,
+    terminal, thermal, thp, threads, thunderbolt, timerfd, tls, tmpfs, tokenizer, tpm2, tty, uds,
+    usb, usb_hid, userfaultfd, usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu,
     virtio_input, virtio_tablet, visual_test, vivaldi, vlan, vmm, vterm, wayland, wifi, workqueue,
     wpa3_sae, xattr, xdg, xfs, zfs,
 };
@@ -1122,6 +1122,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     session::init();
     serial_println!("[KnoxOS] Phase 30: ntp::init...");
     ntp::init();
+    serial_println!("[KnoxOS] Phase 30: bluetooth::init...");
+    bluetooth::init();
+    serial_println!("[KnoxOS] Phase 30: dm_verity::init...");
+    dm_verity::init();
 
     // Security
     serial_println!("[KnoxOS] Phase 30: keyring::init...");
@@ -1145,8 +1149,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // AI subsystem
     serial_println!("[KnoxOS] Phase 30: AI subsystem...");
-    #[cfg(feature = "stub-drivers")]
-    #[cfg(feature = "stub-drivers")]
     tokenizer::init();
     inference_api::init();
     #[cfg(feature = "stub-drivers")]

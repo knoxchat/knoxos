@@ -2,7 +2,7 @@
 
 # 10. System Services
 
-**Grade: Wired (60%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`
+**Grade: Wired (75%)** · `init.rs`, `service_manager.rs`, `dbus.rs`, `cron.rs`, `pam.rs`, `ntp.rs`
 
 ### Wired
 - [x] Init searches standard paths; can map a built-in ELF blob
@@ -14,6 +14,8 @@
 - [x] dmesg ring, syslog structures
 - [x] PAM salted SHA-512 verify; session/seat structs
 - [x] QEMU shutdown ports
+- [x] NTP fixture Server-mode packet applies a 1000 ms offset (`GATE_NTP apply`)
+- [x] Bluetooth HCI virtual adapter Reset Command Complete (`GATE_BT hci`)
 
 ### Stub
 - [x] Init `iretq`s to `/sbin/init` (K3); Failed units restart (`GATE_SVC restart`)

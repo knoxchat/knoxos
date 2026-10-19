@@ -173,8 +173,7 @@ impl ImaSubsystem {
         serial_println!("[IMA] Measured: {}", path);
         self.measurements.push(entry);
 
-        // Extend TPM PCR
-        // crate::tpm2::pcr_extend(self.pcr_index, TpmAlg::Sha256, &template_hash);
+        let _ = crate::tpm2::pcr_extend_sha256(self.pcr_index as u32, &template_hash);
     }
 
     /// Get measurement list for remote attestation

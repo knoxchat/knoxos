@@ -54,7 +54,15 @@ impl Window {
             }
             WindowContentType::Empty => {
                 if let Some((pixels, w, h)) = crate::wayland::window_shm_pixels(self.id) {
-                    fb.blit_bgra(content.x, content.y, w, h, &pixels);
+                    fb.blit_bgra_scaled(
+                        content.x,
+                        content.y,
+                        content.width,
+                        content.height,
+                        &pixels,
+                        w,
+                        h,
+                    );
                 }
             }
         }

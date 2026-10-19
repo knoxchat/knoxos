@@ -139,19 +139,22 @@ pub fn handle_click(x: i32, y: i32) {
 
     match clicked_icon {
         Some((idx, _was_selected)) => {
-            // Select this icon
             for (i, icon) in desktop.icons.iter_mut().enumerate() {
                 icon.selected = i == idx;
             }
             desktop.selected_icon = Some(idx);
-
-            // Start drag tracking — the actual drag movement starts when
-            // handle_icon_drag() detects the mouse has moved enough
+            let name = desktop.icons[idx].name.clone();
+            let icon_type = desktop.icons[idx].icon_type;
             desktop.dragging_icon = Some(idx);
             desktop.drag_offset_x = x - desktop.icons[idx].x;
             desktop.drag_offset_y = y - desktop.icons[idx].y;
             desktop.drag_x = desktop.icons[idx].x;
             desktop.drag_y = desktop.icons[idx].y;
+            drop(desktop);
+            crate::serial_println!("[KnoxOS] Opening: {}", name);
+            open_application(&name, icon_type);
+            crate::gui::request_redraw();
+            return;
         }
         None => {
             // Clicked on empty desktop — deselect all and start rubber band

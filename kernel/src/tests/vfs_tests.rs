@@ -121,6 +121,17 @@ fn test_xhci_mmio_mapped() {
 }
 
 #[test_case]
+fn test_xhci_enable_slot() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::slot_self_test(),
+        "XHCI Enable Slot must complete with cc=1"
+    );
+}
+
+#[test_case]
 fn test_page_cache_writeback() {
     assert!(
         crate::page_cache::writeback_self_test(),

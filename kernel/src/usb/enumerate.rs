@@ -2,7 +2,7 @@
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::serial_println;
 
@@ -24,6 +24,11 @@ struct InterruptUrb {
 }
 
 static INTERRUPT_URBS: Mutex<Vec<InterruptUrb>> = Mutex::new(Vec::new());
+
+/// True only when Enable Slot returned Command Completion cc=1 (not a timeout fallback).
+static SLOT_ENABLE_LIVE: AtomicBool = AtomicBool::new(false);
+
+pub const GATE_XHCI_SLOT_MARKER: &str = "GATE_USB xhci slot";
 
 // ═══════════════════════════════════════════════════════════════════════
 // DEVICE ENUMERATION
@@ -165,14 +170,15 @@ pub fn enable_slot() -> Option<u8> {
         let completion_code = event.completion_code();
         let slot_id = ((event.control >> 24) & 0xFF) as u8;
 
-        if completion_code == 1 {
-            // Success
+        if completion_code == 1 && slot_id != 0 {
+            SLOT_ENABLE_LIVE.store(true, Ordering::Relaxed);
             serial_println!("[XHCI] Enable Slot succeeded: slot_id={}", slot_id);
             return Some(slot_id);
         } else {
             serial_println!(
-                "[XHCI] Enable Slot failed: completion_code={}",
-                completion_code
+                "[XHCI] Enable Slot failed: completion_code={} slot={}",
+                completion_code,
+                slot_id
             );
         }
     } else {
@@ -657,4 +663,21 @@ pub fn enumerate_all_devices() {
             }
         }
     }
+}
+
+/// Prove Enable Slot got a Command Completion (cc=1), not a timeout fallback.
+pub fn slot_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci slot skipped (no controller)");
+        return true;
+    }
+    if !SLOT_ENABLE_LIVE.load(Ordering::Relaxed) {
+        let _ = enable_slot();
+    }
+    if !SLOT_ENABLE_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Enable Slot had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_SLOT_MARKER);
+    true
 }

@@ -5,7 +5,7 @@
 ///   - TLS record protocol
 ///   - TLS handshake protocol
 ///   - Cipher suites (AES-128-GCM, ChaCha20-Poly1305 stubs)
-///   - X.509 certificate handling stubs
+///   - X.509 certificate parse + RSA PKCS#1 chain verify
 ///   - Integration with the TCP socket layer
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -611,6 +611,7 @@ const ASN1_GENERALIZED_TIME: u8 = 0x18;
 const ASN1_CONTEXT_0: u8 = 0xA0;
 const ASN1_CONTEXT_3: u8 = 0xA3;
 const ASN1_BOOLEAN: u8 = 0x01;
+const ASN1_NULL: u8 = 0x05;
 
 /// Parse ASN.1 DER tag + length, return (tag, content_slice, rest)
 fn asn1_read_tlv(data: &[u8]) -> Option<(u8, &[u8], &[u8])> {
@@ -1050,26 +1051,8 @@ impl CertificateStore {
             return false;
         }
 
-        // Get approximate current time from RTC
-        let now = {
-            let dt = crate::rtc::read_rtc();
-            // Approximate Unix timestamp
-            let year = dt.year as u64 + 2000;
-            let days_per_month: [u64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-            let mut days = 0u64;
-            for y in 1970..year {
-                days += if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
-                    366
-                } else {
-                    365
-                };
-            }
-            for m in 0..(dt.month as usize).saturating_sub(1).min(11) {
-                days += days_per_month[m];
-            }
-            days += (dt.day as u64).saturating_sub(1);
-            days * 86400 + (dt.hour as u64) * 3600 + (dt.minute as u64) * 60 + (dt.second as u64)
-        };
+        // CMOS year is already 2000+YY; `unix_time` is seconds since 1970.
+        let now = crate::rtc::unix_time().max(0) as u64;
 
         // 1. Check each certificate's validity period
         for cert in chain {
@@ -1120,8 +1103,200 @@ impl CertificateStore {
             serial_println!("[TLS] Certificate chain verified: {} cert(s)", chain.len());
         }
 
+        // 4. RSA PKCS#1 v1.5 SHA-256 over TBS when keys/signatures are present.
+        for i in 0..chain.len() {
+            let issuer = if i + 1 < chain.len() {
+                &chain[i + 1]
+            } else {
+                &chain[i]
+            };
+            if chain[i].signature.is_empty() || issuer.public_key.is_empty() {
+                continue;
+            }
+            let Some(key) = rsa_public_from_spki_bits(&issuer.public_key) else {
+                serial_println!("[TLS] Chain RSA key parse failed: {}", issuer.subject);
+                return false;
+            };
+            if !crate::crypto::rsa_verify(&chain[i].tbs_raw, &chain[i].signature, &key) {
+                serial_println!("[TLS] Chain signature failed: {}", chain[i].subject);
+                return false;
+            }
+        }
+
         true
     }
+}
+
+/// `public_key` is RSAPublicKey DER (SEQUENCE of INTEGER n, INTEGER e).
+fn rsa_public_from_spki_bits(pk: &[u8]) -> Option<crate::crypto::RsaPublicKey> {
+    let (tag, seq, _) = asn1_read_tlv(pk)?;
+    if tag != ASN1_SEQUENCE {
+        return None;
+    }
+    let (_, n_raw, rest) = asn1_read_tlv(seq)?;
+    let (_, e_raw, _) = asn1_read_tlv(rest)?;
+    let n = if n_raw.first() == Some(&0) {
+        n_raw[1..].to_vec()
+    } else {
+        n_raw.to_vec()
+    };
+    if n.is_empty() {
+        return None;
+    }
+    let mut e = 0u32;
+    for &b in e_raw {
+        e = (e << 8) | b as u32;
+    }
+    Some(crate::crypto::RsaPublicKey {
+        bits: (n.len() * 8) as u32,
+        n,
+        e,
+    })
+}
+
+fn der_len(n: usize) -> Vec<u8> {
+    if n < 0x80 {
+        alloc::vec![n as u8]
+    } else if n < 0x100 {
+        alloc::vec![0x81, n as u8]
+    } else {
+        alloc::vec![0x82, (n >> 8) as u8, n as u8]
+    }
+}
+
+fn der_tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+    let mut out = alloc::vec![tag];
+    out.extend_from_slice(&der_len(content.len()));
+    out.extend_from_slice(content);
+    out
+}
+
+fn der_integer(bytes: &[u8]) -> Vec<u8> {
+    let mut body = Vec::new();
+    if bytes.first().copied().unwrap_or(0) & 0x80 != 0 {
+        body.push(0);
+    }
+    body.extend_from_slice(bytes);
+    der_tlv(ASN1_INTEGER, &body)
+}
+
+fn der_oid(bytes: &[u8]) -> Vec<u8> {
+    der_tlv(ASN1_OID, bytes)
+}
+
+fn x509_name_cn(cn: &str) -> Vec<u8> {
+    let atv = der_tlv(
+        ASN1_SEQUENCE,
+        &[
+            der_oid(&[0x55, 0x04, 0x03]),
+            der_tlv(ASN1_UTF8_STRING, cn.as_bytes()),
+        ]
+        .concat(),
+    );
+    der_tlv(ASN1_SEQUENCE, &der_tlv(ASN1_SET, &atv))
+}
+
+fn alg_sha256_rsa() -> Vec<u8> {
+    der_tlv(
+        ASN1_SEQUENCE,
+        &[
+            der_oid(&[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B]),
+            der_tlv(ASN1_NULL, &[]),
+        ]
+        .concat(),
+    )
+}
+
+fn alg_rsa_encryption() -> Vec<u8> {
+    der_tlv(
+        ASN1_SEQUENCE,
+        &[
+            der_oid(&[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01]),
+            der_tlv(ASN1_NULL, &[]),
+        ]
+        .concat(),
+    )
+}
+
+/// 512-bit RSA used to sign the GATE_TLS13 x509 fixture (e = 65537).
+const GATE_X509_N: [u8; 64] = [
+    0xcb, 0xcc, 0x73, 0x7e, 0x9e, 0xe4, 0x65, 0xd6, 0x58, 0x09, 0x2b, 0x69, 0xcb, 0x02, 0x6f, 0xf6,
+    0xf0, 0x3e, 0x4f, 0x52, 0xa5, 0x3e, 0x16, 0x8c, 0xe8, 0x98, 0xfd, 0x9a, 0x1a, 0x0d, 0xa8, 0x16,
+    0x91, 0x97, 0x52, 0x6a, 0x15, 0x9a, 0xa3, 0x41, 0x87, 0x68, 0xd6, 0x30, 0x9b, 0xc3, 0xa8, 0x7d,
+    0xf2, 0xd2, 0xae, 0x27, 0x01, 0x06, 0x6a, 0xa1, 0x2c, 0xf0, 0x5d, 0x5f, 0x3d, 0x59, 0xf4, 0xed,
+];
+const GATE_X509_D: [u8; 64] = [
+    0x45, 0x22, 0x5e, 0x2b, 0x9e, 0x0b, 0x2c, 0xe0, 0xc1, 0x8c, 0x9a, 0xc5, 0x90, 0xb0, 0x8a, 0xfa,
+    0xe2, 0x14, 0xc1, 0x23, 0xf0, 0x1a, 0x57, 0xdc, 0x05, 0x2b, 0xa1, 0x1c, 0x1d, 0xaa, 0x74, 0x52,
+    0x57, 0xde, 0x9b, 0x17, 0x38, 0x40, 0x32, 0xec, 0x30, 0x28, 0x40, 0x19, 0xbf, 0x23, 0xaf, 0x78,
+    0x1f, 0xbf, 0xa5, 0xbe, 0xf1, 0x1b, 0xe2, 0x0e, 0x90, 0xd3, 0x3e, 0xac, 0xa7, 0x4a, 0x76, 0xa1,
+];
+
+fn build_self_signed_der() -> Vec<u8> {
+    let version = der_tlv(ASN1_CONTEXT_0, &der_integer(&[0x02]));
+    let serial = der_integer(&[0x01]);
+    let sigalg = alg_sha256_rsa();
+    let name = x509_name_cn("KnoxOS Test CA");
+    let validity = der_tlv(
+        ASN1_SEQUENCE,
+        &[
+            der_tlv(ASN1_UTC_TIME, b"000101000000Z"),
+            der_tlv(ASN1_UTC_TIME, b"491231235959Z"),
+        ]
+        .concat(),
+    );
+    let rsa_pub = der_tlv(
+        ASN1_SEQUENCE,
+        &[der_integer(&GATE_X509_N), der_integer(&[0x01, 0x00, 0x01])].concat(),
+    );
+    let mut spki_bits = alloc::vec![0u8];
+    spki_bits.extend_from_slice(&rsa_pub);
+    let spki = der_tlv(
+        ASN1_SEQUENCE,
+        &[alg_rsa_encryption(), der_tlv(ASN1_BIT_STRING, &spki_bits)].concat(),
+    );
+    let bc_seq = der_tlv(ASN1_SEQUENCE, &der_tlv(ASN1_BOOLEAN, &[0xFF]));
+    let ext = der_tlv(
+        ASN1_SEQUENCE,
+        &[
+            der_oid(&[0x55, 0x1D, 0x13]),
+            der_tlv(ASN1_BOOLEAN, &[0xFF]),
+            der_tlv(ASN1_OCTET_STRING, &bc_seq),
+        ]
+        .concat(),
+    );
+    let extensions = der_tlv(ASN1_CONTEXT_3, &der_tlv(ASN1_SEQUENCE, &ext));
+    let tbs = der_tlv(
+        ASN1_SEQUENCE,
+        &[
+            version,
+            serial,
+            sigalg.clone(),
+            name.clone(),
+            validity,
+            name,
+            spki,
+            extensions,
+        ]
+        .concat(),
+    );
+    let key = crate::crypto::RsaPrivateKey {
+        public: crate::crypto::RsaPublicKey {
+            n: GATE_X509_N.to_vec(),
+            e: 65537,
+            bits: 512,
+        },
+        d: GATE_X509_D.to_vec(),
+        p: Vec::new(),
+        q: Vec::new(),
+    };
+    let sig = crate::crypto::rsa_sign(&tbs, &key);
+    let mut sig_bits = alloc::vec![0u8];
+    sig_bits.extend_from_slice(&sig);
+    der_tlv(
+        ASN1_SEQUENCE,
+        &[tbs, sigalg, der_tlv(ASN1_BIT_STRING, &sig_bits)].concat(),
+    )
 }
 
 // ─── SHA-256 (minimal for TLS) ─────────────────────────────────────────
@@ -1352,10 +1527,11 @@ pub fn init() {
     serial_println!("[TLS]   Supported: TLS 1.2, TLS 1.3");
     serial_println!("[TLS]   Cipher suites: AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305");
     serial_println!("[TLS]   X.509 certificate parsing: ASN.1 DER + PEM + Base64");
-    serial_println!("[TLS]   Certificate chain verification: issuer/subject, CA, validity");
+    serial_println!("[TLS]   Certificate chain verification: issuer/subject, CA, validity, RSA");
     serial_println!("[TLS]   SHA-256 hash + HMAC-SHA256: implemented");
     let _ = hkdf_self_test();
     let _ = handshake_self_test();
+    let _ = x509_self_test();
 }
 
 /// HKDF-Extract (SHA-256): PRK = HMAC-Hash(salt, IKM). RFC 5869.
@@ -1476,6 +1652,50 @@ fn handshake_self_test() -> bool {
     serial_println!(
         "[TLS] {} (ClientHello+ServerHello, matching c hs traffic)",
         GATE_TLS13_HS_MARKER
+    );
+    true
+}
+
+pub const GATE_TLS13_X509_MARKER: &str = "GATE_TLS13 x509";
+
+fn x509_self_test() -> bool {
+    let der = build_self_signed_der();
+    let Some(cert) = X509Certificate::from_der(&der) else {
+        serial_println!("[TLS] GATE_TLS13 FAILED: x509 parse");
+        return false;
+    };
+    if !cert.is_self_signed() || !cert.is_ca {
+        serial_println!(
+            "[TLS] GATE_TLS13 FAILED: x509 name/ca subject={}",
+            cert.subject
+        );
+        return false;
+    }
+    let Some(key) = rsa_public_from_spki_bits(&cert.public_key) else {
+        serial_println!("[TLS] GATE_TLS13 FAILED: x509 spki");
+        return false;
+    };
+    if !crate::crypto::rsa_verify(&cert.tbs_raw, &cert.signature, &key) {
+        serial_println!("[TLS] GATE_TLS13 FAILED: x509 rsa verify");
+        return false;
+    }
+    let mut bad = cert.tbs_raw.clone();
+    if let Some(b) = bad.last_mut() {
+        *b ^= 0x01;
+    }
+    if crate::crypto::rsa_verify(&bad, &cert.signature, &key) {
+        serial_println!("[TLS] GATE_TLS13 FAILED: x509 tamper accepted");
+        return false;
+    }
+    let mut store = CertificateStore::new();
+    store.add_trusted_root(cert.clone());
+    if !store.verify_chain(&[cert]) {
+        serial_println!("[TLS] GATE_TLS13 FAILED: x509 chain");
+        return false;
+    }
+    serial_println!(
+        "[TLS] {} (DER parse + RSA PKCS#1 over TBS)",
+        GATE_TLS13_X509_MARKER
     );
     true
 }

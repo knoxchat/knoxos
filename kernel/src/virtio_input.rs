@@ -34,6 +34,9 @@ const ABS_Y: u16 = 0x01;
 const BTN_LEFT: u16 = 0x110;
 const BTN_RIGHT: u16 = 0x111;
 const BTN_MIDDLE: u16 = 0x112;
+const BTN_TOOL_PEN: u16 = 0x140;
+const BTN_TOOL_FINGER: u16 = 0x145;
+const BTN_TOUCH: u16 = 0x14a;
 
 // ── VirtIO PCI ──────────────────────────────────────────────────────
 const VIRTIO_PCI_QUEUE_ADDRESS: u16 = 8;
@@ -530,6 +533,7 @@ static REL_DY: AtomicI32 = AtomicI32::new(0);
 static ACCUM_WHEEL: AtomicI32 = AtomicI32::new(0);
 static BTN_STATE: AtomicU32 = AtomicU32::new(0);
 
+/// Sticky tablet axes (0..32767). -1 = never seen.
 static ABS_CURSOR_X: AtomicI32 = AtomicI32::new(-1);
 static ABS_CURSOR_Y: AtomicI32 = AtomicI32::new(-1);
 static HAS_ABS_EVENT: AtomicBool = AtomicBool::new(false);
@@ -537,6 +541,60 @@ static HAS_ABS_EVENT: AtomicBool = AtomicBool::new(false);
 const BTN_LEFT_BIT: u32 = 1;
 const BTN_RIGHT_BIT: u32 = 2;
 const BTN_MIDDLE_BIT: u32 = 4;
+
+fn apply_button(code: u16, pressed: bool) -> bool {
+    let bit = match code {
+        BTN_LEFT | BTN_TOUCH | BTN_TOOL_FINGER | BTN_TOOL_PEN => BTN_LEFT_BIT,
+        BTN_RIGHT => BTN_RIGHT_BIT,
+        BTN_MIDDLE => BTN_MIDDLE_BIT,
+        0x110..=0x117 => 1u32 << (code - 0x110),
+        0x140..=0x14f => BTN_LEFT_BIT,
+        _ => return false,
+    };
+    if pressed {
+        BTN_STATE.fetch_or(bit, Ordering::Relaxed);
+    } else {
+        BTN_STATE.fetch_and(!bit, Ordering::Relaxed);
+    }
+    true
+}
+
+fn pointer_xy() -> (i32, i32) {
+    let (sw, sh) = crate::gui::cached_screen_size();
+    let (mx, my) = {
+        let mouse = crate::gui::input::MOUSE.lock();
+        (mouse.x, mouse.y)
+    };
+    let abs_x = ABS_CURSOR_X.load(Ordering::Relaxed);
+    let abs_y = ABS_CURSOR_Y.load(Ordering::Relaxed);
+    let x = if abs_x >= 0 && sw > 1 {
+        ((abs_x as i64 * sw as i64) / 32768).min(sw as i64 - 1) as i32
+    } else {
+        mx
+    };
+    let y = if abs_y >= 0 && sh > 1 {
+        ((abs_y as i64 * sh as i64) / 32768).min(sh as i64 - 1) as i32
+    } else {
+        my
+    };
+    (x, y)
+}
+
+fn commit_pointer() {
+    let (x, y) = pointer_xy();
+    let wheel = ACCUM_WHEEL.swap(0, Ordering::Relaxed);
+    let btns = BTN_STATE.load(Ordering::Relaxed);
+    REL_DX.store(0, Ordering::Relaxed);
+    REL_DY.store(0, Ordering::Relaxed);
+    crate::gui::input::set_absolute_mouse(
+        x,
+        y,
+        btns & BTN_LEFT_BIT != 0,
+        btns & BTN_RIGHT_BIT != 0,
+        btns & BTN_MIDDLE_BIT != 0,
+        wheel.clamp(-127, 127) as i8,
+    );
+}
 
 fn dispatch_input_event(evt: VirtioInputEvent) {
     match evt.event_type {
@@ -565,70 +623,27 @@ fn dispatch_input_event(evt: VirtioInputEvent) {
         },
         EV_KEY => {
             let pressed = evt.value != 0;
-            match evt.code {
-                BTN_LEFT => {
-                    if pressed {
-                        BTN_STATE.fetch_or(BTN_LEFT_BIT, Ordering::Relaxed);
-                    } else {
-                        BTN_STATE.fetch_and(!BTN_LEFT_BIT, Ordering::Relaxed);
-                    }
+            if apply_button(evt.code, pressed) {
+                // Click without a move: QEMU often sends only KEY+SYN, or
+                // BTN_TOUCH instead of BTN_LEFT. Commit immediately so the
+                // compositor sees the press edge at the last tablet position.
+                commit_pointer();
+            } else if evt.code < 0x80 {
+                let sc = evt.code as u8;
+                if pressed {
+                    crate::task::keyboard::add_scancode(sc);
+                } else {
+                    crate::task::keyboard::add_scancode(0x80 | sc);
                 }
-                BTN_RIGHT => {
-                    if pressed {
-                        BTN_STATE.fetch_or(BTN_RIGHT_BIT, Ordering::Relaxed);
-                    } else {
-                        BTN_STATE.fetch_and(!BTN_RIGHT_BIT, Ordering::Relaxed);
-                    }
-                }
-                BTN_MIDDLE => {
-                    if pressed {
-                        BTN_STATE.fetch_or(BTN_MIDDLE_BIT, Ordering::Relaxed);
-                    } else {
-                        BTN_STATE.fetch_and(!BTN_MIDDLE_BIT, Ordering::Relaxed);
-                    }
-                }
-                code if code < 0x80 => {
-                    let sc = code as u8;
-                    if pressed {
-                        crate::task::keyboard::add_scancode(sc);
-                    } else {
-                        crate::task::keyboard::add_scancode(0x80 | sc);
-                    }
-                }
-                _ => {}
             }
         }
         EV_SYN => {
-            if HAS_ABS_EVENT.load(Ordering::Relaxed) {
-                let abs_x = ABS_CURSOR_X.swap(-1, Ordering::Relaxed);
-                let abs_y = ABS_CURSOR_Y.swap(-1, Ordering::Relaxed);
+            if HAS_ABS_EVENT.load(Ordering::Relaxed)
+                || ABS_CURSOR_X.load(Ordering::Relaxed) >= 0
+                || ABS_CURSOR_Y.load(Ordering::Relaxed) >= 0
+            {
                 HAS_ABS_EVENT.store(false, Ordering::Relaxed);
-
-                let wheel = ACCUM_WHEEL.swap(0, Ordering::Relaxed);
-                let btns = BTN_STATE.load(Ordering::Relaxed);
-                REL_DX.store(0, Ordering::Relaxed);
-                REL_DY.store(0, Ordering::Relaxed);
-
-                let (sw, sh) = crate::gui::cached_screen_size();
-                let x = if abs_x >= 0 && sw > 0 {
-                    ((abs_x as i64 * sw as i64) / 32768).min(sw as i64 - 1) as i32
-                } else {
-                    0
-                };
-                let y = if abs_y >= 0 && sh > 0 {
-                    ((abs_y as i64 * sh as i64) / 32768).min(sh as i64 - 1) as i32
-                } else {
-                    0
-                };
-
-                crate::gui::input::set_absolute_mouse(
-                    x,
-                    y,
-                    btns & BTN_LEFT_BIT != 0,
-                    btns & BTN_RIGHT_BIT != 0,
-                    btns & BTN_MIDDLE_BIT != 0,
-                    wheel.clamp(-127, 127) as i8,
-                );
+                commit_pointer();
             } else {
                 let dx = REL_DX.swap(0, Ordering::Relaxed);
                 let dy = REL_DY.swap(0, Ordering::Relaxed);

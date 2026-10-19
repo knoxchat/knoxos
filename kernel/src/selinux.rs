@@ -742,22 +742,24 @@ impl SelinuxPolicy {
             permissions: PERM_READ | PERM_GETATTR | PERM_OPEN,
         });
 
-        // unconfined_t has full access (like permissive domain)
-        for target in &type_names {
-            for class in [
-                ObjectClass::File,
-                ObjectClass::Dir,
-                ObjectClass::Process,
-                ObjectClass::Socket,
-                ObjectClass::Capability,
-            ] {
-                policy.te_rules.push(TeRule {
-                    rule_type: RuleType::Allow,
-                    source_type: String::from("unconfined_t"),
-                    target_type: String::from(*target),
-                    class,
-                    permissions: !0,
-                });
+        // unconfined_t / kernel_t have full access (like a permissive domain)
+        for source in ["unconfined_t", "kernel_t"] {
+            for target in &type_names {
+                for class in [
+                    ObjectClass::File,
+                    ObjectClass::Dir,
+                    ObjectClass::Process,
+                    ObjectClass::Socket,
+                    ObjectClass::Capability,
+                ] {
+                    policy.te_rules.push(TeRule {
+                        rule_type: RuleType::Allow,
+                        source_type: String::from(source),
+                        target_type: String::from(*target),
+                        class,
+                        permissions: !0,
+                    });
+                }
             }
         }
 
@@ -879,6 +881,7 @@ impl SelinuxPolicy {
             ("/sys", "system_u:object_r:sysfs_t:s0"),
             ("/dev", "system_u:object_r:device_t:s0"),
             ("/dev/pts", "system_u:object_r:devpts_t:s0"),
+            ("/run/selinux_ok", "system_u:object_r:container_t:s0"),
         ];
 
         for (path, ctx_str) in &default_file_contexts {
@@ -912,6 +915,47 @@ impl SelinuxPolicy {
 }
 
 // ─── Public API ─────────────────────────────────────────────────────
+
+fn path_matches_context(pattern: &str, path: &str) -> bool {
+    if pattern == "/" {
+        return path.starts_with('/');
+    }
+    path == pattern
+        || (path.starts_with(pattern) && path.as_bytes().get(pattern.len()) == Some(&b'/'))
+}
+
+fn lookup_file_context(policy: &SelinuxPolicy, path: &str) -> SecurityContext {
+    let mut best: Option<&FileContext> = None;
+    let mut best_len = 0usize;
+    for fc in &policy.file_contexts {
+        if path_matches_context(&fc.path_regex, path) && fc.path_regex.len() >= best_len {
+            best_len = fc.path_regex.len();
+            best = Some(fc);
+        }
+    }
+    best.map(|fc| fc.context.clone())
+        .unwrap_or_else(|| SecurityContext::new("system_u", "object_r", "default_t", "s0"))
+}
+
+/// VFS write check: Enforcing denies when the TE vector does not allow it.
+pub fn check_vfs_write(pid: u64, path: &str) -> bool {
+    let mut state = SELINUX.lock();
+    if state.mode == SelinuxMode::Disabled {
+        return true;
+    }
+    let source = state
+        .process_contexts
+        .get(&(pid as u32))
+        .cloned()
+        .unwrap_or_else(|| SecurityContext::new("system_u", "system_r", "unconfined_t", "s0"));
+    let target = lookup_file_context(&state.policy, path);
+    state.check_access(
+        &source,
+        &target,
+        ObjectClass::File,
+        PERM_WRITE | PERM_CREATE | PERM_OPEN,
+    )
+}
 
 /// Check if SELinux would allow an access
 pub fn check_access(
@@ -1029,4 +1073,45 @@ pub fn init() {
         num_contexts,
         num_bools
     );
+    drop(state);
+    let _ = mac_self_test();
+}
+
+pub const GATE_SELINUX_MARKER: &str = "GATE_SELINUX deny";
+
+const GATE_SELINUX_PID: u32 = 0x0000_534C;
+const GATE_SELINUX_ALLOW: &str = "/run/selinux_ok";
+const GATE_SELINUX_DENY: &str = "/etc/knoxos/selinux_denied";
+
+/// `container_t` may write a `container_t` path and is denied `/etc` in Enforcing.
+pub fn mac_self_test() -> bool {
+    if setcon(GATE_SELINUX_PID, "system_u:system_r:container_t:s0").is_err() {
+        serial_println!("[SELinux] GATE_SELINUX FAILED: setcon");
+        return false;
+    }
+    let _ = crate::vfs::write_file_dispatch("/etc/knoxos/.keep", b"x");
+    setenforce(SelinuxMode::Enforcing);
+    let allowed = crate::landlock::with_check_pid(GATE_SELINUX_PID as u64, || {
+        crate::vfs::write_file_dispatch(GATE_SELINUX_ALLOW, b"ok")
+    });
+    let denied = crate::landlock::with_check_pid(GATE_SELINUX_PID as u64, || {
+        crate::vfs::write_file_dispatch(GATE_SELINUX_DENY, b"no")
+    });
+    setenforce(SelinuxMode::Permissive);
+    let _ = crate::vfs::remove_dispatch(GATE_SELINUX_ALLOW);
+    if crate::vfs::read_file_dispatch(GATE_SELINUX_DENY).is_some() {
+        let _ = crate::vfs::remove_dispatch(GATE_SELINUX_DENY);
+        serial_println!("[SELinux] GATE_SELINUX FAILED: denied write still landed");
+        return false;
+    }
+    if !allowed || denied {
+        serial_println!(
+            "[SELinux] GATE_SELINUX FAILED: vfs allow={} deny_wrote={}",
+            allowed,
+            denied
+        );
+        return false;
+    }
+    serial_println!("[SELinux] {}", GATE_SELINUX_MARKER);
+    true
 }

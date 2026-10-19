@@ -125,5 +125,17 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 114. **AI** — scaled-dot-product attention + KV append (`GATE_AI attn`); assistant summarize (`GATE_AI chat`).
 115. **NFS** — COMPOUND PUTROOTFH+LOOKUP+READ (`GATE_NFS compound`).
 116. **Broadcom / Thunderbolt** — `BRCMFW` TLV + scan (`GATE_BRCM fw`); TB route hop (`GATE_TB hop`).
+117. **X.509** — DER parse + RSA PKCS#1 v1.5 SHA-256 over TBS (`GATE_TLS13 x509`).
+118. **dpkg** — ar + tar install of a fixture `.deb` (`GATE_DPKG deb`).
+119. **TPM PCR** — software SHA-256 extend (`GATE_TPM pcr`); IMA extends PCR 10.
+120. **BPE vocab** — encode/decode `"the"` (`GATE_AI vocab`).
+121. **CPIO newc** — initramfs payload round-trip (`GATE_CPIO newc`).
+122. **Title `'i'`** — UiBold falls back so `"Terminal"` keeps the stem (`GATE_FONT title`).
+123. **Terminal SHM paint** — first frame glyphs, scaled into the client area (`GATE_TERM shm paint`).
+124. **SELinux** — Enforcing TE on VFS: `container_t` writes a `container_t` path and is denied `/etc` (`GATE_SELINUX deny`). Default remains Permissive.
+125. **XHCI Enable Slot** — scratchpad + Command Completion cc=1 (`GATE_USB xhci slot`). GET_DESCRIPTOR still has a timeout fallback.
+126. **NTP** — Server-mode fixture applies a 1000 ms offset (`GATE_NTP apply`).
+127. **Bluetooth HCI** — virtual adapter HCI Reset Command Complete (`GATE_BT hci`).
+128. **dm-verity** — SHA-256 Merkle leaf equals root; tamper is rejected (`GATE_VERITY root`).
 
-Integration: `./tests/run_integration.sh` **380/380** on QEMU (2026-10-18).
+Integration: `./tests/run_integration.sh` **392/392** on QEMU (2026-10-19).

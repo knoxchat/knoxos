@@ -1150,6 +1150,9 @@ pub fn write_file_dispatch(path: &str, data: &[u8]) -> bool {
     ) {
         return false;
     }
+    if !crate::selinux::check_vfs_write(pid, path) {
+        return false;
+    }
     #[cfg(feature = "fs-ext4")]
     if let Some((fs_idx, rel_path)) = crate::mount::find_ext4_fs_for_path(path) {
         match crate::ext4::write_file(fs_idx, &rel_path, data) {

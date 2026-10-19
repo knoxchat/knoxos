@@ -94,6 +94,22 @@ fn test_landlock_denies_vfs_write() {
 }
 
 #[test_case]
+fn test_selinux_denies_vfs_write() {
+    assert!(
+        crate::selinux::mac_self_test(),
+        "SELinux Enforcing must deny container_t writes to etc_t"
+    );
+}
+
+#[test_case]
+fn test_dm_verity_merkle_root() {
+    assert!(
+        crate::dm_verity::verity_self_test(),
+        "dm-verity must accept a matching leaf and reject a tampered block"
+    );
+}
+
+#[test_case]
 fn test_uts_namespace_isolation() {
     assert!(
         crate::namespaces::uts_isolation_self_test(),

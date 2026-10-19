@@ -276,10 +276,49 @@ pub fn init() {
     for &(a, b) in common_merges {
         tok.add_merge(a, b);
     }
+    for c in b'a'..=b'z' {
+        let s = alloc::string::String::from(core::str::from_utf8(&[c]).unwrap_or("a"));
+        if tok.token_id(&s).is_none() {
+            let id = tok.vocab_size;
+            tok.add_token(id, &s, 0.0, false);
+            tok.vocab_size += 1;
+        }
+    }
 
     drop(tok);
     serial_println!(
         "[KnoxOS] BPE Tokenizer initialized (vocab_size={})",
         TOKENIZER.lock().vocab_size
     );
+    let _ = vocab_self_test();
+}
+
+pub const GATE_AI_VOCAB_MARKER: &str = "GATE_AI vocab";
+
+fn vocab_self_test() -> bool {
+    let tok = TOKENIZER.lock();
+    let ids = tok.encode("the");
+    let decoded = tok.decode(&ids);
+    let the_id = tok.token_id("the");
+    let ok = !ids.is_empty()
+        && ids.iter().all(|&id| id != tok.unk_id)
+        && decoded == "the"
+        && the_id.is_some()
+        && ids == [the_id.unwrap()];
+    if ok {
+        serial_println!(
+            "[AI] {} (BPE \"the\" id={})",
+            GATE_AI_VOCAB_MARKER,
+            the_id.unwrap()
+        );
+        true
+    } else {
+        serial_println!(
+            "[AI] GATE_AI FAILED vocab ids={:?} decoded={:?} the={:?}",
+            ids,
+            decoded,
+            the_id
+        );
+        false
+    }
 }

@@ -2,7 +2,7 @@
 
 # 9. Security & Cryptography
 
-**Grade: Wired (96%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
+**Grade: Wired (97%)** · `crypto.rs`, `tls.rs`, `seccomp.rs`, `random.rs`, `ssp.rs`
 
 ### Wired
 - [x] AES-128/256 block + CBC (software)
@@ -19,16 +19,17 @@
 - [x] Landlock deny-by-default on VFS open/write (K4)
 
 ### Stub / unused
-- [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 HKDF (`GATE_TLS13 hkdf`) plus ClientHello/ServerHello (`GATE_TLS13 hs`). X.509 chain later.
+- [x] AES-GCM, Poly1305 — NIST AES-128-GCM + RFC 8439 Poly1305 (`GATE_AESGCM kat`, `GATE_POLY1305 kat`). TLS 1.3 HKDF (`GATE_TLS13 hkdf`) plus ClientHello/ServerHello (`GATE_TLS13 hs`). DER + RSA PKCS#1 over TBS (`GATE_TLS13 x509`).
 - [x] X25519 / Ed25519 — RFC 7748 Alice public + RFC 8032 TEST 1 (`GATE_X25519 kat`, `GATE_ED25519 kat`)
 - [x] RSA / ECDSA-P256 — PKCS#1 v1.5 SHA-256 + RFC 6979 P-256 (`GATE_RSA kat`, `GATE_ECDSA kat`)
-- [x] **Landlock** hooked on VFS (`GATE_K4 landlock vfs`). SELinux / AppArmor still unused.
+- [x] **Landlock** hooked on VFS (`GATE_K4 landlock vfs`). SELinux Enforcing TE on VFS writes (`GATE_SELINUX deny`); default stays Permissive. AppArmor still unused.
 - [x] Kernel lockdown, secure wipe on free, IMA — unsigned `insert_module` denied (`GATE_LOCKDOWN module`); freed buddy frames are zeros (`GATE_WIPE free`); exec SHA-256 measure (`GATE_IMA exec`)
+- [x] dm-verity — SHA-256 Merkle leaf equals root; tamper rejected (`GATE_VERITY root`)
 
 ### Perfect-OS next steps
 1. ~~Replace xorshift userspace RNG with ChaCha20 from a real entropy pool (RDRAND + jitter + timings).~~ **E2 done.**
 2. ~~W^X + NX on user maps the day Ring 3 boots.~~ **E1 done.**
 3. ~~Deny-by-default seccomp for desktop apps; capabilities on `execve`.~~ Seccomp EPERM + CapNetBindService live; desktop default-deny still later.
-4. Landlock on VFS is live (K4). MAC labels on disk still later.
+4. Landlock on VFS is live (K4). SELinux TE on VFS is live (`GATE_SELINUX deny`). MAC labels on disk still later.
 
 ---

@@ -43,10 +43,10 @@ Screenshot evidence matches this: guest compositor is healthy, host cursor is hi
 
 ### P2 — follow-ups (not blockers for click)
 
-- [ ] **P2.1** Title-bar glyph gap (“Term nal”) — thin `i` clipping / icon overlap. Font/layout, not input.
+- [x] **P2.1** Title-bar glyph gap (“Term nal”) — thin `i` clipping / icon overlap. Font/layout, not input. (`GATE_FONT title`)
 - [x] **P2.2** If VirtIO-GPU cursorq is live but the 64×64 plane is empty, force software cursor so the pointer is visible on a dark wallpaper.
-- [ ] **P2.3** Finish XHCI slot enable / interrupt-IN so `usb-tablet` URBs complete without virtio. Enumeration still has timeout fallbacks.
-- [ ] **P2.4** Ring 3 PTY client must paint SHM on first frame (brown blob in the Terminal client area is uncommitted SHM).
+- [x] **P2.3** Enable Slot Command Completion cc=1 plus scratchpad buffers (`GATE_USB xhci slot`). Interrupt-IN URB submit exists. GET_DESCRIPTOR still has a timeout fallback.
+- [x] **P2.4** Ring 3 PTY client must paint SHM on first frame (brown blob in the Terminal client area is uncommitted SHM). (`GATE_TERM shm paint`)
 
 ## Done when
 

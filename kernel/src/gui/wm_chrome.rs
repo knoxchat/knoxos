@@ -433,7 +433,9 @@ impl Window {
                 t
             }
         };
-        // Use font_engine for high-quality scalable title text
+        // Clip to the title bar so thin glyphs cannot be eaten by chrome
+        // buttons or the content fill that follows.
+        fb.push_clip(self.title_bar_rect());
         font_engine::draw_ui_bold(
             fb,
             title_x,
@@ -442,6 +444,7 @@ impl Window {
             13,
             title_text_color,
         );
+        fb.pop_clip();
 
         // ── Content area ──
         let content = self.content_rect();

@@ -448,7 +448,6 @@ pub mod thermal;
 #[cfg(feature = "stub-drivers")]
 pub mod ai_suggest;
 pub mod inference_api;
-#[cfg(feature = "stub-drivers")]
 pub mod tokenizer;
 // Device drivers
 #[cfg(feature = "stub-drivers")]
@@ -601,7 +600,6 @@ pub mod ime;
 #[cfg(feature = "stub-drivers")]
 pub mod keyboard_layout;
 // Security (additional)
-#[cfg(feature = "stub-drivers")]
 pub mod dm_verity;
 #[cfg(feature = "stub-drivers")]
 pub mod firejail;

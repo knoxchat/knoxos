@@ -299,4 +299,69 @@ pub fn read_file(path: &str) -> Option<Vec<u8>> {
 /// Initialize CPIO/initramfs subsystem
 pub fn init() {
     serial_println!("[CPIO] Initramfs subsystem initialized");
+    let _ = newc_self_test();
+}
+
+pub const GATE_CPIO_MARKER: &str = "GATE_CPIO newc";
+
+fn hex8(v: u32) -> [u8; 8] {
+    let mut out = [b'0'; 8];
+    for i in 0..8 {
+        let nibble = ((v >> (28 - i * 4)) & 0xF) as u8;
+        out[i] = if nibble < 10 {
+            b'0' + nibble
+        } else {
+            b'a' + (nibble - 10)
+        };
+    }
+    out
+}
+
+fn append_newc(buf: &mut Vec<u8>, name: &str, mode: u32, data: &[u8]) {
+    let namesize = name.len() + 1;
+    buf.extend_from_slice(CPIO_MAGIC);
+    buf.extend_from_slice(&hex8(1)); // ino
+    buf.extend_from_slice(&hex8(mode));
+    buf.extend_from_slice(&hex8(0)); // uid
+    buf.extend_from_slice(&hex8(0)); // gid
+    buf.extend_from_slice(&hex8(1)); // nlink
+    buf.extend_from_slice(&hex8(0)); // mtime
+    buf.extend_from_slice(&hex8(data.len() as u32));
+    buf.extend_from_slice(&hex8(0)); // devmajor
+    buf.extend_from_slice(&hex8(0)); // devminor
+    buf.extend_from_slice(&hex8(0)); // rdevmajor
+    buf.extend_from_slice(&hex8(0)); // rdevminor
+    buf.extend_from_slice(&hex8(namesize as u32));
+    buf.extend_from_slice(&hex8(0)); // check
+    buf.extend_from_slice(name.as_bytes());
+    buf.push(0);
+    while buf.len() % 4 != 0 {
+        buf.push(0);
+    }
+    buf.extend_from_slice(data);
+    while buf.len() % 4 != 0 {
+        buf.push(0);
+    }
+}
+
+fn newc_self_test() -> bool {
+    let payload = b"knoxos-cpio\n";
+    let mut archive = Vec::new();
+    append_newc(&mut archive, "init", S_IFREG | 0o755, payload);
+    append_newc(&mut archive, "TRAILER!!!", 0, &[]);
+    let mut ramfs = Initramfs::new();
+    ramfs.load(&archive);
+    let got = ramfs.read_file("init");
+    let ok = ramfs.total_files == 1 && got == Some(&payload[..]);
+    if ok {
+        serial_println!("[CPIO] {} (init payload round-trip)", GATE_CPIO_MARKER);
+        true
+    } else {
+        serial_println!(
+            "[CPIO] GATE_CPIO FAILED files={} got={:?}",
+            ramfs.total_files,
+            got.map(|d| d.len())
+        );
+        false
+    }
 }

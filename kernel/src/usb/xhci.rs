@@ -427,6 +427,7 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
     let cap_length: u8;
     let hci_version: u16;
     let hcs_params1: u32;
+    let hcs_params2: u32;
     let hcc_params1: u32;
     let db_offset: u32;
     let rts_offset: u32;
@@ -437,6 +438,7 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
         cap_length = (cap0 & 0xFF) as u8;
         hci_version = ((cap0 >> 16) & 0xFFFF) as u16;
         hcs_params1 = xhci_read32(mmio_base, 0x04);
+        hcs_params2 = xhci_read32(mmio_base, 0x08);
         hcc_params1 = xhci_read32(mmio_base, 0x10);
         db_offset = xhci_read32(mmio_base, 0x14);
         rts_offset = xhci_read32(mmio_base, 0x18);
@@ -540,6 +542,31 @@ pub fn init_controller(bus: u8, dev: u8, func: u8, bar0: u32) -> bool {
         dcbaa_ptr,
         max_slots
     );
+
+    // Scratchpad buffers live in DCBAA[0] when HCSPARAMS2 reports any.
+    let scratch_lo = (hcs_params2 >> 21) & 0x1F;
+    let scratch_hi = (hcs_params2 >> 27) & 0x1F;
+    let scratch_bufs = ((scratch_hi << 5) | scratch_lo) as usize;
+    if scratch_bufs > 0 {
+        let (array_phys, _) = alloc_ring_buffer((scratch_bufs * 8).max(4096));
+        for i in 0..scratch_bufs {
+            let (page_phys, _) = alloc_ring_buffer(4096);
+            // SAFETY: scratchpad array is a DMA page we own.
+            unsafe {
+                let slot = (dma_virt(array_phys) as *mut u64).add(i);
+                *slot = page_phys;
+            }
+        }
+        // SAFETY: DCBAA[0] is the scratchpad array pointer.
+        unsafe {
+            *(dma_virt(dcbaa_ptr) as *mut u64) = array_phys;
+        }
+        serial_println!(
+            "[XHCI] Scratchpad {} buffers, array phys={:#x}",
+            scratch_bufs,
+            array_phys
+        );
+    }
 
     // ─── Allocate Command Ring ───────────────────────────────────
     let cmd_ring_bytes = CMD_RING_SIZE * TRB_SIZE;

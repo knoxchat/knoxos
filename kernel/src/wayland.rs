@@ -1262,6 +1262,7 @@ const GATE_F12_MAGIC: [u8; 4] = [0x26, 0x16, 0x12, 0xFF];
 const GATE_TERM_MAGIC: [u8; 4] = [0x0D, 0x1A, 0x2B, 0xFF];
 pub const GATE_TERM_MARKER: &str = "GATE_TERM pty userspace";
 pub const GATE_TERM_IO_MARKER: &str = "GATE_TERM pty interactive";
+pub const GATE_TERM_PAINT_MARKER: &str = "GATE_TERM shm paint";
 
 fn shm_title_for_magic(pixels: &[u8]) -> &'static str {
     let Some(head) = pixels.get(0..4) else {
@@ -1306,6 +1307,58 @@ fn is_known_shm_magic(p: &[u8]) -> bool {
         || p == GATE_TERM_MAGIC
 }
 
+/// 5×7 glyphs for the first PTY frame so the Terminal client area is not a
+/// 64×64 brown fill (`GATE_TERM shm paint`). Pixel 0 stays the magic.
+fn paint_term_first_frame(pixels: &mut [u8]) -> bool {
+    if pixels.get(0..4) != Some(&GATE_TERM_MAGIC[..]) {
+        return false;
+    }
+    const GLYPH_O: [u8; 7] = [
+        0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+    ];
+    const GLYPH_K: [u8; 7] = [
+        0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+    ];
+    let stamp = |pixels: &mut [u8], origin_x: usize, glyph: &[u8; 7]| {
+        for (row, bits) in glyph.iter().enumerate() {
+            for col in 0..5 {
+                if bits & (0x10 >> col) == 0 {
+                    continue;
+                }
+                for dy in 0..2 {
+                    for dx in 0..2 {
+                        let x = origin_x + col * 2 + dx;
+                        let y = 10 + row * 2 + dy;
+                        if x == 0 && y == 0 {
+                            continue;
+                        }
+                        if x >= GATE_F_WIDTH as usize || y >= GATE_F_HEIGHT as usize {
+                            continue;
+                        }
+                        let off = (y * GATE_F_WIDTH as usize + x) * 4;
+                        if off + 3 < pixels.len() {
+                            pixels[off] = 0xEE;
+                            pixels[off + 1] = 0xEE;
+                            pixels[off + 2] = 0xF2;
+                            pixels[off + 3] = 0xFF;
+                        }
+                    }
+                }
+            }
+        }
+    };
+    stamp(pixels, 8, &GLYPH_O);
+    stamp(pixels, 22, &GLYPH_K);
+    let painted = pixels.chunks(4).skip(1).any(|p| p != GATE_TERM_MAGIC);
+    if painted {
+        serial_println!(
+            "[WL] {} (first-frame glyphs on 64x64 SHM)",
+            GATE_TERM_PAINT_MARKER
+        );
+    }
+    painted
+}
+
 /// Present a Ring 3 SHM buffer as a compositor surface + desktop window.
 ///
 /// `vaddr` is the client’s mmap’d 64×64 BGRA buffer. Pixels are copied into a
@@ -1316,6 +1369,7 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     let len = (GATE_F_WIDTH * GATE_F_HEIGHT * 4) as usize;
     let mut pixels = vec![0u8; len];
     crate::vmm::read_user_memory(pid, vaddr, &mut pixels);
+    let term_painted = paint_term_first_frame(&mut pixels);
 
     let mut comp = COMPOSITOR.lock();
     let pool = comp.create_shm_pool(-1, len, pid);

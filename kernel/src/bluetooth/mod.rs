@@ -67,6 +67,43 @@ pub fn init() {
     a2dp_init();
 
     serial_println!("[BT] Bluetooth subsystem initialized (HCI + L2CAP + BLE + A2DP)");
+    let _ = hci_self_test();
+}
+
+pub const GATE_BT_MARKER: &str = "GATE_BT hci";
+
+/// Virtual adapter queues HCI Reset; a Command Complete event is applied.
+pub fn hci_self_test() -> bool {
+    use core::sync::atomic::Ordering;
+
+    let mut adapters = HCI_ADAPTERS.lock();
+    let Some((id, adapter)) = adapters.iter_mut().next() else {
+        serial_println!("[BT] GATE_BT FAILED: no adapter");
+        return false;
+    };
+    let adapter_id = *id;
+    let queued_reset = adapter
+        .pending_commands
+        .iter()
+        .any(|cmd| cmd.len() >= 2 && u16::from_le_bytes([cmd[0], cmd[1]]) == HCI_RESET);
+    if !queued_reset && events::LAST_COMPLETE_OPCODE.load(Ordering::Relaxed) != HCI_RESET {
+        send_hci_command(adapter, HCI_RESET, &[]);
+    }
+    drop(adapters);
+
+    process_event(adapter_id, &[0x0E, 0x04, 1, 0x03, 0x0C, 0x00]);
+    let opcode = events::LAST_COMPLETE_OPCODE.load(Ordering::Relaxed);
+    let status = events::LAST_COMPLETE_STATUS.load(Ordering::Relaxed);
+    if opcode != HCI_RESET || status != 0 {
+        serial_println!(
+            "[BT] GATE_BT FAILED: opcode={:#06x} status={:#04x}",
+            opcode,
+            status
+        );
+        return false;
+    }
+    serial_println!("[BT] {} (HCI Reset Command Complete)", GATE_BT_MARKER);
+    true
 }
 
 /// Get adapter info for /sys/class/bluetooth

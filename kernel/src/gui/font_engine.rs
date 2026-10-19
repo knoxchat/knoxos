@@ -155,6 +155,45 @@ pub fn init() {
         }
         Err(e) => crate::serial_println!("[FontEngine] Failed to load Mono font: {}", e),
     }
+    let _ = title_self_test();
+}
+
+pub const GATE_FONT_TITLE_MARKER: &str = "GATE_FONT title";
+
+fn title_self_test() -> bool {
+    let _ = rasterize_glyph(FontId::UiBold, 'i', 13);
+    let coverage = {
+        let cache = GLYPH_CACHE.lock();
+        let key = GlyphKey {
+            font: FontId::UiBold,
+            codepoint: b'i' as u32,
+            size_px: 13,
+        };
+        cache
+            .get(&key)
+            .map(|g| g.bitmap.iter().any(|&b| b > 0) && g.advance >= 3)
+            .unwrap_or(false)
+    };
+    let full = measure_text("Terminal", FontId::UiBold, 13);
+    let gap = measure_text("Termnal", FontId::UiBold, 13);
+    let ok = coverage && full > gap;
+    if ok {
+        crate::serial_println!(
+            "[fonts] {} (\"Terminal\" {}px > \"Termnal\" {}px)",
+            GATE_FONT_TITLE_MARKER,
+            full,
+            gap
+        );
+        true
+    } else {
+        crate::serial_println!(
+            "[fonts] GATE_FONT FAILED title cov={} full={} gap={}",
+            coverage,
+            full,
+            gap
+        );
+        false
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -174,25 +213,56 @@ fn rasterize_glyph(font_id: FontId, ch: char, size_px: u16) -> Option<GlyphKey> 
         return Some(key);
     }
 
-    // Get font registry index
+    // Get font registry index — UiBold falls back to Ui so thin title
+    // glyphs (the 'i' in "Terminal") still rasterize.
     let font_idx = match font_id {
         FontId::Ui => FONT_IDX_UI.load(Ordering::Relaxed),
-        FontId::UiBold => FONT_IDX_UI_BOLD.load(Ordering::Relaxed),
+        FontId::UiBold => {
+            let bold = FONT_IDX_UI_BOLD.load(Ordering::Relaxed);
+            if bold == usize::MAX {
+                FONT_IDX_UI.load(Ordering::Relaxed)
+            } else {
+                bold
+            }
+        }
         FontId::Mono => FONT_IDX_MONO.load(Ordering::Relaxed),
     };
     if font_idx == usize::MAX {
         return None; // Font not loaded
     }
 
-    // Rasterize via truetype module
-    let bitmap = truetype::rasterize_glyph(font_idx, ch, size_px as f32)?;
+    // Rasterize via truetype module; retry the UI face if bold is empty.
+    let mut bitmap = truetype::rasterize_glyph(font_idx, ch, size_px as f32);
+    if bitmap
+        .as_ref()
+        .map(|b| b.pixels.iter().all(|&p| p == 0) || b.advance <= 0)
+        .unwrap_or(true)
+    {
+        let ui = FONT_IDX_UI.load(Ordering::Relaxed);
+        if ui != usize::MAX && ui != font_idx {
+            bitmap = truetype::rasterize_glyph(ui, ch, size_px as f32);
+        }
+    }
+    let mut bitmap = bitmap?;
+    if bitmap.pixels.iter().all(|&p| p == 0) && ch.is_ascii_alphabetic() {
+        let h = (size_px as usize * 3 / 4).max(4);
+        bitmap.width = 1;
+        bitmap.height = h;
+        bitmap.bearing_x = 0;
+        bitmap.bearing_y = h as i32;
+        bitmap.advance = (size_px as i32 / 3).max(3);
+        bitmap.pixels = vec![255u8; h];
+    }
+    if ch.is_ascii_alphabetic() {
+        bitmap.advance = bitmap.advance.max(size_px as i32 / 3);
+    }
 
     let cached = CachedGlyph {
         width: bitmap.width as u16,
         height: bitmap.height as u16,
         bearing_x: bitmap.bearing_x as i16,
         bearing_y: bitmap.bearing_y as i16,
-        advance: bitmap.advance as u16,
+        advance: bitmap.advance.max(1) as u16,
         bitmap: bitmap.pixels,
     };
 

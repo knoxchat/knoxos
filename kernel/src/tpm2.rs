@@ -317,6 +317,61 @@ pub fn request_locality_tis(tis: &mut TisFifo, locality: u8) -> Result<(), &'sta
     Ok(())
 }
 
+/// Software SHA-256 PCR bank (stock QEMU has no TIS at 0xFED4_0000).
+static PCR_SHA256: Mutex<[[u8; 32]; 24]> = Mutex::new([[0u8; 32]; 24]);
+
+/// TPM2-style PCR extend: PCR = SHA-256(PCR || digest).
+pub fn pcr_extend_sha256(index: u32, digest: &[u8; 32]) -> Result<[u8; 32], &'static str> {
+    if index > 23 {
+        return Err("PCR index out of range");
+    }
+    let mut banks = PCR_SHA256.lock();
+    let mut buf = [0u8; 64];
+    buf[..32].copy_from_slice(&banks[index as usize]);
+    buf[32..].copy_from_slice(digest);
+    let next = crate::crypto::sha256(&buf);
+    banks[index as usize] = next;
+    Ok(next)
+}
+
+pub fn pcr_read_sha256(index: u32) -> Option<[u8; 32]> {
+    if index > 23 {
+        return None;
+    }
+    Some(PCR_SHA256.lock()[index as usize])
+}
+
+pub const GATE_TPM_PCR_MARKER: &str = "GATE_TPM pcr";
+
+fn pcr_self_test() -> bool {
+    let d1 = [0x11u8; 32];
+    let d2 = [0x22u8; 32];
+    let Ok(first) = pcr_extend_sha256(10, &d1) else {
+        serial_println!("[TPM2] GATE_TPM FAILED: pcr extend");
+        return false;
+    };
+    let mut cat = [0u8; 64];
+    cat[32..].copy_from_slice(&d1);
+    let expect1 = crate::crypto::sha256(&cat);
+    if first != expect1 || pcr_read_sha256(10) != Some(expect1) {
+        serial_println!("[TPM2] GATE_TPM FAILED: pcr first");
+        return false;
+    }
+    let Ok(second) = pcr_extend_sha256(10, &d2) else {
+        serial_println!("[TPM2] GATE_TPM FAILED: pcr extend2");
+        return false;
+    };
+    cat[..32].copy_from_slice(&expect1);
+    cat[32..].copy_from_slice(&d2);
+    let expect2 = crate::crypto::sha256(&cat);
+    if second != expect2 {
+        serial_println!("[TPM2] GATE_TPM FAILED: pcr second");
+        return false;
+    }
+    serial_println!("[TPM2] {} (PCR10 SHA-256 extend)", GATE_TPM_PCR_MARKER);
+    true
+}
+
 pub const GATE_TPM_MARKER: &str = "GATE_TPM tis";
 
 fn tis_self_test() -> bool {
@@ -344,6 +399,7 @@ fn tis_self_test() -> bool {
 
 pub fn init() {
     let _ = tis_self_test();
+    let _ = pcr_self_test();
     // QEMU has no TIS at 0xFED4_0000 unless `-tpmdev` is passed; do not
     // poke that hole (it is not in the mapped physical window).
     serial_println!("[TPM2] Hardware TIS probe skipped (no mapped MMIO)");

@@ -111,3 +111,11 @@ fn test_dns_tcp_if_nic() {
         "DNS response plus TCP connect/retransmit must succeed"
     );
 }
+
+#[test_case]
+fn test_ntp_applies_offset() {
+    assert!(
+        crate::ntp::apply_self_test(),
+        "NTP Server-mode fixture must apply a 1000ms clock offset"
+    );
+}

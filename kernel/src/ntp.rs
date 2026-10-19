@@ -319,6 +319,43 @@ pub fn init() {
 
     NTP_ENABLED.store(true, Ordering::Relaxed);
     serial_println!("[KnoxOS] NTP client initialized (3 servers)");
+    let _ = apply_self_test();
+}
+
+pub const GATE_NTP_MARKER: &str = "GATE_NTP apply";
+
+/// Parse a fixture Server-mode packet and apply the RFC 5905 offset.
+pub fn apply_self_test() -> bool {
+    let server_ts = NtpTimestamp {
+        seconds: 2,
+        fraction: 0,
+    };
+    let mut pkt = NtpPacket::new_request();
+    pkt.li_vn_mode = 0b00_100_100; // LI=0, VN=4, Mode=4 (server)
+    pkt.stratum = 2;
+    pkt.recv_timestamp = server_ts;
+    pkt.xmit_timestamp = server_ts;
+    let bytes = pkt.to_bytes();
+    let Some(parsed) = NtpPacket::from_bytes(&bytes) else {
+        serial_println!("[NTP] GATE_NTP FAILED: parse");
+        return false;
+    };
+    if parsed.mode() != 4 || parsed.stratum != 2 {
+        serial_println!("[NTP] GATE_NTP FAILED: mode/stratum");
+        return false;
+    }
+    NTP_CLIENT.lock().process_response(&parsed, 1000, 1000);
+    // offset = ((2000-1000)+(2000-1000))/2 = 1000
+    if clock_offset_ms() != 1000 || !is_synced() {
+        serial_println!(
+            "[NTP] GATE_NTP FAILED: offset={} synced={}",
+            clock_offset_ms(),
+            is_synced()
+        );
+        return false;
+    }
+    serial_println!("[NTP] {} (offset=1000ms)", GATE_NTP_MARKER);
+    true
 }
 
 // ═══════════════════════════════════════════════════════════════════════

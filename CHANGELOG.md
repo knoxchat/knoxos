@@ -2,8 +2,21 @@
 
 ## Unreleased
 
+- **SELinux** — Enforcing TE on VFS writes: `container_t` may write a `container_t` path and is denied `/etc` (`GATE_SELINUX deny`). Default mode stays Permissive.
+- **XHCI Enable Slot** — scratchpad buffers in DCBAA[0]; Command Completion cc=1 is required (`GATE_USB xhci slot`). GET_DESCRIPTOR still has a timeout fallback.
+- **NTP** — fixture Server-mode packet applies a 1000 ms clock offset (`GATE_NTP apply`).
+- **Bluetooth HCI** — virtual adapter HCI Reset plus Command Complete status 0 (`GATE_BT hci`).
+- **dm-verity** — SHA-256 Merkle leaf equals root; a flipped byte is rejected (`GATE_VERITY root`).
+- **X.509** — DER parse plus RSA PKCS#1 v1.5 SHA-256 over TBS (`GATE_TLS13 x509`). Tampered TBS is rejected.
+- **dpkg** — ar + uncompressed tar install of a fixture `.deb` (`GATE_DPKG deb`).
+- **TPM PCR** — software SHA-256 extend/read (`GATE_TPM pcr`); IMA measurements extend PCR 10.
+- **Tokenizer** — BPE encode/decode of `"the"` on the demo kernel (`GATE_AI vocab`).
+- **CPIO** — newc archive round-trip (`GATE_CPIO newc`).
+- **Title bar** — UiBold `'i'` falls back to the UI face so `"Terminal"` is not `"Term nal"` (`GATE_FONT title`).
+- **Terminal SHM** — first frame paints `"ok"` glyphs and scales into the client area (`GATE_TERM shm paint`).
 - **Desktop input** — VirtIO-tablet modern PCI + USB digitizer absolute reports + PS/2 aux fallback (`GATE_VIRTIO input tablet`). `./run.sh` was USB-only; cocoa absolute events never reached the compositor.
 - **Pointer visible** — do not skip the software arrow when VirtIO-GPU cursorq is a transparent 64×64 overlay; cocoa is `-vga std` with `show-cursor=off`.
+- **Clicks** — VirtIO-tablet `BTN_TOUCH` / button-only SYN commit at the last absolute position; desktop icons open on single click; close removes the window immediately.
 - **rtl8139** — TX copies into the RX ring with a Realtek status header (`GATE_RTL8139 send`).
 - **CIFS** — SMB2 Negotiate parse plus TREE WRITE/READ round-trip (`GATE_CIFS smb2`).
 - **GPOS** — pair-adjustment kerning: `shape_text("AV")` shrinks A’s advance (`GATE_GPOS kern`).

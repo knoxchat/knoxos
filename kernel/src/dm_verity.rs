@@ -102,11 +102,7 @@ impl VerityDevice {
             return Err("Invalid block size");
         }
 
-        // Compute hash of data block with salt
-        let mut hash_input = Vec::with_capacity(self.salt.len() + BLOCK_SIZE);
-        hash_input.extend_from_slice(&self.salt);
-        hash_input.extend_from_slice(data);
-        let computed_hash = simple_sha256(&hash_input);
+        let computed_hash = self.leaf_hash_of(data);
 
         // Walk up the Merkle tree to verify
         // Level 0: leaf hashes
@@ -147,6 +143,13 @@ impl VerityDevice {
         }
     }
 
+    fn leaf_hash_of(&self, data: &[u8]) -> [u8; HASH_SIZE] {
+        let mut hash_input = Vec::with_capacity(self.salt.len() + data.len());
+        hash_input.extend_from_slice(&self.salt);
+        hash_input.extend_from_slice(data);
+        crate::crypto::sha256(&hash_input)
+    }
+
     /// Activate verity device
     pub fn activate(&mut self) -> Result<(), &'static str> {
         self.load_hash_tree()?;
@@ -157,17 +160,34 @@ impl VerityDevice {
     }
 }
 
-/// Simplified SHA-256 placeholder
-fn simple_sha256(data: &[u8]) -> [u8; HASH_SIZE] {
-    let mut hash = [0u8; HASH_SIZE];
-    for (i, chunk) in data.chunks(32).enumerate() {
-        for (j, &byte) in chunk.iter().enumerate() {
-            hash[j] ^= byte.wrapping_add(i as u8);
-        }
+pub const GATE_VERITY_MARKER: &str = "GATE_VERITY root";
+
+/// One-block Merkle: good data verifies, a flipped byte does not.
+pub fn verity_self_test() -> bool {
+    const SALT: &[u8] = b"knox";
+    let mut data = alloc::vec![0u8; BLOCK_SIZE];
+    data[0] = 0xA5;
+    let mut hash_input = Vec::with_capacity(SALT.len() + BLOCK_SIZE);
+    hash_input.extend_from_slice(SALT);
+    hash_input.extend_from_slice(&data);
+    let root = crate::crypto::sha256(&hash_input);
+    let mut dev = VerityDevice::new("vroot", "vda", "vda-hash", 1, root, SALT);
+    dev.hash_tree = alloc::vec![root];
+    dev.error_action = ErrorAction::ReadOnly;
+    if dev.verify_block(0, &data).is_err() {
+        serial_println!("[DM-VERITY] GATE_VERITY FAILED: good block");
+        return false;
     }
-    hash
+    data[0] ^= 0x01;
+    if dev.verify_block(0, &data).is_ok() {
+        serial_println!("[DM-VERITY] GATE_VERITY FAILED: tamper accepted");
+        return false;
+    }
+    serial_println!("[DM-VERITY] {} (SHA-256 leaf == root)", GATE_VERITY_MARKER);
+    true
 }
 
 pub fn init() {
     serial_println!("[DM-VERITY] dm-verity subsystem loaded");
+    let _ = verity_self_test();
 }
