@@ -1,0 +1,80 @@
+/// NFS Client (Network File System v4)
+///
+/// Implements an NFS4 client for accessing remote filesystems over the network.
+/// Compatible with Linux NFS4 protocol for network storage.
+///
+/// Features:
+///   - NFS4 compound operations (LOOKUP, OPEN, READ, WRITE, CLOSE, etc.)
+///   - File handle management
+///   - Stateful file locking
+///   - Attribute caching with configurable timeouts
+///   - Mount point integration with VFS
+///   - Authentication stubs (AUTH_SYS)
+///   - RPC/XDR encoding/decoding
+///   - Delegation support
+///   - Read-ahead and write-behind caching
+///
+/// Module layout:
+///   types      — NFS4 constants, status, handles, attrs, locks
+///   xdr        — RPC message types and XDR encode/decode
+///   compound   — NFS4 compound ops and results
+///   client     — NfsClient and mount options
+///   mount      — mount table, nfs_mount / nfs_umount
+///   rpc        — TCP RPC send and real-network mount
+///   util       — hash and timestamp helpers
+///   gates      — GATE_NFS compound/write/remove/... self-tests
+mod client;
+mod compound;
+mod gates;
+mod mount;
+mod rpc;
+mod types;
+mod util;
+mod xdr;
+
+pub use client::{NfsClient, NfsMountOptions};
+pub use compound::{NfsCompoundOp, NfsCompoundResult};
+pub use gates::{
+    GATE_NFS_CREATE_MARKER, GATE_NFS_LINK_MARKER, GATE_NFS_MARKER, GATE_NFS_READDIR_MARKER,
+    GATE_NFS_READLINK_MARKER, GATE_NFS_REMOVE_MARKER, GATE_NFS_RENAME_MARKER,
+    GATE_NFS_SETATTR_MARKER, GATE_NFS_WRITE_MARKER, create_self_test, link_self_test,
+    readdir_self_test, readlink_self_test, remove_self_test, rename_self_test, setattr_self_test,
+    write_self_test,
+};
+pub use mount::{NfsMount, list_nfs_mounts, nfs_mount, nfs_umount, proc_nfs_info};
+pub use rpc::{build_lookup_compound, nfs_mount_real, send_rpc};
+pub use types::{
+    NFS_PORT, NFS4_ACCESS_DELETE, NFS4_ACCESS_EXECUTE, NFS4_ACCESS_EXTEND, NFS4_ACCESS_LOOKUP,
+    NFS4_ACCESS_MODIFY, NFS4_ACCESS_READ, NFS4_OPEN4_CREATE, NFS4_PROGRAM, NFS4_SHARE_ACCESS_BOTH,
+    NFS4_SHARE_ACCESS_READ, NFS4_SHARE_ACCESS_WRITE, NFS4_SHARE_DENY_BOTH, NFS4_SHARE_DENY_NONE,
+    NFS4_SHARE_DENY_READ, NFS4_SHARE_DENY_WRITE, NFS4_VERSION, NfsAttrs, NfsDirEntry,
+    NfsFileHandle, NfsFileType, NfsLock, NfsLockType, NfsOp, NfsStat, NfsStateId,
+};
+pub use xdr::{AuthFlavor, AuthSys, RpcMsgType, XdrDecoder, XdrEncoder};
+
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use crate::serial_println;
+
+use gates::compound_self_test;
+
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// Initialize NFS subsystem
+pub fn init() {
+    if INITIALIZED.load(Ordering::Relaxed) {
+        return;
+    }
+    INITIALIZED.store(true, Ordering::Relaxed);
+    serial_println!("[KnoxOS] NFS v4 client initialized");
+    serial_println!("[NFS] Network I/O: TCP socket via net stack");
+    let _ = compound_self_test();
+    let _ = write_self_test();
+    let _ = remove_self_test();
+    let _ = rename_self_test();
+    let _ = create_self_test();
+    let _ = link_self_test();
+    let _ = readlink_self_test();
+    let _ = setattr_self_test();
+    let _ = readdir_self_test();
+}
