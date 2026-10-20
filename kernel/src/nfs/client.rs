@@ -175,8 +175,12 @@ impl NfsClient {
                 NfsCompoundResult::Status(NfsStat::Ok)
             }
             NfsCompoundOp::PutFh(fh) => {
-                self.current_fh = Some(fh.clone());
-                NfsCompoundResult::Status(NfsStat::Ok)
+                if *fh == self.root_fh || self.fh_names.contains_key(fh) {
+                    self.current_fh = Some(fh.clone());
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::Stale)
+                }
             }
             NfsCompoundOp::GetFh => match &self.current_fh {
                 Some(fh) => NfsCompoundResult::FileHandle(fh.clone()),

@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **464/464**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Integration **472/472**.
 
 ---
 
@@ -73,6 +73,7 @@ Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md]
 - FUSE SETATTR (`GATE_FUSE setattr`); FUSE READDIR (`GATE_FUSE readdir`); D-Bus GetConnectionUnixUser (`GATE_DBUS uid`); D-Bus AddMatch (`GATE_DBUS match`); XHCI CLEAR_FEATURE (`GATE_USB xhci clear`); XHCI bulk (`GATE_USB xhci bulk`); NFS LINK (`GATE_NFS link`); NFS READLINK (`GATE_NFS readlink`)
 - FUSE MKNOD (`GATE_FUSE mknod`); FUSE STATFS (`GATE_FUSE statfs`); D-Bus RemoveMatch (`GATE_DBUS remove`); D-Bus GetId (`GATE_DBUS id`); XHCI SET_FEATURE (`GATE_USB xhci set`); XHCI bulk IN (`GATE_USB xhci bulkin`); NFS SETATTR (`GATE_NFS setattr`); NFS READDIR (`GATE_NFS readdir`)
 - FUSE SETXATTR (`GATE_FUSE setxattr`); FUSE GETXATTR (`GATE_FUSE getxattr`); D-Bus StartServiceByName (`GATE_DBUS start`); D-Bus GetConnectionCredentials (`GATE_DBUS creds`); XHCI SET_DESCRIPTOR (`GATE_USB xhci stdesc`); XHCI isochronous IN (`GATE_USB xhci isoch`); NFS ACCESS (`GATE_NFS access`); NFS COMMIT (`GATE_NFS commit`)
+- FUSE LISTXATTR (`GATE_FUSE listxattr`); FUSE REMOVEXATTR (`GATE_FUSE removexattr`); D-Bus ListActivatableNames (`GATE_DBUS activate`); D-Bus ListQueuedOwners (`GATE_DBUS queue`); XHCI GET_DESCRIPTOR(String) (`GATE_USB xhci string`); XHCI interrupt IN (`GATE_USB xhci intr`); NFS GETFH (`GATE_NFS getfh`); NFS PUTFH (`GATE_NFS putfh`)
 - TLS 1.3 HKDF (`GATE_TLS13 hkdf`); HDR/VRR (`GATE_HDR pq`, `GATE_VRR range`); e1000 `Socket::send` (`GATE_E1000 send`); eBPF/sched_ext (`GATE_EBPF exec`); Wi-Fi Beacon+PMK (`GATE_WIFI pmk`); i915 modeset (`GATE_I915 modeset`); Btrfs ramdisk (`GATE_BTRFS block`); VLAN 802.1Q (`GATE_VLAN tag`)
 
 Earlier in this section:

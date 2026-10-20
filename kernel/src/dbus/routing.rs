@@ -355,6 +355,38 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                     }
                 }
             }
+            "ListActivatableNames" => {
+                let names: Vec<DbusValue> = bus
+                    .activatable_names
+                    .iter()
+                    .map(|n| DbusValue::String(n.clone()))
+                    .collect();
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::Array(names)];
+                reply.signature = Some(String::from("as"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
+            "ListQueuedOwners" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let ids = bus.name_queues.get(name).cloned().unwrap_or_default();
+                let mut names = Vec::new();
+                for id in ids {
+                    if let Some(c) = bus.connections.get(&id) {
+                        names.push(DbusValue::String(c.unique_name.clone()));
+                    }
+                }
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::Array(names)];
+                reply.signature = Some(String::from("as"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
             _ => {
                 serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
             }

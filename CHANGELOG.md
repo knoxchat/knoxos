@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **FUSE LISTXATTR** — LISTXATTR includes a name stored by SETXATTR (`GATE_FUSE listxattr`).
+- **FUSE REMOVEXATTR** — REMOVEXATTR drops a stored name so a later GETXATTR fails (`GATE_FUSE removexattr`).
+- **D-Bus ListActivatableNames** — seeded well-known name is listed (`GATE_DBUS activate`).
+- **D-Bus ListQueuedOwners** — a queued RequestName claimant is listed (`GATE_DBUS queue`).
+- **XHCI GET_DESCRIPTOR(String)** — Setup+Data+Status Transfer Event for string index 0 (`GATE_USB xhci string`).
+- **XHCI interrupt IN** — Configure Endpoint interrupt IN plus Normal TRB Transfer Event (`GATE_USB xhci intr`).
+- **NFS GETFH** — GETFH after LOOKUP returns a child handle distinct from the root (`GATE_NFS getfh`).
+- **NFS PUTFH** — PUTFH restores a GETFH handle; unknown handle is STALE (`GATE_NFS putfh`).
 - **FUSE SETXATTR** — SETXATTR stores bytes a later GETXATTR returns (`GATE_FUSE setxattr`).
 - **FUSE GETXATTR** — GETXATTR returns a stored value and fails for a missing name (`GATE_FUSE getxattr`).
 - **D-Bus StartServiceByName** — SUCCESS for a vacant well-known name, then ALREADY_RUNNING (`GATE_DBUS start`).

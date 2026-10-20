@@ -308,6 +308,28 @@ fn test_xhci_isoch_in() {
 }
 
 #[test_case]
+fn test_xhci_get_string_descriptor() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::string_self_test(),
+        "XHCI GET_DESCRIPTOR(String) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_interrupt_in() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::interrupt_in_self_test(),
+        "XHCI interrupt IN must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_fuse_write_roundtrip() {
     assert!(
         crate::fuse::write_self_test(),
@@ -424,6 +446,22 @@ fn test_fuse_getxattr_missing() {
     assert!(
         crate::fuse::getxattr_self_test(),
         "FUSE GETXATTR must return a stored value and fail for a missing name"
+    );
+}
+
+#[test_case]
+fn test_fuse_listxattr_names() {
+    assert!(
+        crate::fuse::listxattr_self_test(),
+        "FUSE LISTXATTR must include a name stored by SETXATTR"
+    );
+}
+
+#[test_case]
+fn test_fuse_removexattr_drops_name() {
+    assert!(
+        crate::fuse::removexattr_self_test(),
+        "FUSE REMOVEXATTR must drop a stored name so a later GETXATTR fails"
     );
 }
 
@@ -602,6 +640,24 @@ fn test_nfs_commit_persist() {
     assert!(
         crate::nfs::commit_self_test(),
         "NFS4 COMMIT must persist an unstable WRITE so a later READ returns it"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_getfh_child() {
+    assert!(
+        crate::nfs::getfh_self_test(),
+        "NFS4 GETFH after LOOKUP must return a child handle distinct from the root"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_putfh_restore() {
+    assert!(
+        crate::nfs::putfh_self_test(),
+        "NFS4 PUTFH must restore a GETFH handle and reject an unknown handle as STALE"
     );
 }
 

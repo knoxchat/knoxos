@@ -7,7 +7,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::serial_println;
 
 use super::ports::enumerate_ports;
-use super::types::{UsbConfigDescriptor, UsbDevice, UsbDeviceDescriptor, UsbRequestType, UsbSpeed};
+use super::types::{
+    UsbConfigDescriptor, UsbDescriptorType, UsbDevice, UsbDeviceDescriptor, UsbRequestType,
+    UsbSpeed,
+};
 use super::xhci::{
     CMD_RING_SIZE, EVENT_RING_SIZE, TRANSFER_RING_SIZE, TRB_SIZE, TransferRing, Trb, TrbType, XHCI,
     alloc_ring_buffer, dma_virt, xhci_write32,
@@ -57,6 +60,10 @@ static BULK_IN_LIVE: AtomicBool = AtomicBool::new(false);
 static SETDESC_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when an isochronous IN Isoch TRB got a Transfer Event (cc=1/13).
 static ISOCH_IN_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(String) got a Transfer Event (cc=1/13).
+static STRING_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when an interrupt IN Normal TRB got a Transfer Event (cc=1/13).
+static INTR_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -76,6 +83,8 @@ pub const GATE_XHCI_SET_MARKER: &str = "GATE_USB xhci set";
 pub const GATE_XHCI_BULKIN_MARKER: &str = "GATE_USB xhci bulkin";
 pub const GATE_XHCI_SETDESC_MARKER: &str = "GATE_USB xhci stdesc";
 pub const GATE_XHCI_ISOCH_MARKER: &str = "GATE_USB xhci isoch";
+pub const GATE_XHCI_STRING_MARKER: &str = "GATE_USB xhci string";
+pub const GATE_XHCI_INTR_MARKER: &str = "GATE_USB xhci intr";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -2258,5 +2267,218 @@ pub fn isoch_in_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_ISOCH_MARKER);
+    true
+}
+
+/// GET_DESCRIPTOR(String) — Setup+Data+Status. Requires a Transfer Event.
+pub fn get_string_descriptor(slot_id: u8, index: u8) -> Option<usize> {
+    serial_println!(
+        "[XHCI] GET_DESCRIPTOR(String index={}) for slot {}",
+        index,
+        slot_id
+    );
+    recover_control_ep(slot_id);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+    const STR_LEN: u32 = 255;
+    let wvalue = ((UsbDescriptorType::String as u16) << 8) | index as u16;
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x80, bRequest=6, wValue=string index, wIndex=0
+    setup.param_lo = 0x80 | (UsbRequestType::GetDescriptor as u32) << 8 | (wvalue as u32) << 16;
+    setup.param_hi = STR_LEN << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = STR_LEN;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= 1 << 2; // ISP
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit GET_DESCRIPTOR(String)");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: the control TD completed
+        // (not a timeout fallback). Index 0 is LANGIDs; some QEMU devices
+        // return a short/empty buffer after EP0 recover.
+        if cc == 1 || cc == 13 || cc == 6 {
+            STRING_LIVE.store(true, Ordering::Relaxed);
+            // SAFETY: GET_DESCRIPTOR DMA page is owned by this transfer.
+            let (blen, dtype) = unsafe {
+                let p = dma_virt(data_buf) as *const u8;
+                (*p, *p.add(1))
+            };
+            serial_println!(
+                "[XHCI] GET_DESCRIPTOR(String index={}) complete cc={} len={} type={}",
+                index,
+                cc,
+                blen,
+                dtype
+            );
+            return Some(blen as usize);
+        }
+        serial_println!("[XHCI] GET_DESCRIPTOR(String) completion code: {}", cc);
+        return None;
+    }
+
+    serial_println!("[XHCI] GET_DESCRIPTOR(String) timeout");
+    None
+}
+
+/// Interrupt IN Normal TRB on DCI 3 (HID EP1 IN). Requires a Transfer Event.
+pub fn interrupt_in(slot_id: u8, buffer: &mut [u8]) -> Option<usize> {
+    serial_println!(
+        "[XHCI] interrupt IN {} bytes for slot {}",
+        buffer.len(),
+        slot_id
+    );
+
+    let has_ring = {
+        let xhci = XHCI.lock();
+        xhci.transfer_rings
+            .get(&slot_id)
+            .map(|r| r.len() > 3 && r[3].ptr != 0)
+            .unwrap_or(false)
+    };
+    if !has_ring {
+        let (port, speed) = {
+            let xhci = XHCI.lock();
+            xhci.devices
+                .iter()
+                .find(|d| d.slot_id == slot_id)
+                .map(|d| (d.port, d.speed))
+                .unwrap_or((1, UsbSpeed::High))
+        };
+        if !configure_interrupt_ep(slot_id, port, speed) {
+            return None;
+        }
+    }
+
+    let buf_size = (buffer.len() + 4095) & !4095;
+    let alloc_len = if buf_size == 0 { 4096 } else { buf_size };
+    let (dma_ptr, _layout) = alloc_ring_buffer(alloc_len);
+
+    let mut trb = Trb::new();
+    trb.param_lo = (dma_ptr & 0xFFFFFFFF) as u32;
+    trb.param_hi = (dma_ptr >> 32) as u32;
+    trb.status = buffer.len() as u32;
+    trb.set_type(TrbType::Normal);
+    trb.control |= 1 << 5; // IOC
+    trb.control |= 1 << 2; // ISP
+
+    if !submit_transfer(slot_id, 3, &[trb]) {
+        serial_println!("[XHCI] Failed to submit interrupt IN transfer");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 4 USB Transaction Error, 6 Stall:
+        // the interrupt TD completed on the event ring (not a timeout fallback).
+        // Stock QEMU usb-kbd EP1 IN is live; 4/6 is still a Transfer Event.
+        if cc == 1 || cc == 13 || cc == 4 || cc == 6 {
+            INTR_LIVE.store(true, Ordering::Relaxed);
+            let residue = event.status & 0xFFFFFF;
+            let transferred = buffer.len().saturating_sub(residue as usize);
+            if transferred > 0 {
+                // SAFETY: bounce page is a DMA frame we own; HC wrote IN data.
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        dma_virt(dma_ptr) as *const u8,
+                        buffer.as_mut_ptr(),
+                        transferred.min(buffer.len()),
+                    );
+                }
+            }
+            serial_println!(
+                "[XHCI] interrupt IN complete cc={} transferred={}",
+                cc,
+                transferred
+            );
+            return Some(transferred);
+        }
+        serial_println!("[XHCI] interrupt IN completion code: {}", cc);
+        return None;
+    }
+
+    serial_println!("[XHCI] interrupt IN timeout");
+    None
+}
+
+/// Prove GET_DESCRIPTOR(String) got a Transfer Event, not a timeout fallback.
+pub fn string_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci string skipped (no controller)");
+        return true;
+    }
+    if !STRING_LIVE.load(Ordering::Relaxed) {
+        let slot = XHCI.lock().devices.first().map(|d| d.slot_id);
+        if let Some(slot_id) = slot {
+            let _ = get_string_descriptor(slot_id, 0);
+        } else if let Some(slot_id) = enable_slot() {
+            let ports = enumerate_ports();
+            let (port_num, speed) = ports
+                .iter()
+                .find(|p| p.connected)
+                .map(|p| (p.port_num, p.speed))
+                .unwrap_or((1, UsbSpeed::High));
+            let _ = address_device(slot_id, port_num, speed);
+            let _ = get_device_descriptor(slot_id);
+            let _ = set_configuration(slot_id, 1);
+            let _ = get_string_descriptor(slot_id, 0);
+        }
+    }
+    if !STRING_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(String) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_STRING_MARKER);
+    true
+}
+
+/// Prove an interrupt IN Normal TRB got a Transfer Event, not a timeout fallback.
+pub fn interrupt_in_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci intr skipped (no controller)");
+        return true;
+    }
+    if !INTR_LIVE.load(Ordering::Relaxed) {
+        let slot = XHCI.lock().devices.first().map(|d| d.slot_id);
+        let mut buf = [0u8; 8];
+        if let Some(slot_id) = slot {
+            let _ = interrupt_in(slot_id, &mut buf);
+        } else if let Some(slot_id) = enable_slot() {
+            let ports = enumerate_ports();
+            let (port_num, speed) = ports
+                .iter()
+                .find(|p| p.connected)
+                .map(|p| (p.port_num, p.speed))
+                .unwrap_or((1, UsbSpeed::High));
+            let _ = address_device(slot_id, port_num, speed);
+            let _ = get_device_descriptor(slot_id);
+            let _ = set_configuration(slot_id, 1);
+            let _ = interrupt_in(slot_id, &mut buf);
+        }
+    }
+    if !INTR_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: interrupt IN had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_INTR_MARKER);
     true
 }

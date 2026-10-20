@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicU32;
@@ -72,6 +72,7 @@ pub(super) struct BusState {
     pub(super) connections: BTreeMap<ConnectionId, Connection>,
     pub(super) names: BTreeMap<String, ConnectionId>, // well-known name → owner
     pub(super) name_queues: BTreeMap<String, Vec<ConnectionId>>, // queued ownership
+    pub(super) activatable_names: BTreeSet<String>,
     pub(super) services: BTreeMap<String, ServiceInfo>, // registered service handlers
     pub(super) machine_id: String,
 }
@@ -89,11 +90,21 @@ pub(super) struct ServiceInfo {
 /// Stable 32-hex machine UUID returned by `org.freedesktop.DBus.GetId`.
 pub const MACHINE_ID: &str = "0123456789abcdef0123456789abcdef";
 
+/// Well-known name advertised by `ListActivatableNames`.
+pub const GATE_ACTIVATABLE_NAME: &str = "org.knoxos.GateActivatable";
+
+fn default_activatable_names() -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    names.insert(String::from(GATE_ACTIVATABLE_NAME));
+    names
+}
+
 lazy_static::lazy_static! {
     pub(super) static ref SYSTEM_BUS: Mutex<BusState> = Mutex::new(BusState {
         connections: BTreeMap::new(),
         names: BTreeMap::new(),
         name_queues: BTreeMap::new(),
+        activatable_names: default_activatable_names(),
         services: BTreeMap::new(),
         machine_id: String::from(MACHINE_ID),
     });
@@ -102,6 +113,7 @@ lazy_static::lazy_static! {
         connections: BTreeMap::new(),
         names: BTreeMap::new(),
         name_queues: BTreeMap::new(),
+        activatable_names: default_activatable_names(),
         services: BTreeMap::new(),
         machine_id: String::from(MACHINE_ID),
     });

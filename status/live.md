@@ -209,5 +209,13 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 198. **XHCI isochronous IN** — Isoch TRB Transfer Event (`GATE_USB xhci isoch`).
 199. **NFS ACCESS** — file bits from mode, not an echo of the request (`GATE_NFS access`).
 200. **NFS COMMIT** — unstable WRITE then COMMIT then READ (`GATE_NFS commit`).
+201. **FUSE LISTXATTR** — LISTXATTR includes a SETXATTR name (`GATE_FUSE listxattr`).
+202. **FUSE REMOVEXATTR** — drops a stored name so GETXATTR fails (`GATE_FUSE removexattr`).
+203. **D-Bus ListActivatableNames** — seeded well-known name is listed (`GATE_DBUS activate`).
+204. **D-Bus ListQueuedOwners** — queued RequestName unique name (`GATE_DBUS queue`).
+205. **XHCI GET_DESCRIPTOR(String)** — Setup+Data+Status Transfer Event (`GATE_USB xhci string`).
+206. **XHCI interrupt IN** — Interrupt IN Normal TRB Transfer Event (`GATE_USB xhci intr`).
+207. **NFS GETFH** — LOOKUP then GETFH is a child handle (`GATE_NFS getfh`).
+208. **NFS PUTFH** — restore GETFH handle; unknown is STALE (`GATE_NFS putfh`).
 
-Integration: `./tests/run_integration.sh` **464/464** on QEMU (2026-10-20).
+Integration: `./tests/run_integration.sh` **472/472** on QEMU (2026-10-21).

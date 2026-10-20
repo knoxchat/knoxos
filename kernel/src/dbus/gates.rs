@@ -8,8 +8,9 @@ use super::connection::{connect, disconnect};
 use super::protocol::{DbusValue, Message, MessageType};
 use super::routing::{receive_message, send_message};
 use super::state::{
-    BusType, DBUS_NAME_FLAG_DO_NOT_QUEUE, DBUS_START_REPLY_ALREADY_RUNNING,
-    DBUS_START_REPLY_SUCCESS, MACHINE_ID,
+    BusType, DBUS_NAME_FLAG_DO_NOT_QUEUE, DBUS_REQUEST_NAME_REPLY_IN_QUEUE,
+    DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, DBUS_START_REPLY_ALREADY_RUNNING,
+    DBUS_START_REPLY_SUCCESS, GATE_ACTIVATABLE_NAME, MACHINE_ID,
 };
 
 pub const GATE_DBUS_METHOD_MARKER: &str = "GATE_DBUS method";
@@ -900,6 +901,146 @@ pub fn creds_self_test() -> bool {
             "[dbus] GATE_DBUS FAILED: creds unique={} well_known={}",
             unique_ok,
             well_known_ok
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_ACTIVATE_MARKER: &str = "GATE_DBUS activate";
+
+/// `ListActivatableNames` must include the seeded well-known name.
+pub fn activate_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB15, 1000);
+    let list = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ListActivatableNames",
+    );
+    let list_serial = send_message(BusType::System, conn, list);
+    let Some(reply) = receive_message(BusType::System, conn) else {
+        serial_println!("[dbus] GATE_DBUS FAILED: no ListActivatableNames reply");
+        disconnect(BusType::System, conn);
+        return false;
+    };
+    let listed = reply.header.message_type == MessageType::MethodReturn
+        && reply.reply_serial == Some(list_serial)
+        && match reply.body.first() {
+            Some(DbusValue::Array(names)) => names.iter().any(|v| match v {
+                DbusValue::String(s) => s == GATE_ACTIVATABLE_NAME,
+                _ => false,
+            }),
+            _ => false,
+        };
+    disconnect(BusType::System, conn);
+    if listed {
+        serial_println!(
+            "[dbus] {} (ListActivatableNames contains {})",
+            GATE_DBUS_ACTIVATE_MARKER,
+            GATE_ACTIVATABLE_NAME
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: ListActivatableNames");
+        false
+    }
+}
+
+pub const GATE_DBUS_QUEUE_MARKER: &str = "GATE_DBUS queue";
+
+/// `ListQueuedOwners` must return the unique name of a queued claimant.
+pub fn queue_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateQueue";
+    let owner = connect(BusType::System, 0xDB16, 1000);
+    let waiter = connect(BusType::System, 0xDB17, 1000);
+    let waiter_unique = format!(":1.{}", waiter);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let owner_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            matches!(
+                msg.body.first(),
+                Some(DbusValue::Uint32(c)) if *c == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER
+            )
+        })
+        .unwrap_or(false);
+
+    let mut wait = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    wait.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    wait.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, waiter, wait);
+    let queued_ok = receive_message(BusType::System, waiter)
+        .map(|msg| {
+            matches!(
+                msg.body.first(),
+                Some(DbusValue::Uint32(c)) if *c == DBUS_REQUEST_NAME_REPLY_IN_QUEUE
+            )
+        })
+        .unwrap_or(false);
+
+    let mut list = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ListQueuedOwners",
+    );
+    list.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    list.signature = Some(String::from("s"));
+    let list_serial = send_message(BusType::System, owner, list);
+    let Some(reply) = receive_message(BusType::System, owner) else {
+        serial_println!("[dbus] GATE_DBUS FAILED: no ListQueuedOwners reply");
+        disconnect(BusType::System, owner);
+        disconnect(BusType::System, waiter);
+        return false;
+    };
+    let listed = reply.header.message_type == MessageType::MethodReturn
+        && reply.reply_serial == Some(list_serial)
+        && match reply.body.first() {
+            Some(DbusValue::Array(names)) => {
+                names.iter().any(|v| match v {
+                    DbusValue::String(s) => s == &waiter_unique,
+                    _ => false,
+                }) && !names.iter().any(|v| match v {
+                    DbusValue::String(s) => s == &format!(":1.{}", owner),
+                    _ => false,
+                })
+            }
+            _ => false,
+        };
+
+    disconnect(BusType::System, owner);
+    disconnect(BusType::System, waiter);
+    if owner_ok && queued_ok && listed {
+        serial_println!(
+            "[dbus] {} (ListQueuedOwners contains queued unique name)",
+            GATE_DBUS_QUEUE_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: owner={} queued={} listed={}",
+            owner_ok,
+            queued_ok,
+            listed
         );
         false
     }

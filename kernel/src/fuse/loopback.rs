@@ -335,3 +335,43 @@ pub(super) fn serve_loopback_getxattr(mount_point: &str, unique: u64, nodeid: u6
     drop(lbs);
     let _ = write_response(mount_point, unique, value);
 }
+pub(super) fn serve_loopback_listxattr(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    let mut out = Vec::new();
+    if let Some(attrs) = lb.xattrs.get(&nodeid) {
+        for name in attrs.keys() {
+            out.extend_from_slice(name.as_bytes());
+            out.push(0);
+        }
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, out);
+}
+pub(super) fn serve_loopback_removexattr(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    let Ok(name) = core::str::from_utf8(req) else {
+        return;
+    };
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    let removed = lb
+        .xattrs
+        .get_mut(&nodeid)
+        .map(|m| m.remove(name).is_some())
+        .unwrap_or(false);
+    if !removed {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}

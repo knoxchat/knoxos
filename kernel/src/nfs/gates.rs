@@ -8,7 +8,7 @@ use super::compound::{NfsCompoundOp, NfsCompoundResult};
 use super::types::{
     NFS4_ACCESS_DELETE, NFS4_ACCESS_EXECUTE, NFS4_ACCESS_EXTEND, NFS4_ACCESS_LOOKUP,
     NFS4_ACCESS_MODIFY, NFS4_ACCESS_READ, NFS4_SHARE_ACCESS_WRITE, NFS4_SHARE_DENY_NONE, NfsAttrs,
-    NfsFileType, NfsStat, NfsStateId,
+    NfsFileHandle, NfsFileType, NfsStat, NfsStateId,
 };
 
 pub const GATE_NFS_MARKER: &str = "GATE_NFS compound";
@@ -619,6 +619,112 @@ pub fn commit_self_test() -> bool {
         }
         other => {
             serial_println!("[NFS] GATE_NFS commit FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_GETFH_MARKER: &str = "GATE_NFS getfh";
+
+/// GETFH after LOOKUP must return a child handle distinct from the export root.
+pub fn getfh_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    client
+        .export_files
+        .insert(String::from("gate-fh.txt"), b"fh".to_vec());
+    let root = client.compound(
+        "getfh-root",
+        &[NfsCompoundOp::PutRootFh, NfsCompoundOp::GetFh],
+    );
+    let child = client.compound(
+        "getfh-child",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("gate-fh.txt")),
+            NfsCompoundOp::GetFh,
+        ],
+    );
+    let root_fh = match root.get(1) {
+        Some(NfsCompoundResult::FileHandle(fh)) => fh.clone(),
+        other => {
+            serial_println!("[NFS] GATE_NFS getfh FAILED: root {:?}", other);
+            return false;
+        }
+    };
+    match child.get(2) {
+        Some(NfsCompoundResult::FileHandle(fh)) if *fh != root_fh => {
+            serial_println!(
+                "[NFS] {} (GETFH child {} bytes)",
+                GATE_NFS_GETFH_MARKER,
+                fh.0.len()
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS getfh FAILED: child {:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_PUTFH_MARKER: &str = "GATE_NFS putfh";
+
+/// PUTFH restores a GETFH handle; an unknown handle is STALE.
+pub fn putfh_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    client
+        .export_files
+        .insert(String::from("gate-pf.txt"), b"pf".to_vec());
+    let looked = client.compound(
+        "putfh-lookup",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("gate-pf.txt")),
+            NfsCompoundOp::GetFh,
+        ],
+    );
+    let child = match looked.get(2) {
+        Some(NfsCompoundResult::FileHandle(fh)) => fh.clone(),
+        other => {
+            serial_println!("[NFS] GATE_NFS putfh FAILED: lookup {:?}", other);
+            return false;
+        }
+    };
+    let switched = client.compound(
+        "putfh-root",
+        &[NfsCompoundOp::PutRootFh, NfsCompoundOp::GetFh],
+    );
+    let root_ok = matches!(
+        switched.get(1),
+        Some(NfsCompoundResult::FileHandle(fh)) if *fh != child
+    );
+    let restored = client.compound(
+        "putfh-restore",
+        &[NfsCompoundOp::PutFh(child.clone()), NfsCompoundOp::GetFh],
+    );
+    let restored_ok = matches!(
+        restored.get(1),
+        Some(NfsCompoundResult::FileHandle(fh)) if *fh == child
+    );
+    let stale = client.compound(
+        "putfh-stale",
+        &[NfsCompoundOp::PutFh(NfsFileHandle::new(vec![0xff; 8]))],
+    );
+    match stale.first() {
+        Some(NfsCompoundResult::Status(NfsStat::Stale)) if root_ok && restored_ok => {
+            serial_println!("[NFS] {} (PUTFH restore then STALE)", GATE_NFS_PUTFH_MARKER);
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS putfh FAILED: {:?}", other);
             false
         }
     }

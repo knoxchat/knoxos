@@ -678,6 +678,22 @@ fn test_dbus_connection_creds() {
 }
 
 #[test_case]
+fn test_dbus_list_activatable_names() {
+    assert!(
+        crate::dbus::activate_self_test(),
+        "ListActivatableNames must include the seeded well-known name"
+    );
+}
+
+#[test_case]
+fn test_dbus_list_queued_owners() {
+    assert!(
+        crate::dbus::queue_self_test(),
+        "ListQueuedOwners must return the unique name of a queued claimant"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

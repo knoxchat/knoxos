@@ -5,8 +5,9 @@ use alloc::vec::Vec;
 
 use super::loopback::{
     serve_loopback, serve_loopback_create, serve_loopback_getattr, serve_loopback_getxattr,
-    serve_loopback_link, serve_loopback_mkdir, serve_loopback_mknod, serve_loopback_read,
-    serve_loopback_readdir, serve_loopback_readlink, serve_loopback_rename, serve_loopback_rmdir,
+    serve_loopback_link, serve_loopback_listxattr, serve_loopback_mkdir, serve_loopback_mknod,
+    serve_loopback_read, serve_loopback_readdir, serve_loopback_readlink,
+    serve_loopback_removexattr, serve_loopback_rename, serve_loopback_rmdir,
     serve_loopback_setattr, serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_symlink,
     serve_loopback_unlink, serve_loopback_write,
 };
@@ -353,4 +354,22 @@ pub fn fuse_getxattr(mount_point: &str, nodeid: u64, name: &str) -> Result<Vec<u
     )?;
     serve_loopback_getxattr(mount_point, unique, nodeid, name.as_bytes());
     take_response(mount_point, unique).ok_or("would block")
+}
+/// Handle a VFS listxattr through FUSE. Response is concatenated `name\0` bytes.
+pub fn fuse_listxattr(mount_point: &str, nodeid: u64) -> Result<Vec<u8>, &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Listxattr, nodeid, Vec::new())?;
+    serve_loopback_listxattr(mount_point, unique, nodeid);
+    take_response(mount_point, unique).ok_or("would block")
+}
+/// Handle a VFS removexattr through FUSE. Request body is the attribute name.
+pub fn fuse_removexattr(mount_point: &str, nodeid: u64, name: &str) -> Result<(), &'static str> {
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::Removexattr,
+        nodeid,
+        name.as_bytes().to_vec(),
+    )?;
+    serve_loopback_removexattr(mount_point, unique, nodeid, name.as_bytes());
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
 }
