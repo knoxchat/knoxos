@@ -28,7 +28,7 @@ STRINGS = [
     # name, text, ttf, px, tracking
     ("logo", "KnoxOS", INTER_BOLD, 80, 1),
     ("tagline", "SI-native Operating System", INTER_REGULAR, 20, 3),
-    ("version", "v0.2.4", INTER_REGULAR, 14, 0),
+    ("version", "v0.2.5", INTER_REGULAR, 14, 0),
     ("status", "Initializing...", INTER_REGULAR, 14, 1),
     ("login_title", "KnoxOS", INTER_BOLD, 36, 0),
     ("login_sub", "Welcome back", INTER_REGULAR, 16, 0),

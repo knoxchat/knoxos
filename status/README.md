@@ -1,7 +1,7 @@
 # KnoxOS status
 
-> **Last updated**: 2026-10-20
-> **Version**: 0.2.4 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.4)
+> **Last updated**: 2026-10-21
+> **Version**: 0.2.5 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.5)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
 > **Codebase**: 611 Rust files in `kernel/src` · ~347,000 lines · 408 `pub mod` entries
 > **Honesty rule**: a module that compiles is not a feature. Only **Live** work counts toward production.

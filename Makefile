@@ -337,8 +337,8 @@ pre-commit-fix: ## same as pre-commit (rustfmt is applied automatically)
 pre-commit-install: ## Install .git/hooks/pre-commit
 	@./scripts/pre-commit.sh --install-hook
 
-release-tag: ## Create a release tag (usage: make release-tag VERSION=v0.2.4)
-	@if [ -z "$(VERSION)" ]; then echo "$(RED)Usage: make release-tag VERSION=v0.2.4$(NC)"; exit 1; fi
+release-tag: ## Create a release tag (usage: make release-tag VERSION=v0.2.5)
+	@if [ -z "$(VERSION)" ]; then echo "$(RED)Usage: make release-tag VERSION=v0.2.5$(NC)"; exit 1; fi
 	@echo "$(BLUE)[KnoxOS] Creating release $(VERSION)...$(NC)"
 	git tag -a $(VERSION) -m "Release $(VERSION)"
 	@echo "$(GREEN)[✓] Tag created. Push with: git push origin $(VERSION)$(NC)"

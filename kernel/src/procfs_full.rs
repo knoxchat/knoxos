@@ -318,8 +318,8 @@ pub fn read_stat() -> String {
 
 pub fn read_version() -> String {
     String::from(
-        "KnoxOS version 0.2.4 (rustc nightly) \
-         #1 SMP PREEMPT_RT KnoxOS 0.2.4 x86_64\n",
+        "KnoxOS version 0.2.5 (rustc nightly) \
+         #1 SMP PREEMPT_RT KnoxOS 0.2.5 x86_64\n",
     )
 }
 

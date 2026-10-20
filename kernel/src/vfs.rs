@@ -118,7 +118,7 @@ impl VirtualFS {
         // /etc files
         vfs.create_file_under(etc, "hostname", FileType::Regular, b"knoxos\n", 0o644);
         vfs.create_file_under(etc, "os-release", FileType::Regular,
-            b"NAME=\"KnoxOS\"\nVERSION=\"0.2.4\"\nID=knoxos\nVERSION_ID=0.2.4\nPRETTY_NAME=\"KnoxOS 0.2.4\"\n",
+            b"NAME=\"KnoxOS\"\nVERSION=\"0.2.5\"\nID=knoxos\nVERSION_ID=0.2.5\nPRETTY_NAME=\"KnoxOS 0.2.5\"\n",
             0o644);
         vfs.create_file_under(
             etc,

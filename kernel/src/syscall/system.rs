@@ -30,7 +30,7 @@ pub fn sys_uname(buf_ptr: u64) -> SyscallResult {
     };
     fill(&mut u.sysname, "KnoxOS");
     fill(&mut u.nodename, "knoxos");
-    fill(&mut u.release, "0.2.4-knoxos");
+    fill(&mut u.release, "0.2.5-knoxos");
     fill(&mut u.version, "#1 SMP PREEMPT_DYNAMIC");
     fill(&mut u.machine, "x86_64");
     if buf_ptr != 0 {

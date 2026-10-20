@@ -141,7 +141,7 @@ pub fn neofetch(_args: &[String]) -> ShellResult {
     .unwrap();
     writeln!(
         output,
-        "\x1b[38;2;86;156;214m        ██╔═██╗ \x1b[0m    \x1b[1mKernel:\x1b[0m 0.2.4-knoxos"
+        "\x1b[38;2;86;156;214m        ██╔═██╗ \x1b[0m    \x1b[1mKernel:\x1b[0m 0.2.5-knoxos"
     )
     .unwrap();
     writeln!(
@@ -262,7 +262,7 @@ pub fn last(_args: &[String]) -> ShellResult {
     .unwrap();
     writeln!(
         output,
-        "reboot   system boot  0.2.4-knoxos     Thu Jan  1 00:00   still running"
+        "reboot   system boot  0.2.5-knoxos     Thu Jan  1 00:00   still running"
     )
     .unwrap();
     writeln!(output).unwrap();
@@ -297,7 +297,7 @@ pub fn hostnamectl(_args: &[String]) -> ShellResult {
     writeln!(output, "         Icon name: computer").unwrap();
     writeln!(output, "           Chassis: desktop").unwrap();
     writeln!(output, "  Operating System: KnoxOS").unwrap();
-    writeln!(output, "            Kernel: KnoxOS 0.2.4").unwrap();
+    writeln!(output, "            Kernel: KnoxOS 0.2.5").unwrap();
     writeln!(output, "      Architecture: x86-64").unwrap();
     ShellResult::ok(&output)
 }
@@ -399,7 +399,7 @@ pub fn iostat(_args: &[String]) -> ShellResult {
     let mut output = String::new();
     writeln!(
         output,
-        "KnoxOS 0.2.4 (knoxos)     01/01/2026     _x86_64_    (1 CPU)"
+        "KnoxOS 0.2.5 (knoxos)     01/01/2026     _x86_64_    (1 CPU)"
     )
     .unwrap();
     writeln!(output).unwrap();

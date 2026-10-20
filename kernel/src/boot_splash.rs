@@ -254,7 +254,7 @@ pub enum BootMenuEntry {
 impl BootMenuEntry {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::NormalBoot => "KnoxOS v0.2.4",
+            Self::NormalBoot => "KnoxOS v0.2.5",
             Self::RecoveryShell => "KnoxOS Recovery Shell",
             Self::SafeGraphics => "KnoxOS (Safe Graphics)",
             Self::VerboseBoot => "KnoxOS (Verbose)",

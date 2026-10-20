@@ -459,7 +459,7 @@ fn generate_response(query: &str) -> String {
     if lower.contains("system") || lower.contains("info") || lower.contains("about") {
         return alloc::format!(
             "Here's your system information:\n\
-             \u{2022} OS: KnoxOS v0.2.4\n\
+             \u{2022} OS: KnoxOS v0.2.5\n\
              \u{2022} Architecture: {}\n\
              \u{2022} Kernel: Rust bare-metal\n\
              \u{2022} Uptime: {}s\n\

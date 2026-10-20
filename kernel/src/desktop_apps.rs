@@ -1199,7 +1199,7 @@ impl SettingsState {
     pub fn about_info(&self) -> String {
         let mut s = String::new();
         s.push_str("╔═══════════════════════════════════╗\n");
-        s.push_str("║        KnoxOS v0.2.4              ║\n");
+        s.push_str("║        KnoxOS v0.2.5              ║\n");
         s.push_str("║   SI-native Operating System      ║\n");
         s.push_str("╚═══════════════════════════════════╝\n\n");
         s.push_str("Built with Rust • Linux Compatible\n\n");

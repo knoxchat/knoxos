@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+## 0.2.5
+
+- **Desktop apps** — icon / start-menu / shortcut clicks open in-kernel Files, Terminal, Browser, Documents, AI Assistant, Settings, and Trash instead of Ring 3 SHM stubs.
 - **Splash type** — boot splash, boot menu, and login wordmark use FreeType-rasterized Inter instead of scaled Hack bitmaps.
+- **Kernel layout** — split crypto, dbus, fuse, nfs, tls, virtio_gpu, wayland, wifi, and timezone into `kernel/src` directories.
 - **FUSE LISTXATTR** — LISTXATTR includes a name stored by SETXATTR (`GATE_FUSE listxattr`).
 - **FUSE REMOVEXATTR** — REMOVEXATTR drops a stored name so a later GETXATTR fails (`GATE_FUSE removexattr`).
 - **D-Bus ListActivatableNames** — seeded well-known name is listed (`GATE_DBUS activate`).
