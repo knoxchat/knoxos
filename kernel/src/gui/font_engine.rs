@@ -158,6 +158,11 @@ pub fn init() {
     let _ = title_self_test();
 }
 
+/// True when the proportional UI faces have been registered.
+pub fn is_ready() -> bool {
+    FONT_IDX_UI.load(Ordering::Relaxed) != usize::MAX
+}
+
 pub const GATE_FONT_TITLE_MARKER: &str = "GATE_FONT title";
 
 fn title_self_test() -> bool {
@@ -299,14 +304,35 @@ pub fn draw_text(
     size_px: u16,
     color: Pixel,
 ) {
+    draw_text_tracked(fb, x, y, text, font, size_px, color, 0);
+}
+
+/// Draw a string with extra tracking (pixels inserted between glyphs).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_text_tracked(
+    fb: &mut FrameBuffer,
+    x: i32,
+    y: i32,
+    text: &str,
+    font: FontId,
+    size_px: u16,
+    color: Pixel,
+    tracking: i32,
+) {
     let mut pen_x = x;
     let baseline_y = y + size_px as i32; // approximate baseline
+    let mut first = true;
 
     for ch in text.chars() {
         if ch == '\n' {
             pen_x = x;
+            first = true;
             continue;
         }
+        if !first {
+            pen_x += tracking;
+        }
+        first = false;
 
         if let Some(key) = rasterize_glyph(font, ch, size_px) {
             let cache = GLYPH_CACHE.lock();
@@ -314,8 +340,16 @@ pub fn draw_text(
                 let gx = pen_x + glyph.bearing_x as i32;
                 let gy = baseline_y - glyph.bearing_y as i32;
 
-                // Blit the alpha bitmap with gamma-correct blending
-                blit_glyph_aa(fb, gx, gy, glyph.width, glyph.height, &glyph.bitmap, color);
+                blit_glyph_aa(
+                    fb,
+                    gx,
+                    gy,
+                    glyph.width,
+                    glyph.height,
+                    &glyph.bitmap,
+                    color,
+                    size_px,
+                );
 
                 pen_x += glyph.advance as i32;
             }
@@ -326,11 +360,46 @@ pub fn draw_text(
     }
 }
 
+/// Draw text horizontally centered at `center_x`.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_text_centered(
+    fb: &mut FrameBuffer,
+    center_x: i32,
+    y: i32,
+    text: &str,
+    font: FontId,
+    size_px: u16,
+    color: Pixel,
+    tracking: i32,
+) {
+    let w = measure_text_tracked(text, font, size_px, tracking) as i32;
+    draw_text_tracked(
+        fb,
+        center_x - w / 2,
+        y,
+        text,
+        font,
+        size_px,
+        color,
+        tracking,
+    );
+}
+
 /// Measure the width of a string in pixels (without drawing).
 pub fn measure_text(text: &str, font: FontId, size_px: u16) -> u32 {
+    measure_text_tracked(text, font, size_px, 0)
+}
+
+/// Measure the width of a string including tracking between glyphs.
+pub fn measure_text_tracked(text: &str, font: FontId, size_px: u16, tracking: i32) -> u32 {
     let mut width: i32 = 0;
+    let mut count: i32 = 0;
 
     for ch in text.chars() {
+        if ch == '\n' {
+            continue;
+        }
+        count += 1;
         if let Some(key) = rasterize_glyph(font, ch, size_px) {
             let cache = GLYPH_CACHE.lock();
             if let Some(glyph) = cache.get(&key) {
@@ -341,13 +410,17 @@ pub fn measure_text(text: &str, font: FontId, size_px: u16) -> u32 {
         }
     }
 
+    if count > 1 {
+        width += tracking * (count - 1);
+    }
     width.max(0) as u32
 }
 
 /// Sharpen coverage to reduce AA fringe blur (matches fonts.rs behavior).
+/// Disabled at display sizes so TrueType outlines keep their natural curves.
 #[inline(always)]
-fn sharpen_coverage(cov: u8) -> u8 {
-    if cov == 0 || cov == 255 {
+fn sharpen_coverage(cov: u8, size_px: u16) -> u8 {
+    if cov == 0 || cov == 255 || size_px >= 24 {
         return cov;
     }
     let c = cov as i32;
@@ -357,14 +430,29 @@ fn sharpen_coverage(cov: u8) -> u8 {
 }
 
 /// Apply stem darkening to improve thin-stem legibility (matches fonts.rs).
+/// Display sizes already have enough weight from the outline.
 #[inline(always)]
-fn apply_stem_darkening(coverage: u8) -> u8 {
-    if coverage == 0 || coverage == 255 {
+fn apply_stem_darkening(coverage: u8, size_px: u16) -> u8 {
+    if coverage == 0 || coverage == 255 || size_px >= 28 {
         return coverage;
     }
     let c = coverage as u32;
     let boost = 25u32 * (255 - c) / 255; // factor = 25
     (c + boost).min(255) as u8
+}
+
+/// Blit a packed 8-bit alpha mask (row-major) with gamma-correct blending.
+pub fn blit_alpha(
+    fb: &mut FrameBuffer,
+    x: i32,
+    y: i32,
+    w: u16,
+    h: u16,
+    bitmap: &[u8],
+    color: Pixel,
+    size_px: u16,
+) {
+    blit_glyph_aa(fb, x, y, w, h, bitmap, color, size_px);
 }
 
 /// Blit an alpha-coverage glyph bitmap onto the framebuffer with gamma-correct blending.
@@ -376,6 +464,7 @@ fn blit_glyph_aa(
     h: u16,
     bitmap: &[u8],
     color: Pixel,
+    size_px: u16,
 ) {
     let fb_w = fb.width as i32;
     let fb_h = fb.height as i32;
@@ -400,11 +489,18 @@ fn blit_glyph_aa(
                 continue;
             }
 
-            // Apply coverage sharpening and stem darkening for crisp text
-            let alpha = apply_stem_darkening(sharpen_coverage(raw_alpha));
+            let cov = apply_stem_darkening(sharpen_coverage(raw_alpha, size_px), size_px);
+            let a = (cov as u32 * color.a as u32 + 127) / 255;
+            if a == 0 {
+                continue;
+            }
 
-            if alpha == 255 {
-                fb.set_pixel(px as usize, py as usize, color);
+            if a >= 250 {
+                fb.set_pixel(
+                    px as usize,
+                    py as usize,
+                    Pixel::rgb(color.r, color.g, color.b),
+                );
             } else {
                 // Gamma-correct alpha blending in linear light space
                 let bg = fb.get_pixel(px as usize, py as usize);
@@ -412,7 +508,6 @@ fn blit_glyph_aa(
                 let bg_g_lin = SRGB_TO_LINEAR[bg.g as usize] as u32;
                 let bg_b_lin = SRGB_TO_LINEAR[bg.b as usize] as u32;
 
-                let a = alpha as u32;
                 let inv_a = 255 - a;
 
                 let r_lin = (cr_lin * a + bg_r_lin * inv_a + 128) / 255;
@@ -478,3 +573,13 @@ pub const UI_SIZE_SMALL: u16 = 11;
 pub const UI_SIZE_LARGE: u16 = 16;
 /// Terminal/mono font size
 pub const MONO_SIZE: u16 = 14;
+/// Splash / lock wordmark
+pub const LOGO_SIZE: u16 = 64;
+/// Boot menu / login title
+pub const TITLE_SIZE: u16 = 32;
+/// Splash tagline
+pub const TAGLINE_SIZE: u16 = 18;
+/// Body copy (menu entries, descriptions)
+pub const BODY_SIZE: u16 = 16;
+/// Captions (version, status, hints)
+pub const CAPTION_SIZE: u16 = 13;

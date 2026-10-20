@@ -665,7 +665,7 @@ impl TtfFont {
 /// on-curve and off-curve control points per the TrueType specification.
 /// Off-curve points are quadratic Bézier control points; consecutive
 /// off-curve points have implied on-curve midpoints between them.
-fn flatten_contour(contour: &Contour) -> Vec<(f32, f32)> {
+fn flatten_contour(contour: &Contour, scale: f32) -> Vec<(f32, f32)> {
     let pts = &contour.points;
     let n = pts.len();
     if n < 2 {
@@ -689,7 +689,8 @@ fn flatten_contour(contour: &Contour) -> Vec<(f32, f32)> {
 
     result.push(first_on);
     let mut last = first_on;
-    let mut i = 0;
+    // Skip the duplicated start point when the contour begins on-curve.
+    let mut i = if pts[0].on_curve { 1 } else { 0 };
 
     while i < n {
         let p = &pts[i];
@@ -714,9 +715,16 @@ fn flatten_contour(contour: &Contour) -> Vec<(f32, f32)> {
                 )
             };
 
+            // Adaptive subdivision: ~1 segment per output pixel of curve length.
+            let dx = end.0 - last.0;
+            let dy = end.1 - last.1;
+            let cdx = ctrl.0 - last.0;
+            let cdy = ctrl.1 - last.1;
+            let approx_len =
+                (libm::sqrtf(dx * dx + dy * dy) + libm::sqrtf(cdx * cdx + cdy * cdy)) * 0.5;
+            let steps = (approx_len * scale).clamp(6.0, 32.0) as usize;
+
             // Subdivide quadratic Bézier: P(t) = (1-t)²·last + 2(1-t)t·ctrl + t²·end
-            // Use 8 segments for smooth curves
-            let steps = 8;
             for s in 1..=steps {
                 let t = s as f32 / steps as f32;
                 let inv = 1.0 - t;
@@ -762,22 +770,23 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
     let flattened: Vec<Vec<(f32, f32)>> = outline
         .contours
         .iter()
-        .map(|c| flatten_contour(c))
+        .map(|c| flatten_contour(c, scale))
         .collect();
 
-    // For each super-sampled scanline, compute winding intersections
+    // TrueType fill rule is non-zero winding (not even-odd). Inter Bold in
+    // particular uses overlapping contours; even-odd punches holes in stems.
     for sy in 0..ss_height {
         let y_f = outline.y_max as f32 - (sy as f32 + 0.5) / (ss_y as f32 * scale);
-        let mut intersections: Vec<f32> = Vec::new();
+        let mut hits: Vec<(f32, i32)> = Vec::new();
 
         for flat_pts in &flattened {
             let n = flat_pts.len();
             if n < 2 {
                 continue;
             }
-            for i in 0..n - 1 {
+            for i in 0..n {
                 let (x0, y0) = flat_pts[i];
-                let (x1, y1) = flat_pts[i + 1];
+                let (x1, y1) = flat_pts[(i + 1) % n];
 
                 if (y0 < y_f && y1 < y_f) || (y0 >= y_f && y1 >= y_f) {
                     continue;
@@ -785,39 +794,32 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
 
                 let t = (y_f - y0) / (y1 - y0);
                 let x_i = x0 + t * (x1 - x0);
-                // Convert to pixel-space X, accounting for super-sampling
-                intersections.push((x_i - outline.x_min as f32) * scale * ss_x as f32);
-            }
-            // Close the contour: last point → first point
-            if n >= 2 {
-                let (x0, y0) = flat_pts[n - 1];
-                let (x1, y1) = flat_pts[0];
-                if !((y0 < y_f && y1 < y_f) || (y0 >= y_f && y1 >= y_f)) {
-                    let t = (y_f - y0) / (y1 - y0);
-                    let x_i = x0 + t * (x1 - x0);
-                    intersections.push((x_i - outline.x_min as f32) * scale * ss_x as f32);
-                }
+                let dir = if y1 > y0 { 1 } else { -1 };
+                hits.push(((x_i - outline.x_min as f32) * scale * ss_x as f32, dir));
             }
         }
 
-        intersections.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal));
         let row = sy / ss_y;
         if row >= height {
             continue;
         }
 
-        // Fill between pairs (even-odd rule) at sub-pixel resolution
-        let mut i = 0;
-        while i + 1 < intersections.len() {
-            let x_start = intersections[i].max(0.0) as usize;
-            let x_end = (intersections[i + 1] as usize).min(ss_width);
-            for sx in x_start..x_end {
-                let col = sx / ss_x;
-                if col < width {
-                    coverage[row * width + col] += 1;
+        let mut winding = 0i32;
+        for i in 0..hits.len() {
+            if winding != 0 && i > 0 {
+                let x_start = hits[i - 1].0.max(0.0) as usize;
+                let x_end = (hits[i].0 as usize).min(ss_width);
+                if x_end > x_start {
+                    for sx in x_start..x_end {
+                        let col = sx / ss_x;
+                        if col < width {
+                            coverage[row * width + col] += 1;
+                        }
+                    }
                 }
             }
-            i += 2;
+            winding += hits[i].1;
         }
     }
 

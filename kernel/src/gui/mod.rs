@@ -34,6 +34,7 @@ pub mod popups;
 pub mod settings;
 pub mod shortcuts_overlay;
 pub mod sounds;
+pub mod splash_type;
 pub mod startmenu;
 pub mod system_tray;
 pub mod task_manager;

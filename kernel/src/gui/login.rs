@@ -10,8 +10,10 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use spin::Mutex;
 
 use super::colors;
+use super::font_engine;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
+use super::splash_type;
 
 /// Login screen state
 static LOGIN_STATE: Mutex<LoginState> = Mutex::new(LoginState::new_const());
@@ -294,24 +296,30 @@ pub fn draw_login_screen(fb: &mut FrameBuffer) {
     let mut cy = card_y + 30;
 
     // ── OS Logo / Title ──
-    // Draw "KnoxOS" title centered
-    let title = "KnoxOS";
-    let title_w = fonts::measure_string_width(title, 1) as i32;
-    let title_x = card_x + (card_w - title_w * 2) / 2; // approximate 2x scale
-    // Draw large title using standard font (double-size effect)
-    fonts::draw_string_bold(fb, title_x, cy, title, Pixel::new(0, 200, 255, 255), 2);
-    cy += 50;
-
-    // Subtitle
-    let subtitle = "Welcome back";
-    let sub_w = fonts::measure_string_width_compact(subtitle, 1) as i32;
-    fonts::draw_string_compact(
+    let title = splash_type::LOGIN_TITLE;
+    let title_x = card_x + (card_w - title.width as i32) / 2;
+    font_engine::blit_alpha(
         fb,
-        card_x + (card_w - sub_w) / 2,
+        title_x,
         cy,
-        subtitle,
-        Pixel::new(160, 200, 240, 180),
-        1,
+        title.width,
+        title.height,
+        title.pixels,
+        Pixel::new(0, 200, 255, 255),
+        32,
+    );
+    cy += title.height as i32 + 16;
+    let subtitle = splash_type::LOGIN_SUB;
+    let sub_x = card_x + (card_w - subtitle.width as i32) / 2;
+    font_engine::blit_alpha(
+        fb,
+        sub_x,
+        cy,
+        subtitle.width,
+        subtitle.height,
+        subtitle.pixels,
+        Pixel::new(160, 200, 240, 200),
+        32,
     );
     cy += 30;
 

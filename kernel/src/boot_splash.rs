@@ -4,10 +4,66 @@
 //! kernel subsystems are being initialized. Called from `kernel_main()` right
 //! after framebuffer init, before any other subsystem needs the display.
 
+use crate::gui::font_engine::{self, FontId};
 use crate::gui::fonts;
 use crate::gui::framebuffer::{FrameBuffer, Pixel, Rect};
+use crate::gui::splash_type::{self, SplashBitmap};
 use crate::serial_println;
-use alloc::format;
+
+const BAR_W: u32 = 280;
+const BAR_H: u32 = 4;
+
+struct SplashLayout {
+    logo_y: i32,
+    tagline_y: i32,
+    version_y: i32,
+    bar_x: u32,
+    bar_y: u32,
+    status_y: i32,
+}
+
+fn splash_layout(w: i32, h: i32) -> SplashLayout {
+    let logo_y = h / 2 - 92;
+    let tagline_y = logo_y + splash_type::LOGO.height as i32 + 24;
+    let version_y = tagline_y + splash_type::TAGLINE.height as i32 + 16;
+    let bar_x = (w as u32 - BAR_W) / 2;
+    let bar_y = (version_y + splash_type::VERSION.height as i32 + 18) as u32;
+    let status_y = bar_y as i32 + BAR_H as i32 + 16;
+    SplashLayout {
+        logo_y,
+        tagline_y,
+        version_y,
+        bar_x,
+        bar_y,
+        status_y,
+    }
+}
+
+fn blit_centered(fb: &mut FrameBuffer, bm: &SplashBitmap, y: i32, color: Pixel) {
+    let x = (fb.width as i32 - bm.width as i32) / 2;
+    font_engine::blit_alpha(fb, x, y, bm.width, bm.height, bm.pixels, color, 32);
+}
+
+fn draw_centered(
+    fb: &mut FrameBuffer,
+    y: i32,
+    text: &str,
+    font: FontId,
+    size: u16,
+    tracking: i32,
+    color: Pixel,
+) {
+    font_engine::draw_text_centered(
+        fb,
+        fb.width as i32 / 2,
+        y,
+        text,
+        font,
+        size,
+        color,
+        tracking,
+    );
+}
 
 /// Draw the full boot splash (background + logo + tagline + progress bar)
 pub fn draw_splash(fb: &mut FrameBuffer) {
@@ -79,78 +135,50 @@ pub fn draw_splash(fb: &mut FrameBuffer) {
         }
     }
 
-    // ── KnoxOS logo text (large, centered) ──────────────────────────
-    let logo = "KnoxOS";
-    let logo_scale = 4u32;
-    let logo_w = logo.len() as i32 * fonts::FONT_WIDTH as i32 * logo_scale as i32;
-    let logo_x = (w - logo_w) / 2;
-    let logo_y = h / 2 - 80;
+    // ── Inter Bold wordmark + Inter Regular supporting copy ─────────
+    let layout = splash_layout(w, h);
 
-    // Shadow (offset scales with text size for proper depth)
-    let shadow_off = (logo_scale as i32).max(2);
-    fonts::draw_string_bold(
+    blit_centered(
         fb,
-        logo_x + shadow_off,
-        logo_y + shadow_off,
-        logo,
-        Pixel::new(0, 0, 0, 140),
-        logo_scale,
+        &splash_type::LOGO,
+        layout.logo_y + 3,
+        Pixel::new(6, 8, 22, 140),
     );
-    // Main text (bright white-blue)
-    fonts::draw_string_bold(
+    blit_centered(
         fb,
-        logo_x,
-        logo_y,
-        logo,
-        Pixel::new(200, 220, 255, 255),
-        logo_scale,
+        &splash_type::LOGO,
+        layout.logo_y,
+        Pixel::new(236, 242, 255, 255),
     );
-
-    // ── Tagline ─────────────────────────────────────────────────────
-    let tagline = "SI-native Operating System";
-    let tl_scale = 2u32;
-    let tl_w = tagline.len() as i32 * fonts::FONT_WIDTH as i32 * tl_scale as i32;
-    let tl_x = (w - tl_w) / 2;
-    let tl_y = logo_y + (fonts::FONT_HEIGHT as i32 * logo_scale as i32) + 16;
-    fonts::draw_string(
+    blit_centered(
         fb,
-        tl_x,
-        tl_y,
-        tagline,
-        Pixel::new(140, 160, 200, 200),
-        tl_scale,
+        &splash_type::TAGLINE,
+        layout.tagline_y,
+        Pixel::new(156, 172, 208, 230),
     );
-
-    // ── Version string ──────────────────────────────────────────────
-    let version = "v0.2.4";
-    let v_w = version.len() as i32 * fonts::FONT_WIDTH as i32;
-    let v_x = (w - v_w) / 2;
-    let v_y = tl_y + (fonts::FONT_HEIGHT as i32 * tl_scale as i32) + 8;
-    fonts::draw_string(fb, v_x, v_y, version, Pixel::new(100, 120, 160, 160), 1);
+    blit_centered(
+        fb,
+        &splash_type::VERSION,
+        layout.version_y,
+        Pixel::new(112, 128, 168, 210),
+    );
+    blit_centered(
+        fb,
+        &splash_type::STATUS,
+        layout.status_y,
+        Pixel::new(132, 148, 188, 210),
+    );
 
     // ── Progress bar track (empty) ──────────────────────────────────
-    let bar_w = 320u32;
-    let bar_h = 6u32;
-    let bar_x = (w as u32 - bar_w) / 2;
-    let bar_y = (v_y + fonts::FONT_HEIGHT as i32 + 16) as u32;
-
-    // Track background
     fb.fill_rect(
         Rect {
-            x: bar_x as i32,
-            y: bar_y as i32,
-            width: bar_w,
-            height: bar_h,
+            x: layout.bar_x as i32,
+            y: layout.bar_y as i32,
+            width: BAR_W,
+            height: BAR_H,
         },
         Pixel::new(40, 40, 60, 120),
     );
-
-    // ── "Loading..." text ───────────────────────────────────────────
-    let load_text = "Initializing...";
-    let lt_w = load_text.len() as i32 * fonts::FONT_WIDTH as i32;
-    let lt_x = (w - lt_w) / 2;
-    let lt_y = bar_y as i32 + bar_h as i32 + 12;
-    fonts::draw_string(fb, lt_x, lt_y, load_text, Pixel::new(120, 140, 180, 180), 1);
 
     // Present to hardware framebuffer
     fb.present();
@@ -163,36 +191,25 @@ pub fn update_progress(fb: &mut FrameBuffer, percent: u32) {
     let w = fb.width as i32;
     let h = fb.height as i32;
 
-    // Must match the bar position from draw_splash()
-    let logo_scale = 4u32;
-    let tl_scale = 2u32;
-    let logo_y = h / 2 - 80;
-    let tl_y = logo_y + (fonts::FONT_HEIGHT as i32 * logo_scale as i32) + 16;
-    let v_y = tl_y + (fonts::FONT_HEIGHT as i32 * tl_scale as i32) + 8;
-
-    let bar_w = 320u32;
-    let bar_h = 6u32;
-    let bar_x = (w as u32 - bar_w) / 2;
-    let bar_y = (v_y + fonts::FONT_HEIGHT as i32 + 16) as u32;
-
-    let fill_w = (bar_w * percent.min(100)) / 100;
+    let layout = splash_layout(w, h);
+    let fill_w = (BAR_W * percent.min(100)) / 100;
     if fill_w > 0 {
         // Gradient fill: blue → cyan
         for dx in 0..fill_w {
-            let t = dx as f32 / bar_w as f32;
+            let t = dx as f32 / BAR_W as f32;
             let r = (60.0 + t * 40.0) as u8;
             let g = (130.0 + t * 80.0) as u8;
             let b = (220.0 + t * 35.0) as u8;
-            for dy in 0..bar_h {
+            for dy in 0..BAR_H {
                 fb.set_pixel(
-                    (bar_x + dx) as usize,
-                    (bar_y + dy) as usize,
+                    (layout.bar_x + dx) as usize,
+                    (layout.bar_y + dy) as usize,
                     Pixel::rgb(r, g, b),
                 );
             }
         }
         // Only present the progress bar region for speed
-        fb.present_rect(bar_x as i32, bar_y as i32, bar_w, bar_h);
+        fb.present_rect(layout.bar_x as i32, layout.bar_y as i32, BAR_W, BAR_H);
     }
 }
 
@@ -292,21 +309,16 @@ pub fn draw_boot_menu(fb: &mut FrameBuffer, selected: usize) {
     );
 
     // Title
-    let title = "KnoxOS Boot Menu";
-    let title_scale = 3u32;
-    let title_w = title.len() as i32 * fonts::FONT_WIDTH as i32 * title_scale as i32;
-    let title_x = (w - title_w) / 2;
-    fonts::draw_string(
+    let title_y = 56i32;
+    blit_centered(
         fb,
-        title_x,
-        60,
-        title,
-        Pixel::new(200, 220, 255, 255),
-        title_scale,
+        &splash_type::MENU_TITLE,
+        title_y,
+        Pixel::new(236, 242, 255, 255),
     );
 
     // Separator line
-    let sep_y = 60 + fonts::FONT_HEIGHT as i32 * title_scale as i32 + 16;
+    let sep_y = title_y + splash_type::MENU_TITLE.height as i32 + 20;
     fb.fill_rect(
         Rect {
             x: w / 4,
@@ -348,27 +360,69 @@ pub fn draw_boot_menu(fb: &mut FrameBuffer, selected: usize) {
         let indicator = if is_selected { "> " } else { "  " };
         let label = entry.label();
         let combined = alloc::format!("{}{}", indicator, label);
-        fonts::draw_string(fb, entry_x, y + 4, &combined, label_color, 2);
+        if font_engine::is_ready() {
+            font_engine::draw_text(
+                fb,
+                entry_x,
+                y + 6,
+                &combined,
+                FontId::Ui,
+                font_engine::BODY_SIZE,
+                label_color,
+            );
+        } else {
+            fonts::draw_string(fb, entry_x, y + 4, &combined, label_color, 2);
+        }
 
         // Description text for selected item
         if is_selected {
             let desc_y = start_y + BOOT_MENU_ENTRIES.len() as i32 * entry_height + 24;
-            fonts::draw_string(
-                fb,
-                entry_x,
-                desc_y,
-                entry.description(),
-                Pixel::new(120, 130, 160, 200),
-                1,
-            );
+            if font_engine::is_ready() {
+                font_engine::draw_text(
+                    fb,
+                    entry_x,
+                    desc_y,
+                    entry.description(),
+                    FontId::Ui,
+                    font_engine::CAPTION_SIZE,
+                    Pixel::new(120, 130, 160, 200),
+                );
+            } else {
+                fonts::draw_string(
+                    fb,
+                    entry_x,
+                    desc_y,
+                    entry.description(),
+                    Pixel::new(120, 130, 160, 200),
+                    1,
+                );
+            }
         }
     }
 
     // Footer help
     let help = "Use Arrow Keys to select, Enter to boot, Esc for normal boot";
-    let help_w = help.len() as i32 * fonts::FONT_WIDTH as i32;
-    let help_x = (w - help_w) / 2;
-    fonts::draw_string(fb, help_x, h - 40, help, Pixel::new(80, 90, 120, 180), 1);
+    if font_engine::is_ready() {
+        draw_centered(
+            fb,
+            h - 44,
+            help,
+            FontId::Ui,
+            font_engine::CAPTION_SIZE,
+            0,
+            Pixel::new(96, 108, 140, 200),
+        );
+    } else {
+        let help_w = help.len() as i32 * fonts::FONT_WIDTH as i32;
+        fonts::draw_string(
+            fb,
+            (w - help_w) / 2,
+            h - 40,
+            help,
+            Pixel::new(80, 90, 120, 180),
+            1,
+        );
+    }
 
     fb.present();
 }

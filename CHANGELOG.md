@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Splash type** — boot splash, boot menu, and login wordmark use FreeType-rasterized Inter instead of scaled Hack bitmaps.
 - **FUSE LISTXATTR** — LISTXATTR includes a name stored by SETXATTR (`GATE_FUSE listxattr`).
 - **FUSE REMOVEXATTR** — REMOVEXATTR drops a stored name so a later GETXATTR fails (`GATE_FUSE removexattr`).
 - **D-Bus ListActivatableNames** — seeded well-known name is listed (`GATE_DBUS activate`).
