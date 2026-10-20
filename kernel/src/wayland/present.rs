@@ -187,6 +187,21 @@ pub fn window_shm_pixels(window_id: u32) -> Option<(Vec<u8>, u32, u32)> {
     WINDOW_PIXELS.lock().get(&window_id).cloned()
 }
 
+/// Close leftover Ring 3 SHM demo windows after boot gates so the desktop
+/// is not left with a scaled `"OK"` Terminal stub.
+pub fn dismiss_gate_demo_windows() {
+    let wids: Vec<u32> = CLIENT_WINDOWS.lock().values().copied().collect();
+    if wids.is_empty() {
+        return;
+    }
+    let n = wids.len();
+    for wid in wids {
+        crate::gui::window::WINDOW_MANAGER.lock().close_window(wid);
+        crate::gui::taskbar::remove_entry(wid);
+    }
+    serial_println!("[WL] dismissed {} gate demo window(s)", n);
+}
+
 /// Drop compositor mappings when a chrome window is closed.
 pub fn forget_window(window_id: u32) {
     WINDOW_SURFACES.lock().remove(&window_id);

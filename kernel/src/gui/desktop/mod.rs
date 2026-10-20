@@ -11,7 +11,7 @@ mod types;
 mod wallpaper;
 mod zoom;
 
-pub use apps::open_application;
+pub use apps::{open_application, open_browser_at, open_editor_at, open_explorer_at};
 pub use context_menu::{close_context_menu, handle_context_menu_click, show_context_menu};
 pub use cursor::{
     CURSOR_H, CURSOR_SAVE_H, CURSOR_SAVE_PAD, CURSOR_SAVE_W, CURSOR_W, CursorTheme, CursorType,

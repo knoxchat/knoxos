@@ -244,6 +244,9 @@ pub fn open() {
         detail_idx: None,
         scroll_y: 0,
     });
+    super::taskbar::add_entry(wid, "Software Center");
+    super::taskbar::set_active(wid);
+    super::sounds::window_open();
     super::request_redraw();
 }
 

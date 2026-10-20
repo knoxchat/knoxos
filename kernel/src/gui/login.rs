@@ -44,12 +44,17 @@ struct LoginState {
 
 impl LoginState {
     const fn new_const() -> Self {
+        let mut username = [0u8; 64];
+        username[0] = b'u';
+        username[1] = b's';
+        username[2] = b'e';
+        username[3] = b'r';
         Self {
-            username: [0u8; 64],
-            username_len: 0,
+            username,
+            username_len: 4,
             password: [0u8; 64],
             password_len: 0,
-            focused_field: 0,
+            focused_field: 1,
             error_msg: [0u8; 64],
             error_len: 0,
             authenticating: false,
@@ -657,10 +662,6 @@ pub fn handle_click(x: i32, y: i32, screen_width: i32, screen_height: i32) {
 /// Reset login screen state (e.g., after logout)
 pub fn reset() {
     let mut state = LOGIN_STATE.lock();
-    state.username_len = 0;
-    state.password_len = 0;
-    state.focused_field = 0;
-    state.error_len = 0;
-    state.authenticating = false;
+    *state = LoginState::new_const();
     LOGGED_IN.store(false, Ordering::Relaxed);
 }

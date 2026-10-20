@@ -39,6 +39,30 @@ const HEADER_HEIGHT: i32 = 40;
 
 // ─── Public API ─────────────────────────────────────────────────────
 
+/// Open an empty Archive Manager window (start menu / desktop).
+pub fn open() {
+    let mut win = window::Window::new("Archive Manager", 200, 100, 650, 450);
+    win.content_type = WindowContentType::ArchiveViewer;
+    let wid = win.id;
+
+    let mut wm = window::WINDOW_MANAGER.lock();
+    wm.add_window(win);
+    drop(wm);
+
+    ARCHIVE_STATES.lock().push(ArchiveViewState {
+        window_id: wid,
+        archive_path: String::from("No archive open"),
+        entries: Vec::new(),
+        selected: -1,
+        extracted: false,
+    });
+
+    super::taskbar::add_entry(wid, "Archive Manager");
+    super::taskbar::set_active(wid);
+    super::sounds::window_open();
+    super::request_redraw();
+}
+
 /// Open an archive file in the archive viewer
 pub fn open_archive(path: &str) {
     let data = match crate::file_manager::read_file(path) {
@@ -67,6 +91,9 @@ pub fn open_archive(path: &str) {
     });
     drop(states);
 
+    super::taskbar::add_entry(wid, "Archive");
+    super::taskbar::set_active(wid);
+    super::sounds::window_open();
     super::request_redraw();
 }
 

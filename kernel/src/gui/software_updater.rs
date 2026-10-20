@@ -87,6 +87,9 @@ pub fn open() {
         status_msg: status,
     });
 
+    super::taskbar::add_entry(wid, "Software Updater");
+    super::taskbar::set_active(wid);
+    super::sounds::window_open();
     super::request_redraw();
 }
 

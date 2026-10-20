@@ -43,8 +43,8 @@ pub use gates::{
     GATE_TERM_PAINT_MARKER, GATE_WL_MARKER, WAYLAND_SOCKET_PATH, shm_pool_self_test,
 };
 pub use present::{
-    forget_window, present_unix_buffer, present_user_buffer, pty_key_to_window, window_pty,
-    window_shm_pixels,
+    dismiss_gate_demo_windows, forget_window, present_unix_buffer, present_user_buffer,
+    pty_key_to_window, window_pty, window_shm_pixels,
 };
 pub use protocol::{dispatch_client_bytes, on_client_connected};
 pub use seat::{PointerAxis, PointerButton, Seat};

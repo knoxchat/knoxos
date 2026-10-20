@@ -38,11 +38,11 @@ lazy_static::lazy_static! {
 }
 
 /// Open a browser window navigated to the given URL
-pub fn open_browser_window(_url: &str) {
-    crate::user_task::spawn_browser_app();
+pub fn open_browser_window(url: &str) {
+    crate::gui::desktop::open_browser_at(url);
 }
 
 /// Open a file explorer window at a given path
-pub fn open_file_explorer_at(_path: &str) {
-    crate::user_task::spawn_files_app();
+pub fn open_file_explorer_at(path: &str) {
+    crate::gui::desktop::open_explorer_at(path);
 }

@@ -200,6 +200,9 @@ pub fn open() {
     drop(wm);
 
     STATES.lock().push(WizardState::new(wid));
+    super::taskbar::add_entry(wid, "Setup Wizard");
+    super::taskbar::set_active(wid);
+    super::sounds::window_open();
     super::request_redraw();
 }
 

@@ -378,6 +378,6 @@ pub fn rename_backspace(wid: WindowId) {
 
 /// Open a file in the text editor (launches a new editor window)
 pub(super) fn open_file_in_editor(path: &str) {
-    crate::user_task::spawn_editor_app();
+    crate::gui::desktop::open_editor_at(path);
     crate::serial_println!("[KnoxOS] Opened file in editor: {}", path);
 }

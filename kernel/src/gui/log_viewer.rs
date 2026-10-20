@@ -51,6 +51,9 @@ pub fn open() {
         entries,
     };
     STATES.lock().push(state);
+    super::taskbar::add_entry(wid, "Log Viewer");
+    super::taskbar::set_active(wid);
+    super::sounds::window_open();
     super::request_redraw();
 }
 

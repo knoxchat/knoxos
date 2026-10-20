@@ -54,7 +54,25 @@ const TAB_LABELS: &[(&str, TaskManagerTab)] = &[
 // ─── Public API ─────────────────────────────────────────────────────
 
 pub fn open() {
-    crate::user_task::spawn_taskmgr_app();
+    let mut win = window::Window::new("Task Manager", 200, 80, 720, 520);
+    win.content_type = WindowContentType::TaskManager;
+    let wid = win.id;
+
+    let mut wm = window::WINDOW_MANAGER.lock();
+    wm.add_window(win);
+    drop(wm);
+
+    STATES.lock().push(TaskManagerState {
+        window_id: wid,
+        tab: TaskManagerTab::Processes,
+        selected: -1,
+        scroll_y: 0,
+    });
+
+    super::taskbar::add_entry(wid, "Task Manager");
+    super::taskbar::set_active(wid);
+    super::sounds::window_open();
+    super::request_redraw();
 }
 
 pub fn close(wid: WindowId) {

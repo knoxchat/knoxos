@@ -91,11 +91,19 @@ impl VirtualFS {
         // User home directory
         let user_home = vfs.create_dir_under(home, "user", 0o755);
         let _desktop = vfs.create_dir_under(user_home, "Desktop", 0o755);
-        let _documents = vfs.create_dir_under(user_home, "Documents", 0o755);
+        let documents = vfs.create_dir_under(user_home, "Documents", 0o755);
         let _downloads = vfs.create_dir_under(user_home, "Downloads", 0o755);
         let _music = vfs.create_dir_under(user_home, "Music", 0o755);
         let _pictures = vfs.create_dir_under(user_home, "Pictures", 0o755);
         let _videos = vfs.create_dir_under(user_home, "Videos", 0o755);
+        let _trash = vfs.create_dir_under(user_home, ".trash", 0o700);
+        vfs.create_file_under(
+            documents,
+            "Welcome.txt",
+            FileType::Regular,
+            b"Welcome to KnoxOS.\n\nThis is your Documents folder.\nOpen files from the desktop Files icon.\n",
+            0o644,
+        );
 
         // Device files
         vfs.create_file_under(dev, "null", FileType::CharDevice, &[], 0o666);

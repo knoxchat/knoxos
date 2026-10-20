@@ -44,6 +44,9 @@ pub fn open() {
     });
     drop(states);
 
+    super::taskbar::add_entry(wid, "Bluetooth");
+    super::taskbar::set_active(wid);
+    super::sounds::window_open();
     super::request_redraw();
 }
 

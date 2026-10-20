@@ -91,6 +91,7 @@ pub fn run_gate_demos() {
     unsafe {
         crate::context::run_in_desktop_context(gate_boot_body);
     }
+    crate::wayland::dismiss_gate_demo_windows();
     serial_println!(
         "[user_task] ── Gate B3–B8 + D1 + F1–F4 + J1 + J4 + K1 + K3 + L1 + L4 + M2–M4 + N2–N4 + O2–O4 + P2–P4 + Q2–Q4 + R2–R4 + S2–S4 + T2–T4 + U2–U4 + V2–V4 + W2–W4 + X2–X4 + Y2–Y4 + Z2–Z4: done ──"
     );
