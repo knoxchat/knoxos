@@ -4,10 +4,11 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::loopback::{
-    serve_loopback, serve_loopback_create, serve_loopback_getattr, serve_loopback_link,
-    serve_loopback_mkdir, serve_loopback_mknod, serve_loopback_read, serve_loopback_readdir,
-    serve_loopback_readlink, serve_loopback_rename, serve_loopback_rmdir, serve_loopback_setattr,
-    serve_loopback_statfs, serve_loopback_symlink, serve_loopback_unlink, serve_loopback_write,
+    serve_loopback, serve_loopback_create, serve_loopback_getattr, serve_loopback_getxattr,
+    serve_loopback_link, serve_loopback_mkdir, serve_loopback_mknod, serve_loopback_read,
+    serve_loopback_readdir, serve_loopback_readlink, serve_loopback_rename, serve_loopback_rmdir,
+    serve_loopback_setattr, serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_symlink,
+    serve_loopback_unlink, serve_loopback_write,
 };
 use super::mount::{send_request, take_response};
 use super::protocol::{
@@ -325,4 +326,31 @@ pub fn fuse_statfs(mount_point: &str) -> Result<FuseStatfs, &'static str> {
     serve_loopback_statfs(mount_point, unique);
     let resp = take_response(mount_point, unique).ok_or("would block")?;
     parse_fuse_statfs(&resp).ok_or("short statfs")
+}
+/// Handle a VFS setxattr through FUSE. Request body is `name\0value`.
+pub fn fuse_setxattr(
+    mount_point: &str,
+    nodeid: u64,
+    name: &str,
+    value: &[u8],
+) -> Result<(), &'static str> {
+    let mut data = Vec::with_capacity(name.len() + 1 + value.len());
+    data.extend_from_slice(name.as_bytes());
+    data.push(0);
+    data.extend_from_slice(value);
+    let unique = send_request(mount_point, FuseOpcode::Setxattr, nodeid, data.clone())?;
+    serve_loopback_setxattr(mount_point, unique, nodeid, &data);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS getxattr through FUSE. Request body is the attribute name.
+pub fn fuse_getxattr(mount_point: &str, nodeid: u64, name: &str) -> Result<Vec<u8>, &'static str> {
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::Getxattr,
+        nodeid,
+        name.as_bytes().to_vec(),
+    )?;
+    serve_loopback_getxattr(mount_point, unique, nodeid, name.as_bytes());
+    take_response(mount_point, unique).ok_or("would block")
 }

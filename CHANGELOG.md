@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **FUSE SETXATTR** — SETXATTR stores bytes a later GETXATTR returns (`GATE_FUSE setxattr`).
+- **FUSE GETXATTR** — GETXATTR returns a stored value and fails for a missing name (`GATE_FUSE getxattr`).
+- **D-Bus StartServiceByName** — SUCCESS for a vacant well-known name, then ALREADY_RUNNING (`GATE_DBUS start`).
+- **D-Bus GetConnectionCredentials** — unique and well-known names return ProcessID and UnixUserID (`GATE_DBUS creds`).
+- **XHCI SET_DESCRIPTOR** — Setup+Data+Status Transfer Event for SET_DESCRIPTOR (`GATE_USB xhci stdesc`).
+- **XHCI isochronous IN** — Configure Endpoint isoch IN plus Isoch TRB Transfer Event (`GATE_USB xhci isoch`).
+- **NFS ACCESS** — COMPOUND ACCESS grants file bits from mode, not the requested mask (`GATE_NFS access`).
+- **NFS COMMIT** — unstable WRITE is not visible until COMMIT persists it (`GATE_NFS commit`).
 - **FUSE MKNOD** — MKNOD creates a special file LOOKUP returns with `S_IFCHR` (`GATE_FUSE mknod`).
 - **FUSE STATFS** — STATFS reports `bsize` 4096 and counts created names (`GATE_FUSE statfs`).
 - **D-Bus RemoveMatch** — method return, then matching signals are no longer delivered (`GATE_DBUS remove`).

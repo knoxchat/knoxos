@@ -6,9 +6,9 @@ use crate::serial_println;
 
 use super::mount::{loopback_put, mount};
 use super::ops::{
-    fuse_create, fuse_getattr, fuse_link, fuse_lookup, fuse_mkdir, fuse_mknod, fuse_read,
-    fuse_readdir, fuse_readlink, fuse_rename, fuse_rmdir, fuse_setattr, fuse_statfs, fuse_symlink,
-    fuse_unlink, fuse_write,
+    fuse_create, fuse_getattr, fuse_getxattr, fuse_link, fuse_lookup, fuse_mkdir, fuse_mknod,
+    fuse_read, fuse_readdir, fuse_readlink, fuse_rename, fuse_rmdir, fuse_setattr, fuse_setxattr,
+    fuse_statfs, fuse_symlink, fuse_unlink, fuse_write,
 };
 
 pub const GATE_FUSE_MARKER: &str = "GATE_FUSE lookup";
@@ -705,4 +705,115 @@ pub fn statfs_self_test() -> bool {
         );
         false
     }
+}
+
+pub const GATE_FUSE_SETXATTR_MARKER: &str = "GATE_FUSE setxattr";
+const GATE_FUSE_SETXATTR_NAME: &str = "user.knox";
+const GATE_FUSE_SETXATTR_PAYLOAD: &[u8] = b"knoxos-fuse-sx\n";
+
+/// SETXATTR must store bytes that a subsequent GETXATTR returns.
+pub fn setxattr_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-sx";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE setxattr FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "sx.txt", b"x").is_err() {
+        serial_println!("[fuse] GATE_FUSE setxattr FAILED: put");
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "sx.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE setxattr FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_setxattr(
+        MP,
+        looked.nodeid,
+        GATE_FUSE_SETXATTR_NAME,
+        GATE_FUSE_SETXATTR_PAYLOAD,
+    ) {
+        serial_println!("[fuse] GATE_FUSE setxattr FAILED: setxattr ({})", e);
+        return false;
+    }
+    match fuse_getxattr(MP, looked.nodeid, GATE_FUSE_SETXATTR_NAME) {
+        Ok(data) if data == GATE_FUSE_SETXATTR_PAYLOAD => {
+            serial_println!(
+                "[fuse] {} (SETXATTR+GETXATTR {} bytes ino={})",
+                GATE_FUSE_SETXATTR_MARKER,
+                data.len(),
+                looked.nodeid
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[fuse] GATE_FUSE setxattr FAILED: getxattr len={}",
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_FUSE_GETXATTR_MARKER: &str = "GATE_FUSE getxattr";
+const GATE_FUSE_GETXATTR_NAME: &str = "user.knox";
+const GATE_FUSE_GETXATTR_PAYLOAD: &[u8] = b"knoxos-fuse-gx\n";
+
+/// GETXATTR must return a stored value and fail for a missing name.
+pub fn getxattr_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-gx";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE getxattr FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "gx.txt", b"x").is_err() {
+        serial_println!("[fuse] GATE_FUSE getxattr FAILED: put");
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "gx.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE getxattr FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_setxattr(
+        MP,
+        looked.nodeid,
+        GATE_FUSE_GETXATTR_NAME,
+        GATE_FUSE_GETXATTR_PAYLOAD,
+    ) {
+        serial_println!("[fuse] GATE_FUSE getxattr FAILED: setxattr ({})", e);
+        return false;
+    }
+    let got = match fuse_getxattr(MP, looked.nodeid, GATE_FUSE_GETXATTR_NAME) {
+        Ok(data) => data,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE getxattr FAILED: getxattr ({})", e);
+            return false;
+        }
+    };
+    if got != GATE_FUSE_GETXATTR_PAYLOAD {
+        serial_println!("[fuse] GATE_FUSE getxattr FAILED: value len={}", got.len());
+        return false;
+    }
+    if fuse_getxattr(MP, looked.nodeid, "user.missing").is_ok() {
+        serial_println!("[fuse] GATE_FUSE getxattr FAILED: missing name present");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (GETXATTR {} bytes, missing ENOENT)",
+        GATE_FUSE_GETXATTR_MARKER,
+        got.len()
+    );
+    true
 }

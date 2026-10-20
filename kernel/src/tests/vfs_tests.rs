@@ -286,6 +286,28 @@ fn test_xhci_bulk_in() {
 }
 
 #[test_case]
+fn test_xhci_set_descriptor() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::set_descriptor_self_test(),
+        "XHCI SET_DESCRIPTOR must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_isoch_in() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::isoch_in_self_test(),
+        "XHCI isochronous IN must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_fuse_write_roundtrip() {
     assert!(
         crate::fuse::write_self_test(),
@@ -386,6 +408,22 @@ fn test_fuse_statfs_bsize() {
     assert!(
         crate::fuse::statfs_self_test(),
         "FUSE STATFS must report bsize 4096 and count created names"
+    );
+}
+
+#[test_case]
+fn test_fuse_setxattr_roundtrip() {
+    assert!(
+        crate::fuse::setxattr_self_test(),
+        "FUSE SETXATTR must store bytes that a later GETXATTR returns"
+    );
+}
+
+#[test_case]
+fn test_fuse_getxattr_missing() {
+    assert!(
+        crate::fuse::getxattr_self_test(),
+        "FUSE GETXATTR must return a stored value and fail for a missing name"
     );
 }
 
@@ -546,6 +584,24 @@ fn test_nfs_readdir_names() {
     assert!(
         crate::nfs::readdir_self_test(),
         "NFS4 READDIR must list created files and directories"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_access_bits() {
+    assert!(
+        crate::nfs::access_self_test(),
+        "NFS4 ACCESS must grant file bits from mode, not echo the request"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_commit_persist() {
+    assert!(
+        crate::nfs::commit_self_test(),
+        "NFS4 COMMIT must persist an unstable WRITE so a later READ returns it"
     );
 }
 

@@ -662,6 +662,22 @@ fn test_dbus_get_id() {
 }
 
 #[test_case]
+fn test_dbus_start_service() {
+    assert!(
+        crate::dbus::start_self_test(),
+        "StartServiceByName must return SUCCESS then ALREADY_RUNNING"
+    );
+}
+
+#[test_case]
+fn test_dbus_connection_creds() {
+    assert!(
+        crate::dbus::creds_self_test(),
+        "GetConnectionCredentials must return ProcessID and UnixUserID"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

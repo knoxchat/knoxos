@@ -42,6 +42,8 @@ pub(super) struct LoopbackFs {
     pub(super) links: BTreeMap<String, (u64, String)>,
     /// name → (ino, mode) for special files (mknod)
     pub(super) nodes: BTreeMap<String, (u64, u32)>,
+    /// nodeid → (xattr name → value)
+    pub(super) xattrs: BTreeMap<u64, BTreeMap<String, Vec<u8>>>,
     pub(super) next_ino: u64,
 }
 
@@ -82,6 +84,7 @@ pub fn mount(mount_point: &str, daemon_pid: u32) -> Result<(), &'static str> {
             dirs: BTreeMap::new(),
             links: BTreeMap::new(),
             nodes: BTreeMap::new(),
+            xattrs: BTreeMap::new(),
             next_ino: 2,
         },
     );

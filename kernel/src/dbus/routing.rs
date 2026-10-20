@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec;
@@ -7,7 +8,10 @@ use crate::serial_println;
 
 use super::connection::{release_name_on_bus, request_name_on_bus};
 use super::protocol::{DbusValue, Message, MessageType};
-use super::state::{BusState, BusType, Connection, ConnectionId, MatchRule, get_bus};
+use super::state::{
+    BusState, BusType, Connection, ConnectionId, DBUS_START_REPLY_ALREADY_RUNNING,
+    DBUS_START_REPLY_SUCCESS, MatchRule, get_bus,
+};
 
 // ═══════════════════════════════════════════════════════════════════════
 // MESSAGE ROUTING
@@ -248,6 +252,61 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 reply.signature = Some(String::from("s"));
                 if let Some(c) = bus.connections.get_mut(&from) {
                     c.message_queue.push(reply);
+                }
+            }
+            "StartServiceByName" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.clone(),
+                    _ => return,
+                };
+                let _flags = match msg.body.get(1) {
+                    Some(DbusValue::Uint32(f)) => *f,
+                    _ => 0,
+                };
+                let code = if bus.names.contains_key(&name) {
+                    DBUS_START_REPLY_ALREADY_RUNNING
+                } else {
+                    let _ = request_name_on_bus(bus, from, &name, 0);
+                    DBUS_START_REPLY_SUCCESS
+                };
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::Uint32(code)];
+                reply.signature = Some(String::from("u"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
+            "GetConnectionCredentials" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let owner_id = bus.names.get(name).copied().or_else(|| {
+                    bus.connections
+                        .values()
+                        .find(|c| c.unique_name == name)
+                        .map(|c| c.id)
+                });
+                if let Some(id) = owner_id {
+                    let creds = bus.connections.get(&id).map(|c| (c.pid, c.uid));
+                    if let Some((pid, uid)) = creds {
+                        let entries = vec![
+                            DbusValue::DictEntry(
+                                Box::new(DbusValue::String(String::from("UnixUserID"))),
+                                Box::new(DbusValue::Variant(Box::new(DbusValue::Uint32(uid)))),
+                            ),
+                            DbusValue::DictEntry(
+                                Box::new(DbusValue::String(String::from("ProcessID"))),
+                                Box::new(DbusValue::Variant(Box::new(DbusValue::Uint32(pid)))),
+                            ),
+                        ];
+                        let mut reply = Message::method_return(msg.header.serial);
+                        reply.body = vec![DbusValue::Array(entries)];
+                        reply.signature = Some(String::from("a{sv}"));
+                        if let Some(c) = bus.connections.get_mut(&from) {
+                            c.message_queue.push(reply);
+                        }
+                    }
                 }
             }
             "GetConnectionUnixUser" => {

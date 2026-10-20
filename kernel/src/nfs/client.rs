@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -8,10 +8,31 @@ use crate::serial_println;
 
 use super::compound::{NfsCompoundOp, NfsCompoundResult};
 use super::types::{
-    NFS_PORT, NFS4_SHARE_ACCESS_READ, NFS4_SHARE_ACCESS_WRITE, NFS4_SHARE_DENY_NONE, NfsAttrs,
-    NfsDirEntry, NfsFileHandle, NfsFileType, NfsLock, NfsStat, NfsStateId,
+    NFS_PORT, NFS4_ACCESS_DELETE, NFS4_ACCESS_EXECUTE, NFS4_ACCESS_EXTEND, NFS4_ACCESS_LOOKUP,
+    NFS4_ACCESS_MODIFY, NFS4_ACCESS_READ, NFS4_SHARE_ACCESS_READ, NFS4_SHARE_ACCESS_WRITE,
+    NFS4_SHARE_DENY_NONE, NfsAttrs, NfsDirEntry, NfsFileHandle, NfsFileType, NfsLock, NfsStat,
+    NfsStateId,
 };
 use super::util::{rdtsc, simple_hash};
+
+const NFS4_ACCESS_ALL: u32 = NFS4_ACCESS_READ
+    | NFS4_ACCESS_LOOKUP
+    | NFS4_ACCESS_MODIFY
+    | NFS4_ACCESS_EXTEND
+    | NFS4_ACCESS_DELETE
+    | NFS4_ACCESS_EXECUTE;
+const NFS4_ACCESS_FILE: u32 = NFS4_ACCESS_READ | NFS4_ACCESS_MODIFY | NFS4_ACCESS_EXTEND;
+
+fn apply_write(file: &mut Vec<u8>, offset: u64, data: &[u8]) {
+    let start = offset as usize;
+    let end = start.saturating_add(data.len());
+    if end > file.len() {
+        file.resize(end, 0);
+    }
+    if start < end {
+        file[start..end].copy_from_slice(data);
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // NFS CLIENT
@@ -74,6 +95,8 @@ pub struct NfsClient {
     connected: bool,
     pub(super) export_files: BTreeMap<String, Vec<u8>>,
     export_links: BTreeMap<String, String>,
+    export_dirs: BTreeSet<String>,
+    uncommitted: BTreeMap<String, Vec<u8>>,
     fh_names: BTreeMap<NfsFileHandle, String>,
 }
 
@@ -93,6 +116,8 @@ impl NfsClient {
             connected: false,
             export_files: BTreeMap::new(),
             export_links: BTreeMap::new(),
+            export_dirs: BTreeSet::new(),
+            uncommitted: BTreeMap::new(),
             fh_names: BTreeMap::new(),
         }
     }
@@ -205,10 +230,25 @@ impl NfsClient {
                     None => NfsCompoundResult::Status(NfsStat::NoFileHandle),
                 }
             }
-            NfsCompoundOp::Access(requested) => NfsCompoundResult::AccessResult {
-                supported: *requested,
-                access: *requested,
-            },
+            NfsCompoundOp::Access(requested) => {
+                if self.current_fh.is_none() {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                }
+                let name = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh));
+                let is_dir = name.map(|n| self.export_dirs.contains(n)).unwrap_or(true);
+                let granted = if is_dir {
+                    NFS4_ACCESS_ALL
+                } else {
+                    NFS4_ACCESS_FILE
+                };
+                NfsCompoundResult::AccessResult {
+                    supported: NFS4_ACCESS_ALL,
+                    access: *requested & granted,
+                }
+            }
             NfsCompoundOp::Open {
                 share_access,
                 share_deny,
@@ -270,14 +310,19 @@ impl NfsClient {
                     .as_ref()
                     .and_then(|fh| self.fh_names.get(fh).cloned())
                 {
-                    let file = self.export_files.entry(name).or_default();
-                    let start = *offset as usize;
-                    let end = start.saturating_add(data.len());
-                    if end > file.len() {
-                        file.resize(end, 0);
-                    }
-                    if start < end {
-                        file[start..end].copy_from_slice(data);
+                    if *stable {
+                        let file = self.export_files.entry(name.clone()).or_default();
+                        apply_write(file, *offset, data);
+                        self.uncommitted.remove(&name);
+                    } else {
+                        let mut pending = self
+                            .uncommitted
+                            .get(&name)
+                            .cloned()
+                            .or_else(|| self.export_files.get(&name).cloned())
+                            .unwrap_or_default();
+                        apply_write(&mut pending, *offset, data);
+                        self.uncommitted.insert(name, pending);
                     }
                     data.len() as u32
                 } else {
@@ -332,7 +377,9 @@ impl NfsClient {
             NfsCompoundOp::Remove(name) => {
                 let file = self.export_files.remove(name);
                 let link = self.export_links.remove(name);
-                if file.is_none() && link.is_none() {
+                let dir = self.export_dirs.remove(name);
+                self.uncommitted.remove(name);
+                if file.is_none() && link.is_none() && !dir {
                     NfsCompoundResult::Status(NfsStat::Noent)
                 } else {
                     self.fh_names.retain(|_, n| n != name);
@@ -342,7 +389,9 @@ impl NfsClient {
             NfsCompoundOp::Rename { old_name, new_name } => {
                 let file = self.export_files.remove(old_name);
                 let link = self.export_links.remove(old_name);
-                if file.is_none() && link.is_none() {
+                let dir = self.export_dirs.remove(old_name);
+                let pending = self.uncommitted.remove(old_name);
+                if file.is_none() && link.is_none() && !dir {
                     NfsCompoundResult::Status(NfsStat::Noent)
                 } else {
                     if let Some(data) = file {
@@ -350,6 +399,12 @@ impl NfsClient {
                     }
                     if let Some(target) = link {
                         self.export_links.insert(new_name.clone(), target);
+                    }
+                    if dir {
+                        self.export_dirs.insert(new_name.clone());
+                    }
+                    if let Some(data) = pending {
+                        self.uncommitted.insert(new_name.clone(), data);
                     }
                     for name in self.fh_names.values_mut() {
                         if name == old_name {
@@ -375,6 +430,9 @@ impl NfsClient {
                             .insert(name.clone(), link_text.as_bytes().to_vec());
                     } else {
                         self.export_files.insert(name.clone(), Vec::new());
+                        if matches!(file_type, NfsFileType::Directory) {
+                            self.export_dirs.insert(name.clone());
+                        }
                     }
                     let mut child_fh = self
                         .current_fh
@@ -409,6 +467,9 @@ impl NfsClient {
                         if let Some(target) = self.export_links.get(&src).cloned() {
                             self.export_links.insert(new_name.clone(), target);
                         }
+                        if self.export_dirs.contains(&src) {
+                            self.export_dirs.insert(new_name.clone());
+                        }
                         NfsCompoundResult::LinkResult {
                             name: new_name.clone(),
                         }
@@ -428,7 +489,33 @@ impl NfsClient {
                     None => NfsCompoundResult::Status(NfsStat::Inval),
                 }
             }
-            NfsCompoundOp::Commit { offset, count } => NfsCompoundResult::Status(NfsStat::Ok),
+            NfsCompoundOp::Commit { offset, count } => {
+                let name = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh).cloned());
+                match name {
+                    Some(n) => {
+                        if let Some(pending) = self.uncommitted.remove(&n) {
+                            let file = self.export_files.entry(n).or_default();
+                            if *count == 0 {
+                                *file = pending;
+                            } else {
+                                let start = *offset as usize;
+                                let end = start.saturating_add(*count as usize).min(pending.len());
+                                if end > file.len() {
+                                    file.resize(end, 0);
+                                }
+                                if start < end {
+                                    file[start..end].copy_from_slice(&pending[start..end]);
+                                }
+                            }
+                        }
+                        NfsCompoundResult::Status(NfsStat::Ok)
+                    }
+                    None => NfsCompoundResult::Status(NfsStat::NoFileHandle),
+                }
+            }
             NfsCompoundOp::Lock(lock) => {
                 self.locks.push(lock.clone());
                 NfsCompoundResult::LockResult {

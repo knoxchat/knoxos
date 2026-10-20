@@ -292,3 +292,46 @@ pub(super) fn serve_loopback_statfs(mount_point: &str, unique: u64) {
     drop(lbs);
     let _ = write_response(mount_point, unique, encode_statfs(&st));
 }
+fn loopback_has_ino(lb: &super::mount::LoopbackFs, nodeid: u64) -> bool {
+    nodeid == 1
+        || lb.files.values().any(|(ino, _)| *ino == nodeid)
+        || lb.dirs.values().any(|&ino| ino == nodeid)
+        || lb.links.values().any(|(ino, _)| *ino == nodeid)
+        || lb.nodes.values().any(|(ino, _)| *ino == nodeid)
+}
+pub(super) fn serve_loopback_setxattr(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    let Some(z) = req.iter().position(|&b| b == 0) else {
+        return;
+    };
+    let Ok(name) = core::str::from_utf8(&req[..z]) else {
+        return;
+    };
+    let value = req[z + 1..].to_vec();
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    lb.xattrs
+        .entry(nodeid)
+        .or_default()
+        .insert(String::from(name), value);
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_getxattr(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    let Ok(name) = core::str::from_utf8(req) else {
+        return;
+    };
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    let Some(value) = lb.xattrs.get(&nodeid).and_then(|m| m.get(name)).cloned() else {
+        return;
+    };
+    drop(lbs);
+    let _ = write_response(mount_point, unique, value);
+}

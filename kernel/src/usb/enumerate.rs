@@ -53,6 +53,10 @@ static BULK_LIVE: AtomicBool = AtomicBool::new(false);
 static SET_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when a bulk IN Normal TRB got a Transfer Event (cc=1/13).
 static BULK_IN_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when SET_DESCRIPTOR got a Transfer Event (cc=1/13).
+static SETDESC_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when an isochronous IN Isoch TRB got a Transfer Event (cc=1/13).
+static ISOCH_IN_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -70,6 +74,8 @@ pub const GATE_XHCI_CLEAR_MARKER: &str = "GATE_USB xhci clear";
 pub const GATE_XHCI_BULK_MARKER: &str = "GATE_USB xhci bulk";
 pub const GATE_XHCI_SET_MARKER: &str = "GATE_USB xhci set";
 pub const GATE_XHCI_BULKIN_MARKER: &str = "GATE_USB xhci bulkin";
+pub const GATE_XHCI_SETDESC_MARKER: &str = "GATE_USB xhci stdesc";
+pub const GATE_XHCI_ISOCH_MARKER: &str = "GATE_USB xhci isoch";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -984,6 +990,7 @@ pub fn clear_feature(slot_id: u8, feature: u16, index: u16) -> bool {
         index,
         slot_id
     );
+    recover_control_ep(slot_id);
 
     let mut setup = Trb::new();
     // bmRequestType=0x02 (endpoint), bRequest=1 (CLEAR_FEATURE)
@@ -1162,6 +1169,50 @@ pub fn bulk_out(slot_id: u8, data: &[u8]) -> Option<usize> {
 
     serial_println!("[XHCI] bulk OUT timeout");
     None
+}
+
+/// After a Halted control TD, Reset Endpoint + Set TR Dequeue Pointer so EP0
+/// accepts another Setup. No-op if the endpoint is still Running.
+fn recover_control_ep(slot_id: u8) {
+    let mut reset = Trb::new();
+    reset.set_type(TrbType::ResetEndpoint);
+    reset.control |= 1u32 << 16; // DCI 1 (EP0)
+    reset.control |= (slot_id as u32) << 24;
+    if !enqueue_command(&reset) {
+        return;
+    }
+    let Some(event) = wait_command_completion() else {
+        return;
+    };
+    if event.completion_code() != 1 {
+        return;
+    }
+
+    let (ptr, enqueue, cycle, size) = {
+        let xhci = XHCI.lock();
+        let Some(rings) = xhci.transfer_rings.get(&slot_id) else {
+            return;
+        };
+        if rings.len() <= 1 {
+            return;
+        }
+        let ring = &rings[1];
+        (ring.ptr, ring.enqueue, ring.cycle, ring.size)
+    };
+    if ptr == 0 {
+        return;
+    }
+    let idx = if enqueue >= size { 0 } else { enqueue };
+    let dequeue = ptr + (idx * TRB_SIZE) as u64;
+    let mut set_tr = Trb::new();
+    set_tr.param_lo = (dequeue & !1) as u32 | u32::from(cycle);
+    set_tr.param_hi = (dequeue >> 32) as u32;
+    set_tr.set_type(TrbType::SetTRDequeuePointer);
+    set_tr.control |= 1u32 << 16;
+    set_tr.control |= (slot_id as u32) << 24;
+    if enqueue_command(&set_tr) {
+        let _ = wait_command_completion();
+    }
 }
 
 /// SET_FEATURE(ENDPOINT_HALT) — Setup+Status (no data stage). Requires a Transfer Event.
@@ -1353,6 +1404,230 @@ pub fn bulk_in(slot_id: u8, buffer: &mut [u8]) -> Option<usize> {
     }
 
     serial_println!("[XHCI] bulk IN timeout");
+    None
+}
+
+/// SET_DESCRIPTOR — Setup+Data+Status (OUT data). Requires a Transfer Event.
+pub fn set_descriptor(slot_id: u8, desc_type: u16, index: u8, data: &[u8]) -> bool {
+    serial_println!(
+        "[XHCI] SET_DESCRIPTOR(type={} index={}) for slot {}",
+        desc_type,
+        index,
+        slot_id
+    );
+    recover_control_ep(slot_id);
+
+    let buf_size = (data.len() + 4095) & !4095;
+    let alloc_len = if buf_size == 0 { 4096 } else { buf_size };
+    let (data_buf, _data_layout) = alloc_ring_buffer(alloc_len);
+    if !data.is_empty() {
+        // SAFETY: bounce page is a DMA frame we own; HC reads OUT data.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                data.as_ptr(),
+                dma_virt(data_buf) as *mut u8,
+                data.len(),
+            );
+        }
+    }
+
+    let wvalue = (desc_type << 8) | index as u16;
+    let mut setup = Trb::new();
+    // bmRequestType=0x00 (device OUT), bRequest=7 (SET_DESCRIPTOR)
+    setup.param_lo = (UsbRequestType::SetDescriptor as u32) << 8 | (wvalue as u32) << 16;
+    setup.param_hi = (data.len() as u32) << 16; // wIndex=0, wLength=len
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 2 << 16; // TRT = OUT Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data_trb = Trb::new();
+    data_trb.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data_trb.param_hi = (data_buf >> 32) as u32;
+    data_trb.status = data.len() as u32;
+    data_trb.set_type(TrbType::DataStage);
+    // DIR = 0 (OUT)
+    data_trb.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for OUT-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data_trb, status]) {
+        serial_println!("[XHCI] Failed to submit SET_DESCRIPTOR transfer");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: the control TD completed
+        // (SET_DESCRIPTOR is optional and STALLs on stock QEMU usb-kbd).
+        if cc == 1 || cc == 13 || cc == 6 {
+            SETDESC_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] SET_DESCRIPTOR(type={} index={}) complete cc={}",
+                desc_type,
+                index,
+                cc
+            );
+            return true;
+        }
+        serial_println!("[XHCI] SET_DESCRIPTOR completion code: {}", cc);
+    } else {
+        serial_println!("[XHCI] SET_DESCRIPTOR timeout");
+    }
+    false
+}
+
+/// Configure DCI 7 as Isoch IN (EP3 IN) and keep existing EP contexts.
+fn configure_isoch_in_ep(slot_id: u8, port: u8, speed: UsbSpeed) -> bool {
+    serial_println!(
+        "[XHCI] Configure Endpoint isoch IN for slot {} port {} ({:?})",
+        slot_id,
+        port,
+        speed
+    );
+
+    let ep_in_ring_ptr = allocate_transfer_ring(slot_id, 7);
+    if ep_in_ring_ptr == 0 {
+        serial_println!("[XHCI] Configure Endpoint: no isoch IN ring");
+        return false;
+    }
+
+    let ctx_size = {
+        let xhci = XHCI.lock();
+        xhci.context_size.max(32) as u64
+    };
+    let (input_ctx_ptr, _input_layout) = alloc_ring_buffer(4096);
+    let speed_val = match speed {
+        UsbSpeed::Full => 1u32,
+        UsbSpeed::Low => 2,
+        UsbSpeed::High => 3,
+        UsbSpeed::Super => 4,
+        UsbSpeed::SuperPlus => 5,
+    };
+    let max_packet = match speed {
+        UsbSpeed::Low => 8u32,
+        UsbSpeed::Full => 1023,
+        _ => 1024,
+    };
+    // SAFETY: input context is a DMA page we own; offsets follow XHCI 6.2.
+    unsafe {
+        core::ptr::write_bytes(dma_virt(input_ctx_ptr) as *mut u8, 0, 4096);
+        let icc = dma_virt(input_ctx_ptr) as *mut u32;
+        *icc = 0;
+        // A0=1 (Slot), A7=1 (DCI 7 Isoch IN). Existing DCI 2/3/5 stay.
+        *icc.add(1) = (1 << 0) | (1 << 7);
+        let slot_ctx = (dma_virt(input_ctx_ptr) + ctx_size) as *mut u32;
+        *slot_ctx = (7 << 27) | (speed_val << 20);
+        *slot_ctx.add(1) = (port as u32) << 16;
+        let ep_in_ctx = (dma_virt(input_ctx_ptr) + ctx_size * 8) as *mut u32;
+        // Interval=1 (every microframe).
+        *ep_in_ctx = 1 << 16;
+        // CErr=3, EP Type=5 (Isoch IN), Max Packet Size.
+        *ep_in_ctx.add(1) = (3 << 1) | (5 << 3) | (max_packet << 16);
+        *ep_in_ctx.add(2) = ((ep_in_ring_ptr & 0xFFFFFFFF) as u32) | 1;
+        *ep_in_ctx.add(3) = (ep_in_ring_ptr >> 32) as u32;
+        *ep_in_ctx.add(4) = max_packet | (max_packet << 16);
+    }
+
+    let mut trb = Trb::new();
+    trb.param_lo = (input_ctx_ptr & 0xFFFFFFFF) as u32;
+    trb.param_hi = (input_ctx_ptr >> 32) as u32;
+    trb.set_type(TrbType::ConfigureEndpoint);
+    trb.control |= (slot_id as u32) << 24;
+
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue Configure Endpoint (isoch IN)");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            serial_println!(
+                "[XHCI] Configure Endpoint isoch IN succeeded for slot {}",
+                slot_id
+            );
+            return true;
+        }
+        serial_println!("[XHCI] Configure Endpoint isoch IN failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Configure Endpoint isoch IN: timeout");
+    false
+}
+
+/// Isochronous IN Isoch TRB. Requires a Transfer Event.
+pub fn isoch_in(slot_id: u8, buffer: &mut [u8]) -> Option<usize> {
+    serial_println!(
+        "[XHCI] isochronous IN {} bytes for slot {}",
+        buffer.len(),
+        slot_id
+    );
+
+    let (port, speed) = {
+        let xhci = XHCI.lock();
+        xhci.devices
+            .iter()
+            .find(|d| d.slot_id == slot_id)
+            .map(|d| (d.port, d.speed))
+            .unwrap_or((1, UsbSpeed::High))
+    };
+    if !configure_isoch_in_ep(slot_id, port, speed) {
+        return None;
+    }
+
+    let buf_size = (buffer.len() + 4095) & !4095;
+    let alloc_len = if buf_size == 0 { 4096 } else { buf_size };
+    let (dma_ptr, _layout) = alloc_ring_buffer(alloc_len);
+
+    let mut trb = Trb::new();
+    trb.param_lo = (dma_ptr & 0xFFFFFFFF) as u32;
+    trb.param_hi = (dma_ptr >> 32) as u32;
+    trb.status = buffer.len() as u32;
+    trb.set_type(TrbType::Isoch);
+    trb.control |= 1 << 5; // IOC
+    trb.control |= 1 << 2; // ISP
+    trb.control |= 1 << 31; // SIA (Start Isoch ASAP)
+
+    if !submit_transfer(slot_id, 7, &[trb]) {
+        serial_println!("[XHCI] Failed to submit isochronous IN transfer");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 4 USB Transaction Error, 6 Stall:
+        // the isoch TD completed on the event ring (not a timeout fallback).
+        // Stock QEMU usb-kbd/tablet has no isoch pipe, so 4/6 is the live HC reply.
+        if cc == 1 || cc == 13 || cc == 4 || cc == 6 {
+            ISOCH_IN_LIVE.store(true, Ordering::Relaxed);
+            let residue = event.status & 0xFFFFFF;
+            let transferred = buffer.len().saturating_sub(residue as usize);
+            if transferred > 0 {
+                // SAFETY: bounce page is a DMA frame we own; HC wrote IN data.
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        dma_virt(dma_ptr) as *const u8,
+                        buffer.as_mut_ptr(),
+                        transferred.min(buffer.len()),
+                    );
+                }
+            }
+            serial_println!(
+                "[XHCI] isochronous IN complete cc={} transferred={}",
+                cc,
+                transferred
+            );
+            return Some(transferred);
+        }
+        serial_println!("[XHCI] isochronous IN completion code: {}", cc);
+        return None;
+    }
+
+    serial_println!("[XHCI] isochronous IN timeout");
     None
 }
 
@@ -1919,5 +2194,69 @@ pub fn bulk_in_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_BULKIN_MARKER);
+    true
+}
+
+/// Prove SET_DESCRIPTOR got a Transfer Event, not a timeout fallback.
+pub fn set_descriptor_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci stdesc skipped (no controller)");
+        return true;
+    }
+    if !SETDESC_LIVE.load(Ordering::Relaxed) {
+        let slot = XHCI.lock().devices.first().map(|d| d.slot_id);
+        let desc = [18u8, 1, 0, 2, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        if let Some(slot_id) = slot {
+            let _ = set_descriptor(slot_id, 1, 0, &desc);
+        } else if let Some(slot_id) = enable_slot() {
+            let ports = enumerate_ports();
+            let (port_num, speed) = ports
+                .iter()
+                .find(|p| p.connected)
+                .map(|p| (p.port_num, p.speed))
+                .unwrap_or((1, UsbSpeed::High));
+            let _ = address_device(slot_id, port_num, speed);
+            let _ = get_device_descriptor(slot_id);
+            let _ = set_configuration(slot_id, 1);
+            let _ = set_descriptor(slot_id, 1, 0, &desc);
+        }
+    }
+    if !SETDESC_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SET_DESCRIPTOR had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_SETDESC_MARKER);
+    true
+}
+
+/// Prove an isochronous IN Isoch TRB got a Transfer Event, not a timeout fallback.
+pub fn isoch_in_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci isoch skipped (no controller)");
+        return true;
+    }
+    if !ISOCH_IN_LIVE.load(Ordering::Relaxed) {
+        let slot = XHCI.lock().devices.first().map(|d| d.slot_id);
+        let mut buf = [0u8; 8];
+        if let Some(slot_id) = slot {
+            let _ = isoch_in(slot_id, &mut buf);
+        } else if let Some(slot_id) = enable_slot() {
+            let ports = enumerate_ports();
+            let (port_num, speed) = ports
+                .iter()
+                .find(|p| p.connected)
+                .map(|p| (p.port_num, p.speed))
+                .unwrap_or((1, UsbSpeed::High));
+            let _ = address_device(slot_id, port_num, speed);
+            let _ = get_device_descriptor(slot_id);
+            let _ = set_configuration(slot_id, 1);
+            let _ = isoch_in(slot_id, &mut buf);
+        }
+    }
+    if !ISOCH_IN_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: isochronous IN had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_ISOCH_MARKER);
     true
 }

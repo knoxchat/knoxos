@@ -6,7 +6,9 @@ use crate::serial_println;
 use super::client::{NfsClient, NfsMountOptions};
 use super::compound::{NfsCompoundOp, NfsCompoundResult};
 use super::types::{
-    NFS4_SHARE_ACCESS_WRITE, NFS4_SHARE_DENY_NONE, NfsAttrs, NfsFileType, NfsStat, NfsStateId,
+    NFS4_ACCESS_DELETE, NFS4_ACCESS_EXECUTE, NFS4_ACCESS_EXTEND, NFS4_ACCESS_LOOKUP,
+    NFS4_ACCESS_MODIFY, NFS4_ACCESS_READ, NFS4_SHARE_ACCESS_WRITE, NFS4_SHARE_DENY_NONE, NfsAttrs,
+    NfsFileType, NfsStat, NfsStateId,
 };
 
 pub const GATE_NFS_MARKER: &str = "GATE_NFS compound";
@@ -466,6 +468,157 @@ pub fn readdir_self_test() -> bool {
         }
         other => {
             serial_println!("[NFS] GATE_NFS readdir FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_ACCESS_MARKER: &str = "GATE_NFS access";
+
+/// ACCESS must grant file bits from mode, not echo the requested mask.
+pub fn access_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    client
+        .export_files
+        .insert(String::from("gate-a.txt"), b"a".to_vec());
+    let requested = NFS4_ACCESS_READ
+        | NFS4_ACCESS_LOOKUP
+        | NFS4_ACCESS_MODIFY
+        | NFS4_ACCESS_EXTEND
+        | NFS4_ACCESS_DELETE
+        | NFS4_ACCESS_EXECUTE;
+    let file_bits = NFS4_ACCESS_READ | NFS4_ACCESS_MODIFY | NFS4_ACCESS_EXTEND;
+    let looked = client.compound(
+        "access-file",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("gate-a.txt")),
+            NfsCompoundOp::Access(requested),
+        ],
+    );
+    let file_ok = matches!(
+        looked.get(2),
+        Some(NfsCompoundResult::AccessResult { supported, access })
+            if *supported == requested && *access == file_bits && *access != requested
+    );
+    let created = client.compound(
+        "access-dir",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Create {
+                name: String::from("gatedir"),
+                file_type: NfsFileType::Directory,
+                attrs: NfsAttrs::new_dir(1),
+                link_text: String::new(),
+            },
+            NfsCompoundOp::Access(requested),
+        ],
+    );
+    match created.get(2) {
+        Some(NfsCompoundResult::AccessResult { supported, access })
+            if file_ok
+                && *supported == requested
+                && *access & NFS4_ACCESS_LOOKUP != 0
+                && *access & NFS4_ACCESS_EXECUTE != 0 =>
+        {
+            serial_println!(
+                "[NFS] {} (ACCESS file={:#x} dir={:#x})",
+                GATE_NFS_ACCESS_MARKER,
+                file_bits,
+                access
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS access FAILED: {:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_COMMIT_MARKER: &str = "GATE_NFS commit";
+const GATE_NFS_COMMIT_PAYLOAD: &[u8] = b"knoxos-nfs-c\n";
+
+/// Unstable WRITE must not persist until COMMIT; then READ returns the bytes.
+pub fn commit_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let written = client.compound(
+        "commit-write",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-c.txt"),
+                create: true,
+            },
+            NfsCompoundOp::Write {
+                state_id: NfsStateId::new(1),
+                offset: 0,
+                data: GATE_NFS_COMMIT_PAYLOAD.to_vec(),
+                stable: false,
+            },
+        ],
+    );
+    let write_ok = matches!(
+        written.get(2),
+        Some(NfsCompoundResult::WriteResult {
+            count,
+            committed: false
+        }) if *count == GATE_NFS_COMMIT_PAYLOAD.len() as u32
+    );
+    let before = client.compound(
+        "commit-read-before",
+        &[NfsCompoundOp::Read {
+            state_id: NfsStateId::anonymous(),
+            offset: 0,
+            count: 64,
+        }],
+    );
+    let unseen = matches!(
+        before.first(),
+        Some(NfsCompoundResult::ReadResult { data, .. }) if data.is_empty()
+    );
+    let committed = client.compound(
+        "commit",
+        &[NfsCompoundOp::Commit {
+            offset: 0,
+            count: 0,
+        }],
+    );
+    let commit_ok = matches!(
+        committed.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Ok))
+    );
+    let after = client.compound(
+        "commit-read-after",
+        &[NfsCompoundOp::Read {
+            state_id: NfsStateId::anonymous(),
+            offset: 0,
+            count: 64,
+        }],
+    );
+    match after.first() {
+        Some(NfsCompoundResult::ReadResult { data, .. })
+            if write_ok && unseen && commit_ok && data == GATE_NFS_COMMIT_PAYLOAD =>
+        {
+            serial_println!(
+                "[NFS] {} (unstable WRITE then COMMIT {} bytes)",
+                GATE_NFS_COMMIT_MARKER,
+                data.len()
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS commit FAILED: {:?}", other);
             false
         }
     }

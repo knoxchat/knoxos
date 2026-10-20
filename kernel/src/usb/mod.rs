@@ -31,14 +31,15 @@ pub use enumerate::{
     GATE_XHCI_ADDR_MARKER, GATE_XHCI_BULK_MARKER, GATE_XHCI_BULKIN_MARKER, GATE_XHCI_CLEAR_MARKER,
     GATE_XHCI_CONFIG_MARKER, GATE_XHCI_DESC_MARKER, GATE_XHCI_ENUM_MARKER, GATE_XHCI_EP_MARKER,
     GATE_XHCI_GETCFG_MARKER, GATE_XHCI_GETIFACE_MARKER, GATE_XHCI_IFACE_MARKER,
-    GATE_XHCI_SET_MARKER, GATE_XHCI_SLOT_MARKER, GATE_XHCI_STATUS_MARKER, addr_self_test,
-    address_device, bulk_in, bulk_in_self_test, bulk_out, bulk_self_test, clear_feature,
-    clear_self_test, config_self_test, configure_endpoint, descriptor_self_test, enable_slot,
-    enum_self_test, enumerate_all_devices, enumerate_device, ep_self_test, get_config_descriptor,
-    get_configuration, get_device_descriptor, get_interface, get_status, getcfg_self_test,
-    getiface_self_test, iface_self_test, poll_events, poll_transfer_event, set_configuration,
-    set_feature, set_interface, set_self_test, slot_self_test, status_self_test,
-    submit_interrupt_urb, submit_interrupt_urb_for_hid,
+    GATE_XHCI_ISOCH_MARKER, GATE_XHCI_SET_MARKER, GATE_XHCI_SETDESC_MARKER, GATE_XHCI_SLOT_MARKER,
+    GATE_XHCI_STATUS_MARKER, addr_self_test, address_device, bulk_in, bulk_in_self_test, bulk_out,
+    bulk_self_test, clear_feature, clear_self_test, config_self_test, configure_endpoint,
+    descriptor_self_test, enable_slot, enum_self_test, enumerate_all_devices, enumerate_device,
+    ep_self_test, get_config_descriptor, get_configuration, get_device_descriptor, get_interface,
+    get_status, getcfg_self_test, getiface_self_test, iface_self_test, isoch_in,
+    isoch_in_self_test, poll_events, poll_transfer_event, set_configuration, set_descriptor,
+    set_descriptor_self_test, set_feature, set_interface, set_self_test, slot_self_test,
+    status_self_test, submit_interrupt_urb, submit_interrupt_urb_for_hid,
 };
 pub use ethernet::*;
 pub use gamepad::*;
@@ -91,10 +92,12 @@ pub fn init() {
             let _ = iface_self_test();
             let _ = getcfg_self_test();
             let _ = getiface_self_test();
+            let _ = set_self_test();
+            let _ = set_descriptor_self_test();
             let _ = clear_self_test();
             let _ = bulk_self_test();
-            let _ = set_self_test();
             let _ = bulk_in_self_test();
+            let _ = isoch_in_self_test();
             let _ = enum_self_test();
 
             let dev_count = device_count();

@@ -44,11 +44,13 @@ pub mod upower;
 
 pub use connection::{connect, disconnect, release_name, request_name};
 pub use gates::{
-    GATE_DBUS_HAS_OWNER_MARKER, GATE_DBUS_ID_MARKER, GATE_DBUS_LIST_MARKER, GATE_DBUS_MATCH_MARKER,
-    GATE_DBUS_METHOD_MARKER, GATE_DBUS_NAME_MARKER, GATE_DBUS_OWNER_MARKER, GATE_DBUS_PID_MARKER,
-    GATE_DBUS_RELEASE_MARKER, GATE_DBUS_REMOVE_MARKER, GATE_DBUS_UID_MARKER, add_match_self_test,
+    GATE_DBUS_CREDS_MARKER, GATE_DBUS_HAS_OWNER_MARKER, GATE_DBUS_ID_MARKER, GATE_DBUS_LIST_MARKER,
+    GATE_DBUS_MATCH_MARKER, GATE_DBUS_METHOD_MARKER, GATE_DBUS_NAME_MARKER, GATE_DBUS_OWNER_MARKER,
+    GATE_DBUS_PID_MARKER, GATE_DBUS_RELEASE_MARKER, GATE_DBUS_REMOVE_MARKER,
+    GATE_DBUS_START_MARKER, GATE_DBUS_UID_MARKER, add_match_self_test, creds_self_test,
     get_id_self_test, has_owner_self_test, list_self_test, method_self_test, name_self_test,
-    owner_self_test, pid_self_test, release_self_test, remove_match_self_test, uid_self_test,
+    owner_self_test, pid_self_test, release_self_test, remove_match_self_test, start_self_test,
+    uid_self_test,
 };
 pub use protocol::{
     ALLOW_INTERACTIVE_AUTH, DBUS_TYPE_ARRAY, DBUS_TYPE_BOOLEAN, DBUS_TYPE_BYTE,
@@ -65,7 +67,8 @@ pub use state::{
     DBUS_RELEASE_NAME_REPLY_NON_EXISTENT, DBUS_RELEASE_NAME_REPLY_NOT_OWNER,
     DBUS_RELEASE_NAME_REPLY_RELEASED, DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER,
     DBUS_REQUEST_NAME_REPLY_EXISTS, DBUS_REQUEST_NAME_REPLY_IN_QUEUE,
-    DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, MACHINE_ID, MatchRule,
+    DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, DBUS_START_REPLY_ALREADY_RUNNING,
+    DBUS_START_REPLY_SUCCESS, MACHINE_ID, MatchRule,
 };
 pub use unix::{GATE_L3_MARKER, SYSTEM_BUS_PATH, unix_bus_self_test};
 
@@ -162,4 +165,6 @@ pub fn init() {
     let _ = add_match_self_test();
     let _ = remove_match_self_test();
     let _ = get_id_self_test();
+    let _ = start_self_test();
+    let _ = creds_self_test();
 }

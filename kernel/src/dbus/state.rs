@@ -53,6 +53,8 @@ pub const DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER: u32 = 4;
 pub const DBUS_RELEASE_NAME_REPLY_RELEASED: u32 = 1;
 pub const DBUS_RELEASE_NAME_REPLY_NON_EXISTENT: u32 = 2;
 pub const DBUS_RELEASE_NAME_REPLY_NOT_OWNER: u32 = 3;
+pub const DBUS_START_REPLY_SUCCESS: u32 = 1;
+pub const DBUS_START_REPLY_ALREADY_RUNNING: u32 = 2;
 
 // ═══════════════════════════════════════════════════════════════════════
 // BUS STATE
