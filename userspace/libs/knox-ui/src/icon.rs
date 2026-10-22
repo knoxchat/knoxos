@@ -310,7 +310,15 @@ impl Element for Icon {
         let key = 0xD802_1000u64 | ((self.name as u64) << 8) | (side as u64);
         let tile = env.atlas.intern_alpha(key, side as u32, side as u32, alpha);
         let color = self.color.unwrap_or(self.theme.colors.foreground);
-        scene.push_mono_sprite(MonochromeSprite::new(bounds, tile, color));
+        // Paint at the Lucide box, centered — never stretch a 16px tile into a
+        // flex cell. That was why desktop glyphs looked thinner than type.
+        let dest = Bounds::from_xywh(
+            bounds.x() + (bounds.width() - side) / 2,
+            bounds.y() + (bounds.height() - side) / 2,
+            side,
+            side,
+        );
+        scene.push_mono_sprite(MonochromeSprite::new(dest, tile, color));
     }
 }
 
@@ -1051,10 +1059,25 @@ fn flatten(name: IconName) -> Vec<(f32, f32, f32, f32)> {
     segs
 }
 
+/// Optical stroke so Lucide matches Inter at the type scale.
+/// Raw `2 * size/24` is 1.17px at 14 and 1.33px at 16 — thinner than stems.
+fn stroke_half(size: i32) -> f32 {
+    let scale = size as f32 / VIEW;
+    let raw = STROKE * scale;
+    let visual = if size <= 16 {
+        raw.max(1.55)
+    } else if size <= 28 {
+        raw.max(1.7)
+    } else {
+        (raw * 0.94).max(2.05)
+    };
+    visual * 0.5
+}
+
 fn raster(name: IconName, size: i32) -> Vec<u8> {
     let size = size.max(8);
     let scale = size as f32 / VIEW;
-    let half = (STROKE * scale) * 0.5;
+    let half = stroke_half(size);
     let mut buf = vec![0u8; (size * size) as usize];
     for (x0, y0, x1, y1) in flatten(name) {
         stamp_seg(
@@ -1097,5 +1120,17 @@ mod tests {
         assert_eq!(IconName::for_label("Files"), IconName::Folder);
         assert_eq!(IconName::for_label("Calculator"), IconName::Calculator);
         assert_eq!(IconName::for_label("Settings"), IconName::Settings);
+    }
+
+    #[test]
+    fn caption_stroke_is_optically_heavy() {
+        let ink = raster(IconName::Folder, 16)
+            .iter()
+            .filter(|p| **p > 32)
+            .count();
+        assert!(
+            ink > 40,
+            "16px Lucide must keep stem weight next to 14px type, got {ink}"
+        );
     }
 }

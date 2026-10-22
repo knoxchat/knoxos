@@ -23,7 +23,7 @@
 - [x] TPM TIS FIFO — locality 0 REQUEST_USE → VALID|ACTIVE (`GATE_TPM tis`). Software SHA-256 PCR extend (`GATE_TPM pcr`). Hardware 0xFED4_0000 still unmapped on stock QEMU.
 
 ### Stub
-- [x] VirtIO-GPU — controlq + cursorq vs QEMU `-device virtio-gpu-pci` (F8). 3D/Virgl not negotiated.
+- [x] VirtIO-GPU — controlq + cursorq vs QEMU `-vga virtio` (F8 + modern stack). 3D/Virgl not negotiated.
 - [x] DRM — GEM from buddy frames + CRTC set (`GATE_DRM gem`). HDR PQ + VRR (`GATE_HDR pq`, `GATE_VRR range`)
 - [x] USB HID URB completion — submit + complete + boot-protocol parse → evdev (`GATE_USB hid urb`). Transfer Events feed the same handler and the GUI mouse/key path.
 - [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). USB Audio SET_CUR + PCM (`GATE_USB audio`).
@@ -38,7 +38,7 @@
 1. One storage, one net, one GPU scanout, one USB HID — **finished**, not 40 started.
 2. Storage: VirtIO-blk production-quality; AHCI DMA live (C4); NVMe DMA live (C5).
 3. Net: VirtIO-net rings + DHCP + DNS/TCP live (D2–D4); e1000 `Socket::send` loopback live (`GATE_E1000 send`).
-4. Display: VirtIO-GPU 2D resource + scanout live (F8); VGA software FB remains the compositor present path.
+4. Display: VirtIO-GPU 2D resource + scanout is the primary present path on `-vga virtio` (F8 + `GATE_GPU modern stack`). VGA blit remains only for a secondary `-vga std` head.
 5. Input: USB HID URB completion loop is live (`GATE_USB hid urb`). XHCI BAR0 is mapped (`GATE_USB xhci mmio`). Enable Slot Command Completion is live (`GATE_USB xhci slot`). Address Device Command Completion is live (`GATE_USB xhci addr`). GET_DESCRIPTOR Transfer Event is live (`GATE_USB xhci desc`). SET_CONFIGURATION Transfer Event is live (`GATE_USB xhci config`). Configure Endpoint Command Completion is live (`GATE_USB xhci ep`). Full enumeration including GET_DESCRIPTOR(Configuration) requires live events (`GATE_USB xhci enum`). GET_STATUS Transfer Event is live (`GATE_USB xhci status`). SET_INTERFACE Transfer Event is live (`GATE_USB xhci iface`). GET_CONFIGURATION Transfer Event is live (`GATE_USB xhci getcfg`). GET_INTERFACE Transfer Event is live (`GATE_USB xhci getiface`). CLEAR_FEATURE Transfer Event is live (`GATE_USB xhci clear`). bulk OUT Normal TRB Transfer Event is live (`GATE_USB xhci bulk`). SET_FEATURE Transfer Event is live (`GATE_USB xhci set`). bulk IN Normal TRB Transfer Event is live (`GATE_USB xhci bulkin`). SET_DESCRIPTOR Transfer Event is live (`GATE_USB xhci stdesc`). isochronous IN Isoch TRB Transfer Event is live (`GATE_USB xhci isoch`). GET_DESCRIPTOR(String) Transfer Event is live (`GATE_USB xhci string`). interrupt IN Normal TRB Transfer Event is live (`GATE_USB xhci intr`). No-Op Command Completion is live (`GATE_USB xhci noop`). Disable Slot Command Completion is live (`GATE_USB xhci disable`). Evaluate Context Command Completion is live (`GATE_USB xhci eval`). Stop Endpoint bulk OUT (DCI 2) Command Completion is live (`GATE_USB xhci stop`). Reset Endpoint Halted bulk IN (DCI 5) Command Completion is live (`GATE_USB xhci resetep`). Set TR Dequeue Pointer Stopped extra pipe Command Completion is live (`GATE_USB xhci settr`). Desktop cursor is VirtIO-tablet + USB digitizer + PS/2 aux.
 
 ---

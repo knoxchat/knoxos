@@ -182,7 +182,7 @@ impl IntoElement for FilesView {
                 .child(
                     text(self.path.clone())
                         .color(self.theme.colors.foreground)
-                        .size(12),
+                        .size(13),
                 ),
         );
 

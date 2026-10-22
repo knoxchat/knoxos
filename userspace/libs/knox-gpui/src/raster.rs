@@ -305,17 +305,21 @@ impl RasterBuffer {
         let color = sprite.color.to_bgra();
         let dw = sprite.bounds.width().max(1) as u32;
         let dh = sprite.bounds.height().max(1) as u32;
+        let one_to_one = dw == tw && dh == th;
         for y in y0..y1 {
             for x in x0..x1 {
                 let lx = (x as i32 - sprite.bounds.x()).max(0) as u32;
                 let ly = (y as i32 - sprite.bounds.y()).max(0) as u32;
-                let tx = lx * tw / dw;
-                let ty = ly * th / dh;
+                let (tx, ty) = if one_to_one {
+                    (lx, ly)
+                } else {
+                    (lx * tw / dw, ly * th / dh)
+                };
                 let cov = atlas.coverage(sprite.tile, tx, ty);
                 if cov == 0 {
                     continue;
                 }
-                self.blend_pixel(x, y, color.modulate_alpha(cov));
+                self.blend_glyph_pixel(x, y, color, cov);
             }
         }
     }
@@ -395,6 +399,56 @@ impl RasterBuffer {
         self.pixels[i..i + BYTES_PER_PIXEL].copy_from_slice(&out.to_bytes());
     }
 
+    /// Glyph coverage is linear light. Blending it as sRGB washed out
+    /// caption-size stems on dark chrome.
+    fn blend_glyph_pixel(&mut self, x: usize, y: usize, color: Bgra, cov: u8) {
+        if cov == 0 {
+            return;
+        }
+        let a = ((color.a as u32 * cov as u32 + 127) / 255) as u8;
+        if a == 0 {
+            return;
+        }
+        let i = y * self.pitch + x * BYTES_PER_PIXEL;
+        let dst = Bgra::from_bytes([
+            self.pixels[i],
+            self.pixels[i + 1],
+            self.pixels[i + 2],
+            self.pixels[i + 3],
+        ]);
+        let out = if a >= 250 {
+            Bgra {
+                b: color.b,
+                g: color.g,
+                r: color.r,
+                a: 255,
+            }
+        } else if dst.a == 0 {
+            Bgra {
+                b: color.b,
+                g: color.g,
+                r: color.r,
+                a,
+            }
+        } else {
+            let sa = a as u32;
+            let inv = 255 - sa;
+            let ch = |sc: u8, dc: u8| -> u8 {
+                let src_lin = srgb_to_lin(sc);
+                let dst_lin = srgb_to_lin(dc);
+                lin_to_srgb((src_lin * sa + dst_lin * inv + 127) / 255)
+            };
+            let out_a = sa + (dst.a as u32 * inv + 127) / 255;
+            Bgra {
+                b: ch(color.b, dst.b),
+                g: ch(color.g, dst.g),
+                r: ch(color.r, dst.r),
+                a: out_a.min(255) as u8,
+            }
+        };
+        self.pixels[i..i + BYTES_PER_PIXEL].copy_from_slice(&out.to_bytes());
+    }
+
     /// Opaque axis-aligned quad. Out-of-bounds pixels are clipped, not written.
     /// On x86_64 the row fill uses SSE2 16-byte stores (D13.4).
     pub fn fill_quad(&mut self, x: i32, y: i32, width: i32, height: i32, color: Bgra) {
@@ -471,6 +525,15 @@ fn fill_opaque_row_sse2(dst: &mut [u8], px: u32) {
             p = p.add(4);
         }
     }
+}
+
+fn srgb_to_lin(c: u8) -> u32 {
+    (c as u32 * c as u32 + 127) / 255
+}
+
+fn lin_to_srgb(l: u32) -> u8 {
+    let v = libm::sqrtf((l.min(255) * 255) as f32);
+    v as u32 as u8
 }
 
 fn grayscale(c: Bgra) -> Bgra {

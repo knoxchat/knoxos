@@ -12,6 +12,7 @@ pub mod arch_compat;
 pub mod arch_port;
 pub mod cmdline;
 pub mod context;
+pub mod fw_cfg;
 pub mod gdt;
 pub mod hpet;
 pub mod interrupts;

@@ -19,9 +19,10 @@ use crate::menu::{MenuItem, PopupMenu};
 use crate::theme::Theme;
 
 /// Grid cell matching the compositor icon metrics.
-pub const ICON_CELL_W: i32 = 112;
-pub const ICON_CELL_H: i32 = 92;
-const ICON_GLYPH: i32 = 40;
+/// Horizontal lockup: Lucide + label on one baseline (same as buttons/menus).
+pub const ICON_CELL_W: i32 = 176;
+pub const ICON_CELL_H: i32 = 52;
+const ICON_GLYPH: i32 = 28;
 
 /// One desktop shortcut / folder cell.
 #[derive(Clone, Debug)]
@@ -159,8 +160,10 @@ fn icon_cell(
         .top(px(local_y))
         .w(px(ICON_CELL_W))
         .h(px(ICON_CELL_H))
-        .flex_col()
+        .flex()
         .items_center()
+        .gap_2()
+        .pad_x(theme.spacing.sm)
         .rounded(theme.radius.md)
         .bg(fill)
         .border_1()
@@ -181,15 +184,13 @@ fn icon_cell(
                 .pixel_size(ICON_GLYPH),
         )
         .child(
-            div().mt(theme.spacing.xs).child(
-                text(entry.name.clone())
-                    .color(if selected {
-                        theme.colors.primary
-                    } else {
-                        knox_gpui::Hsla::WHITE
-                    })
-                    .size(11),
-            ),
+            text(entry.name.clone())
+                .color(if selected {
+                    theme.colors.primary
+                } else {
+                    knox_gpui::Hsla::WHITE
+                })
+                .size(theme.typo.desktop),
         )
 }
 

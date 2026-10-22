@@ -487,11 +487,57 @@ pub fn init() {
         },
     );
 
+    // Cursor overlay plane — bound to the live VirtIO-GPU cursor resource
+    // when `-vga virtio` is the primary scanout.
+    let cursor_plane_id = alloc_id();
+    let (scan_w, scan_h) = crate::virtio_gpu::scanout_size();
+    let plane_w = if scan_w > 0 { scan_w } else { 1920 };
+    let plane_h = if scan_h > 0 { scan_h } else { 1080 };
+    if let Some(plane) = dev.planes.get_mut(&plane_id) {
+        plane.crtc_id = Some(crtc_id);
+        plane.crtc_w = plane_w;
+        plane.crtc_h = plane_h;
+        plane.src_w = plane_w << 16;
+        plane.src_h = plane_h << 16;
+    }
+    dev.planes.insert(
+        cursor_plane_id,
+        Plane {
+            id: cursor_plane_id,
+            plane_type: PlaneType::Cursor,
+            crtc_id: Some(crtc_id),
+            fb_id: None,
+            crtc_x: 0,
+            crtc_y: 0,
+            crtc_w: 64,
+            crtc_h: 64,
+            src_x: 0,
+            src_y: 0,
+            src_w: 64 << 16,
+            src_h: 64 << 16,
+            possible_crtcs: 1,
+            formats: alloc::vec![0x34325241], // AR24
+        },
+    );
+    if crate::virtio_gpu::scanout_live() && scan_w > 0 && scan_h > 0 {
+        let mut mode = DisplayMode::default_1920x1080();
+        mode.name = alloc::format!("{}x{}@60", scan_w, scan_h);
+        mode.hdisplay = scan_w;
+        mode.vdisplay = scan_h;
+        let _ = dev.set_crtc(crtc_id, 0, 0, 0, &[conn_id], &mode);
+        serial_println!(
+            "[DRM] KMS bound to VirtIO-GPU scanout {}x{} (cursor plane {})",
+            scan_w,
+            scan_h,
+            cursor_plane_id
+        );
+    }
+
     drop(dev);
     DRM_AVAILABLE.store(true, Ordering::Relaxed);
 
     serial_println!("[DRM] Direct Rendering Manager initialized");
-    serial_println!("[DRM]   1 CRTC, 1 encoder, 1 connector, 1 plane");
+    serial_println!("[DRM]   1 CRTC, 1 encoder, 1 connector, 2 planes");
     let _ = gem_crtc_self_test();
 }
 

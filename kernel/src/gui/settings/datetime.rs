@@ -22,7 +22,7 @@ pub(super) fn draw_datetime_tab(
     cy += 30;
 
     // Display current time from RTC
-    let rtc_time = crate::rtc::read_rtc();
+    let rtc_time = crate::rtc::local_now();
     let time_str = alloc::format!(
         "{:04}-{:02}-{:02}  {:02}:{:02}:{:02}",
         rtc_time.year,

@@ -24,6 +24,7 @@ pub mod icons;
 pub mod image_viewer;
 pub mod input;
 pub mod installer;
+pub mod inter_font;
 pub mod keyboard_layout;
 pub mod locale;
 pub mod lock_screen;

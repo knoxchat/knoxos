@@ -69,7 +69,7 @@ Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 - [x] i915 modeset — pipe A + plane + GTT[0] in shadow MMIO (`GATE_I915 modeset`). AMDGPU firmware (`GATE_AMDGPU fw`).
 - [x] HDA — CORB/RIRB + PCM BDL from buddy frames (`GATE_HDA dma`)
 - [x] TPM TIS FIFO — locality 0 REQUEST_USE grants VALID|ACTIVE (`GATE_TPM tis`). Software SHA-256 PCR extend (`GATE_TPM pcr`). Hardware 0xFED4_0000 still unmapped on stock QEMU.
-- [x] VirtIO-GPU — controlq + cursorq vs QEMU `-device virtio-gpu-pci` (`GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`)
+- [x] VirtIO-GPU — controlq + cursorq vs QEMU `-vga virtio` (`GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`, `GATE_GPU modern stack`, `GATE_GPU pointer plane`)
 - [x] DRM — GEM from buddy frames + CRTC set (`GATE_DRM gem`). HDR PQ + VRR Adaptive-Sync (`GATE_HDR pq`, `GATE_VRR range`).
 - [x] USB HID URB completion — submit + complete + boot-protocol parse (`GATE_USB hid urb`). Transfer Events feed the same handler and the GUI mouse/key path.
 - [x] USB MSC — SCSI READ(10) vs ramdisk LUN (`GATE_USB msc`). USB Audio SET_CUR + PCM loopback (`GATE_USB audio`).
@@ -85,8 +85,8 @@ Details: [subsystems/06-drivers.md](subsystems/06-drivers.md)
 Details: [subsystems/07-gui.md](subsystems/07-gui.md)
 
 - [x] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2) plus AF_UNIX `/run/wayland-0` (F5) plus `wl_display` object opcodes (`GATE_WL display protocol`)
-- [x] **GPU compositor** — `gpu_compositor` init + VSync; desktop `present_rect` flushes through VirtIO-GPU (`GATE_GPU desktop scanout`). VGA blit remains for `-vga std`.
-- [x] Hardware cursor — VirtIO-GPU cursorq `UPDATE_CURSOR` / `MOVE_CURSOR` KAT (`GATE_F8 hw cursor`). Software arrow still draws on `-vga std`.
+- [x] **GPU compositor** — `gpu_compositor` init + VSync; desktop `present_rect` flushes through VirtIO-GPU (`GATE_GPU desktop scanout`). `-vga virtio` is the window (`GATE_GPU modern stack`).
+- [x] Hardware cursor — VirtIO-GPU cursorq `UPDATE_CURSOR` / `MOVE_CURSOR` is the pointing device on the primary scanout (`GATE_F8 hw cursor`, `GATE_GPU pointer plane`).
 - [x] VSync — `gpu_compositor` software VBlank flip on the live path (`GATE_VSYNC paced`); desktop still software-blits to VGA
 - [x] IME — pinyin `"ni"` → `你` (`GATE_IME compose`). Full IME framework later.
 - [x] TrueType bytecode hinting — SVTCA/PUSHB/MDAP round-to-grid (`GATE_TTF hint`). Title `'i'` stem (`GATE_FONT title`).

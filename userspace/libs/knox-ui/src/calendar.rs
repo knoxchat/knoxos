@@ -14,7 +14,7 @@ use knox_gpui::{
 };
 
 use crate::button::{Button, ButtonVariants};
-use crate::size::{Disableable, Selectable};
+use crate::size::{Disableable, Selectable, Sizable};
 use crate::theme::Theme;
 
 const MONTHS: [&str; 12] = [
@@ -236,7 +236,11 @@ impl IntoElement for Calendar {
             .justify_between()
             .w(px(252))
             .child(prev)
-            .child(text(title).color(self.theme.colors.foreground).size(13))
+            .child(
+                text(title)
+                    .color(self.theme.colors.foreground)
+                    .size(self.theme.typo.body),
+            )
             .child(next);
 
         let mut days = div().flex().gap_1().w(px(252));
@@ -251,7 +255,7 @@ impl IntoElement for Calendar {
                     .child(
                         text(name)
                             .color(self.theme.colors.muted_foreground)
-                            .size(11),
+                            .size(12),
                     ),
             );
         }
@@ -273,8 +277,10 @@ impl IntoElement for Calendar {
                         Button::new(format!("cal-{d}"))
                             .themed(&self.theme)
                             .ghost()
+                            .small()
+                            .compact()
                             .label(format!("{d}"))
-                            .min_w(px(32))
+                            .w(px(32))
                             .selected(selected)
                             .on_click(move || {
                                 if let Some(h) = &on {

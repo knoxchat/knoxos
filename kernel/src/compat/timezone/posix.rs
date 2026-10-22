@@ -18,7 +18,7 @@ pub fn parse_posix_tz(tz_string: &str) -> Option<Timezone> {
 
     if rest.is_empty() {
         // No DST
-        return Some(Timezone::simple(tz_string, &std_abbrev, std_offset_hours));
+        return Some(Timezone::simple(tz_string, &std_abbrev, -std_offset_hours));
     }
 
     // Parse DST abbreviation

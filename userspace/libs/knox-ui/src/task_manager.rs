@@ -227,7 +227,7 @@ impl IntoElement for TaskManagerView {
             .child(
                 text(self.status)
                     .color(self.theme.colors.muted_foreground)
-                    .size(11),
+                    .size(12),
             );
         if self.tab == 0 {
             if let Some(h) = self.on_end {

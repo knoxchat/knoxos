@@ -65,7 +65,7 @@ impl Label {
             masked: false,
             highlights_text: None,
             font: FontId::Ui,
-            size_px: 13,
+            size_px: crate::theme::TypeTokens::UI,
         }
     }
 

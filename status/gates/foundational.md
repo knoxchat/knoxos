@@ -74,7 +74,7 @@ This **is** becoming an OS.
 | F5 | Wayland over a Unix socket | **Done** — compositor `listen`s `/run/wayland-0`; Ring 3 `connect`+`sendto` presents SHM (`GATE_F5 wayland unix`). Object protocol: `GATE_WL display protocol`. |
 | F6 | Calculator userspace | **Done** — Ring 3 SHM, not `WindowContentType::Calculator` (`GATE_F6 calculator userspace`) |
 | F7 | Files userspace | **Done** — Ring 3 SHM, not `WindowContentType::FileExplorer` (`GATE_F7 files userspace`) |
-| F8 | VirtIO-GPU scanout + hardware cursor | **Done** — controlq 2D resource + SET_SCANOUT + FLUSH (`GATE_F8 virtio-gpu scanout`); cursorq UPDATE_CURSOR (`GATE_F8 hw cursor`). Desktop `present_rect` also flushes through that scanout (`GATE_GPU desktop scanout`). |
+| F8 | VirtIO-GPU scanout + hardware cursor | **Done** — controlq 2D resource + SET_SCANOUT + FLUSH (`GATE_F8 virtio-gpu scanout`); cursorq UPDATE_CURSOR (`GATE_F8 hw cursor`). `-vga virtio` is the primary window (`GATE_GPU modern stack`); the cursor plane is the pointer (`GATE_GPU pointer plane`). Desktop `present_rect` also flushes through that scanout (`GATE_GPU desktop scanout`). |
 
 ### Gate H — Memory, VFS, core leftovers (after A–F)
 

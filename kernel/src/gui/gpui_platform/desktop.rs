@@ -75,7 +75,7 @@ fn map_icon(t: IconType) -> IconName {
 pub fn icons_dest_rect(_screen_w: u32, _screen_h: u32) -> Rect {
     let desktop = DESKTOP.lock();
     if desktop.icons.is_empty() {
-        return Rect::new(24, 16, (ICON_CELL_W + 8) as u32, (ICON_CELL_H + 8) as u32);
+        return Rect::new(16, 16, (ICON_CELL_W + 8) as u32, (ICON_CELL_H + 8) as u32);
     }
     let mut x0 = i32::MAX;
     let mut y0 = i32::MAX;

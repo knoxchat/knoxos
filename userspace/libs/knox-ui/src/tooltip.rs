@@ -61,7 +61,7 @@ impl IntoElement for Tooltip {
             .pad_y(px(4))
             .rounded(self.theme.radius.sm)
             .bg(c.foreground)
-            .child(text(self.text).color(c.background).size(11));
+            .child(text(self.text).color(c.background).size(12));
         if let Some(kbd) = self.kbd {
             bubble = bubble.child(kbd.themed(&self.theme).appearance(false));
         }

@@ -105,7 +105,9 @@ QEMU_CMD=(qemu-system-x86_64
     -device nvme,serial=knoxos,drive=nvme0
     -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$PROJECT_ROOT/tests/d4_http.sh"
     -device virtio-net-pci,netdev=net1,disable-modern=on
-    -device virtio-gpu-pci
+    -vga virtio
+    -global virtio-vga.xres=1920
+    -global virtio-vga.yres=1080
     -device virtio-tablet-pci
     -device virtio-keyboard-pci
     -device qemu-xhci,id=xhci
@@ -119,6 +121,8 @@ QEMU_CMD=(qemu-system-x86_64
     -m 2G
     -smp 2
     -cpu qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt
+    -rtc base=utc,clock=host
+    -fw_cfg name=opt/knoxos.tz,string="${KNOXOS_TZ:-$(date +%z)}")
     -no-reboot
     -no-shutdown
 )
@@ -476,6 +480,8 @@ check_marker "GATE_TERM pty userspace"
 check_marker "GATE_TERM pty interactive"
 check_marker "GATE_WL display protocol"
 check_marker "GATE_GPU desktop scanout"
+check_marker "GATE_GPU modern stack"
+check_marker "GATE_GPU pointer plane"
 check_marker "GATE_CGROUP memory"
 check_marker "GATE_CGROUP2 memory"
 check_marker "GATE_JOB stop"

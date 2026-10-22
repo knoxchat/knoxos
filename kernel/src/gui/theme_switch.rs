@@ -374,7 +374,7 @@ pub fn check_auto_theme() {
     let dark_h = sched.dark_hour;
     drop(sched);
 
-    let rtc = crate::rtc::read_rtc();
+    let rtc = crate::rtc::local_now();
     let hour = rtc.hour;
 
     let should_be_light = if light_h < dark_h {

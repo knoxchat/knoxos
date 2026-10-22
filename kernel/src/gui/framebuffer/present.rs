@@ -33,6 +33,11 @@ impl FrameBuffer {
             (y1 - y0) as u32,
         );
 
+        // `-vga virtio` shows the VirtIO-GPU scanout, not VGA memory.
+        if crate::virtio_gpu::is_primary_display() && crate::virtio_gpu::scanout_live() {
+            return;
+        }
+
         // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             let fb_ptr = self.framebuffer_addr as *mut u8;
@@ -108,6 +113,10 @@ impl FrameBuffer {
             self.width as u32,
             self.height as u32,
         );
+
+        if crate::virtio_gpu::is_primary_display() && crate::virtio_gpu::scanout_live() {
+            return;
+        }
 
         // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {

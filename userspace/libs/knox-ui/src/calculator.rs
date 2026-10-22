@@ -147,7 +147,7 @@ impl IntoElement for Calculator {
                         div().flex().justify_end().child(
                             text(history)
                                 .color(self.theme.colors.muted_foreground)
-                                .size(11),
+                                .size(12),
                         ),
                     )
                     .child(

@@ -8,11 +8,52 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, IntoElement, Styled, div, px, text};
+use knox_gpui::{Div, FontId, IntoElement, Styled, div, px, text};
 
 use crate::button::{Button, ButtonVariants};
 use crate::interact::IndexHandler;
 use crate::theme::Theme;
+
+/// Session toast card width (title + wrapped body + dismiss).
+pub const TOAST_CARD_W: i32 = 380;
+const TOAST_TEXT_W: i32 = 308;
+
+/// Break `s` on word boundaries so a line stays within `max_px`.
+pub fn wrap_words(s: &str, max_px: i32, size_px: u16) -> String {
+    let mut out = String::new();
+    let mut line_w = 0i32;
+    let mut first = true;
+    for word in s.split_whitespace() {
+        let ww = word
+            .chars()
+            .map(|ch| layout_advance(ch, size_px))
+            .sum::<i32>();
+        let space = layout_advance(' ', size_px);
+        if !first && line_w + space + ww > max_px && max_px > 0 {
+            out.push('\n');
+            line_w = 0;
+        } else if !first {
+            out.push(' ');
+            line_w += space;
+        }
+        out.push_str(word);
+        line_w += ww;
+        first = false;
+    }
+    out
+}
+
+fn layout_advance(ch: char, size_px: u16) -> i32 {
+    let em = size_px as i32;
+    let sixteenths = match ch {
+        ' ' => 5,
+        'i' | 'j' | 'l' | 'I' | '.' | ',' | ':' | ';' | '!' | '\'' | '|' => 4,
+        'f' | 't' | 'r' | 'J' => 6,
+        'm' | 'M' | 'w' | 'W' => 14,
+        _ => 9,
+    };
+    ((em * sixteenths) / 16).max(2)
+}
 
 /// One ephemeral notice.
 #[derive(Clone, Debug)]
@@ -78,13 +119,16 @@ impl IntoElement for Toast {
     type Element = Div;
 
     fn into_element(self) -> Div {
+        let typo = self.theme.typo;
+        let title = wrap_words(&self.data.title, TOAST_TEXT_W, typo.ui);
+        let message = wrap_words(&self.data.message, TOAST_TEXT_W, typo.body);
         let mut card = div()
             .flex()
             .justify_between()
-            .items_center()
-            .w(px(280))
-            .p(self.theme.spacing.sm)
-            .gap_2()
+            .items_start()
+            .w(px(TOAST_CARD_W))
+            .p(px(14))
+            .gap(px(10))
             .bg(self.theme.colors.surface)
             .border_1()
             .border_color(self.theme.colors.border)
@@ -93,15 +137,17 @@ impl IntoElement for Toast {
                 div()
                     .flex_col()
                     .gap_1()
+                    .w(px(TOAST_TEXT_W))
                     .child(
-                        text(self.data.title)
+                        text(title)
                             .color(self.theme.colors.foreground)
-                            .size(13),
+                            .font(FontId::UiBold)
+                            .size(typo.ui),
                     )
                     .child(
-                        text(self.data.message)
+                        text(message)
                             .color(self.theme.colors.muted_foreground)
-                            .size(11),
+                            .size(typo.body),
                     ),
             );
         if let Some(dismiss) = self.on_dismiss {
@@ -174,7 +220,7 @@ impl IntoElement for NotificationList {
 
 #[cfg(test)]
 mod tests {
-    use super::{NotificationList, Toast, ToastData, tick_toasts};
+    use super::{NotificationList, TOAST_TEXT_W, Toast, ToastData, tick_toasts, wrap_words};
     use crate::theme::Theme;
     use alloc::vec;
     use knox_gpui::IntoElement;
@@ -190,6 +236,23 @@ mod tests {
         assert_eq!(items[0].title, "B");
         tick_toasts(&mut items, 80);
         assert!(items.is_empty());
+    }
+
+    #[test]
+    fn wrap_keeps_welcome_copy_inside_card() {
+        let title = wrap_words("Welcome to KnoxOS", TOAST_TEXT_W, 16);
+        assert!(
+            !title.contains('\n'),
+            "title must stay on one line: {title}"
+        );
+        let body = wrap_words("Desktop environment loaded successfully", TOAST_TEXT_W, 15);
+        for line in body.split('\n') {
+            let w: i32 = line.chars().map(|ch| super::layout_advance(ch, 15)).sum();
+            assert!(
+                w <= TOAST_TEXT_W,
+                "wrapped line {line:?} is {w}px, max {TOAST_TEXT_W}"
+            );
+        }
     }
 
     #[test]

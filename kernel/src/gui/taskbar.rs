@@ -567,7 +567,7 @@ pub fn update_clock(_ticks: u64) {
     let mut taskbar = TASKBAR.lock();
 
     // Read real wall-clock time from CMOS RTC (works correctly in QEMU)
-    let dt = crate::rtc::read_rtc();
+    let dt = crate::rtc::local_now();
     taskbar.clock_text = crate::gui::locale::format_time(dt.hour, dt.minute);
 }
 

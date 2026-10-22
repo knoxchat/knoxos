@@ -108,8 +108,9 @@ pub use arch::aarch64_boot;
 #[cfg(any(target_arch = "riscv64", feature = "stub-drivers"))]
 pub use arch::riscv64_boot;
 pub use arch::{
-    acpi, acpi_tables, apic_timer, arch_compat, arch_port, cmdline, context, gdt, hpet, interrupts,
-    kaslr, lazy_init, livepatch, multiboot, nested_irq, preempt_rt, rtc, serial, smp, usermode,
+    acpi, acpi_tables, apic_timer, arch_compat, arch_port, cmdline, context, fw_cfg, gdt, hpet,
+    interrupts, kaslr, lazy_init, livepatch, multiboot, nested_irq, preempt_rt, rtc, serial, smp,
+    usermode,
 };
 
 pub mod sched;

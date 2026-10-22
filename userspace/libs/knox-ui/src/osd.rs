@@ -447,11 +447,11 @@ impl IntoElement for OsdFlyout {
                             .flex()
                             .justify_between()
                             .items_center()
-                            .child(text("KnoxOS").color(theme.colors.muted_foreground).size(11))
+                            .child(text("KnoxOS").color(theme.colors.muted_foreground).size(12))
                             .child(
                                 text(format!("{}%", self.battery))
                                     .color(theme.colors.primary)
-                                    .size(11),
+                                    .size(12),
                             ),
                     )
             }
@@ -577,7 +577,7 @@ mod tests {
         let p = input
             .hitboxes()
             .iter()
-            .find(|hb| hb.tab_stop && hb.bounds.y() > 90 && hb.bounds.width() <= 40)
+            .find(|hb| hb.tab_stop && hb.bounds.y() > 80 && hb.bounds.width() <= 48)
             .map(|hb| Point::xy(hb.bounds.x() + 8, hb.bounds.y() + 8))
             .expect("calendar day");
         click_at(&mut el, &mut input, p);

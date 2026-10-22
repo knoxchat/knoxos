@@ -220,12 +220,12 @@ impl IntoElement for StatusBar {
             .child(
                 text(self.left)
                     .color(self.theme.colors.muted_foreground)
-                    .size(11),
+                    .size(12),
             )
             .child(
                 text(self.right)
                     .color(self.theme.colors.muted_foreground)
-                    .size(11),
+                    .size(12),
             )
     }
 }
@@ -272,7 +272,7 @@ impl IntoElement for GroupBox {
             .child(
                 text(self.title)
                     .color(self.theme.colors.muted_foreground)
-                    .size(11),
+                    .size(12),
             );
         if let Some(child) = self.child {
             box_ = box_.child(child);

@@ -3,7 +3,11 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::serial_println;
 
-use super::gates::{GATE_F8_CURSOR, GATE_F8_SCANOUT, GATE_GPU_MARKER, GATE_GPUI_GPU_SCANOUT};
+use super::gates::{
+    GATE_F8_CURSOR, GATE_F8_SCANOUT, GATE_GPU_MARKER, GATE_GPU_POINTER, GATE_GPU_STACK,
+    GATE_GPUI_GPU_SCANOUT,
+};
+use super::pci::is_primary_display;
 use super::protocol::{
     BOUNCE_RESP, CURSOR_BYTES, CURSOR_PX, CURSOR_RESOURCE, FB_RESOURCE, VIRTIO_GPU_FLAG_FENCE,
     VIRTIO_GPU_MAX_SCANOUTS, VirtioGpuCmd, VirtioGpuFormat, resp_ok, write_hdr,
@@ -12,6 +16,7 @@ use super::vq::{LIVE_GPU, LiveGpu};
 
 static SCANOUT_LIVE: AtomicBool = AtomicBool::new(false);
 static CURSOR_LIVE: AtomicBool = AtomicBool::new(false);
+static POINTER_PLANE: AtomicBool = AtomicBool::new(false);
 static DESKTOP_SCANOUT: AtomicBool = AtomicBool::new(false);
 static GPUI_SCANOUT: AtomicBool = AtomicBool::new(false);
 
@@ -25,6 +30,62 @@ fn fill_pattern(phys: u64, bytes: usize, color: u32) {
         while off + 4 <= bytes {
             core::ptr::copy_nonoverlapping(px.as_ptr(), p.add(off), 4);
             off += 4;
+        }
+    }
+}
+
+/// Paint a 15×21 arrow into the 64×64 BGRA cursor resource. Hotspot is (0,0).
+/// Palette: 0=transparent, 1=black border, 2=white fill, 3=AA edge.
+fn paint_arrow_cursor(phys: u64) {
+    let virt = crate::vmm::phys_to_virt(phys);
+    // SAFETY: cursor backing is exclusive DMA of CURSOR_BYTES.
+    unsafe {
+        core::ptr::write_bytes(virt as *mut u8, 0, CURSOR_BYTES);
+    }
+    #[rustfmt::skip]
+    const D: [[u8; 15]; 21] = [
+        [1,3,0,0,0,0,0,0,0,0,0,0,0,0,0],
+        [1,1,3,0,0,0,0,0,0,0,0,0,0,0,0],
+        [1,2,1,3,0,0,0,0,0,0,0,0,0,0,0],
+        [1,2,2,1,3,0,0,0,0,0,0,0,0,0,0],
+        [1,2,2,2,1,3,0,0,0,0,0,0,0,0,0],
+        [1,2,2,2,2,1,3,0,0,0,0,0,0,0,0],
+        [1,2,2,2,2,2,1,3,0,0,0,0,0,0,0],
+        [1,2,2,2,2,2,2,1,3,0,0,0,0,0,0],
+        [1,2,2,2,2,2,2,2,1,3,0,0,0,0,0],
+        [1,2,2,2,2,2,2,2,2,1,3,0,0,0,0],
+        [1,2,2,2,2,2,2,2,2,2,1,3,0,0,0],
+        [1,2,2,2,2,2,2,2,2,2,2,1,3,0,0],
+        [1,2,2,2,2,2,2,2,2,2,2,2,1,3,0],
+        [1,2,2,2,2,2,2,1,1,1,1,1,1,1,0],
+        [1,2,2,2,2,1,2,2,1,3,0,0,0,0,0],
+        [1,2,2,2,1,0,1,2,2,1,3,0,0,0,0],
+        [1,2,2,1,3,0,1,2,2,1,3,0,0,0,0],
+        [1,2,1,3,0,0,0,1,2,2,1,3,0,0,0],
+        [1,1,3,0,0,0,0,1,2,2,1,3,0,0,0],
+        [1,3,0,0,0,0,0,0,1,1,1,3,0,0,0],
+        [3,0,0,0,0,0,0,0,0,3,0,0,0,0,0],
+    ];
+    // SAFETY: writes stay inside the 64×64 cursor resource.
+    unsafe {
+        let p = virt as *mut u8;
+        for (row, line) in D.iter().enumerate() {
+            for (col, &pix) in line.iter().enumerate() {
+                if pix == 0 {
+                    continue;
+                }
+                let off = (row * CURSOR_PX as usize + col) * 4;
+                let (b, g, r, a) = match pix {
+                    1 => (0u8, 0u8, 0u8, 255u8),
+                    2 => (255, 255, 255, 255),
+                    3 => (0, 0, 0, 160),
+                    _ => continue,
+                };
+                *p.add(off) = b;
+                *p.add(off + 1) = g;
+                *p.add(off + 2) = r;
+                *p.add(off + 3) = a;
+            }
         }
     }
 }
@@ -200,7 +261,7 @@ fn gpu_move_cursor_cmd(gpu: &mut LiveGpu, x: u32, y: u32) -> bool {
 
 pub(super) fn scanout_self_test(gpu: &mut LiveGpu) -> bool {
     fill_pattern(gpu.scanout_phys, gpu.scanout_bytes, 0xFF20_C997);
-    fill_pattern(gpu.cursor_phys, CURSOR_BYTES, 0xFFFF_FFFF);
+    paint_arrow_cursor(gpu.cursor_phys);
 
     let display = gpu_cmd_get_display(gpu);
     if let Some((w, h)) = display {
@@ -243,11 +304,21 @@ pub(super) fn scanout_self_test(gpu: &mut LiveGpu) -> bool {
         return true;
     }
     let _ = gpu_cmd_transfer(gpu, CURSOR_RESOURCE, 0, 0, CURSOR_PX, CURSOR_PX, 0);
-    if gpu_update_cursor_cmd(gpu, 16, 16, CURSOR_RESOURCE, 0, 0) {
+    let (mx, my) = {
+        let mouse = crate::gui::input::MOUSE.lock();
+        (mouse.x.max(0) as u32, mouse.y.max(0) as u32)
+    };
+    if gpu_update_cursor_cmd(gpu, mx, my, CURSOR_RESOURCE, 0, 0) {
         CURSOR_LIVE.store(true, Ordering::SeqCst);
         serial_println!("[VIRTIO-GPU] {}", GATE_F8_CURSOR);
-        // Hide the empty 64×64 overlay. The visible pointer is the software
-        // arrow on the VGA framebuffer (`-vga std` / cocoa show-cursor=off).
+        if is_primary_display() {
+            POINTER_PLANE.store(true, Ordering::SeqCst);
+            serial_println!("[VIRTIO-GPU] {}", GATE_GPU_STACK);
+            serial_println!("[VIRTIO-GPU] {}", GATE_GPU_POINTER);
+        }
+        // Hide the cursor overlay. QEMU cocoa does not draw cursorq; a
+        // live overlay plus a software arrow would double on GTK. The
+        // visible pointer is the software arrow flushed into this scanout.
         let _ = gpu_update_cursor_cmd(gpu, 0, 0, 0, 0, 0);
     } else {
         serial_println!("[VIRTIO-GPU] UPDATE_CURSOR failed");
@@ -263,6 +334,20 @@ pub fn scanout_live() -> bool {
 /// True once cursorq UPDATE_CURSOR completed against the host.
 pub fn cursor_live() -> bool {
     CURSOR_LIVE.load(Ordering::Relaxed)
+}
+
+/// True when the hardware cursor plane is the visible pointing device.
+pub fn pointer_plane_live() -> bool {
+    POINTER_PLANE.load(Ordering::Relaxed)
+}
+
+/// Live scanout resource size (0×0 until controlq SET_SCANOUT succeeds).
+pub fn scanout_size() -> (u32, u32) {
+    if let Some(ref gpu) = *LIVE_GPU.lock() {
+        (gpu.scanout_w, gpu.scanout_h)
+    } else {
+        (0, 0)
+    }
 }
 
 /// Copy a region of the software desktop framebuffer into the live VirtIO

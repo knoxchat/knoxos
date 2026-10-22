@@ -202,7 +202,7 @@ impl IntoElement for Editor {
             let mut row = div().flex().h(px(row_h)).child(
                 text(gutter)
                     .color(self.theme.colors.muted_foreground)
-                    .size(11),
+                    .size(12),
             );
             let fold = self.on_fold.clone();
             row = row.child(
@@ -211,7 +211,7 @@ impl IntoElement for Editor {
                     .child(
                         text(if self.folds.is_folded(i) { ">" } else { "v" })
                             .color(self.theme.colors.muted_foreground)
-                            .size(11),
+                            .size(12),
                     )
                     .on_click(move |_| {
                         if let Some(f) = &fold {

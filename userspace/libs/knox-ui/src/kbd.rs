@@ -119,7 +119,7 @@ impl IntoElement for Kbd {
     fn into_element(self) -> Div {
         let label = Self::format(&self.stroke);
         if !self.appearance {
-            return div().child(text(label).font(FontId::Mono).size(11));
+            return div().child(text(label).font(FontId::Mono).size(self.theme.typo.body));
         }
         let c = self.theme.colors;
         let (bg, fg, border) = if self.outline {
@@ -128,15 +128,20 @@ impl IntoElement for Kbd {
             (c.muted, c.muted_foreground, c.muted)
         };
         let mut el = div()
-            .h(px(20))
-            .min_w(px(20))
+            .h(px(24))
+            .min_w(px(24))
             .pad_x(px(6))
             .flex()
             .items_center()
             .justify_center()
             .rounded(self.theme.radius.sm)
             .bg(bg)
-            .child(text(label).color(fg).font(FontId::Mono).size(11));
+            .child(
+                text(label)
+                    .color(fg)
+                    .font(FontId::Mono)
+                    .size(self.theme.typo.body),
+            );
         if self.outline {
             el = el.border_1().border_color(border);
         }

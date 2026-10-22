@@ -9,7 +9,7 @@ license = "MIT"
 
 [features]
 default = ["gui", "net", "fs-ext4"]
-gui = ["dep:knox-gpui", "dep:knox-ui"]
+gui = ["dep:knox-gpui", "dep:knox-ui", "dep:fontdue"]
 net = []
 fs-ext4 = []
 stub-drivers = []
@@ -24,6 +24,8 @@ lazy_static = { version = "1.5.1", features = ["spin_no_std"] }
 bitflags = "2.13.2"
 conquer-once = { version = "0.4.0", default-features = false }
 libm = "0.2.16"
+# Pure-Rust no_std TrueType rasterizer — same crate/features as the `os` project.
+fontdue = { version = "=0.9.4", default-features = false, features = ["hashbrown"], optional = true }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 bootloader_api = "0.11.17"

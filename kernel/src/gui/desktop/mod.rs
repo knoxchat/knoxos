@@ -160,26 +160,38 @@ fn draw_desktop_damaged_inner(damage: &[Rect]) {
         // The cursor was drawn into the back buffer on the previous frame.
         // We MUST erase it before compositing, otherwise the old cursor
         // pixels get baked into the wallpaper cache reads and leave ghosts.
+        // Hardware cursor lives on a GPU plane — skip the software save/restore.
+        let hw_pointer = super::hw_cursor::is_enabled();
         let (old_cx, old_cy) = last_cursor_pos();
-        let old_cursor_rect = Rect::new(
-            old_cx - CURSOR_SAVE_PAD,
-            old_cy - CURSOR_SAVE_PAD,
-            CURSOR_SAVE_W as u32,
-            CURSOR_SAVE_H as u32,
-        );
-        restore_cursor_background(fb);
+        let old_cursor_rect = if hw_pointer {
+            Rect::new(0, 0, 0, 0)
+        } else {
+            Rect::new(
+                old_cx - CURSOR_SAVE_PAD,
+                old_cy - CURSOR_SAVE_PAD,
+                CURSOR_SAVE_W as u32,
+                CURSOR_SAVE_H as u32,
+            )
+        };
+        if !hw_pointer {
+            restore_cursor_background(fb);
+        }
 
         // New cursor rect for the position we'll draw at this frame
-        let new_cursor_rect = Rect::new(
-            mx - CURSOR_SAVE_PAD,
-            my - CURSOR_SAVE_PAD,
-            CURSOR_SAVE_W as u32,
-            CURSOR_SAVE_H as u32,
-        );
+        let new_cursor_rect = if hw_pointer {
+            Rect::new(0, 0, 0, 0)
+        } else {
+            Rect::new(
+                mx - CURSOR_SAVE_PAD,
+                my - CURSOR_SAVE_PAD,
+                CURSOR_SAVE_W as u32,
+                CURSOR_SAVE_H as u32,
+            )
+        };
 
         // Compute the union bounding box of all damage rects, clamped to screen.
-        // Include both old and new cursor positions so the HW framebuffer
-        // is updated everywhere the cursor was or will be.
+        // Software cursor: include old + new save areas. Hardware cursor plane
+        // does not touch the composed FB.
         let base_damage = if damage.is_empty() {
             screen_rect
         } else {
@@ -190,10 +202,14 @@ fn draw_desktop_damaged_inner(damage: &[Rect]) {
             u
         };
         let damage_union = clamp_rect_to_screen(
-            super::rect_union(
-                super::rect_union(base_damage, old_cursor_rect),
-                new_cursor_rect,
-            ),
+            if hw_pointer {
+                base_damage
+            } else {
+                super::rect_union(
+                    super::rect_union(base_damage, old_cursor_rect),
+                    new_cursor_rect,
+                )
+            },
             screen_w,
             screen_h,
         );

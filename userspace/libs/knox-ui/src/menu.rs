@@ -158,7 +158,7 @@ fn menu_panel(
         if let Some(name) = item.icon {
             left = left.child(Icon::new(name).themed(theme).color(fg).small());
         }
-        left = left.child(text(item.label.clone()).color(fg).size(12));
+        left = left.child(text(item.label.clone()).color(fg).size(theme.typo.body));
         if item.disabled {
             row = row.child(left);
         } else {

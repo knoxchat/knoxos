@@ -9,9 +9,10 @@
 ///   - head (units-per-em, bounding box)
 ///   - Simple + composite glyphs (components, scales, XY offsets)
 ///
-/// The rasterizer uses a non-zero winding scanline fill with 8×4
-/// super-sampling at UI sizes, 1px padding, and ~0.4px stem darkening so
-/// 13px Inter stems do not dropout.
+/// The rasterizer uses a non-zero winding scanline fill with 8×8
+/// super-sampling at UI sizes. UI chrome is rasterized by `fontdue`
+/// (Inter); this module remains the OpenType parser (GSUB/GPOS) and
+/// a fallback outline rasterizer.
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -791,7 +792,7 @@ fn add_quad(out: &mut Vec<(f32, f32)>, p0: (f32, f32), p1: (f32, f32), p2: (f32,
     let cdx = p1.0 - p0.0;
     let cdy = p1.1 - p0.1;
     let approx = 0.5 * (libm::sqrtf(dx * dx + dy * dy) + libm::sqrtf(cdx * cdx + cdy * cdy));
-    let steps = (approx * 2.0).clamp(4.0, 16.0) as usize;
+    let steps = (approx * 3.0).clamp(6.0, 24.0) as usize;
     for s in 1..=steps {
         let t = s as f32 / steps as f32;
         let inv = 1.0 - t;
@@ -803,39 +804,17 @@ fn add_quad(out: &mut Vec<(f32, f32)>, p0: (f32, f32), p1: (f32, f32), p2: (f32,
 }
 
 /// Flatten a quadratic Bézier contour into pixel-space line segments.
-/// `embolden_px` expands the contour away from its centroid (stem darkening).
-fn flatten_contour(contour: &Contour, scale: f32, embolden_px: f32) -> Vec<(f32, f32)> {
+fn flatten_contour(contour: &Contour, scale: f32) -> Vec<(f32, f32)> {
     let n = contour.points.len();
     if n < 2 {
         return Vec::new();
     }
 
-    let mut pts: Vec<(f32, f32, bool)> = contour
+    let pts: Vec<(f32, f32, bool)> = contour
         .points
         .iter()
         .map(|p| (p.x as f32 * scale, p.y as f32 * scale, p.on_curve))
         .collect();
-
-    if embolden_px > 0.0 && n >= 3 {
-        let nf = n as f32;
-        let mut cx = 0.0f32;
-        let mut cy = 0.0f32;
-        for p in &pts {
-            cx += p.0;
-            cy += p.1;
-        }
-        cx /= nf;
-        cy /= nf;
-        for p in &mut pts {
-            let dx = p.0 - cx;
-            let dy = p.1 - cy;
-            let len = libm::sqrtf(dx * dx + dy * dy);
-            if len > 0.05 {
-                p.0 += dx / len * embolden_px;
-                p.1 += dy / len * embolden_px;
-            }
-        }
-    }
 
     let mut result: Vec<(f32, f32)> = Vec::new();
     let first = if pts[0].2 {
@@ -878,18 +857,55 @@ fn flatten_contour(contour: &Contour, scale: f32, embolden_px: f32) -> Vec<(f32,
     result
 }
 
+/// Grow the filled region: TrueType outers are clockwise, inners
+/// counter-clockwise, so the left normal expands ink on both.
+fn offset_polyline(pts: &[(f32, f32)], amount: f32) -> Vec<(f32, f32)> {
+    let n = pts.len();
+    if n < 3 || amount == 0.0 {
+        return pts.to_vec();
+    }
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let (x0, y0) = pts[(i + n - 1) % n];
+        let (x1, y1) = pts[i];
+        let (x2, y2) = pts[(i + 1) % n];
+        let mut nx = 0.0f32;
+        let mut ny = 0.0f32;
+        let e1x = x1 - x0;
+        let e1y = y1 - y0;
+        let l1 = libm::sqrtf(e1x * e1x + e1y * e1y);
+        if l1 > 1e-6 {
+            nx += -e1y / l1;
+            ny += e1x / l1;
+        }
+        let e2x = x2 - x1;
+        let e2y = y2 - y1;
+        let l2 = libm::sqrtf(e2x * e2x + e2y * e2y);
+        if l2 > 1e-6 {
+            nx += -e2y / l2;
+            ny += e2x / l2;
+        }
+        let ln = libm::sqrtf(nx * nx + ny * ny);
+        if ln > 1e-6 {
+            out.push((x1 + nx / ln * amount, y1 + ny / ln * amount));
+        } else {
+            out.push((x1, y1));
+        }
+    }
+    out
+}
+
 /// Rasterize a glyph outline into an 8-bit coverage bitmap.
 ///
-/// UI sizes (≤24px) use 8×4 super-sampling, 1px padding, and ~0.4px stem
-/// darkening so 1px Inter stems survive without TrueType bytecode hinting.
-/// Coverage is mapped so ~40% of samples already read as opaque ink.
+/// UI sizes (≤16px) use 8×8 super-sampling and pixel-grid padding.
+/// Coverage is true area coverage so counters in `e` / `a` / `o` stay open.
 fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) -> GlyphBitmap {
     let scale = if units_per_em == 0 {
         1.0
     } else {
         px_size / units_per_em as f32
     };
-    let advance = libm::roundf(outline.advance_width as f32 * scale).max(1.0) as i32;
+    let mut advance = libm::roundf(outline.advance_width as f32 * scale).max(1.0) as i32;
 
     if outline.contours.is_empty() {
         return GlyphBitmap {
@@ -902,6 +918,8 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
         };
     }
 
+    // Light stem darkening at caption sizes so thin Inter fallback stems
+    // do not dropout when this rasterizer is used outside fontdue.
     let embolden_px = if px_size < 24.0 {
         0.40 * (1.0 - (px_size / 24.0) * 0.4)
     } else {
@@ -913,8 +931,12 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
     let x_max_px = outline.x_max as f32 * scale + pad;
     let y_max_px = outline.y_max as f32 * scale + pad;
 
-    let width = libm::ceilf(x_max_px - x_min_px).max(1.0) as usize;
-    let height = libm::ceilf(y_max_px - y_min_px).max(1.0) as usize;
+    let origin_x = libm::floorf(x_min_px);
+    let origin_y = libm::floorf(y_min_px);
+    let top = libm::ceilf(y_max_px);
+    let right = libm::ceilf(x_max_px);
+    let width = (right - origin_x).max(1.0) as usize;
+    let height = (top - origin_y).max(1.0) as usize;
     if width > 512 || height > 512 {
         return GlyphBitmap {
             width: 1,
@@ -926,7 +948,9 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
         };
     }
 
-    let (ss_x, ss_y) = if px_size <= 24.0 {
+    let (ss_x, ss_y) = if px_size <= 16.0 {
+        (8usize, 8usize)
+    } else if px_size <= 24.0 {
         (8usize, 4usize)
     } else {
         (4usize, 4usize)
@@ -938,13 +962,13 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
     let flattened: Vec<Vec<(f32, f32)>> = outline
         .contours
         .iter()
-        .map(|c| flatten_contour(c, scale, embolden_px))
+        .map(|c| offset_polyline(&flatten_contour(c, scale), embolden_px))
         .collect();
 
     // TrueType fill rule is non-zero winding (not even-odd). Inter Bold in
     // particular uses overlapping contours; even-odd punches holes in stems.
     for sy in 0..ss_height {
-        let y_f = y_max_px - (sy as f32 + 0.5) / ss_y as f32;
+        let y_f = top - (sy as f32 + 0.5) / ss_y as f32;
         let mut hits: Vec<(f32, i32)> = Vec::new();
 
         for flat_pts in &flattened {
@@ -963,7 +987,7 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
                 let t = (y_f - y0) / (y1 - y0);
                 let x_i = x0 + t * (x1 - x0);
                 let dir = if y1 > y0 { 1 } else { -1 };
-                hits.push(((x_i - x_min_px) * ss_x as f32, dir));
+                hits.push(((x_i - origin_x) * ss_x as f32, dir));
             }
         }
 
@@ -977,7 +1001,8 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
         for i in 0..hits.len() {
             if winding != 0 && i > 0 {
                 let x_start = hits[i - 1].0.max(0.0) as usize;
-                let x_end = (hits[i].0 as usize).min(ss_width);
+                let x_end = hits[i].0.max(0.0) as usize;
+                let x_end = x_end.min(ss_width);
                 if x_end > x_start {
                     for sx in x_start..x_end {
                         let col = sx / ss_x;
@@ -992,23 +1017,26 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
     }
 
     let samples = (ss_x * ss_y) as u32;
-    // At UI sizes, treat ~40% coverage as opaque so a 1px stem that only
-    // covers a few supersamples still reads as ink (FreeType-style darkening).
-    let denom = if px_size < 18.0 {
-        (samples * 2 / 5).max(1)
-    } else {
-        samples
-    };
     let mut pixels = vec![0u8; width * height];
     for i in 0..pixels.len() {
-        pixels[i] = ((coverage[i] * 255) / denom).min(255) as u8;
+        pixels[i] = ((coverage[i] * 255) / samples.max(1)).min(255) as u8;
+    }
+
+    let bearing_x = origin_x as i32;
+    let bearing_y = top as i32;
+    let painted = bearing_x + width as i32;
+    if advance < painted {
+        advance = painted;
+    }
+    if advance < 1 {
+        advance = 1;
     }
 
     GlyphBitmap {
         width,
         height,
-        bearing_x: libm::roundf(x_min_px) as i32,
-        bearing_y: libm::roundf(y_max_px) as i32,
+        bearing_x,
+        bearing_y,
         advance,
         pixels,
     }
@@ -1262,22 +1290,29 @@ pub struct FontFallbackEntry {
 lazy_static::lazy_static! {
     static ref FONT_FALLBACK_CHAIN: Mutex<Vec<FontFallbackEntry>> = Mutex::new(vec![
         FontFallbackEntry {
-            name: String::from("Hack"),
+            name: String::from("Inter"),
             priority: 0,
             covers_cjk: false,
             covers_emoji: false,
             covers_symbols: true,
         },
         FontFallbackEntry {
-            name: String::from("CJK-Bitmap"),
+            name: String::from("Hack"),
             priority: 1,
+            covers_cjk: false,
+            covers_emoji: false,
+            covers_symbols: true,
+        },
+        FontFallbackEntry {
+            name: String::from("CJK-Bitmap"),
+            priority: 2,
             covers_cjk: true,
             covers_emoji: false,
             covers_symbols: false,
         },
         FontFallbackEntry {
             name: String::from("Emoji-Color"),
-            priority: 2,
+            priority: 3,
             covers_cjk: false,
             covers_emoji: true,
             covers_symbols: false,
@@ -1323,7 +1358,7 @@ pub fn resolve_font_for_codepoint(codepoint: u32) -> String {
         }
     }
     // Ultimate fallback
-    String::from("Hack")
+    String::from("Inter")
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1516,7 +1551,7 @@ pub enum AaMode {
 
 lazy_static::lazy_static! {
     static ref FONT_CONFIG: Mutex<FontConfig> = Mutex::new(FontConfig {
-        default_family: String::from("Hack"),
+        default_family: String::from("Inter"),
         monospace_family: String::from("Hack"),
         default_size: 14,
         hinting: HintingMode::Slight,

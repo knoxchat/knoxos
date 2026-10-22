@@ -20,14 +20,13 @@ pub fn card_rect(fb_w: i32, fb_h: i32) -> Rect {
     )
 }
 
-pub fn paint_card(percent: u32, phase: f32) -> RasterBuffer {
+pub fn paint_card(percent: u32) -> RasterBuffer {
     let theme = Theme::aurora_dark();
     let percent = percent.min(100);
     let mut el = Splash::new()
         .themed(&theme)
         .size(px(SPLASH_CARD_W), px(SPLASH_CARD_H))
         .progress(percent as f32)
-        .phase(phase.clamp(0.0, 1.0))
         .status(splash_status(percent))
         .into_element();
     let mut atlas = SpriteAtlas::new();
@@ -51,8 +50,8 @@ pub fn paint_card(percent: u32, phase: f32) -> RasterBuffer {
     buf
 }
 
-pub fn blit_card(fb: &mut FrameBuffer, percent: u32, phase: f32) {
-    let buf = paint_card(percent, phase);
+pub fn blit_card(fb: &mut FrameBuffer, percent: u32) {
+    let buf = paint_card(percent);
     let dest = card_rect(fb.width as i32, fb.height as i32);
     fb.blit_bgra(dest.x, dest.y, dest.width, dest.height, buf.as_bytes());
 }

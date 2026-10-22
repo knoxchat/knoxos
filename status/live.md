@@ -40,7 +40,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 32. **Gate I4 SMP balance** — unpinned Ring 3 `getcpu` runs on idle CPU 1 without claiming BSP CFS current (`GATE_I4 smp balance`).
 33. **Gate G4 audit** — `set_robust_list`/`get_robust_list` round-trip; `madvise` EINVAL; `mlock` records; `readahead`/`fadvise64` return EBADF (`GATE_G4 audit live`).
 34. **Gate F7 Files userspace** — Ring 3 SHM client, not `WindowContentType::FileExplorer` (`GATE_F7 files userspace`). Settings/Task Manager/Editor/Browser/AI spawn the same SHM class.
-35. **Gate F8 VirtIO-GPU** — controlq `RESOURCE_CREATE_2D` + `ATTACH_BACKING` + `SET_SCANOUT` + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` (`GATE_F8 virtio-gpu scanout`). cursorq `UPDATE_CURSOR` (`GATE_F8 hw cursor`). Software arrow still blits on `-vga std` (cocoa); the 64×64 plane is not that window.
+35. **Gate F8 VirtIO-GPU** — controlq `RESOURCE_CREATE_2D` + `ATTACH_BACKING` + `SET_SCANOUT` + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` (`GATE_F8 virtio-gpu scanout`). cursorq `UPDATE_CURSOR` (`GATE_F8 hw cursor`). `-vga virtio` makes that scanout the cocoa/GTK window (`GATE_GPU modern stack`); the painted cursor plane is the pointer (`GATE_GPU pointer plane`).
 36. **Gate C8 JBD2** — ramdisk journal: descriptor + data + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount uses the same walker when `fs-ext4` is on.
 37. **USB HID URB** — submit + complete + boot-protocol keyboard parse delivers evdev KEY_A (`GATE_USB hid urb`).
 38. **XHCI MMIO** — BAR0 mapped uncached via `vmm::map_mmio`; rings are buddy DMA frames, not heap pointers (`GATE_USB xhci mmio`). Transfer Events drain into the HID URB handler and the GUI mouse/key path.

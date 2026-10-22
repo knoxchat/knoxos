@@ -12,12 +12,12 @@ QEMU is the hardware. Tick a driver only when the virtqueue, DMA, or IRQ path ro
 | VirtIO-input | modern `virtio-tablet-pci` eventq; `GATE_VIRTIO input tablet` |
 | VirtIO-blk | Guest-physical virtqueue; persist C1–C7 |
 | VirtIO-net | TX/RX rings; DHCP/DNS/TCP (D2–D5) |
-| VirtIO-GPU | controlq + cursorq; `GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor` |
+| VirtIO-GPU | controlq + cursorq on `-vga virtio`; `GATE_F8 virtio-gpu scanout`, `GATE_F8 hw cursor`, `GATE_GPU modern stack`, `GATE_GPU pointer plane` |
 | AHCI | Command-list + PRDT DMA (`GATE_C4 ahci dma complete`) |
 | NVMe | Admin + I/O queues, PRP bounce (`GATE_C5 nvme dma complete`) |
-| VGA/BGA FB | Bootloader framebuffer; software present |
+| VGA/BGA FB | Bootloader fallback when the GPU is not the primary display |
 
-QEMU flags used by `./run.sh` and `tests/run_integration.sh`: `-drive if=virtio`, `-device ahci`, `-device nvme`, `-device virtio-net-pci,disable-modern=on`, `-device virtio-gpu-pci`, `-device virtio-tablet-pci`, `-device virtio-keyboard-pci`, `-device qemu-xhci`, `-device intel-hda`, `-vga std`.
+QEMU flags used by `./run.sh` and `tests/run_integration.sh`: `-drive if=virtio`, `-device ahci`, `-device nvme`, `-device virtio-net-pci,disable-modern=on`, `-vga virtio`, `-device virtio-tablet-pci`, `-device virtio-keyboard-pci`, `-device qemu-xhci`, `-device intel-hda`.
 
 ## Wired, not the live input/display path
 

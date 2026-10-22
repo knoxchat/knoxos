@@ -203,7 +203,7 @@ impl IntoElement for AltTab {
                         Self::THUMB_H,
                         self.on_select.clone(),
                     ))
-                    .child(text(title).color(title_color).size(12)),
+                    .child(text(title).color(title_color).size(13)),
             );
         }
         let card = div()
@@ -371,7 +371,7 @@ fn overview_tile(
         .w(px(Overview::TILE_W))
         .h(px(Overview::TILE_H))
         .child(preview)
-        .child(text(title).color(title_color).size(12))
+        .child(text(title).color(title_color).size(13))
 }
 
 impl IntoElement for Overview {

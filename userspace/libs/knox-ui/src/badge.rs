@@ -107,9 +107,9 @@ impl IntoElement for Badge {
         let bg = self.color.unwrap_or(self.theme.colors.destructive);
         let fg = self.theme.colors.destructive_foreground;
         let (mark_h, font) = match self.size {
-            ControlSize::Large => (px(20), 12u16),
-            ControlSize::Medium => (px(16), 10),
-            ControlSize::Small => (px(12), 8),
+            ControlSize::Large => (px(20), self.theme.typo.body),
+            ControlSize::Medium => (px(16), self.theme.typo.caption),
+            ControlSize::Small => (px(14), self.theme.typo.caption),
         };
         let overlay = match self.mark {
             BadgeMark::Dot => div()

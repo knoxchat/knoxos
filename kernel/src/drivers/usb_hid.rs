@@ -520,9 +520,6 @@ pub fn deliver_hardware_report(hid_id: u32, slot_id: u8, report: &[u8]) {
 
 /// QEMU `usb-tablet` digitizer: `[buttons, x_lo, x_hi, y_lo, y_hi]`, X/Y 0..32767.
 pub fn parse_tablet_report(device: &mut HidDevice, report: &[u8]) {
-    if crate::virtio_input::is_active() {
-        return;
-    }
     if report.len() < 5 {
         return;
     }
@@ -816,7 +813,15 @@ pub fn process_report(device_id: u32, report: &[u8]) {
     if let Some(device) = devices.iter_mut().find(|d| d.id == device_id) {
         match device.device_type {
             HidDeviceType::Keyboard => parse_boot_keyboard_report(device, report),
-            HidDeviceType::Mouse => parse_boot_mouse_report(device, report),
+            HidDeviceType::Mouse => {
+                // QEMU usb-tablet is sometimes enumerated as a HID mouse
+                // but sends 5-byte absolute digitizer reports.
+                if report.len() >= 5 {
+                    parse_tablet_report(device, report);
+                } else {
+                    parse_boot_mouse_report(device, report);
+                }
+            }
             HidDeviceType::Tablet => parse_tablet_report(device, report),
             _ => {}
         }

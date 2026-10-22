@@ -73,7 +73,7 @@ pub fn text(value: impl Into<String>) -> Text {
         value: value.into(),
         color: Hsla::WHITE,
         font: FontId::Ui,
-        size_px: 13,
+        size_px: 16,
         tracking: 0,
         computed: Bounds::ZERO,
     }
@@ -105,8 +105,8 @@ impl Text {
         self.computed
     }
 
-    /// Inter-ish advances in 16ths of an em. A flat 1em overflowed cells;
-    /// a flat 0.56em was close on average but still clipped `m`/`w`.
+    /// Inter advances in 16ths of an em.
+    /// Layout may overestimate; paint uses the real fontdue advance.
     fn layout_advance(&self, ch: char) -> i32 {
         let em = self.size_px as i32;
         let sixteenths = match ch {
@@ -118,11 +118,18 @@ impl Text {
         };
         ((em * sixteenths) / 16).max(2)
     }
+
+    /// Extra descender / tittle room so Inter Medium stems survive overflow clip.
+    /// Large wordmarks keep the requested em so splash lockups do not grow.
+    fn line_height(&self) -> i32 {
+        let em = self.size_px as i32;
+        if em <= 24 { em + (em / 4).max(4) } else { em }
+    }
 }
 
 impl Element for Text {
     fn request_layout(&mut self, origin: Point, _available: Size) -> Bounds {
-        let line_h = px(self.size_px as i32);
+        let line_h = px(self.line_height());
         let mut x = 0i32;
         let mut lines = 1i32;
         let mut line_w = 0i32;
@@ -141,6 +148,10 @@ impl Element for Text {
             line_w += self.layout_advance(ch);
         }
         x = x.max(line_w);
+        // Left slack for negative LSB, right slack for RSB / stem pad.
+        if x > 0 {
+            x += 4;
+        }
         self.computed = Bounds::new(
             origin,
             Size {
@@ -170,12 +181,14 @@ impl Element for Text {
         let Some(sys) = env.text else {
             return;
         };
-        let line_h = self.size_px as i32;
+        let line_h = self.line_height();
         let mut pen_y = bounds.y();
-        let mut line_x = 0i32;
+        // 1px left inset matches request_layout slack so a negative LSB cannot
+        // sit outside overflow clip.
+        let mut line_x = 1i32;
         for ch in self.value.chars() {
             if ch == '\n' {
-                line_x = 0;
+                line_x = 1;
                 pen_y += line_h;
                 continue;
             }
@@ -186,12 +199,12 @@ impl Element for Text {
             let dest = Bounds::new(
                 Point {
                     x: px(bounds.x() + line_x + glyph.bearing.x.0),
-                    y: px(pen_y + glyph.bearing.y.0),
+                    y: px((pen_y + glyph.bearing.y.0).max(pen_y)),
                 },
                 glyph.size,
             );
             scene.push_mono_sprite(MonochromeSprite::new(dest, glyph.tile, self.color));
-            line_x += glyph.advance.0 + self.tracking;
+            line_x += glyph.advance.0.max(1) + self.tracking;
         }
     }
 }
@@ -337,12 +350,17 @@ mod tests {
 
     #[test]
     fn labels_do_not_soft_wrap() {
-        let mut el = text("Primary").size(13);
+        let mut el = text("Secondary").size(13);
         let bounds = el.request_layout(Point::ZERO, Size::wh(36, 32));
         assert_eq!(
             bounds.height(),
-            13,
+            17,
             "button/desktop labels wrap only on newline"
+        );
+        assert!(
+            bounds.width() >= 50,
+            "Secondary must keep Inter cell room, got {}",
+            bounds.width()
         );
         assert!(
             bounds.width() > 36,
@@ -350,7 +368,14 @@ mod tests {
         );
         let mut wrapped = text("One\nTwo").size(13);
         let two = wrapped.request_layout(Point::ZERO, Size::wh(200, 40));
-        assert_eq!(two.height(), 26);
+        assert_eq!(two.height(), 34);
+        let mut files = text("Files").size(13);
+        let files_b = files.request_layout(Point::ZERO, Size::wh(200, 40));
+        assert!(
+            files_b.width() >= 25,
+            "Files must not clip the last letter, got {}",
+            files_b.width()
+        );
     }
 
     #[test]

@@ -386,8 +386,67 @@ pub fn set_timezone(name: &str) {
     let tzs = common_timezones();
     if let Some(tz) = tzs.iter().find(|t| t.name == name) {
         DATETIME.lock().timezone = tz.clone();
+        let _ = crate::timezone::set_timezone(iana_for_settings(name));
         crate::serial_println!("[settings_ext] Timezone set to {}", name);
+        return;
     }
+    apply_detected_timezone(name);
+}
+
+fn iana_for_settings(name: &str) -> &str {
+    match name {
+        "US/Eastern" => "America/New_York",
+        "US/Central" => "America/Chicago",
+        "US/Mountain" => "America/Denver",
+        "US/Pacific" => "America/Los_Angeles",
+        other => other,
+    }
+}
+
+/// Minutes east of UTC for the active UI timezone.
+pub fn current_offset_minutes() -> i32 {
+    DATETIME.lock().timezone.utc_offset_minutes
+}
+
+/// Adopt a detected IANA name or `+HHMM` offset as the UI timezone.
+pub fn apply_detected_timezone(spec: &str) {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return;
+    }
+    let tzs = common_timezones();
+    if let Some(tz) = tzs.iter().find(|t| t.name == spec) {
+        DATETIME.lock().timezone = tz.clone();
+        let _ = crate::timezone::set_timezone(iana_for_settings(spec));
+        return;
+    }
+    if spec.contains('/') && crate::timezone::set_timezone(spec) {
+        let off = crate::timezone::get_utc_offset(crate::rtc::unix_time()) / 60;
+        DATETIME.lock().timezone = TimezoneInfo {
+            name: String::from(spec),
+            utc_offset_minutes: off,
+            abbreviation: String::from(spec),
+        };
+        return;
+    }
+    if let Some(mins) = crate::timezone::parse_offset_minutes(spec) {
+        if let Some(tz) = tzs.iter().find(|t| t.utc_offset_minutes == mins) {
+            DATETIME.lock().timezone = tz.clone();
+            let _ = crate::timezone::set_timezone(iana_for_settings(&tz.name));
+            return;
+        }
+        DATETIME.lock().timezone = TimezoneInfo {
+            name: String::from(spec),
+            utc_offset_minutes: mins,
+            abbreviation: String::from(spec),
+        };
+    }
+}
+
+/// Copy the system timezone crate into Date & Time settings after auto-detect.
+pub fn sync_timezone_from_system() {
+    let name = crate::timezone::get_timezone_name();
+    apply_detected_timezone(&name);
 }
 
 /// Toggle a privacy setting

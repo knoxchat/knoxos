@@ -106,7 +106,7 @@ impl IntoElement for Attachment {
             .child(
                 text(alloc::format!("[{}]", self.name))
                     .color(self.theme.colors.foreground)
-                    .size(11),
+                    .size(12),
             )
     }
 }
@@ -135,7 +135,7 @@ impl IntoElement for Marker {
     type Element = Div;
 
     fn into_element(self) -> Div {
-        div().child(text(self.label).color(self.theme.colors.primary).size(11))
+        div().child(text(self.label).color(self.theme.colors.primary).size(12))
     }
 }
 

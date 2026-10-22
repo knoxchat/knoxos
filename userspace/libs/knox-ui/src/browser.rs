@@ -243,7 +243,7 @@ impl IntoElement for BrowserChrome {
                 div().h(px(20)).p(self.theme.spacing.xs).child(
                     text(self.status)
                         .color(self.theme.colors.muted_foreground)
-                        .size(11),
+                        .size(12),
                 ),
             )
     }

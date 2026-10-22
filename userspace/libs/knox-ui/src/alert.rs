@@ -118,9 +118,14 @@ impl IntoElement for Alert {
         let fg = self.theme.colors.foreground;
         let mut body = div().flex_col().gap_1().grow();
         if let Some(title) = self.title {
-            body = body.child(text(title).color(fg).font(FontId::UiBold).size(13));
+            body = body.child(
+                text(title)
+                    .color(fg)
+                    .font(FontId::UiBold)
+                    .size(self.theme.typo.ui),
+            );
         }
-        body = body.child(text(self.message).color(fg).size(12));
+        body = body.child(text(self.message).color(fg).size(self.theme.typo.body));
 
         let mut row = div()
             .flex()
@@ -135,7 +140,7 @@ impl IntoElement for Alert {
                 Icon::new(icon)
                     .themed(&self.theme)
                     .color(accent)
-                    .with_size(ControlSize::Small),
+                    .with_size(ControlSize::Medium),
             )
             .child(body);
 

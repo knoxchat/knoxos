@@ -27,6 +27,9 @@ KERNEL_BIN_RELEASE="$KERNEL_DIR/target/$TARGET/release/knoxos-kernel"
 QEMU="qemu-system-x86_64"
 QEMU_MEMORY="2G"
 QEMU_CPUS="2"
+# Default guest framebuffer (virtio-vga + bootloader request).
+QEMU_DISPLAY_WIDTH="1920"
+QEMU_DISPLAY_HEIGHT="1080"
 
 # Persistent storage disk image (survives reboots) — KNOXPERSIST blob on vda
 PERSISTENT_DISK="$SCRIPT_DIR/knoxos-storage.img"
@@ -40,14 +43,44 @@ NVME_DISK="$SCRIPT_DIR/knoxos-nvme.img"
 NVME_DISK_SIZE="64M"
 D4_HTTP="$SCRIPT_DIR/tests/d4_http.sh"
 
+# Host timezone for the guest clock (QEMU RTC stays UTC; kernel applies this).
+host_timezone() {
+    if [ -n "${KNOXOS_TZ:-}" ]; then
+        printf '%s' "$KNOXOS_TZ"
+        return
+    fi
+    if [ -n "${TZ:-}" ] && [[ "$TZ" == */* ]]; then
+        printf '%s' "$TZ"
+        return
+    fi
+    local dest=""
+    if [ -L /etc/localtime ]; then
+        dest=$(readlink /etc/localtime 2>/dev/null || true)
+    fi
+    if [ -z "$dest" ]; then
+        dest=$(readlink /etc/localtime 2>/dev/null || true)
+    fi
+    if [ -n "$dest" ] && [[ "$dest" == *zoneinfo/* ]]; then
+        printf '%s' "${dest#*zoneinfo/}"
+        return
+    fi
+    if [ -f /etc/timezone ]; then
+        tr -d '[:space:]' < /etc/timezone
+        return
+    fi
+    date +%z
+}
+HOST_TZ="$(host_timezone)"
+QEMU_TIME_ARGS=(-rtc base=utc,clock=host -fw_cfg "name=opt/knoxos.tz,string=${HOST_TZ}")
+
 # Auto-detect display backend for QEMU
 # zoom-to-fit allows the QEMU window to be resized freely
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    QEMU_DISPLAY="cocoa,show-cursor=off,zoom-to-fit=on"
+    QEMU_DISPLAY="cocoa,show-cursor=on,zoom-to-fit=on"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    QEMU_DISPLAY="gtk,show-cursor=off,grab-on-hover=off,zoom-to-fit=on"
+    QEMU_DISPLAY="gtk,show-cursor=on,grab-on-hover=off,zoom-to-fit=on"
 else
-    QEMU_DISPLAY="sdl,show-cursor=off"
+    QEMU_DISPLAY="sdl,show-cursor=on"
 fi
 
 # OVMF firmware paths (tried in order)
@@ -84,7 +117,7 @@ print_banner() {
     echo "║   ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ║"
     echo "║                                                          ║"
     echo "║   AI Operating System - Linux Compatible                 ║"
-    echo "║   Rust-powered | Framebuffer GUI | QEMU Testing          ║"
+    echo "║   Rust-powered | VirtIO-GPU Desktop | QEMU Testing       ║"
     echo "║                                                          ║"
     echo "╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -308,7 +341,9 @@ run_qemu_bios() {
     log_step "Starting KnoxOS in QEMU (BIOS mode)..."
     echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
     echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
-    echo -e "  ${CYAN}Input:${NC}   virtio-tablet + USB tablet/kbd + PS/2 fallback"
+    echo -e "  ${CYAN}Resolution:${NC} ${QEMU_DISPLAY_WIDTH}x${QEMU_DISPLAY_HEIGHT}"
+    echo -e "  ${CYAN}Timezone:${NC} $HOST_TZ"
+    echo -e "  ${CYAN}Input:${NC}   virtio-tablet + virtio-mouse + USB tablet (click the window first)"
     echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
     echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
     echo -e "  ${CYAN}Storage:${NC}  $PERSISTENT_DISK ($PERSISTENT_DISK_SIZE persistent)"
@@ -330,18 +365,18 @@ run_qemu_bios() {
         -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
-        -device virtio-gpu-pci \
         -device virtio-tablet-pci \
+        -device virtio-mouse-pci \
         -device virtio-keyboard-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \
         -cpu qemu64 \
         -smp "$QEMU_CPUS" \
-        -vga std \
-        -global VGA.vgamem_mb=64 \
-        -global VGA.xres=1920 \
-        -global VGA.yres=1080 \
+        "${QEMU_TIME_ARGS[@]}" \
+        -vga virtio \
+        -global virtio-vga.xres="$QEMU_DISPLAY_WIDTH" \
+        -global virtio-vga.yres="$QEMU_DISPLAY_HEIGHT" \
         -display $QEMU_DISPLAY \
         -device qemu-xhci,id=xhci \
         -device usb-kbd,bus=xhci.0 \
@@ -382,7 +417,9 @@ run_qemu_uefi() {
     log_step "Starting KnoxOS in QEMU (UEFI mode)..."
     echo -e "${PURPLE}════════════════════════════════════════════════════════${NC}"
     echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
-    echo -e "  ${CYAN}Input:${NC}   virtio-tablet + USB tablet/kbd + PS/2 fallback"
+    echo -e "  ${CYAN}Resolution:${NC} ${QEMU_DISPLAY_WIDTH}x${QEMU_DISPLAY_HEIGHT}"
+    echo -e "  ${CYAN}Timezone:${NC} $HOST_TZ"
+    echo -e "  ${CYAN}Input:${NC}   virtio-tablet + virtio-mouse + USB tablet (click the window first)"
     echo -e "  ${CYAN}OVMF:${NC}    $ovmf"
     echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
     echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
@@ -403,18 +440,18 @@ run_qemu_uefi() {
         -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
-        -device virtio-gpu-pci \
         -device virtio-tablet-pci \
+        -device virtio-mouse-pci \
         -device virtio-keyboard-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \
         -cpu qemu64 \
         -smp "$QEMU_CPUS" \
-        -vga std \
-        -global VGA.vgamem_mb=64 \
-        -global VGA.xres=1920 \
-        -global VGA.yres=1080 \
+        "${QEMU_TIME_ARGS[@]}" \
+        -vga virtio \
+        -global virtio-vga.xres="$QEMU_DISPLAY_WIDTH" \
+        -global virtio-vga.yres="$QEMU_DISPLAY_HEIGHT" \
         -display $QEMU_DISPLAY \
         -device qemu-xhci,id=xhci \
         -device usb-kbd,bus=xhci.0 \
@@ -452,18 +489,18 @@ run_qemu_debug() {
         -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
-        -device virtio-gpu-pci \
         -device virtio-tablet-pci \
+        -device virtio-mouse-pci \
         -device virtio-keyboard-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -m "$QEMU_MEMORY" \
         -cpu qemu64 \
         -smp "$QEMU_CPUS" \
-        -vga std \
-        -global VGA.vgamem_mb=64 \
-        -global VGA.xres=1920 \
-        -global VGA.yres=1080 \
+        "${QEMU_TIME_ARGS[@]}" \
+        -vga virtio \
+        -global virtio-vga.xres="$QEMU_DISPLAY_WIDTH" \
+        -global virtio-vga.yres="$QEMU_DISPLAY_HEIGHT" \
         -display $QEMU_DISPLAY \
         -device intel-hda,id=hda0 \
         -device hda-duplex,bus=hda0.0 \
@@ -477,7 +514,7 @@ show_help() {
     echo "Usage: ./run.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  (no args)       Build release and run in QEMU (BIOS mode)"
+    echo "  (no args)       Build release and run in QEMU (BIOS, 1920x1080)"
     echo "  --uefi          Build and run in UEFI mode"
     echo "  --dev           Build debug (unoptimized) instead of release"
     echo "  --release       Build optimized release build (default)"

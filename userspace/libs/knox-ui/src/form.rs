@@ -75,7 +75,7 @@ impl IntoElement for Field {
             col = col.child(
                 text(self.description)
                     .color(self.theme.colors.muted_foreground)
-                    .size(11),
+                    .size(12),
             );
         }
         if let Some(child) = self.child {
@@ -85,7 +85,7 @@ impl IntoElement for Field {
             col = col.child(
                 text(self.error)
                     .color(self.theme.colors.destructive)
-                    .size(11),
+                    .size(12),
             );
         }
         col

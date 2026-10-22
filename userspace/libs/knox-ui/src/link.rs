@@ -84,7 +84,7 @@ impl IntoElement for Link {
         };
         let mut el = div()
             .flex_col()
-            .child(text(self.label).color(fg).size(13))
+            .child(text(self.label).color(fg).size(self.theme.typo.body))
             .child(
                 div()
                     .h(px(1))

@@ -132,7 +132,7 @@ impl IntoElement for ShortcutsOverlay {
                         .child(
                             text(*keys)
                                 .color(self.theme.colors.muted_foreground)
-                                .size(11),
+                                .size(12),
                         )
                         .child(text(*action).color(self.theme.colors.foreground).size(12)),
                 );

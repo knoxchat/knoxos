@@ -40,6 +40,43 @@ pub struct DateTime {
 }
 
 impl DateTime {
+    /// Civil date from a Unix timestamp (seconds since 1970-01-01 00:00:00 UTC).
+    /// `day_of_week` is 0 = Sunday … 6 = Saturday.
+    pub fn from_unix(ts: i64) -> Self {
+        let mut days = ts / 86400;
+        let mut time_of_day = (ts % 86400) as i32;
+        if time_of_day < 0 {
+            time_of_day += 86400;
+            days -= 1;
+        }
+
+        let hour = (time_of_day / 3600) as u8;
+        let minute = ((time_of_day % 3600) / 60) as u8;
+        let second = (time_of_day % 60) as u8;
+        let dow = ((days % 7 + 4) % 7) as u8;
+
+        let z = days + 719468;
+        let era = if z >= 0 { z } else { z - 146096 } / 146097;
+        let doe = (z - era * 146097) as u32;
+        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        let y = yoe as i64 + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let year = if m <= 2 { y + 1 } else { y };
+
+        DateTime {
+            second,
+            minute,
+            hour,
+            day: d as u8,
+            month: m as u8,
+            year: year.clamp(1970, 9999) as u16,
+            day_of_week: dow,
+        }
+    }
+
     /// Convert to Unix timestamp (seconds since 1970-01-01 00:00:00 UTC)
     pub fn to_unix_timestamp(&self) -> i64 {
         let mut y = self.year as i64;
@@ -228,6 +265,25 @@ pub fn unix_time() -> i64 {
     datetime_to_unix(&dt)
 }
 
+/// Wall-clock local time for UI (RTC is UTC; timezone offset applied).
+pub fn local_now() -> DateTime {
+    let utc = unix_time();
+    if crate::timezone::is_ready() {
+        let local = crate::timezone::to_local_time(utc);
+        DateTime {
+            second: local.second,
+            minute: local.minute,
+            hour: local.hour,
+            day: local.day,
+            month: local.month,
+            year: local.year.clamp(1970, 9999) as u16,
+            day_of_week: local.day_of_week,
+        }
+    } else {
+        DateTime::from_unix(utc)
+    }
+}
+
 /// Get time since boot in nanoseconds
 pub fn monotonic_ns() -> i64 {
     let ticks = MONOTONIC_TICKS.load(core::sync::atomic::Ordering::Relaxed);
@@ -280,7 +336,11 @@ pub fn gettimeofday() -> (Timeval, Timezone) {
             tv_usec: 0,
         },
         Timezone {
-            tz_minuteswest: 0,
+            tz_minuteswest: if crate::timezone::is_ready() {
+                -(crate::timezone::get_utc_offset(secs) / 60)
+            } else {
+                0
+            },
             tz_dsttime: 0,
         },
     )

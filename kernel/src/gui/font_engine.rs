@@ -1,18 +1,10 @@
 /// Font Engine — Scalable TrueType font rendering for KnoxOS
 ///
-/// Replaces the fixed-size bitmap fonts (Hack 10×20, 8×14, 20×40) with a
-/// scalable engine that can render any embedded TTF at any point size.
+/// UI text is Inter via `fontdue` — the same rasterizer, faces, and metrics
+/// as `os/kernel/knox-kernel/src/display/font.rs`. Terminal/code uses Hack.
 ///
-/// Architecture: uses the existing `truetype::TtfFont` parser as backend,
-/// adds a glyph bitmap cache keyed by (font_id, glyph_id, size_px),
-/// and provides a simple text drawing API.
-///
-/// Two font families are embedded:
-///   - **UI font** (proportional): for window titles, menus, buttons, labels
-///   - **Mono font** (monospace): for terminal, code editor, log viewer
-///
-/// Rendering quality: grayscale anti-aliased by default, with gamma-correct
-/// blending using the sRGB lookup tables from fonts.rs.
+/// Architecture: `inter_font` caches `(face, size, glyph)` coverage; this
+/// module blits with gamma-correct sRGB blending and exposes the FontId API.
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
@@ -20,6 +12,7 @@ use alloc::vec::Vec;
 use spin::Mutex;
 
 use super::framebuffer::{FrameBuffer, Pixel};
+use super::inter_font::{self, Face};
 use super::truetype;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -29,12 +22,21 @@ use super::truetype;
 /// Identifies which embedded font to use
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FontId {
-    /// Proportional UI font (Inter / Noto Sans)
+    /// Proportional UI font (Inter Regular)
     Ui,
-    /// Bold proportional UI font
+    /// Bold proportional UI font (Inter Bold)
     UiBold,
-    /// Monospace font (Hack / JetBrains Mono)
+    /// Monospace font (Hack Regular)
     Mono,
+}
+
+fn face_for(font: FontId) -> Face {
+    match font {
+        // Same weights the `os` chrome uses: Medium for body, SemiBold for titles.
+        FontId::Ui => Face::Inter(inter_font::Weight::Medium),
+        FontId::UiBold => Face::Inter(inter_font::Weight::SemiBold),
+        FontId::Mono => Face::Mono,
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -127,7 +129,9 @@ static LINEAR_TO_SRGB: [u8; 256] = [
 /// Initialize the font engine with embedded font data.
 /// Call this once during GUI init.
 pub fn init() {
-    // Load embedded fonts via the truetype font registry
+    inter_font::init();
+
+    // Keep the truetype registry populated for GSUB/GPOS / fallback scans.
     let ui_data = super::embedded_fonts::FONT_UI_DATA;
     let ui_bold_data = super::embedded_fonts::FONT_UI_BOLD_DATA;
     let mono_data = super::embedded_fonts::FONT_MONO_DATA;
@@ -155,12 +159,13 @@ pub fn init() {
         }
         Err(e) => crate::serial_println!("[FontEngine] Failed to load Mono font: {}", e),
     }
+    super::embedded_fonts::install_system_fonts();
     let _ = title_self_test();
 }
 
-/// True when the proportional UI faces have been registered.
+/// True when the Inter faces have been registered.
 pub fn is_ready() -> bool {
-    FONT_IDX_UI.load(Ordering::Relaxed) != usize::MAX
+    inter_font::is_ready()
 }
 
 pub const GATE_FONT_TITLE_MARKER: &str = "GATE_FONT title";
@@ -169,7 +174,10 @@ fn title_self_test() -> bool {
     let _ = rasterize_glyph(FontId::UiBold, 'i', 13);
     let _ = rasterize_glyph(FontId::Ui, ':', 13);
     let _ = rasterize_glyph(FontId::Ui, 'm', 13);
-    let (coverage, colon_runs, m_ink) = {
+    let _ = rasterize_glyph(FontId::Ui, 'e', 13);
+    let _ = rasterize_glyph(FontId::Ui, 's', 13);
+    let _ = rasterize_glyph(FontId::Ui, 'F', 13);
+    let (coverage, colon_runs, m_ink, e_ink, s_ink, f_ink) = {
         let cache = GLYPH_CACHE.lock();
         let i_key = GlyphKey {
             font: FontId::UiBold,
@@ -198,30 +206,75 @@ fn title_self_test() -> bool {
             .get(&m_key)
             .map(|g| g.bitmap.iter().filter(|&&b| b > 40).count())
             .unwrap_or(0);
-        (coverage, colon_runs, m_ink)
+        let e_key = GlyphKey {
+            font: FontId::Ui,
+            codepoint: b'e' as u32,
+            size_px: 13,
+        };
+        let s_key = GlyphKey {
+            font: FontId::Ui,
+            codepoint: b's' as u32,
+            size_px: 13,
+        };
+        let f_key = GlyphKey {
+            font: FontId::Ui,
+            codepoint: b'F' as u32,
+            size_px: 13,
+        };
+        let e_ink = cache
+            .get(&e_key)
+            .map(|g| g.bitmap.iter().filter(|&&b| b > 80).count())
+            .unwrap_or(0);
+        let s_ink = cache
+            .get(&s_key)
+            .map(|g| g.bitmap.iter().filter(|&&b| b > 80).count())
+            .unwrap_or(0);
+        let f_ink = cache
+            .get(&f_key)
+            .map(|g| g.bitmap.iter().filter(|&&b| b > 80).count())
+            .unwrap_or(0);
+        (coverage, colon_runs, m_ink, e_ink, s_ink, f_ink)
     };
     let full = measure_text("Terminal", FontId::UiBold, 13);
     let gap = measure_text("Termnal", FontId::UiBold, 13);
+    let files = measure_text("Files", FontId::Ui, 13);
+    let holes = measure_text("Fls", FontId::Ui, 13);
     // Composite ':' is two dots; a failed composite decode is empty or one blob.
-    let ok = coverage && full > gap && colon_runs >= 2 && m_ink >= 12;
+    let ok = coverage
+        && full > gap
+        && files > holes
+        && colon_runs >= 2
+        && m_ink >= 12
+        && e_ink >= 16
+        && s_ink >= 12
+        && f_ink >= 12;
     if ok {
         crate::serial_println!(
-            "[fonts] {} (\"Terminal\" {}px > \"Termnal\" {}px colon_runs={} m_ink={})",
+            "[fonts] {} (\"Terminal\" {}px > \"Termnal\" {}px Files={} colon_runs={} m_ink={} e={} s={} F={})",
             GATE_FONT_TITLE_MARKER,
             full,
             gap,
+            files,
             colon_runs,
-            m_ink
+            m_ink,
+            e_ink,
+            s_ink,
+            f_ink
         );
         true
     } else {
         crate::serial_println!(
-            "[fonts] GATE_FONT FAILED title cov={} full={} gap={} colon_runs={} m_ink={}",
+            "[fonts] GATE_FONT FAILED title cov={} full={} gap={} files={} holes={} colon_runs={} m_ink={} e={} s={} F={}",
             coverage,
             full,
             gap,
+            files,
+            holes,
             colon_runs,
-            m_ink
+            m_ink,
+            e_ink,
+            s_ink,
+            f_ink
         );
         false
     }
@@ -263,61 +316,28 @@ fn rasterize_glyph(font_id: FontId, ch: char, size_px: u16) -> Option<GlyphKey> 
         return Some(key);
     }
 
-    // Get font registry index — UiBold falls back to Ui so thin title
-    // glyphs (the 'i' in "Terminal") still rasterize.
-    let font_idx = match font_id {
-        FontId::Ui => FONT_IDX_UI.load(Ordering::Relaxed),
-        FontId::UiBold => {
-            let bold = FONT_IDX_UI_BOLD.load(Ordering::Relaxed);
-            if bold == usize::MAX {
-                FONT_IDX_UI.load(Ordering::Relaxed)
-            } else {
-                bold
-            }
-        }
-        FontId::Mono => FONT_IDX_MONO.load(Ordering::Relaxed),
-    };
-    if font_idx == usize::MAX {
-        return None; // Font not loaded
-    }
-
-    // Rasterize via truetype module; retry the UI face if bold is empty.
-    let mut bitmap = truetype::rasterize_glyph(font_idx, ch, size_px as f32);
-    if bitmap
-        .as_ref()
-        .map(|b| b.pixels.iter().all(|&p| p == 0) || b.advance <= 0)
-        .unwrap_or(true)
-    {
-        let ui = FONT_IDX_UI.load(Ordering::Relaxed);
-        if ui != usize::MAX && ui != font_idx {
-            bitmap = truetype::rasterize_glyph(ui, ch, size_px as f32);
-        }
-    }
-    let mut bitmap = bitmap?;
-    let empty = bitmap.width == 0 || bitmap.height == 0 || bitmap.pixels.iter().all(|&p| p == 0);
-    // Last-resort stem so a failed outline still occupies the advance. Real
-    // letters (including composite 'i' / ':') come from the TTF rasterizer.
+    let mut glyph = inter_font::rasterize(face_for(font_id), ch, size_px)?;
+    let empty = glyph.width == 0 || glyph.height == 0 || glyph.coverage.iter().all(|&p| p == 0);
+    // Last-resort stem so a failed outline still occupies the advance.
     if empty && ch != ' ' && ch.is_ascii_alphabetic() {
         let h = (size_px as usize * 3 / 4).max(4);
         let w = 2usize;
-        bitmap.width = w;
-        bitmap.height = h;
-        bitmap.bearing_x = 0;
-        bitmap.bearing_y = h as i32;
-        bitmap.advance = (size_px as i32 / 4).max(3);
-        bitmap.pixels = vec![220u8; w * h];
+        glyph.width = w;
+        glyph.height = h;
+        glyph.xmin = 0;
+        glyph.bearing_y = h as i16;
+        glyph.advance = (size_px as f32 / 4.0).max(3.0);
+        glyph.coverage = vec![220u8; w * h];
     }
-    if bitmap.advance < 1 {
-        bitmap.advance = 1;
-    }
+    let advance = libm::roundf(glyph.advance).max(1.0) as u16;
 
     let cached = CachedGlyph {
-        width: bitmap.width as u16,
-        height: bitmap.height as u16,
-        bearing_x: bitmap.bearing_x as i16,
-        bearing_y: bitmap.bearing_y as i16,
-        advance: bitmap.advance.max(1) as u16,
-        bitmap: bitmap.pixels,
+        width: glyph.width as u16,
+        height: glyph.height as u16,
+        bearing_x: glyph.xmin as i16,
+        bearing_y: glyph.bearing_y,
+        advance,
+        bitmap: glyph.coverage,
     };
 
     let mut cache = GLYPH_CACHE.lock();
@@ -352,11 +372,7 @@ pub fn glyph_coverage(font: FontId, ch: char, size_px: u16) -> Option<GlyphCover
         bearing_x: g.bearing_x,
         bearing_y: g.bearing_y,
         advance: g.advance,
-        coverage: g
-            .bitmap
-            .iter()
-            .map(|&c| apply_stem_darkening(sharpen_coverage(c, size_px), size_px))
-            .collect(),
+        coverage: g.bitmap.clone(),
     })
 }
 
@@ -396,8 +412,25 @@ pub fn draw_text_tracked(
     color: Pixel,
     tracking: i32,
 ) {
+    let face = face_for(font);
+    if tracking == 0 {
+        let _ = inter_font::walk_text(text, size_px, face, y, |gx, gy, glyph| {
+            blit_glyph_aa(
+                fb,
+                x + gx,
+                gy,
+                glyph.width as u16,
+                glyph.height as u16,
+                &glyph.coverage,
+                color,
+                size_px,
+            );
+        });
+        return;
+    }
+
     let mut pen_x = x;
-    let baseline_y = y + size_px as i32; // approximate baseline
+    let baseline_y = y + inter_font::ascent(face, size_px);
     let mut first = true;
 
     for ch in text.chars() {
@@ -469,6 +502,10 @@ pub fn measure_text(text: &str, font: FontId, size_px: u16) -> u32 {
 
 /// Measure the width of a string including tracking between glyphs.
 pub fn measure_text_tracked(text: &str, font: FontId, size_px: u16, tracking: i32) -> u32 {
+    if tracking == 0 {
+        return inter_font::measure_text(text, size_px, face_for(font)).max(0) as u32;
+    }
+
     let mut width: i32 = 0;
     let mut count: i32 = 0;
 
@@ -491,37 +528,6 @@ pub fn measure_text_tracked(text: &str, font: FontId, size_px: u16, tracking: i3
         width += tracking * (count - 1);
     }
     width.max(0) as u32
-}
-
-/// Contrast curve. A strong S-curve (delta = (c-128)/2) mapped coverage
-/// below ~43 to 0 and deleted 13px Inter stems. UI sizes keep linear coverage.
-#[inline(always)]
-fn sharpen_coverage(cov: u8, size_px: u16) -> u8 {
-    if cov == 0 || cov == 255 || size_px < 24 {
-        return cov;
-    }
-    let c = cov as i32;
-    let delta = (c - 128) * 48 / 256;
-    (c + delta).clamp(0, 255) as u8
-}
-
-/// Light extra weight on mid-coverage pixels. The rasterizer already
-/// stem-darkens outlines; this only lifts remaining AA fringe.
-#[inline(always)]
-fn apply_stem_darkening(coverage: u8, size_px: u16) -> u8 {
-    if coverage == 0 || coverage == 255 {
-        return coverage;
-    }
-    let factor = match size_px {
-        0..=14 => 36,
-        15..=23 => 20,
-        _ => 0,
-    };
-    if factor == 0 {
-        return coverage;
-    }
-    let c = coverage as u32;
-    (c + factor * (255 - c) / 255).min(255) as u8
 }
 
 /// Blit a packed 8-bit alpha mask (row-major) with gamma-correct blending.
@@ -547,7 +553,7 @@ fn blit_glyph_aa(
     h: u16,
     bitmap: &[u8],
     color: Pixel,
-    size_px: u16,
+    _size_px: u16,
 ) {
     let fb_w = fb.width as i32;
     let fb_h = fb.height as i32;
@@ -572,8 +578,7 @@ fn blit_glyph_aa(
                 continue;
             }
 
-            let cov = apply_stem_darkening(sharpen_coverage(raw_alpha, size_px), size_px);
-            let a = (cov as u32 * color.a as u32 + 127) / 255;
+            let a = (raw_alpha as u32 * color.a as u32 + 127) / 255;
             if a == 0 {
                 continue;
             }
@@ -648,21 +653,26 @@ pub fn clear_cache() {
     GLYPH_CACHE.lock().clear();
 }
 
-/// Default UI font size in pixels
-pub const UI_SIZE: u16 = 14;
-/// Small UI font size (labels, status bars)
-pub const UI_SIZE_SMALL: u16 = 11;
-/// Large UI font size (window titles, headings)
-pub const UI_SIZE_LARGE: u16 = 16;
+/// Matches knox-ui `TypeTokens` (ui / body / title).
+pub const UI_SIZE: u16 = 16;
+/// Small UI font size (labels, status bars) — TypeTokens.body
+pub const UI_SIZE_SMALL: u16 = 15;
+/// Large UI font size (window titles, headings) — TypeTokens.title
+pub const UI_SIZE_LARGE: u16 = 18;
 /// Terminal/mono font size
-pub const MONO_SIZE: u16 = 14;
+pub const MONO_SIZE: u16 = 15;
 /// Splash / lock wordmark
 pub const LOGO_SIZE: u16 = 64;
 /// Boot menu / login title
-pub const TITLE_SIZE: u16 = 32;
+pub const TITLE_SIZE: u16 = 36;
 /// Splash tagline
 pub const TAGLINE_SIZE: u16 = 18;
 /// Body copy (menu entries, descriptions)
 pub const BODY_SIZE: u16 = 16;
 /// Captions (version, status, hints)
-pub const CAPTION_SIZE: u16 = 13;
+pub const CAPTION_SIZE: u16 = 14;
+
+/// Rounded Inter/Hack ascent for GPUI line-box placement.
+pub fn ascent(font: FontId, size_px: u16) -> i32 {
+    inter_font::ascent(face_for(font), size_px)
+}

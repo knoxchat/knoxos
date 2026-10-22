@@ -29,9 +29,9 @@ mod posix;
 mod types;
 
 pub use api::{
-    format_currency, format_datetime, format_number, get_current_locale, get_locale_name,
-    get_timezone_name, get_utc_offset, init, list_locales, list_timezones, set_locale,
-    set_timezone, to_local_time,
+    detect_host, format_currency, format_datetime, format_number, get_current_locale,
+    get_locale_name, get_timezone_name, get_utc_offset, init, is_ready, list_locales,
+    list_timezones, parse_offset_minutes, set_locale, set_timezone, to_local_time,
 };
 pub use locale::{
     Locale, LocaleCategory, MessagesFormat, MonetaryFormat, NumericFormat, TimeFormat,

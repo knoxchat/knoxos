@@ -31,19 +31,20 @@ impl ControlSize {
         if compact { (base / 2).max(4) } else { base }
     }
 
+    /// Matches [`crate::theme::TypeTokens`] body / ui / title.
     pub fn font(self) -> u16 {
         match self {
-            Self::Small => 12,
-            Self::Medium => 13,
-            Self::Large => 14,
+            Self::Small => 15,
+            Self::Medium => 16,
+            Self::Large => 18,
         }
     }
 
     pub fn indicator(self) -> i32 {
         match self {
-            Self::Small => 14,
+            Self::Small => 12,
             Self::Medium => 16,
-            Self::Large => 18,
+            Self::Large => 20,
         }
     }
 
@@ -56,12 +57,12 @@ impl ControlSize {
         }
     }
 
-    /// Kit icon box (14 / 16 / 24).
+    /// Lucide box paired with [`Self::font`] (14 / 16 / 24).
     pub fn icon(self) -> i32 {
         match self {
-            Self::Small => 14,
-            Self::Medium => 16,
-            Self::Large => 24,
+            Self::Small => 16,
+            Self::Medium => 18,
+            Self::Large => 22,
         }
     }
 
@@ -92,4 +93,23 @@ pub trait Disableable: Sized {
 
 pub trait Selectable: Sized {
     fn selected(self, selected: bool) -> Self;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ControlSize;
+    use crate::theme::TypeTokens;
+
+    #[test]
+    fn control_scale_pairs_type_and_lucide() {
+        assert_eq!(ControlSize::Small.font(), TypeTokens::BODY);
+        assert_eq!(ControlSize::Medium.font(), TypeTokens::UI);
+        assert_eq!(ControlSize::Large.font(), TypeTokens::TITLE);
+        assert_eq!(ControlSize::Small.icon(), TypeTokens::ICON_CAPTION);
+        assert_eq!(ControlSize::Medium.icon(), TypeTokens::ICON_UI);
+        assert_eq!(ControlSize::Large.icon(), TypeTokens::ICON_TITLE);
+        assert_eq!(ControlSize::Small.height(), 24);
+        assert_eq!(ControlSize::Medium.height(), 32);
+        assert_eq!(ControlSize::Large.height(), 40);
+    }
 }

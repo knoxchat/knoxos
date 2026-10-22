@@ -15,7 +15,7 @@ kernel_main
     → SMP INIT/SIPI (`-smp 2`): AP loads its own TSS + GS
     → Gate B2: `iretq` hello ELF → `sys_write` serial → `sys_exit`
     → Gates B3–B8 / F / H / I / J–BL / BM: scheduled Ring 3 demos
-    → software compositor (VGA FB) + VirtIO-GPU 2D scanout + cursor plane
+    → software compositor + VirtIO-GPU primary scanout + hardware cursor plane
 async executor (~60 FPS)
     → PS/2 + XHCI HID (mapped MMIO), damage-rect present, idle `HLT`
 ```
@@ -37,9 +37,9 @@ The default root is still an in-memory VFS. A VirtIO-blk blob store (`KNOXPERSIS
 
 ## Display
 
-1. Bootloader VGA/BGA framebuffer — software compositor back-buffer, `present_rect` to HW.
-2. VirtIO-GPU controlq — `RESOURCE_CREATE_2D` + `ATTACH_BACKING` + `SET_SCANOUT` + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` (`GATE_F8 virtio-gpu scanout`).
-3. VirtIO-GPU cursorq — `UPDATE_CURSOR` / `MOVE_CURSOR` (`GATE_F8 hw cursor`). The cocoa window is `-vga std`; the visible pointer is the software arrow.
+1. Bootloader framebuffer — software compositor back-buffer (GPUI raster).
+2. VirtIO-GPU controlq — `RESOURCE_CREATE_2D` + `ATTACH_BACKING` + `SET_SCANOUT` + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` (`GATE_F8 virtio-gpu scanout`). `-vga virtio` makes this the cocoa/GTK window (`GATE_GPU modern stack`).
+3. VirtIO-GPU cursorq — `UPDATE_CURSOR` / `MOVE_CURSOR` KAT (`GATE_F8 hw cursor`, `GATE_GPU pointer plane`). QEMU cocoa does not draw that overlay; the window pointer is the software arrow flushed into the GPU scanout.
 
 ## Isolation vs compose
 

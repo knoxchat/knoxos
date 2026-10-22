@@ -1,6 +1,6 @@
 //! Boot Splash Screen — Early graphical feedback during OS initialization
 //!
-//! Aurora background + Knox UI Splash card (Progress / Spinner / Tag).
+//! Aurora background + Knox UI Splash card (Progress / Tag).
 //! Fonts and the GPUI platform are brought up in `gui::init_framebuffer`
 //! before the first `draw_splash`.
 
@@ -45,9 +45,8 @@ fn fill_aurora(fb: &mut FrameBuffer) {
 
 fn paint_card(fb: &mut FrameBuffer, percent: u32) {
     let percent = percent.min(100);
-    let phase = (percent as f32) / 100.0;
     if gpui_platform::is_ready() && font_engine::is_ready() {
-        gpui_platform::blit_splash_card(fb, percent, phase);
+        gpui_platform::blit_splash_card(fb, percent);
         return;
     }
     let dest = gpui_platform::splash_card_rect(fb.width as i32, fb.height as i32);

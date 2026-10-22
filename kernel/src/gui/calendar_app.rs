@@ -36,7 +36,7 @@ const DOW_H: i32 = 24;
 // ─── Public API ─────────────────────────────────────────────────────
 
 pub fn open() {
-    let dt = crate::rtc::read_rtc();
+    let dt = crate::rtc::local_now();
     let mut win = window::Window::new("Calendar", 200, 80, 370, 400);
     win.content_type = WindowContentType::Gpui(ViewKind::Calendar);
     win.decorations = false;
@@ -192,7 +192,7 @@ pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, content: Rect, _scroll_
     }
 
     // ── Current time display at bottom ──
-    let dt = crate::rtc::read_rtc();
+    let dt = crate::rtc::local_now();
     let mut time_str = String::new();
     let _ = write!(time_str, "{:02}:{:02}:{:02}", dt.hour, dt.minute, dt.second);
     let tw = fonts::measure_string_width(&time_str, 1);

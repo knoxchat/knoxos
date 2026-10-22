@@ -7,7 +7,7 @@
 use alloc::string::String;
 use alloc::sync::Arc;
 
-use knox_gpui::{Div, IntoElement, Pixels, Point, Styled, div, px, text};
+use knox_gpui::{Div, FontId, IntoElement, Pixels, Point, Styled, div, px, text};
 
 use crate::button::{Button, ButtonVariants};
 use crate::icon::{Icon, IconName};
@@ -87,19 +87,19 @@ impl IntoElement for TitleBar {
         let mut caption = div()
             .flex()
             .items_center()
-            .gap_1()
+            .gap_2()
             .grow()
-            .h(px(28))
+            .h(px(36))
             .child(
                 Icon::new(self.icon)
                     .themed(&self.theme)
-                    .color(self.theme.colors.foreground)
-                    .small(),
+                    .color(self.theme.colors.foreground),
             )
             .child(
                 text(self.title)
                     .color(self.theme.colors.foreground)
-                    .size(12),
+                    .font(FontId::UiBold)
+                    .size(self.theme.typo.title),
             );
         if let Some(drag) = self.on_drag {
             caption = caption.on_mouse_down(move |e| drag(e.position));
@@ -110,6 +110,7 @@ impl IntoElement for TitleBar {
                 Button::new("csd-min")
                     .themed(&self.theme)
                     .ghost()
+                    .small()
                     .compact()
                     .icon(IconName::Minus)
                     .on_click(move || min()),
@@ -125,6 +126,7 @@ impl IntoElement for TitleBar {
                 Button::new("csd-max")
                     .themed(&self.theme)
                     .ghost()
+                    .small()
                     .compact()
                     .icon(glyph)
                     .on_click(move || max()),
@@ -135,6 +137,7 @@ impl IntoElement for TitleBar {
                 Button::new("csd-x")
                     .themed(&self.theme)
                     .danger()
+                    .small()
                     .compact()
                     .icon(IconName::Close)
                     .on_click(move || close()),
@@ -145,8 +148,9 @@ impl IntoElement for TitleBar {
             .items_center()
             .justify_between()
             .grow()
-            .h(px(32))
-            .p(self.theme.spacing.xs)
+            .h(px(36))
+            .pad_x(self.theme.spacing.sm)
+            .pad_y(self.theme.spacing.xs)
             .bg(self.theme.colors.surface)
             .child(caption)
             .child(buttons)
@@ -238,7 +242,7 @@ mod tests {
             .on_close(|| {})
             .into_element();
         let mut input = WindowInput::new();
-        prepare_element(&mut el, Point::ZERO, Size::wh(400, 32), &mut input);
+        prepare_element(&mut el, Point::ZERO, Size::wh(400, 36), &mut input);
         dispatch_mouse_down(&mut el, &mut input, Point::xy(20, 8));
         assert!(hit.load(Ordering::SeqCst));
         let _ = WindowBorder::new("W")

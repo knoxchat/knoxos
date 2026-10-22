@@ -42,6 +42,10 @@ fn serialize_settings() -> String {
         out.push_str(&format!("ntp_enabled={}\n", use_ntp as u8));
         out.push_str(&format!("use_24h={}\n", use_24h as u8));
         out.push_str(&format!("show_seconds={}\n", show_sec as u8));
+        out.push_str(&format!(
+            "timezone={}\n",
+            super::settings_ext::current_timezone_name()
+        ));
     }
 
     // ── Privacy ──────────────────────────────────────────────────────
@@ -99,9 +103,23 @@ fn deserialize_settings(config: &str) {
             "volume_muted" => {
                 super::system_tray::set_volume_muted(val == "1");
             }
-            "ntp_enabled" | "use_24h" | "show_seconds" => {
-                // These are read-only loads — store into the DateTimeSettings
-                // We apply them below after all lines are parsed.
+            "ntp_enabled" => {
+                if super::settings_ext::get_datetime().0 != (val == "1") {
+                    super::settings_ext::toggle_datetime_flag("ntp");
+                }
+            }
+            "use_24h" => {
+                if super::settings_ext::get_datetime().1 != (val == "1") {
+                    super::settings_ext::toggle_datetime_flag("24h");
+                }
+            }
+            "show_seconds" => {
+                if super::settings_ext::get_datetime().2 != (val == "1") {
+                    super::settings_ext::toggle_datetime_flag("seconds");
+                }
+            }
+            "timezone" => {
+                super::settings_ext::set_timezone(val);
             }
             "priv_location" => {
                 let mut p = super::settings_ext::PRIVACY.lock();

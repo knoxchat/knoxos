@@ -54,6 +54,57 @@ impl Default for RadiusTokens {
     }
 }
 
+/// Inter type scale. Every surface picks a step — not a one-off px.
+/// Caption < body < ui < title < desktop < display.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TypeTokens {
+    /// Badges, kbd, table heads, helper lines.
+    pub caption: u16,
+    /// Menus, inputs, notify body.
+    pub body: u16,
+    /// Buttons, titlebar, section chrome.
+    pub ui: u16,
+    /// Settings pages, empty titles, switcher.
+    pub title: u16,
+    /// Desktop app names next to [`Self::ICON_DESKTOP`].
+    pub desktop: u16,
+    /// Clock / lock wordmark.
+    pub display: u16,
+}
+
+impl TypeTokens {
+    pub const CAPTION: u16 = 14;
+    pub const BODY: u16 = 15;
+    pub const UI: u16 = 16;
+    pub const TITLE: u16 = 18;
+    pub const DESKTOP: u16 = 20;
+    pub const DISPLAY: u16 = 36;
+
+    /// Lucide box that sits on the same row as each type step.
+    pub const ICON_CAPTION: i32 = 16;
+    pub const ICON_BODY: i32 = 18;
+    pub const ICON_UI: i32 = 18;
+    pub const ICON_TITLE: i32 = 22;
+    pub const ICON_DESKTOP: i32 = 28;
+
+    pub const fn knox() -> Self {
+        Self {
+            caption: Self::CAPTION,
+            body: Self::BODY,
+            ui: Self::UI,
+            title: Self::TITLE,
+            desktop: Self::DESKTOP,
+            display: Self::DISPLAY,
+        }
+    }
+}
+
+impl Default for TypeTokens {
+    fn default() -> Self {
+        Self::knox()
+    }
+}
+
 /// Kit `SpacingTokens` scale (integer px).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpacingTokens {

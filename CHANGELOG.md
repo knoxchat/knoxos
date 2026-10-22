@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Modern GPU stack** — `./run.sh` uses `-vga virtio` as the primary display. DRM/KMS binds the live VirtIO-GPU scanout (`GATE_GPU modern stack`). Cursorq is proven (`GATE_GPU pointer plane`); QEMU cocoa does not composite that overlay, so the QEMU window pointer is the software arrow in the scanout plus the host cursor (`show-cursor=on`). USB tablet reports are not dropped when VirtIO-input is also bound.
 - **FUSE FLUSH** — FLUSH after WRITE succeeds; unknown nodeid fails (`GATE_FUSE flush`).
 - **FUSE FSYNCDIR** — FSYNCDIR of a directory succeeds; a file or unknown nodeid fails (`GATE_FUSE fsyncdir`).
 - **D-Bus ReloadConfig** — empty method return (`GATE_DBUS reload`).

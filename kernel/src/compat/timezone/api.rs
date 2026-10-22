@@ -1,6 +1,7 @@
 //! Global timezone/locale state and the public subsystem API.
 
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -58,12 +59,148 @@ pub fn init() {
     serial_println!("[TZ/Locale] Timezone & locale subsystem initialized (UTC, C locale)");
 }
 
+/// True after [`init`].
+pub fn is_ready() -> bool {
+    INITIALIZED.load(Ordering::SeqCst)
+}
+
+/// Parse `+0800`, `+08:00`, or `UTC+8` into minutes east of UTC.
+pub fn parse_offset_minutes(spec: &str) -> Option<i32> {
+    let s = spec.trim();
+    let s = s
+        .strip_prefix("UTC")
+        .or_else(|| s.strip_prefix("GMT"))
+        .unwrap_or(s)
+        .trim();
+    if s.is_empty() || s == "Z" || s == "0" {
+        return Some(0);
+    }
+    let (sign, rest) = if let Some(r) = s.strip_prefix('+') {
+        (1i32, r)
+    } else if let Some(r) = s.strip_prefix('-') {
+        (-1i32, r)
+    } else if s.bytes().all(|b| b.is_ascii_digit() || b == b':') {
+        (1i32, s)
+    } else {
+        return None;
+    };
+    let rest = rest.trim();
+    let (hours, mins) = if rest.len() >= 5 && rest.as_bytes().get(2) == Some(&b':') {
+        let h = rest[..2].parse::<i32>().ok()?;
+        let m = rest[3..5].parse::<i32>().ok()?;
+        (h, m)
+    } else if rest.len() >= 4
+        && rest.as_bytes().get(2) != Some(&b':')
+        && rest.chars().all(|c| c.is_ascii_digit())
+    {
+        let h = rest[..2].parse::<i32>().ok()?;
+        let m = rest[2..4].parse::<i32>().ok()?;
+        (h, m)
+    } else {
+        let h = rest.parse::<i32>().ok()?;
+        (h, 0)
+    };
+    if hours.abs() > 14 || mins >= 60 {
+        return None;
+    }
+    Some(sign * (hours * 60 + mins))
+}
+
+fn posix_from_offset_minutes(minutes: i32) -> String {
+    let sign = if minutes >= 0 { '-' } else { '+' };
+    let abs = minutes.unsigned_abs();
+    let h = abs / 60;
+    let m = abs % 60;
+    if m == 0 {
+        format!("UTC{}{}", sign, h)
+    } else {
+        format!("UTC{}{}:{:02}", sign, h, m)
+    }
+}
+
+fn offset_to_iana(minutes: i32) -> &'static str {
+    match minutes {
+        0 => "UTC",
+        60 => "Europe/Berlin",
+        180 => "Europe/Moscow",
+        330 => "Asia/Kolkata",
+        480 => "Asia/Shanghai",
+        540 => "Asia/Tokyo",
+        600 => "Australia/Sydney",
+        -300 => "America/New_York",
+        -360 => "America/Chicago",
+        -420 => "America/Denver",
+        -480 => "America/Los_Angeles",
+        _ => "UTC",
+    }
+}
+
+fn apply_spec(spec: &str) -> bool {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return false;
+    }
+    if spec.contains('/') {
+        if set_timezone(spec) {
+            persist_etc_timezone(spec);
+            return true;
+        }
+    }
+    if let Some(mins) = parse_offset_minutes(spec) {
+        let iana = offset_to_iana(mins);
+        if set_timezone(iana) {
+            persist_etc_timezone(iana);
+            return true;
+        }
+        let posix = posix_from_offset_minutes(mins);
+        if set_timezone(&posix) {
+            persist_etc_timezone(&posix);
+            return true;
+        }
+    }
+    false
+}
+
+fn persist_etc_timezone(name: &str) {
+    crate::vfs::ensure_directory("/etc");
+    let mut body = String::from(name);
+    body.push('\n');
+    let _ = crate::vfs::write_file_dispatch("/etc/timezone", body.as_bytes());
+}
+
+/// Detect host timezone from fw_cfg, cmdline, or `/etc/timezone` (like a desktop OS).
+pub fn detect_host() {
+    if !INITIALIZED.load(Ordering::SeqCst) {
+        init();
+    }
+    if let Some(spec) = crate::fw_cfg::read_file("opt/knoxos.tz") {
+        if apply_spec(&spec) {
+            serial_println!("[TZ] Auto-detected host timezone from firmware: {}", spec);
+            return;
+        }
+    }
+    if let Some(spec) = crate::cmdline::get("timezone") {
+        if apply_spec(&spec) {
+            serial_println!("[TZ] Timezone from cmdline: {}", spec);
+            return;
+        }
+    }
+    if let Some(data) = crate::vfs::read_file_dispatch("/etc/timezone") {
+        if let Ok(text) = core::str::from_utf8(&data) {
+            if apply_spec(text) {
+                serial_println!("[TZ] Timezone from /etc/timezone: {}", text.trim());
+            }
+        }
+    }
+}
+
 /// Set the system timezone by IANA name (e.g., "America/New_York")
 pub fn set_timezone(name: &str) -> bool {
     let mut state = TZ_STATE.lock();
     if let Some(ref mut s) = *state {
         if let Some(posix_tz) = s.tz_database.get(name) {
-            if let Some(tz) = parse_posix_tz(posix_tz) {
+            if let Some(mut tz) = parse_posix_tz(posix_tz) {
+                tz.name = String::from(name);
                 serial_println!("[TZ] Set timezone to {} ({})", name, tz.std_abbrev);
                 s.current_tz = tz;
                 return true;

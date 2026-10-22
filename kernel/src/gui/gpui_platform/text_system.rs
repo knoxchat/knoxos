@@ -45,11 +45,16 @@ impl PlatformTextSystem for KnoxosTextSystem {
                 )
             }
         } else {
+            // Place from the fontdue ascent, not `size_px`. Inter Medium
+            // bitmaps are taller than the em; pinning to `size_px` clipped
+            // tittles and punched holes (`Primary` → `Pr ary`).
+            let ascent = font_engine::ascent(map_font(font), size_px);
+            let y_off = (ascent - g.bearing_y as i32).max(0);
             (
                 g.width as u32,
                 g.height as u32,
                 g.coverage,
-                Point::xy(g.bearing_x as i32, size_px as i32 - g.bearing_y as i32),
+                Point::xy(g.bearing_x as i32, y_off),
                 Size::wh(g.width as i32, g.height as i32),
             )
         };

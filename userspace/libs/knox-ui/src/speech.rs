@@ -180,7 +180,7 @@ impl IntoElement for Speech {
                 SpeechState::NoRecognizer => "No recognizer",
             }))
             .color(self.theme.colors.muted_foreground)
-            .size(11),
+            .size(12),
         )
     }
 }

@@ -18,7 +18,7 @@ The session chrome, catalog gallery, and in-process apps are Knox GPUI views (`u
 - [x] Kit catalog gallery (`GATE_GPUI kit gallery`)
 - [x] Scene dirty regions (typing damages the focused field, not 1920×1080)
 - [x] Opaque fill SIMD on x86_64 (`GATE_GPUI simd fill`)
-- [x] VirtIO-GPU scanout at FB size (`GATE_GPUI gpu scanout`). Software arrow on `-vga std`
+- [x] VirtIO-GPU scanout at FB size (`GATE_GPUI gpu scanout`). `-vga virtio` primary + hardware cursor plane (`GATE_GPU modern stack`, `GATE_GPU pointer plane`)
 - [x] Night light and zoom lens are compositor post-process on the composed FB (including GPUI blits)
 - [x] High-contrast + reduced-motion tokens from Settings; panel clock and launcher labels follow `locale.rs`
 - [x] Keyboard cheat-sheet is a GPUI Dialog (`?` / Ctrl+/); lists D6.3 `cmd-k` / `command_palette`
@@ -31,7 +31,7 @@ The session chrome, catalog gallery, and in-process apps are Knox GPUI views (`u
 
 ### Unused / later
 
-- [x] Hardware cursor plane — not the cocoa `-vga std` pointer; software arrow stays
+- [x] Hardware cursor plane — cursorq KAT on `-vga virtio`; cocoa shows the software arrow in the GPU scanout
 - [x] Multi-monitor is still one FB (`monitor.rs` types; no fake per-head DPI)
 - Ring 3 Rust GUI runtime (D15.2 documents the C ABI until musl Rust exists)
 

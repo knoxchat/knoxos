@@ -152,20 +152,7 @@ impl NotifyItem {
     }
 
     fn to_toast_data(&self) -> ToastData {
-        let mut msg = self.body.clone();
-        if !self.app_name.is_empty() {
-            if !msg.is_empty() {
-                msg.push(' ');
-            }
-            msg.push('·');
-            msg.push(' ');
-            msg.push_str(&self.app_name);
-            if !self.age.is_empty() {
-                msg.push(' ');
-                msg.push_str(&self.age);
-            }
-        }
-        ToastData::new(self.title.clone(), msg, 1)
+        ToastData::new(self.title.clone(), self.body.clone(), 1)
     }
 }
 
@@ -180,8 +167,8 @@ pub struct ToastStack {
 }
 
 impl ToastStack {
-    pub const WIDTH: i32 = 336;
-    pub const CARD_H: i32 = 84;
+    pub const WIDTH: i32 = crate::toast::TOAST_CARD_W;
+    pub const CARD_H: i32 = 112;
     pub const GAP: i32 = 8;
     pub const MAX: usize = 5;
 
@@ -554,23 +541,23 @@ fn center_row(
                             text(ellipsize(&item.title, 28))
                                 .color(theme.colors.foreground)
                                 .font(FontId::UiBold)
-                                .size(12),
+                                .size(theme.typo.ui),
                         )
                         .child(
                             text(item.age.clone())
                                 .color(theme.colors.muted_foreground)
-                                .size(10),
+                                .size(theme.typo.caption),
                         ),
                 )
                 .child(
                     text(ellipsize(&item.body, 34))
                         .color(theme.colors.muted_foreground)
-                        .size(11),
+                        .size(theme.typo.body),
                 )
                 .child(
                     text(item.app_name.clone())
                         .color(theme.colors.muted_foreground)
-                        .size(10),
+                        .size(theme.typo.caption),
                 ),
         );
     if let Some(h) = on_dismiss {
@@ -626,7 +613,7 @@ impl IntoElement for NotificationCenter {
                     text("Notifications")
                         .color(theme.colors.foreground)
                         .font(FontId::UiBold)
-                        .size(14),
+                        .size(theme.typo.ui),
                 )
                 .when(!unread_label.is_empty(), |d| {
                     d.child(
@@ -642,7 +629,7 @@ impl IntoElement for NotificationCenter {
                             .child(
                                 text(unread_label)
                                     .color(theme.colors.primary_foreground)
-                                    .size(10),
+                                    .size(theme.typo.caption),
                             ),
                     )
                 }),

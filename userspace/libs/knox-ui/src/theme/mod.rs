@@ -10,7 +10,7 @@ use crate::motion::MotionTokens;
 
 mod tokens;
 
-pub use tokens::{ColorTokens, RadiusTokens, ShadowToken, ShadowTokens, SpacingTokens};
+pub use tokens::{ColorTokens, RadiusTokens, ShadowToken, ShadowTokens, SpacingTokens, TypeTokens};
 
 /// Light / dark appearance (kit `ThemeMode`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -38,6 +38,7 @@ impl ThemeMode {
 pub struct Theme {
     pub mode: ThemeMode,
     pub colors: ColorTokens,
+    pub typo: TypeTokens,
     pub radius: RadiusTokens,
     pub spacing: SpacingTokens,
     pub shadow: ShadowTokens,
@@ -56,6 +57,7 @@ impl Theme {
         Self {
             mode: ThemeMode::Dark,
             colors: aurora_dark_colors(),
+            typo: TypeTokens::knox(),
             radius: RadiusTokens::default(),
             spacing: SpacingTokens::default(),
             shadow: ShadowTokens::elevations(Hsla::BLACK.alpha(0.40)),
@@ -68,6 +70,7 @@ impl Theme {
         Self {
             mode: ThemeMode::Light,
             colors: arctic_light_colors(),
+            typo: TypeTokens::knox(),
             radius: RadiusTokens::default(),
             spacing: SpacingTokens::default(),
             shadow: ShadowTokens::elevations(Hsla::BLACK.alpha(0.18)),
@@ -80,6 +83,7 @@ impl Theme {
         Self {
             mode: ThemeMode::Dark,
             colors: sunset_warm_colors(),
+            typo: TypeTokens::knox(),
             radius: RadiusTokens::default(),
             spacing: SpacingTokens::default(),
             shadow: ShadowTokens::elevations(Hsla::BLACK.alpha(0.45)),
@@ -314,6 +318,13 @@ mod tests {
         assert_eq!(s.sm, px(8));
         assert_eq!(s.md, px(12));
         assert_eq!(s.xl, px(24));
+        let t = super::TypeTokens::knox();
+        assert_eq!(t.caption, 14);
+        assert_eq!(t.body, 15);
+        assert_eq!(t.ui, 16);
+        assert_eq!(t.title, 18);
+        assert_eq!(t.desktop, 20);
+        assert_eq!(t.display, 36);
     }
 
     #[test]

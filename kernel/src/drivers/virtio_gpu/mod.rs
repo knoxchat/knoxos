@@ -35,14 +35,20 @@ pub use api::{
     create_2d_resource, create_3d_resource, flush_resource, is_available, is_virgl_available,
     set_scanout_rect, transfer_to_host_2d_rect,
 };
-pub use cmds::{cursor_live, hw_move_cursor, present_desktop_fb, scanout_live};
+pub use cmds::{
+    cursor_live, hw_move_cursor, pointer_plane_live, present_desktop_fb, scanout_live, scanout_size,
+};
 pub use device::{
     VirtioGpuDevice, accelerated_fill, composite_blit, ctx_attach_resource, ctx_create,
     ctx_destroy, dma_blit, get_capset_info, get_display_info, move_cursor, resource_attach_backing,
     resource_create_2d, resource_create_3d, resource_flush, resource_unref, set_scanout, submit_3d,
     transfer_to_host_2d, update_cursor,
 };
-pub use gates::{GATE_F8_CURSOR, GATE_F8_SCANOUT, GATE_GPU_MARKER, GATE_GPUI_GPU_SCANOUT};
+pub use gates::{
+    GATE_F8_CURSOR, GATE_F8_SCANOUT, GATE_GPU_MARKER, GATE_GPU_POINTER, GATE_GPU_STACK,
+    GATE_GPUI_GPU_SCANOUT,
+};
+pub use pci::is_primary_display;
 pub use protocol::{
     VIRTIO_GPU_F_CONTEXT_INIT, VIRTIO_GPU_F_EDID, VIRTIO_GPU_F_RESOURCE_BLOB,
     VIRTIO_GPU_F_RESOURCE_UUID, VIRTIO_GPU_F_VIRGL, VIRTIO_GPU_MAX_SCANOUTS, VirtioGpuCmd,
@@ -65,7 +71,7 @@ pub fn init() {
     serial_println!("[VIRTIO-GPU] Scanning PCI for a GPU virtqueue");
 
     let Some((bus, dev, func, bar0)) = find_virtio_gpu() else {
-        serial_println!("[VIRTIO-GPU] No virtio-gpu device on PCI (add -device virtio-gpu-pci)");
+        serial_println!("[VIRTIO-GPU] No virtio-gpu device on PCI (add -vga virtio)");
         return;
     };
 

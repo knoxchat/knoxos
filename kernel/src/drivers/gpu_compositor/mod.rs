@@ -89,6 +89,11 @@ pub fn init() {
     let backend = detect_backend();
     let mut comp = GPU_COMPOSITOR.lock();
     comp.backend = backend;
+    let (sw, sh) = crate::virtio_gpu::scanout_size();
+    if sw > 0 && sh > 0 {
+        comp.display_width = sw;
+        comp.display_height = sh;
+    }
 
     crate::serial_println!("[gpu_compositor] Initialized with {:?} backend", backend);
     crate::serial_println!(
@@ -96,6 +101,9 @@ pub fn init() {
         comp.display_width,
         comp.display_height
     );
+    if crate::virtio_gpu::is_primary_display() && crate::virtio_gpu::scanout_live() {
+        crate::serial_println!("[gpu_compositor] Primary VirtIO-GPU scanout (modern GPU stack)");
+    }
     drop(comp);
     pace_frame();
     let _ = enable_hdr10();

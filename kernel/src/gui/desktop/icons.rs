@@ -3,10 +3,9 @@ use crate::gui::colors;
 use crate::gui::font_engine;
 use crate::gui::framebuffer::{FrameBuffer, Pixel, Rect};
 use crate::gui::icon_theme;
-use crate::gui::icons;
 
 use super::types::{
-    DESKTOP, ICON_HEIGHT, ICON_SIZE_ACTUAL, ICON_WIDTH, IconType, TEXT_LABEL_MARGIN_TOP,
+    DESKTOP, ICON_HEIGHT, ICON_SIZE_ACTUAL, ICON_WIDTH, IconType, TEXT_LABEL_PADDING_LEFT,
 };
 
 /// Draw all desktop icons
@@ -61,13 +60,9 @@ pub(crate) fn draw_desktop_icons(fb: &mut FrameBuffer) {
             );
         }
 
-        // Draw the 48×48 icon graphic centered in the cell
-        let ix = icon.x + (ICON_WIDTH as i32 - icons::ICON_SIZE as i32) / 2;
-        let iy = icon.y + 2;
-
+        let iy = icon.y + (ICON_HEIGHT as i32 - ICON_SIZE_ACTUAL) / 2;
+        let ix = icon.x + TEXT_LABEL_PADDING_LEFT;
         draw_icon_graphic(fb, ix, iy, icon.icon_type);
-
-        // Draw icon label with text shadow (font_engine)
         draw_icon_label_fe(fb, icon.x, icon.y, &icon.name);
     }
 
@@ -90,29 +85,30 @@ pub(crate) fn draw_desktop_icons(fb: &mut FrameBuffer) {
                 1,
             );
 
-            // Icon graphic
-            let ix = dx + (ICON_WIDTH as i32 - icons::ICON_SIZE as i32) / 2;
-            let iy = dy + 2;
+            let iy = dy + (ICON_HEIGHT as i32 - ICON_SIZE_ACTUAL) / 2;
+            let ix = dx + TEXT_LABEL_PADDING_LEFT;
             draw_icon_graphic(fb, ix, iy, icon.icon_type);
-
-            // Label (font_engine)
             draw_icon_label_fe(fb, dx, dy, &icon.name);
         }
     }
 }
 
-/// Helper: draw the icon graphic by type using Lucide (48×48)
+/// Helper: draw the icon graphic by type using Lucide (desktop lockup size).
 fn draw_icon_graphic(fb: &mut FrameBuffer, ix: i32, iy: i32, icon_type: IconType) {
-    icon_theme::draw_desktop_icon(fb, ix, iy, icon_theme::for_desktop(icon_type));
+    icon_theme::blit(
+        fb,
+        ix,
+        iy,
+        icon_theme::for_desktop(icon_type),
+        ICON_SIZE_ACTUAL,
+    );
 }
 
-/// Draw a centered icon label below the icon using font_engine with shadow
+/// Label to the right of the Lucide glyph (same lockup as the GPUI layer).
 fn draw_icon_label_fe(fb: &mut FrameBuffer, icon_x: i32, icon_y: i32, text: &str) {
-    const LABEL_SIZE: u16 = 11;
-    let tw = font_engine::measure_ui_text(text, LABEL_SIZE) as i32;
-    let cx = icon_x + (ICON_WIDTH as i32 - tw) / 2;
-    let cy = icon_y + ICON_SIZE_ACTUAL + TEXT_LABEL_MARGIN_TOP;
-    // Shadow
+    const LABEL_SIZE: u16 = knox_ui::TypeTokens::DESKTOP;
+    let cx = icon_x + TEXT_LABEL_PADDING_LEFT + ICON_SIZE_ACTUAL + 8;
+    let cy = icon_y + (ICON_HEIGHT as i32 - LABEL_SIZE as i32) / 2;
     font_engine::draw_ui_text(
         fb,
         cx + 1,
@@ -121,7 +117,6 @@ fn draw_icon_label_fe(fb: &mut FrameBuffer, icon_x: i32, icon_y: i32, text: &str
         LABEL_SIZE,
         colors::ICON_TEXT_SHADOW,
     );
-    // Text
     font_engine::draw_ui_text(fb, cx, cy, text, LABEL_SIZE, colors::ICON_TEXT);
 }
 

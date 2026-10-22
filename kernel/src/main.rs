@@ -71,10 +71,10 @@ use knoxos_kernel::{
     shell_startup, shm, signalfd, signals, slab, smp, socket_activation, soloader, sound, splice,
     ssp, stack_guard, strace, stress_test, suspend, swap, sysctl, sysfs, sysinfo, syslog,
     task::{Task, executor::Executor, keyboard},
-    terminal, thermal, thp, threads, thunderbolt, timerfd, tls, tmpfs, tokenizer, tpm2, tty, uds,
-    usb, usb_hid, userfaultfd, usermode, users, utsname, vdso, vfs, virtio_blk, virtio_gpu,
-    virtio_input, virtio_tablet, visual_test, vivaldi, vlan, vmm, vterm, wayland, wifi, workqueue,
-    wpa3_sae, xattr, xdg, xfs, zfs,
+    terminal, thermal, thp, threads, thunderbolt, timerfd, timezone, tls, tmpfs, tokenizer, tpm2,
+    tty, uds, usb, usb_hid, userfaultfd, usermode, users, utsname, vdso, vfs, virtio_blk,
+    virtio_gpu, virtio_input, virtio_tablet, visual_test, vivaldi, vlan, vmm, vterm, wayland, wifi,
+    workqueue, wpa3_sae, xattr, xdg, xfs, zfs,
 };
 #[cfg(feature = "net")]
 use knoxos_kernel::{dhcp, dns, firewall, ipv6, net, netfilter, netint, nfs, virtio_net};
@@ -217,8 +217,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
     }
 
-    // Initialize Real-Time Clock
+    // Initialize Real-Time Clock, then adopt the host timezone (fw_cfg / cmdline).
     rtc::init();
+    timezone::init();
+    timezone::detect_host();
+    gui::settings_ext::sync_timezone_from_system();
 
     // Initialize Unix path subsystem
     path::init();
@@ -1349,7 +1352,7 @@ async fn gui_redraw_loop() {
         scheduler::deferred_schedule();
 
         // ── RTC-based time checks ──
-        let dt = crate::rtc::read_rtc();
+        let dt = crate::rtc::local_now();
 
         // Terminal cursor blink
         let blink_phase = dt.second & 1;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Boot splash card (D12.3): Aurora surface + Progress / Spinner / Tag.
+//! Boot splash card (D12.3): Aurora surface + Progress / Tag.
 //!
 //! Rasterized by the kernel with `KnoxosTextSystem` and blitted onto the
 //! framebuffer. Replaces the Python `gen_splash_type.py` packed bitmaps.
@@ -12,22 +12,24 @@ use knox_gpui::{Div, FontId, IntoElement, Pixels, Styled, div, px, text};
 use crate::icon::{Icon, IconName};
 use crate::progress::Progress;
 use crate::separator::Separator;
-use crate::size::{ControlSize, Sizable};
-use crate::spinner::Spinner;
+use crate::size::Sizable;
 use crate::tag::Tag;
 use crate::theme::Theme;
 
 /// Backing-store size of the centered splash card (outer aurora + inner panel).
-pub const SPLASH_CARD_W: i32 = 520;
-pub const SPLASH_CARD_H: i32 = 460;
+pub const SPLASH_CARD_W: i32 = 560;
+pub const SPLASH_CARD_H: i32 = 500;
+const SPLASH_PANEL_W: i32 = 460;
+const SPLASH_METER_W: i32 = 360;
 
 /// Wordmark + mark used by splash, login, and lock.
 pub fn brand_lockup(theme: &Theme, compact: bool) -> Div {
     let c = theme.colors;
+    let typo = theme.typo;
     let (mark, icon, word) = if compact {
-        (40, 20, 28u16)
+        (40, 20, 32u16)
     } else {
-        (56, 28, 44)
+        (56, 28, 48)
     };
     let badge = div()
         .w(px(mark))
@@ -48,7 +50,7 @@ pub fn brand_lockup(theme: &Theme, compact: bool) -> Div {
     let mut col = div()
         .flex_col()
         .items_center()
-        .gap(px(if compact { 8 } else { 12 }))
+        .gap(px(if compact { 8 } else { 14 }))
         .child(badge)
         .child(
             text("KnoxOS")
@@ -59,7 +61,8 @@ pub fn brand_lockup(theme: &Theme, compact: bool) -> Div {
     if !compact {
         col = col.child(
             text("SI-native Operating System")
-                .size(13)
+                .font(FontId::Ui)
+                .size(typo.ui)
                 .color(c.muted_foreground),
         );
     }
@@ -84,7 +87,6 @@ pub struct Splash {
     width: Pixels,
     height: Pixels,
     progress: f32,
-    phase: f32,
     version: String,
     status: String,
 }
@@ -96,7 +98,6 @@ impl Splash {
             width: px(SPLASH_CARD_W),
             height: px(SPLASH_CARD_H),
             progress: 0.0,
-            phase: 0.0,
             version: String::from("v0.2.5"),
             status: String::from(splash_status(0)),
         }
@@ -115,11 +116,6 @@ impl Splash {
 
     pub fn progress(mut self, value: f32) -> Self {
         self.progress = value.clamp(0.0, 100.0);
-        self
-    }
-
-    pub fn phase(mut self, phase: f32) -> Self {
-        self.phase = phase.clamp(0.0, 1.0);
         self
     }
 
@@ -145,39 +141,39 @@ impl IntoElement for Splash {
 
     fn into_element(self) -> Div {
         let c = self.theme.colors;
+        let typo = self.theme.typo;
         let pct = format!("{}%", self.progress as i32);
         let meter = div()
             .flex_col()
             .gap_1()
-            .w(px(300))
+            .w(px(SPLASH_METER_W))
             .child(
                 Progress::new()
                     .themed(&self.theme)
                     .value(self.progress)
-                    .w(px(300))
+                    .w(px(SPLASH_METER_W))
                     .large(),
             )
             .child(
                 div()
                     .flex()
                     .justify_between()
-                    .w(px(300))
-                    .child(text(self.status.clone()).size(13).color(c.muted_foreground))
-                    .child(text(pct).size(13).color(c.muted_foreground)),
+                    .w(px(SPLASH_METER_W))
+                    .child(
+                        text(self.status.clone())
+                            .size(typo.body)
+                            .color(c.muted_foreground),
+                    )
+                    .child(text(pct).size(typo.body).color(c.muted_foreground)),
             );
-        let status = Spinner::new()
-            .themed(&self.theme)
-            .with_size(ControlSize::Large)
-            .phase(self.phase)
-            .color(c.primary);
         let panel = div()
-            .w(px(400))
-            .min_h(px(360))
+            .w(px(SPLASH_PANEL_W))
+            .min_h(px(400))
             .flex_col()
             .items_center()
             .justify_center()
-            .gap(px(18))
-            .p(px(28))
+            .gap(px(20))
+            .p(px(32))
             .bg(c.surface)
             .border_1()
             .border_color(c.border)
@@ -192,11 +188,10 @@ impl IntoElement for Splash {
             )
             .child(
                 div()
-                    .w(px(300))
+                    .w(px(SPLASH_METER_W))
                     .child(Separator::horizontal().themed(&self.theme)),
             )
-            .child(meter)
-            .child(status);
+            .child(meter);
         div()
             .w(self.width)
             .h(self.height)
@@ -217,13 +212,12 @@ mod tests {
         WindowInput, paint_element_with_input, px,
     };
 
-    fn paint(progress: f32, phase: f32) -> RasterBuffer {
+    fn paint(progress: f32) -> RasterBuffer {
         let theme = Theme::aurora_dark();
         let mut el = Splash::new()
             .themed(&theme)
             .size(px(SPLASH_CARD_W), px(SPLASH_CARD_H))
             .progress(progress)
-            .phase(phase)
             .status(splash_status(progress as u32))
             .into_element();
         let mut atlas = SpriteAtlas::new();
@@ -249,7 +243,7 @@ mod tests {
 
     #[test]
     fn splash_card_has_ink() {
-        let buf = paint(40.0, 0.3);
+        let buf = paint(40.0);
         let mid = buf
             .pixel(SPLASH_CARD_W / 2, SPLASH_CARD_H / 2)
             .expect("pixel");
@@ -258,7 +252,7 @@ mod tests {
 
     #[test]
     fn splash_panel_is_raised_above_aurora() {
-        let buf = paint(40.0, 0.3);
+        let buf = paint(40.0);
         let corner = buf.pixel(2, 2).expect("corner");
         let mid = buf
             .pixel(SPLASH_CARD_W / 2, SPLASH_CARD_H / 2)
@@ -272,7 +266,7 @@ mod tests {
 
     #[test]
     fn splash_progress_paints_primary() {
-        let buf = paint(40.0, 0.3);
+        let buf = paint(40.0);
         let mut coral = 0u32;
         for y in 0..SPLASH_CARD_H {
             for x in 0..SPLASH_CARD_W {

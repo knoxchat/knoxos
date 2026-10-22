@@ -1273,7 +1273,7 @@ impl IntoElement for InputGroup {
                 div().pad_x(px(8)).child(
                     text(self.prefix)
                         .color(self.theme.colors.muted_foreground)
-                        .size(12),
+                        .size(13),
                 ),
             );
         }
@@ -1283,7 +1283,7 @@ impl IntoElement for InputGroup {
                 div().pad_x(px(8)).child(
                     text(self.suffix)
                         .color(self.theme.colors.muted_foreground)
-                        .size(12),
+                        .size(13),
                 ),
             );
         }

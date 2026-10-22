@@ -70,6 +70,7 @@ pub struct Button {
     dropdown_caret: bool,
     loading: bool,
     min_width: Option<Pixels>,
+    width: Option<Pixels>,
     corners: Option<Corners>,
     fill: bool,
     icon: Option<IconName>,
@@ -91,6 +92,7 @@ impl Button {
             dropdown_caret: false,
             loading: false,
             min_width: None,
+            width: None,
             corners: None,
             fill: false,
             icon: None,
@@ -135,6 +137,12 @@ impl Button {
 
     pub fn min_w(mut self, width: Pixels) -> Self {
         self.min_width = Some(width);
+        self
+    }
+
+    /// Fixed width (calendar day cells). Clips only when the box is explicit.
+    pub fn w(mut self, width: Pixels) -> Self {
+        self.width = Some(width);
         self
     }
 
@@ -370,10 +378,11 @@ impl IntoElement for Button {
             .justify_center()
             .rounded_corners(corners)
             .bg(face.bg);
-        if self.fill {
+        el = el.h(h);
+        if let Some(w) = self.width {
+            el = el.w(w).overflow_hidden();
+        } else if self.fill {
             el = el.grow();
-        } else {
-            el = el.h(h).overflow_hidden();
         }
         if let Some(min_w) = self.min_width {
             el = el.min_w(min_w);

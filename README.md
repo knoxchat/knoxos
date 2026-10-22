@@ -10,7 +10,7 @@ This is **not** a production OS yet. The kernel compiles a large tree of modules
 | PS/2 keyboard and mouse; Ring 3 SHM clients (Gate F) | Most desktop apps still in-kernel `WindowContentType` |
 | VirtIO-blk persist + AHCI/NVMe DMA (C1–C8) + JBD2 replay | ext4 as default root (RAM VFS still boots) |
 | Loopback + VirtIO-net DHCP/DNS/TCP CUBIC (D1–D5) | IPv6, TLS 1.3, e1000 as the socket NIC |
-| Scheduled Ring 3: `execve`/`fork`/`wait`, signals, timer preempt + GPR/FPU save; VirtIO-GPU scanout + hw cursor (F8); USB HID URB + XHCI MMIO | Desktop without PS/2 unproven (PS/2 remains fallback); ext4 is not default root |
+| Scheduled Ring 3: `execve`/`fork`/`wait`, signals, timer preempt + GPR/FPU save; VirtIO-GPU primary scanout + hardware pointer (`-vga virtio`); USB HID URB + XHCI MMIO | Desktop without PS/2 unproven (PS/2 remains fallback); ext4 is not default root |
 | W^X, ChaCha20 `getrandom`, seccomp, capabilities (E1–E4) | SELinux on the VFS path |
 | Per-CPU TSS + GS; AP online on QEMU `-smp 2` (I1) | SMP load balance of Ring 3 (APs still HLT) |
 

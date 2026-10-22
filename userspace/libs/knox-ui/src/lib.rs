@@ -182,7 +182,7 @@ pub use terminal::{TERM_TAB_H, TerminalChrome};
 pub use textview::{MdBlock, TextView, parse_markdown};
 pub use theme::{
     ActiveTheme, ColorTokens, RadiusTokens, ShadowToken, ShadowTokens, SpacingTokens, Theme,
-    ThemeMode,
+    ThemeMode, TypeTokens,
 };
 pub use titlebar::{TitleBar, WindowBorder};
 pub use toast::{NotificationList, Toast, ToastData, tick_toasts};

@@ -111,7 +111,7 @@ impl IntoElement for TableHead {
                     .child(
                         text(format!("{}{mark}", col.title))
                             .color(self.theme.colors.foreground)
-                            .size(11),
+                            .size(12),
                     )
                     .on_click(move |_| {
                         if let Some(s) = &sort {

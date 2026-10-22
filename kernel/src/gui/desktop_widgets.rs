@@ -13,9 +13,12 @@ static STATS_ENABLED: AtomicBool = AtomicBool::new(true);
 static UPTIME_ENABLED: AtomicBool = AtomicBool::new(true);
 
 const WIDGET_MARGIN: i32 = 24;
-const WIDGET_WIDTH: u32 = 248;
-const PANEL_RADIUS: u32 = 16;
-const PAD: i32 = 20;
+const WIDGET_WIDTH: u32 = 280;
+const PANEL_RADIUS: u32 = 12;
+const PAD: i32 = 16;
+const TYPE_DISPLAY: u16 = 36;
+const TYPE_BODY: u16 = 16;
+const TYPE_CAPTION: u16 = 14;
 
 pub fn set_widgets_enabled(on: bool) {
     WIDGETS_ENABLED.store(on, Ordering::Relaxed);
@@ -59,13 +62,13 @@ pub fn draw(fb: &mut FrameBuffer) {
     let wy = 52i32;
     let mut content_h = PAD as u32;
     if show_clock {
-        content_h += 86;
+        content_h += 104;
     }
     if show_stats {
-        content_h += 92;
+        content_h += 108;
     }
     if show_uptime {
-        content_h += 36;
+        content_h += 40;
     }
     content_h += PAD as u32;
 
@@ -138,17 +141,17 @@ fn bright() -> Pixel {
 }
 
 fn draw_clock_block(fb: &mut FrameBuffer, x: i32, y: i32, _w: u32) -> i32 {
-    let dt = crate::rtc::read_rtc();
+    let dt = crate::rtc::local_now();
     let accent = theme::accent_color();
 
     let mut hm = String::new();
     let _ = write!(hm, "{:02}:{:02}", dt.hour, dt.minute);
-    font_engine::draw_ui_bold(fb, x, y, &hm, 28, accent);
+    font_engine::draw_ui_bold(fb, x, y, &hm, TYPE_DISPLAY, accent);
 
     let mut sec = String::new();
     let _ = write!(sec, "{:02}", dt.second);
-    let hm_w = font_engine::measure_ui_text(&hm, 28) as i32;
-    font_engine::draw_ui_text(fb, x + hm_w + 8, y + 10, &sec, 13, muted());
+    let hm_w = font_engine::measure_ui_text(&hm, TYPE_DISPLAY) as i32;
+    font_engine::draw_ui_text(fb, x + hm_w + 8, y + 12, &sec, TYPE_CAPTION, muted());
 
     let day_name = match dt.day_of_week {
         1 => "Monday",
@@ -175,10 +178,10 @@ fn draw_clock_block(fb: &mut FrameBuffer, x: i32, y: i32, _w: u32) -> i32 {
     };
     let mut date = String::new();
     let _ = write!(date, "{} {} {}", month_name, dt.day, dt.year);
-    font_engine::draw_ui_text(fb, x, y + 36, day_name, 13, bright());
-    font_engine::draw_ui_text(fb, x, y + 54, &date, 12, muted());
+    font_engine::draw_ui_text(fb, x, y + 44, day_name, TYPE_BODY, bright());
+    font_engine::draw_ui_text(fb, x, y + 66, &date, TYPE_CAPTION, muted());
 
-    y + 78
+    y + 92
 }
 
 fn draw_stats_block(fb: &mut FrameBuffer, x: i32, y: i32, w: u32) -> i32 {
@@ -188,11 +191,11 @@ fn draw_stats_block(fb: &mut FrameBuffer, x: i32, y: i32, w: u32) -> i32 {
     let used_mb = used / (1024 * 1024);
     let total_mb = info.totalram / (1024 * 1024);
 
-    font_engine::draw_ui_text(fb, x, y, "Memory", 12, muted());
+    font_engine::draw_ui_text(fb, x, y, "Memory", TYPE_BODY, muted());
     let mut pct = String::new();
     let _ = write!(pct, "{}%", mem_pct.min(100));
-    let pct_w = font_engine::measure_ui_text(&pct, 12) as i32;
-    font_engine::draw_ui_bold(fb, x + w as i32 - pct_w, y, &pct, 12, bright());
+    let pct_w = font_engine::measure_ui_text(&pct, TYPE_BODY) as i32;
+    font_engine::draw_ui_bold(fb, x + w as i32 - pct_w, y, &pct, TYPE_BODY, bright());
 
     let bar_y = y + 22;
     let bar_h = 5u32;
@@ -208,7 +211,7 @@ fn draw_stats_block(fb: &mut FrameBuffer, x: i32, y: i32, w: u32) -> i32 {
 
     let mut mem_text = String::new();
     let _ = write!(mem_text, "{} / {} MB", used_mb, total_mb);
-    font_engine::draw_ui_text(fb, x, y + 34, &mem_text, 11, muted());
+    font_engine::draw_ui_text(fb, x, y + 36, &mem_text, TYPE_CAPTION, muted());
 
     let load_1 = info.loads[0] / 65536;
     let load_frac = (info.loads[0] % 65536) * 100 / 65536;
@@ -225,9 +228,9 @@ fn draw_stats_block(fb: &mut FrameBuffer, x: i32, y: i32, w: u32) -> i32 {
 }
 
 fn draw_kv_row(fb: &mut FrameBuffer, x: i32, y: i32, w: u32, key: &str, value: &str) {
-    font_engine::draw_ui_text(fb, x, y, key, 12, muted());
-    let vw = font_engine::measure_ui_text(value, 12) as i32;
-    font_engine::draw_ui_bold(fb, x + w as i32 - vw, y, value, 12, bright());
+    font_engine::draw_ui_text(fb, x, y, key, TYPE_BODY, muted());
+    let vw = font_engine::measure_ui_text(value, TYPE_BODY) as i32;
+    font_engine::draw_ui_bold(fb, x + w as i32 - vw, y, value, TYPE_BODY, bright());
 }
 
 fn draw_uptime_block(fb: &mut FrameBuffer, x: i32, y: i32, w: u32) {

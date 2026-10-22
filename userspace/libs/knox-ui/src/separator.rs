@@ -172,7 +172,7 @@ impl IntoElement for Separator {
                 .child(
                     text(label)
                         .color(self.theme.colors.muted_foreground)
-                        .size(11),
+                        .size(12),
                 )
                 .child(rule(1)),
             (true, Some(label)) => div()
@@ -184,7 +184,7 @@ impl IntoElement for Separator {
                 .child(
                     text(label)
                         .color(self.theme.colors.muted_foreground)
-                        .size(11),
+                        .size(12),
                 )
                 .child(rule(1)),
         }

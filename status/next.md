@@ -41,7 +41,7 @@ A dynamically linked musl binary runs (BM4). VirtIO-GPU scanout + hardware curso
 
 - **Interactive start-menu Terminal in Ring 3** — **Done**: start menu spawns a Ring 3 `openpty` client; master fd + slave I/O are live (`GATE_TERM pty interactive`). Keyboard on Empty+SHM Terminal writes the PTY, not `TerminalApp`.
 - **`wl_display` object protocol** — **Done**: `get_registry` / `bind` / `create_pool(vaddr)` / `attach` / `commit` on `/run/wayland-0` (`GATE_WL display protocol`). F5 8-byte vaddr remains for the old client.
-- **GPU compositor for the desktop** — **Done**: desktop `present_rect` flushes the software FB through the live VirtIO-GPU scanout (`GATE_GPU desktop scanout`). VGA blit remains for `-vga std`.
+- **GPU compositor for the desktop** — **Done**: desktop `present_rect` flushes the software FB through the live VirtIO-GPU scanout (`GATE_GPU desktop scanout`). `-vga virtio` is the primary window; the hardware cursor plane is the pointer (`GATE_GPU modern stack`, `GATE_GPU pointer plane`).
 - Host fuzz of ELF/ext4/packet parsers — **Done** (`cargo test -p knoxos-host-tests` mutates malformed inputs; parsers must not panic).
 - Cargo workspace that includes `kernel` + `boot` — **Done**: root workspace members; `default-members` stay host tools; kernel builds via `./scripts/kernel-cargo.sh`.
 - Memory cgroup hard limit on mmap/brk (`GATE_CGROUP memory`, `GATE_CGROUP2 memory`).

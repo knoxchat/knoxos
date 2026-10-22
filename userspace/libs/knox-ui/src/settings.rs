@@ -245,7 +245,7 @@ impl IntoElement for SettingsWidget {
                             .child(
                                 text(item.hint.clone())
                                     .color(self.theme.colors.muted_foreground)
-                                    .size(11),
+                                    .size(12),
                             ),
                     );
                     if !item.value.is_empty() {

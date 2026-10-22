@@ -228,12 +228,11 @@ pub fn move_count() -> u64 {
 pub fn init() {
     let available = detect();
     if available {
-        // GATE_F8 cursorq is live on a 64×64 VirtIO-GPU resource. `./run.sh`
-        // presents the desktop through `-vga std`; that overlay is not the
-        // cocoa/GTK window, and the KAT resource is transparent. Do not skip
-        // the software arrow or the pointer is invisible (host cursor is off).
+        // QEMU cocoa/GTK does not composite virtio-gpu cursorq onto the
+        // window. The visible pointer is the software arrow in the GPU
+        // scanout (host cursor is also on in ./run.sh for window testing).
         crate::serial_println!(
-            "[hw_cursor] VirtIO-GPU cursorq live — drawing software arrow on VGA FB"
+            "[hw_cursor] VirtIO-GPU cursorq live — software arrow on GPU scanout"
         );
     } else {
         crate::serial_println!("[hw_cursor] No hardware cursor — using software cursor");

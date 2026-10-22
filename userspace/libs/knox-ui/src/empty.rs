@@ -83,11 +83,15 @@ impl IntoElement for Empty {
                 text(self.title)
                     .color(c.foreground)
                     .font(FontId::UiBold)
-                    .size(13),
+                    .size(self.theme.typo.ui),
             );
         }
         if !self.description.is_empty() {
-            col = col.child(text(self.description).color(c.muted_foreground).size(12));
+            col = col.child(
+                text(self.description)
+                    .color(c.muted_foreground)
+                    .size(self.theme.typo.body),
+            );
         }
         col
     }

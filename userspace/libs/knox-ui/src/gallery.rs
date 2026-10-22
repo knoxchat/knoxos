@@ -134,7 +134,11 @@ pub fn d8_buttons_construct_all(theme: &Theme) -> Vec<Div> {
 }
 
 pub(crate) fn heading(theme: &Theme, title: &'static str) -> Div {
-    div().child(text(title).color(theme.colors.muted_foreground).size(11))
+    div().mt(theme.spacing.xs).child(
+        text(title)
+            .color(theme.colors.muted_foreground)
+            .size(theme.typo.caption),
+    )
 }
 
 /// D8.1 gallery rows: buttons, toggles, and binary inputs.
@@ -151,40 +155,51 @@ pub fn d8_buttons_gallery(
     };
 
     let variants = div()
-        .flex()
+        .flex_col()
         .gap_2()
-        .items_center()
         .child(
-            Button::new("g-primary")
-                .themed(theme)
-                .primary()
-                .label("Primary"),
+            div()
+                .flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    Button::new("g-primary")
+                        .themed(theme)
+                        .primary()
+                        .label("Primary"),
+                )
+                .child(
+                    Button::new("g-secondary")
+                        .themed(theme)
+                        .secondary()
+                        .label("Secondary"),
+                )
+                .child(
+                    Button::new("g-danger")
+                        .themed(theme)
+                        .danger()
+                        .label("Danger"),
+                ),
         )
         .child(
-            Button::new("g-secondary")
-                .themed(theme)
-                .secondary()
-                .label("Secondary"),
-        )
-        .child(
-            Button::new("g-danger")
-                .themed(theme)
-                .danger()
-                .label("Danger"),
-        )
-        .child(Button::new("g-ghost").themed(theme).ghost().label("Ghost"))
-        .child(
-            Button::new("g-disabled")
-                .themed(theme)
-                .label("Disabled")
-                .disabled(true),
-        )
-        .child(
-            Button::new("g-outline")
-                .themed(theme)
-                .primary()
-                .outline()
-                .label("Outline"),
+            div()
+                .flex()
+                .gap_2()
+                .items_center()
+                .child(Button::new("g-ghost").themed(theme).ghost().label("Ghost"))
+                .child(
+                    Button::new("g-disabled")
+                        .themed(theme)
+                        .label("Disabled")
+                        .disabled(true),
+                )
+                .child(
+                    Button::new("g-outline")
+                        .themed(theme)
+                        .primary()
+                        .outline()
+                        .label("Outline"),
+                ),
         );
 
     let click = fire.clone();
@@ -283,7 +298,7 @@ pub fn d8_buttons_gallery(
 
     div()
         .flex_col()
-        .gap_2()
+        .gap(theme.spacing.md)
         .child(heading(theme, "Buttons"))
         .child(variants)
         .child(
@@ -437,7 +452,7 @@ pub fn d8_display_gallery(theme: &Theme) -> Div {
 
     div()
         .flex_col()
-        .gap_2()
+        .gap(theme.spacing.md)
         .child(heading(theme, "Display"))
         .child(labels)
         .child(keys)
@@ -590,7 +605,7 @@ pub fn d8_feedback_gallery(
 
     div()
         .flex_col()
-        .gap_2()
+        .gap(theme.spacing.md)
         .child(heading(theme, "Feedback"))
         .child(alert)
         .child(
@@ -728,7 +743,7 @@ pub fn d8_input_gallery(
 
     div()
         .flex_col()
-        .gap_2()
+        .gap(theme.spacing.md)
         .child(heading(theme, "Input"))
         .child(div().flex().gap_2().items_center().child(line).child(group))
         .child(area)
@@ -870,7 +885,7 @@ pub fn d8_forms_gallery(
 
     div()
         .flex_col()
-        .gap_2()
+        .gap(theme.spacing.md)
         .child(heading(theme, "Forms"))
         .child(div().flex().gap_2().items_center().child(number).child(otp))
         .child(
@@ -1017,7 +1032,7 @@ pub fn d8_select_gallery(
 
     div()
         .flex_col()
-        .gap_2()
+        .gap(theme.spacing.md)
         .child(heading(theme, "Select"))
         .child(
             div()
@@ -1127,7 +1142,7 @@ pub fn d8_date_gallery(
 
     div()
         .flex_col()
-        .gap_2()
+        .gap(theme.spacing.md)
         .child(heading(theme, "Date / Time"))
         .child(
             div()
@@ -1248,7 +1263,7 @@ pub fn d8_overlay_gallery(
 
     div()
         .flex_col()
-        .gap_2()
+        .gap(theme.spacing.md)
         .child(heading(theme, "Overlays"))
         .child(buttons)
         .child(
@@ -1259,7 +1274,7 @@ pub fn d8_overlay_gallery(
                 .child(
                     text("Esc dismisses")
                         .color(theme.colors.muted_foreground)
-                        .size(12),
+                        .size(theme.typo.caption),
                 )
                 .on_dismiss({
                     let click = fire.clone();
@@ -1289,7 +1304,7 @@ pub fn d8_overlay_gallery(
                 .child(
                     text("Side panel")
                         .color(theme.colors.muted_foreground)
-                        .size(12),
+                        .size(theme.typo.caption),
                 )
                 .on_dismiss({
                     let click = fire.clone();
@@ -1300,17 +1315,22 @@ pub fn d8_overlay_gallery(
             Popover::new()
                 .themed(theme)
                 .open(snap.popover)
-                .child(text("Popover").color(theme.colors.foreground).size(12))
+                .child(
+                    text("Popover")
+                        .color(theme.colors.foreground)
+                        .size(theme.typo.caption),
+                )
                 .on_dismiss({
                     let click = fire.clone();
                     move || click(D8OverlayAction::Popover(false))
                 }),
         )
         .child(
-            HoverCard::new()
-                .themed(theme)
-                .open(snap.hover)
-                .child(text("Hover card").color(theme.colors.foreground).size(12)),
+            HoverCard::new().themed(theme).open(snap.hover).child(
+                text("Hover card")
+                    .color(theme.colors.foreground)
+                    .size(theme.typo.caption),
+            ),
         )
 }
 

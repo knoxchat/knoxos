@@ -1,6 +1,17 @@
 /// PCI discovery and VirtIO capability-region MMIO for virtio-gpu.
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use crate::pci;
 use crate::serial_println;
+
+/// Set when the VirtIO GPU is a VGA-class device (`virtio-vga` / `-vga virtio`).
+/// That head is the cocoa/GTK window. `virtio-gpu-pci` plus `-vga std` is not.
+static PRIMARY_DISPLAY: AtomicBool = AtomicBool::new(false);
+
+/// True when the live VirtIO GPU is the primary (VGA-class) display.
+pub fn is_primary_display() -> bool {
+    PRIMARY_DISPLAY.load(Ordering::Relaxed)
+}
 
 const VIRTIO_PCI_VENDOR: u16 = 0x1AF4;
 const VIRTIO_GPU_DEVICE_MODERN: u16 = 0x1050;
@@ -157,12 +168,21 @@ pub(super) fn find_virtio_gpu() -> Option<(u8, u8, u8, u32)> {
                     || ((0x1000..=0x103F).contains(&device_id) && subsystem == VIRTIO_ID_GPU);
                 if is_gpu {
                     let bar0 = pci::pci_config_read32(bus, device, function, 0x10);
+                    let class = pci::pci_config_read8(bus, device, function, 0x0B);
+                    let subclass = pci::pci_config_read8(bus, device, function, 0x0A);
+                    // VGA-class virtio-vga (`-vga virtio`) is the window the
+                    // host shows. Display-other virtio-gpu-pci is a second head.
+                    let primary = class == 0x03 && subclass == 0x00;
+                    PRIMARY_DISPLAY.store(primary, Ordering::SeqCst);
                     serial_println!(
-                        "[VIRTIO-GPU] PCI {:02x}:{:02x}.{} id={:#06x} bar0={:#x}",
+                        "[VIRTIO-GPU] PCI {:02x}:{:02x}.{} id={:#06x} class={:02x}:{:02x} {} bar0={:#x}",
                         bus,
                         device,
                         function,
                         device_id,
+                        class,
+                        subclass,
+                        if primary { "primary VGA" } else { "secondary" },
                         bar0
                     );
                     return Some((bus, device, function, bar0));
