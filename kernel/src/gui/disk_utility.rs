@@ -10,7 +10,7 @@ use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::theme;
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 /// Info about a mounted filesystem for display
 #[derive(Clone)]
@@ -42,7 +42,8 @@ pub fn open() {
     let entries = gather_filesystem_info();
 
     let mut win = window::Window::new("Disk Utility", 180, 80, 700, 480);
-    win.content_type = WindowContentType::DiskUtility;
+    win.content_type = WindowContentType::Gpui(ViewKind::Disks);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -70,7 +71,49 @@ pub fn on_window_closed(wid: WindowId) {
 
 // ─── Drawing ────────────────────────────────────────────────────────
 
+pub fn disk_rows(wid: WindowId) -> (Vec<String>, Option<usize>) {
+    let states = STATES.lock();
+    let Some(s) = states.iter().find(|s| s.window_id == wid) else {
+        return (Vec::new(), None);
+    };
+    let rows = s
+        .entries
+        .iter()
+        .map(|e| {
+            format!(
+                "{}  {}  {}  {}/{} ",
+                e.mount_point, e.source, e.fs_type, e.used_bytes, e.total_bytes
+            )
+        })
+        .collect();
+    let sel = if s.selected >= 0 {
+        Some(s.selected as usize)
+    } else {
+        None
+    };
+    (rows, sel)
+}
+
+pub fn refresh_disks(wid: WindowId) {
+    let entries = gather_filesystem_info();
+    let mut states = STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        s.entries = entries;
+    }
+}
+
+pub fn select_disk(wid: WindowId, i: usize) {
+    let mut states = STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        s.selected = i as i32;
+    }
+}
+
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, content: Rect, scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_apps(fb, wid, content);
+        return;
+    }
     let states = STATES.lock();
     let state = match states.iter().find(|s| s.window_id == wid) {
         Some(s) => s,

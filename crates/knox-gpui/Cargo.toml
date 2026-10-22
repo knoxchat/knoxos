@@ -1,0 +1,35 @@
+[package]
+name = "knox-gpui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+license = "MIT"
+description = "no_std GPUI-shaped UI core for KnoxOS"
+authors = ["KnoxOS Contributors"]
+publish = false
+
+# Keep this crate no_std. Forbidden deps are listed in README.md.
+[dependencies]
+libm = "0.2.16"
+
+[lints.clippy]
+byte_char_slices = "allow"
+chunks_exact_to_as_chunks = "allow"
+collapsible_if = "allow"
+collapsible_match = "allow"
+doc_lazy_continuation = "allow"
+drain_collect = "allow"
+empty_line_after_doc_comments = "allow"
+excessive_precision = "allow"
+for_kv_map = "allow"
+let_and_return = "allow"
+manual_range_patterns = "allow"
+manual_slice_fill = "allow"
+missing_safety_doc = "allow"
+undocumented_unsafe_blocks = "deny"
+needless_return = "allow"
+question_mark = "allow"
+redundant_closure = "allow"
+single_match = "allow"
+unnecessary_map_or = "allow"
+vec_box = "allow"

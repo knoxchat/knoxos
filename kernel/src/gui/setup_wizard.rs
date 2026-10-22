@@ -21,7 +21,7 @@ use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::theme;
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 // ── Steps ────────────────────────────────────────────────────────────
 
@@ -192,7 +192,8 @@ const ACCENT_COLORS: &[Pixel] = &[
 
 pub fn open() {
     let mut win = window::Window::new("Setup Wizard", 140, 80, 520, 440);
-    win.content_type = WindowContentType::SetupWizard;
+    win.content_type = WindowContentType::Gpui(ViewKind::Wizard);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -220,9 +221,176 @@ pub fn init() {
     );
 }
 
+/// GPUI snapshot (D11.10).
+pub struct WizardSnap {
+    pub step: u8,
+    pub title: String,
+    pub body: String,
+    pub options: Vec<String>,
+    pub selected: Option<usize>,
+    pub next_label: String,
+    pub can_back: bool,
+    pub complete: bool,
+}
+
+pub fn snapshot(wid: WindowId) -> Option<WizardSnap> {
+    let states = STATES.lock();
+    let s = states.iter().find(|s| s.window_id == wid)?;
+    let (body, options, selected) = match s.step {
+        SetupStep::Welcome => (
+            String::from("Let's set up your new system."),
+            Vec::new(),
+            None,
+        ),
+        SetupStep::Language => (
+            String::from("Choose a language."),
+            LANGUAGES
+                .iter()
+                .map(|(l, r)| format!("{l} ({r})"))
+                .collect(),
+            Some(s.language_idx),
+        ),
+        SetupStep::Keyboard => (
+            String::from("Choose a keyboard layout."),
+            KEYBOARDS.iter().map(|k| String::from(*k)).collect(),
+            Some(s.keyboard_idx),
+        ),
+        SetupStep::Timezone => (
+            String::from("Choose a timezone."),
+            TIMEZONES.iter().map(|t| String::from(*t)).collect(),
+            Some(s.timezone_idx),
+        ),
+        SetupStep::Network => (
+            String::from("Wi-Fi can be configured later in Settings."),
+            ["KnoxOS-Setup", "Home WiFi", "Office-5G", "Guest"]
+                .iter()
+                .map(|n| String::from(*n))
+                .collect(),
+            None,
+        ),
+        SetupStep::UserAccount => (
+            format!(
+                "Name: {}\nUser: {}\nHost: {}",
+                if s.full_name.is_empty() {
+                    "(none)"
+                } else {
+                    &s.full_name
+                },
+                if s.username.is_empty() {
+                    "(none)"
+                } else {
+                    &s.username
+                },
+                s.hostname
+            ),
+            Vec::new(),
+            None,
+        ),
+        SetupStep::Privacy => (
+            String::from("Help improve KnoxOS."),
+            alloc::vec![
+                format!(
+                    "Crash reports: {}",
+                    if s.crash_reports { "on" } else { "off" }
+                ),
+                format!("Usage stats: {}", if s.usage_stats { "on" } else { "off" }),
+            ],
+            None,
+        ),
+        SetupStep::Theme => (
+            String::from("Appearance"),
+            alloc::vec![
+                String::from(if s.dark_theme { "Dark" } else { "Light" }),
+                format!("Accent {}", s.accent_idx),
+            ],
+            Some(if s.dark_theme { 1 } else { 0 }),
+        ),
+        SetupStep::Complete => (
+            if s.username.is_empty() {
+                String::from("You're ready to use KnoxOS.")
+            } else {
+                format!("Welcome, {}!", s.username)
+            },
+            Vec::new(),
+            None,
+        ),
+    };
+    Some(WizardSnap {
+        step: s.step.index(),
+        title: String::from(s.step.title()),
+        body,
+        options,
+        selected,
+        next_label: String::from(if s.step == SetupStep::Complete {
+            "Start Using KnoxOS"
+        } else if s.step == SetupStep::Network {
+            "Skip"
+        } else {
+            "Next"
+        }),
+        can_back: s.step.index() > 0 && s.step != SetupStep::Complete,
+        complete: s.step == SetupStep::Complete,
+    })
+}
+
+pub fn go_back(wid: WindowId) {
+    let mut states = STATES.lock();
+    let Some(s) = states.iter_mut().find(|s| s.window_id == wid) else {
+        return;
+    };
+    if s.step.index() > 0 && s.step != SetupStep::Complete {
+        s.step = SetupStep::from_index(s.step.index() - 1);
+    }
+}
+
+pub fn go_next(wid: WindowId) {
+    let mut states = STATES.lock();
+    let Some(s) = states.iter_mut().find(|s| s.window_id == wid) else {
+        return;
+    };
+    if s.step == SetupStep::Complete {
+        apply_settings(s);
+        SETUP_COMPLETE.store(true, Ordering::SeqCst);
+        FIRST_BOOT.store(false, Ordering::SeqCst);
+        crate::serial_println!("[setup_wizard] setup complete!");
+        return;
+    }
+    let next = s.step.index() + 1;
+    if next < SetupStep::TOTAL {
+        s.step = SetupStep::from_index(next);
+    }
+}
+
+pub fn pick(wid: WindowId, i: usize) {
+    let mut states = STATES.lock();
+    let Some(s) = states.iter_mut().find(|s| s.window_id == wid) else {
+        return;
+    };
+    match s.step {
+        SetupStep::Language if i < LANGUAGES.len() => s.language_idx = i,
+        SetupStep::Keyboard if i < KEYBOARDS.len() => s.keyboard_idx = i,
+        SetupStep::Timezone if i < TIMEZONES.len() => s.timezone_idx = i,
+        SetupStep::Privacy => match i {
+            0 => s.crash_reports = !s.crash_reports,
+            1 => s.usage_stats = !s.usage_stats,
+            _ => {}
+        },
+        SetupStep::Theme => match i {
+            0 => s.dark_theme = false,
+            1 => s.dark_theme = true,
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
 // ── Drawing ──────────────────────────────────────────────────────────
 
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, _scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_wizard(fb, wid, area);
+        return;
+    }
     let tc = theme::colors();
     let accent = colors::accent();
     let mut states = STATES.lock();

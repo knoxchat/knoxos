@@ -11,7 +11,8 @@ use super::pci::{
     mmio_r32, mmio_w8, mmio_w16, mmio_w32, mmio_w64, parse_virtio_caps,
 };
 use super::protocol::{
-    BOUNCE_CMD, BOUNCE_RESP, BOUNCE_RESP_LEN, CURSOR_BYTES, QUEUE_CAP, SCANOUT_BYTES,
+    BOUNCE_CMD, BOUNCE_RESP, BOUNCE_RESP_LEN, CURSOR_BYTES, FALLBACK_SCANOUT_BYTES,
+    FALLBACK_SCANOUT_H, FALLBACK_SCANOUT_W, QUEUE_CAP,
 };
 
 const VIRTIO_STATUS_ACKNOWLEDGE: u8 = 1;
@@ -72,9 +73,46 @@ pub(super) struct LiveGpu {
     pub(super) cursor: Vq,
     bounce_phys: u64,
     pub(super) scanout_phys: u64,
+    pub(super) scanout_w: u32,
+    pub(super) scanout_h: u32,
+    pub(super) scanout_bytes: usize,
     pub(super) cursor_phys: u64,
     fence: u64,
     pub(super) ready: bool,
+}
+
+fn desktop_scanout_size() -> (u32, u32) {
+    let (w, h) = crate::gui::cached_screen_size();
+    let w = if w > 0 { w as u32 } else { 1024 };
+    let h = if h > 0 { h as u32 } else { 768 };
+    (w.max(64), h.max(64))
+}
+
+fn alloc_scanout() -> Option<(u64, u32, u32, usize)> {
+    let (w, h) = desktop_scanout_size();
+    let bytes = (w as usize).saturating_mul(h as usize).saturating_mul(4);
+    let pages = bytes.div_ceil(4096).max(1);
+    if let Some(phys) = crate::vmm::allocate_contiguous_frames(pages) {
+        // SAFETY: exclusive DMA pages for the scanout resource.
+        unsafe {
+            core::ptr::write_bytes(crate::vmm::phys_to_virt(phys) as *mut u8, 0, pages * 4096);
+        }
+        serial_println!("[VIRTIO-GPU] scanout backing {}x{} ({} bytes)", w, h, bytes);
+        return Some((phys, w, h, bytes));
+    }
+    serial_println!("[VIRTIO-GPU] full-res scanout alloc failed; 64x64 fallback");
+    let pages = FALLBACK_SCANOUT_BYTES.div_ceil(4096).max(1);
+    let phys = crate::vmm::allocate_contiguous_frames(pages)?;
+    // SAFETY: exclusive DMA pages for the 64×64 fallback scanout resource.
+    unsafe {
+        core::ptr::write_bytes(crate::vmm::phys_to_virt(phys) as *mut u8, 0, pages * 4096);
+    }
+    Some((
+        phys,
+        FALLBACK_SCANOUT_W,
+        FALLBACK_SCANOUT_H,
+        FALLBACK_SCANOUT_BYTES,
+    ))
 }
 
 pub(super) static LIVE_GPU: Mutex<Option<LiveGpu>> = Mutex::new(None);
@@ -422,18 +460,12 @@ pub(super) fn init_modern(bus: u8, dev: u8, func: u8) -> Option<LiveGpu> {
     let ctrl = setup_modern_queue(caps.common, 0)?;
     let cursor = setup_modern_queue(caps.common, 1)?;
     let bounce_phys = crate::vmm::allocate_contiguous_frames(1)?;
-    let scan_pages = SCANOUT_BYTES.div_ceil(4096).max(1);
+    let (scanout_phys, scanout_w, scanout_h, scanout_bytes) = alloc_scanout()?;
     let cur_pages = CURSOR_BYTES.div_ceil(4096).max(1);
-    let scanout_phys = crate::vmm::allocate_contiguous_frames(scan_pages)?;
     let cursor_phys = crate::vmm::allocate_contiguous_frames(cur_pages)?;
     // SAFETY: DMA pages are exclusive to this driver.
     unsafe {
         core::ptr::write_bytes(crate::vmm::phys_to_virt(bounce_phys) as *mut u8, 0, 4096);
-        core::ptr::write_bytes(
-            crate::vmm::phys_to_virt(scanout_phys) as *mut u8,
-            0,
-            scan_pages * 4096,
-        );
         core::ptr::write_bytes(
             crate::vmm::phys_to_virt(cursor_phys) as *mut u8,
             0,
@@ -460,6 +492,9 @@ pub(super) fn init_modern(bus: u8, dev: u8, func: u8) -> Option<LiveGpu> {
         cursor,
         bounce_phys,
         scanout_phys,
+        scanout_w,
+        scanout_h,
+        scanout_bytes,
         cursor_phys,
         fence: 0,
         ready: true,
@@ -510,16 +545,10 @@ pub(super) fn init_legacy(io_base: u16) -> Option<LiveGpu> {
         cursor.notify_off = 0;
 
         let bounce_phys = crate::vmm::allocate_contiguous_frames(1)?;
-        let scan_pages = SCANOUT_BYTES.div_ceil(4096).max(1);
+        let (scanout_phys, scanout_w, scanout_h, scanout_bytes) = alloc_scanout()?;
         let cur_pages = CURSOR_BYTES.div_ceil(4096).max(1);
-        let scanout_phys = crate::vmm::allocate_contiguous_frames(scan_pages)?;
         let cursor_phys = crate::vmm::allocate_contiguous_frames(cur_pages)?;
         core::ptr::write_bytes(crate::vmm::phys_to_virt(bounce_phys) as *mut u8, 0, 4096);
-        core::ptr::write_bytes(
-            crate::vmm::phys_to_virt(scanout_phys) as *mut u8,
-            0,
-            scan_pages * 4096,
-        );
         core::ptr::write_bytes(
             crate::vmm::phys_to_virt(cursor_phys) as *mut u8,
             0,
@@ -538,6 +567,9 @@ pub(super) fn init_legacy(io_base: u16) -> Option<LiveGpu> {
             cursor,
             bounce_phys,
             scanout_phys,
+            scanout_w,
+            scanout_h,
+            scanout_bytes,
             cursor_phys,
             fence: 0,
             ready: true,

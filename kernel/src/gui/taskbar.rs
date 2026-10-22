@@ -11,19 +11,18 @@ use super::font_engine;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::icon_theme;
-use super::icon_theme::IconCategory;
-use super::icons;
 use super::system_tray;
 use super::window;
+use super::window::ViewKind;
 
 /// Total dock vertical footprint (including float gap)
-pub const TASKBAR_HEIGHT: u32 = 54;
+pub const TASKBAR_HEIGHT: u32 = 64;
 
 /// Actual dock bar height (the visible pill)
-const DOCK_BAR_HEIGHT: u32 = 44;
+const DOCK_BAR_HEIGHT: u32 = 52;
 
 /// Gap between dock and screen bottom edge
-const DOCK_FLOAT_GAP: u32 = 8;
+const DOCK_FLOAT_GAP: u32 = 10;
 
 /// Min dock width (capsule)
 const DOCK_MIN_WIDTH: u32 = 360;
@@ -367,7 +366,7 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
         let menu_open = super::startmenu::is_visible();
 
         if menu_open || hovered {
-            fb.fill_rounded_rect_aa(btn_rect, colors::TASKBAR_HOVER, 8);
+            fb.fill_rounded_rect_aa(btn_rect, Pixel::new(232, 121, 100, 50), 8);
         }
 
         // App grid icon (9 dots in 3×3 grid)
@@ -465,9 +464,9 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
 
         // Background glow on hover or active
         if entry.active {
-            fb.fill_rounded_rect_aa(item_rect, colors::TASKBAR_ACTIVE, 8);
+            fb.fill_rounded_rect_aa(item_rect, Pixel::new(232, 121, 100, 65), 8);
         } else if hovered {
-            fb.fill_rounded_rect_aa(item_rect, colors::TASKBAR_HOVER, 8);
+            fb.fill_rounded_rect_aa(item_rect, Pixel::new(232, 121, 100, 50), 8);
         }
 
         // Draw app icon (20×20 centered in 36×36 cell)
@@ -548,8 +547,9 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
     );
     cursor_x += separator_w / 2;
 
-    // ── SYSTEM TRAY (Wi-Fi, Volume, Battery, Notifications) ────
-    system_tray::draw(fb, cursor_x, dock_cy);
+    // D9.5: system tray icons live in the GPUI panel; the legacy dock
+    // no longer paints fill_rect tray glyphs.
+    let _ = cursor_x;
 }
 
 /// Draw a tiny icon (16×16) in the taskbar for a given window content type
@@ -559,16 +559,7 @@ fn draw_taskbar_icon(
     y: i32,
     content_type: window::WindowContentType,
 ) {
-    let (category, name) = match content_type {
-        window::WindowContentType::Terminal => (IconCategory::Apps, "utilities-x-terminal"),
-        window::WindowContentType::FileExplorer => (IconCategory::Places, "folder"),
-        window::WindowContentType::Browser => (IconCategory::Apps, "web-browser"),
-        window::WindowContentType::AIAssistant => (IconCategory::Apps, "preferences-system"),
-        window::WindowContentType::TextEditor => (IconCategory::Apps, "accessories-text-editor"),
-        window::WindowContentType::Settings => (IconCategory::Apps, "org.gnome.Settings"),
-        _ => (IconCategory::Mimetypes, "text-x-generic"),
-    };
-    icon_theme::draw_tiny_icon(fb, x, y, category, name);
+    icon_theme::draw_tiny_icon(fb, x, y, icon_theme::for_content(content_type));
 }
 
 /// Update the clock display (called from timer interrupt)
@@ -577,26 +568,7 @@ pub fn update_clock(_ticks: u64) {
 
     // Read real wall-clock time from CMOS RTC (works correctly in QEMU)
     let dt = crate::rtc::read_rtc();
-    let hours = dt.hour as u64;
-    let minutes = dt.minute as u64;
-    let seconds = dt.second as u64;
-
-    let am_pm = if hours < 12 { "AM" } else { "PM" };
-    let display_hour = if hours == 0 {
-        12
-    } else if hours > 12 {
-        hours - 12
-    } else {
-        hours
-    };
-
-    taskbar.clock_text.clear();
-    write!(
-        taskbar.clock_text,
-        "{}:{:02}:{:02} {}",
-        display_hour, minutes, seconds, am_pm
-    )
-    .ok();
+    taskbar.clock_text = crate::gui::locale::format_time(dt.hour, dt.minute);
 }
 
 /// Get the current clock text (for change detection)
@@ -613,7 +585,7 @@ pub fn add_entry(window_id: window::WindowId, title: &str) {
             .iter()
             .find(|w| w.id == window_id)
             .map(|w| w.content_type)
-            .unwrap_or(window::WindowContentType::Empty)
+            .unwrap_or(window::WindowContentType::ShmEmpty)
     };
     let mut taskbar = TASKBAR.lock();
     taskbar.entries.push(TaskbarEntry {
@@ -669,7 +641,6 @@ pub fn update_hover(mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height
         || mouse_x > layout.dock_x + layout.dock_w as i32
     {
         taskbar.hovered_entry = None;
-        system_tray::clear_hover();
         return;
     }
 
@@ -697,30 +668,12 @@ pub fn update_hover(mouse_x: i32, mouse_y: i32, screen_width: u32, screen_height
     }
     taskbar.hovered_entry = hovered;
 
-    // Advance past separator
-    cursor_x += layout.separator_w;
-
-    // Update system tray hover
-    system_tray::update_hover(mouse_x, mouse_y, cursor_x, layout.dock_cy);
+    let _ = cursor_x;
 }
 
 /// Clear hover state (called when mouse leaves taskbar area)
 pub fn clear_hover() {
     TASKBAR.lock().hovered_entry = None;
-}
-
-/// Compute the (tray_x, dock_cy) coordinates for the system tray area.
-/// Returns None if the dock layout can't be computed.
-pub fn tray_layout(screen_width: u32, screen_height: u32) -> Option<(i32, i32)> {
-    let taskbar = TASKBAR.lock();
-    let entry_count = taskbar.entries.len().min(MAX_DOCK_ENTRIES);
-    let layout = compute_dock_layout(entry_count, screen_width, screen_height);
-    let mut cursor_x = layout.content_x + layout.start_btn_w + layout.workspace_area_w;
-    if entry_count > 0 {
-        cursor_x += layout.entry_spacing + entry_count as i32 * DOCK_ITEM_SIZE as i32;
-    }
-    cursor_x += layout.separator_w;
-    Some((cursor_x, layout.dock_cy))
 }
 
 /// Handle taskbar/dock click
@@ -838,16 +791,37 @@ pub fn handle_click(x: i32, y: i32, screen_width: u32, screen_height: u32) -> bo
         cursor_x += DOCK_ITEM_SIZE as i32;
     }
 
-    // Skip separator
-    cursor_x += separator_w;
-
-    // ── SYSTEM TRAY CLICKS ──
-    if system_tray::handle_click(x, y, cursor_x, dock_cy) {
-        drop(taskbar);
-        return true;
-    }
-
+    let _ = (cursor_x, separator_w, dock_cy);
     true
+}
+
+/// Focus or minimize the dock entry at `index` (D9.1 GPUI panel).
+pub fn activate_dock_index(index: usize) {
+    let (wid, is_active) = {
+        let taskbar = TASKBAR.lock();
+        match taskbar.entries.get(index) {
+            Some(e) => (e.window_id, e.active),
+            None => return,
+        }
+    };
+    super::popups::close_all_popups();
+    super::notifications::close_panel();
+    let mut wm = window::WINDOW_MANAGER.lock();
+    if is_active {
+        wm.minimize_window(wid);
+        let new_focus = wm.focused_window;
+        drop(wm);
+        let mut tb = TASKBAR.lock();
+        for e in tb.entries.iter_mut() {
+            e.active = new_focus == Some(e.window_id);
+        }
+        crate::serial_println!("[KnoxOS] Dock: minimized window {}", wid);
+    } else {
+        wm.focus_window(wid);
+        drop(wm);
+        set_active(wid);
+        crate::serial_println!("[KnoxOS] Dock: focused window {}", wid);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1022,7 +996,7 @@ lazy_static::lazy_static! {
         visible: false,
         window_id: 0,
         title: String::new(),
-        content_type: window::WindowContentType::Empty,
+        content_type: window::WindowContentType::ShmEmpty,
         item_center_x: 0,
         dock_top_y: 0,
     });
@@ -1129,11 +1103,11 @@ pub fn draw_window_preview(fb: &mut FrameBuffer) {
     );
 
     let bg = match preview.content_type {
-        window::WindowContentType::Terminal => Pixel::new(25, 28, 38, 255),
-        window::WindowContentType::Browser => Pixel::new(40, 45, 58, 255),
-        window::WindowContentType::FileExplorer => Pixel::new(30, 38, 48, 255),
-        window::WindowContentType::Settings => Pixel::new(22, 28, 38, 255),
-        window::WindowContentType::TextEditor => Pixel::new(28, 28, 30, 255),
+        window::WindowContentType::TerminalSurface => Pixel::new(25, 28, 38, 255),
+        window::WindowContentType::Gpui(ViewKind::Browser) => Pixel::new(40, 45, 58, 255),
+        window::WindowContentType::Gpui(ViewKind::Files) => Pixel::new(30, 38, 48, 255),
+        window::WindowContentType::Gpui(ViewKind::Settings) => Pixel::new(22, 28, 38, 255),
+        window::WindowContentType::Gpui(ViewKind::Editor) => Pixel::new(28, 28, 30, 255),
         _ => Pixel::new(35, 40, 52, 255),
     };
     fb.fill_rounded_rect_aa(content_rect, bg, 6);
@@ -1193,7 +1167,7 @@ struct AppWindowList {
 lazy_static::lazy_static! {
     static ref APP_WINDOW_LIST: Mutex<AppWindowList> = Mutex::new(AppWindowList {
         visible: false,
-        content_type: window::WindowContentType::Empty,
+        content_type: window::WindowContentType::ShmEmpty,
         windows: Vec::new(),
         popup_x: 0,
         popup_y: 0,
@@ -1207,7 +1181,7 @@ pub fn show_app_window_list(ct: window::WindowContentType, center_x: i32, dock_t
     let mut windows: Vec<(window::WindowId, String, bool)> = wm
         .windows
         .iter()
-        .filter(|w| w.content_type as u8 == ct as u8 && w.visible)
+        .filter(|w| w.content_type == ct && w.visible)
         .map(|w| (w.id, w.title.clone(), w.focused))
         .collect();
     drop(wm);

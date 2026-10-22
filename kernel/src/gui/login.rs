@@ -10,16 +10,20 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use spin::Mutex;
 
 use super::colors;
-use super::font_engine;
+use super::font_engine::{self, FontId};
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
-use super::splash_type;
 
 /// Login screen state
 static LOGIN_STATE: Mutex<LoginState> = Mutex::new(LoginState::new_const());
 
 /// Whether the login screen is currently active (blocks desktop)
 static LOGGED_IN: AtomicBool = AtomicBool::new(false);
+
+/// Auto-login after boot. Default on so QEMU `./run.sh` still reaches the
+/// desktop (GATE tests). Set `auto_login=0` in settings.conf to show the
+/// GPUI login Dialog first. Logout always shows login regardless.
+static AUTO_LOGIN: AtomicBool = AtomicBool::new(true);
 
 /// Timestamp when login screen was last redrawn (for animation)
 static LOGIN_ANIM_TSC: AtomicU64 = AtomicU64::new(0);
@@ -85,14 +89,102 @@ impl LoginState {
     }
 }
 
+/// Snapshot for the GPUI login Dialog (D12.1).
+pub struct LoginSnap {
+    pub username: String,
+    pub password_mask: String,
+    pub focused: u8,
+    pub error: String,
+    pub authenticating: bool,
+}
+
+fn mask_dots(len: usize) -> String {
+    let mut s = String::new();
+    for _ in 0..len.min(40) {
+        s.push('\u{2022}');
+    }
+    s
+}
+
 /// Check if the user is logged in (desktop should be shown)
 pub fn is_logged_in() -> bool {
     LOGGED_IN.load(Ordering::Relaxed)
 }
 
-/// Force login state (for initial boot — auto-login disabled by default)
+pub fn auto_login_enabled() -> bool {
+    AUTO_LOGIN.load(Ordering::Relaxed)
+}
+
+pub fn set_auto_login(val: bool) {
+    AUTO_LOGIN.store(val, Ordering::Relaxed);
+}
+
+/// Force login state (logout / tests). Auto-login is a separate setting.
 pub fn set_logged_in(val: bool) {
     LOGGED_IN.store(val, Ordering::Relaxed);
+}
+
+pub fn snapshot() -> LoginSnap {
+    let state = LOGIN_STATE.lock();
+    LoginSnap {
+        username: String::from(state.username_str()),
+        password_mask: mask_dots(state.password_len),
+        focused: state.focused_field,
+        error: String::from(state.error_str()),
+        authenticating: state.authenticating,
+    }
+}
+
+pub fn set_focused_field(field: u8) {
+    let mut state = LOGIN_STATE.lock();
+    state.focused_field = if field == 0 { 0 } else { 1 };
+    drop(state);
+    super::request_redraw();
+}
+
+/// Sign In button — authenticate even if the username field is focused.
+pub fn submit() {
+    {
+        let mut state = LOGIN_STATE.lock();
+        state.focused_field = 1;
+    }
+    handle_enter();
+}
+
+/// Apply the auto-login setting after `settings_persist::init`.
+/// PAM still authenticates the default `user` account.
+pub fn boot() {
+    if !AUTO_LOGIN.load(Ordering::Relaxed) {
+        crate::serial_println!("[KnoxOS] Login required (auto-login disabled)");
+        return;
+    }
+    match crate::users::authenticate("user", "") {
+        Ok(uid) => {
+            crate::serial_println!("[KnoxOS] Auto-login: user uid={}", uid);
+            LOGGED_IN.store(true, Ordering::Relaxed);
+        }
+        Err(msg) => {
+            crate::serial_println!("[KnoxOS] Auto-login failed ({}): showing login", msg);
+            LOGGED_IN.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Live-path login frame. Does **not** compose the desktop.
+pub fn present_frame() {
+    if let Some(ref mut fb) = *super::FRAMEBUFFER.lock() {
+        let sw = fb.width as u32;
+        let sh = fb.height as u32;
+        let full = Rect::new(0, 0, sw, sh);
+        if super::gpui_platform::is_ready() {
+            super::gpui_platform::pump(fb, sw, sh, full, true);
+            super::gpui_platform::present_login(fb, full, true);
+            draw_login_cursor(fb, sw as i32, sh as i32);
+        } else {
+            draw_login_screen(fb);
+        }
+        fb.present();
+    }
 }
 
 /// Handle a character input on the login screen
@@ -301,32 +393,28 @@ pub fn draw_login_screen(fb: &mut FrameBuffer) {
     let mut cy = card_y + 30;
 
     // ── OS Logo / Title ──
-    let title = splash_type::LOGIN_TITLE;
-    let title_x = card_x + (card_w - title.width as i32) / 2;
-    font_engine::blit_alpha(
+    font_engine::draw_text_centered(
         fb,
-        title_x,
+        card_x + card_w / 2,
         cy,
-        title.width,
-        title.height,
-        title.pixels,
-        Pixel::new(0, 200, 255, 255),
-        32,
+        "KnoxOS",
+        FontId::UiBold,
+        font_engine::TITLE_SIZE,
+        Pixel::rgb(240, 232, 224),
+        0,
     );
-    cy += title.height as i32 + 16;
-    let subtitle = splash_type::LOGIN_SUB;
-    let sub_x = card_x + (card_w - subtitle.width as i32) / 2;
-    font_engine::blit_alpha(
+    cy += font_engine::TITLE_SIZE as i32 + 12;
+    font_engine::draw_text_centered(
         fb,
-        sub_x,
+        card_x + card_w / 2,
         cy,
-        subtitle.width,
-        subtitle.height,
-        subtitle.pixels,
-        Pixel::new(160, 200, 240, 200),
-        32,
+        "Welcome back",
+        FontId::Ui,
+        font_engine::BODY_SIZE,
+        Pixel::rgb(140, 130, 120),
+        0,
     );
-    cy += 30;
+    cy += font_engine::BODY_SIZE as i32 + 18;
 
     // ── Username field ──
     cy += 10;

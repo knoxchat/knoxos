@@ -458,6 +458,75 @@ where
     browsers.get_mut(&wid).map(f)
 }
 
+pub fn chrome_snapshot(
+    wid: WindowId,
+) -> (String, String, Vec<String>, Vec<Option<String>>, String) {
+    with_browser(wid, |s| {
+        let lines: Vec<String> = s.page.lines.iter().map(|l| l.text.clone()).collect();
+        let links: Vec<Option<String>> = s.page.lines.iter().map(|l| l.link_url.clone()).collect();
+        (
+            s.page.title.clone(),
+            s.url_text.clone(),
+            lines,
+            links,
+            s.status_text.clone(),
+        )
+    })
+    .unwrap_or_else(|| {
+        (
+            String::from("New Tab"),
+            String::from("knoxos://home"),
+            Vec::new(),
+            Vec::new(),
+            String::new(),
+        )
+    })
+}
+
+pub fn set_url_text(wid: WindowId, text: String) {
+    with_browser_mut(wid, |s| {
+        s.url_text = text;
+        s.focus = BrowserFocus::UrlBar;
+        s.url_cursor = s.url_text.len();
+    });
+}
+
+pub fn go_back(wid: WindowId) {
+    with_browser_mut(wid, |s| s.go_back());
+}
+
+pub fn go_forward(wid: WindowId) {
+    with_browser_mut(wid, |s| s.go_forward());
+}
+
+pub fn reload(wid: WindowId) {
+    with_browser_mut(wid, |s| s.reload());
+}
+
+pub fn submit_url(wid: WindowId) {
+    with_browser_mut(wid, |s| s.url_bar_submit());
+}
+
+pub fn new_tab(wid: WindowId) {
+    with_browser_mut(wid, |s| {
+        if s.vivaldi {
+            s.navigate("vivaldi://newtab");
+        } else {
+            s.navigate("knoxos://home");
+        }
+    });
+}
+
+pub fn open_line(wid: WindowId, index: usize) {
+    let url = with_browser(wid, |s| {
+        s.page.lines.get(index).and_then(|l| l.link_url.clone())
+    })
+    .flatten();
+    if let Some(url) = url {
+        with_browser_mut(wid, |s| s.navigate(&url));
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // CLICK HANDLING
 // ═══════════════════════════════════════════════════════════════════════

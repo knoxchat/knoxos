@@ -1,7 +1,7 @@
 /// Window / icon drag, resize, snap zones, and mouse-up handling
 use crate::gui::desktop;
 use crate::gui::window;
-use crate::gui::window::WindowContentType;
+use crate::gui::window::{ViewKind, WindowContentType};
 
 /// Snap preview zone: 0=none, 1=left, 2=right, 3=maximize
 static LAST_SNAP_ZONE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
@@ -53,7 +53,7 @@ fn snap_zone_at(x: i32, y: i32, screen_w: i32) -> u8 {
 pub(super) fn handle_drag(x: i32, y: i32) {
     let (screen_w, screen_h) = crate::gui::cached_screen_size();
 
-    // ── Desktop icon drag ────────────────────────────────────
+    // ── Desktop icon drag (D9.9: compositor-owned preview) ───
     if desktop::is_dragging_icon() {
         desktop::handle_icon_drag(x, y);
         return;
@@ -84,7 +84,7 @@ pub(super) fn handle_drag(x: i32, y: i32) {
                 .rev()
                 .find(|w| w.visible && w.rect.contains(x, y))
             {
-                if win.content_type == WindowContentType::FileExplorer
+                if win.content_type == WindowContentType::Gpui(ViewKind::Files)
                     && win.explorer_selected >= 0
                     && win.content_rect().contains(x, y)
                 {
@@ -283,7 +283,7 @@ pub(super) fn handle_mouse_up(x: i32, y: i32) {
             .rev()
             .find(|w| {
                 w.visible
-                    && w.content_type == window::WindowContentType::FileExplorer
+                    && w.content_type == window::WindowContentType::Gpui(ViewKind::Files)
                     && w.rect.contains(x, y)
             })
             .map(|w| w.id);
@@ -307,6 +307,12 @@ pub(super) fn handle_mouse_up(x: i32, y: i32) {
             }
             crate::gui::explorer::cancel_file_drag();
         }
+        return;
+    }
+
+    // Knox GPUI proof window press (D3.6): complete click / clear active.
+    if crate::gui::gpui_platform::pointer_up(x, y) {
+        crate::gui::gpui_platform::damage_proof();
         return;
     }
 

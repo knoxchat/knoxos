@@ -6,7 +6,7 @@
 ///   - Write-back policy: dirty pages flushed asynchronously
 ///   - LRU eviction: least-recently-used pages reclaimed under memory pressure
 ///   - Readahead: sequential detection triggers prefetching
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -348,6 +348,24 @@ pub fn flush_inode(inode: u64) -> Result<usize, PageCacheError> {
 
 /// Flush ALL dirty pages to disk (called periodically by the writeback timer)
 pub fn sync_all() -> usize {
+    // Drop dirty pages that have no backing path (self-test inodes). They
+    // cannot be flushed and would otherwise sit dirty until the next tick.
+    {
+        let known: BTreeSet<u64> = INODE_PATHS.lock().keys().copied().collect();
+        let mut cache = CACHE.lock();
+        let orphans: Vec<PageKey> = cache
+            .pages
+            .iter()
+            .filter(|(k, p)| p.flags.dirty && !known.contains(&k.inode))
+            .map(|(k, _)| *k)
+            .collect();
+        for key in orphans {
+            cache.pages.remove(&key);
+        }
+        cache.stats.dirty_pages = cache.pages.values().filter(|p| p.flags.dirty).count();
+        cache.stats.total_pages = cache.pages.len();
+    }
+
     let dirty_inodes: Vec<u64> = {
         let cache = CACHE.lock();
         let mut inodes: Vec<u64> = cache
@@ -684,6 +702,7 @@ pub fn init() {
     );
     let _ = writeback_self_test();
     let _ = lru_reclaim_self_test();
+    let _ = sync_all();
 }
 
 /// Serial marker once a dirty middle page flushes without replacing the

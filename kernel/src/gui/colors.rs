@@ -46,17 +46,6 @@ pub const ORB_LAVENDER: Pixel = Pixel::new(160, 130, 200, 255); // Soft lavender
 pub const ORB_PEACH: Pixel = Pixel::new(240, 170, 130, 255); // Peach
 pub const ORB_SAGE: Pixel = Pixel::new(130, 180, 150, 255); // Sage green
 
-// ═══════════════════════════════════════════════════════════════════════
-// FLOATING DOCK — Frosted warm glass (centered, pill-shaped)
-// ═══════════════════════════════════════════════════════════════════════
-pub const TASKBAR_BG: Pixel = Pixel::new(28, 24, 22, 175); // Warm frosted glass
-pub const TASKBAR_HOVER: Pixel = Pixel::new(232, 121, 100, 50); // Coral hover
-pub const TASKBAR_ACTIVE: Pixel = Pixel::new(232, 121, 100, 65); // Coral active
-pub const TASKBAR_FOREGROUND: Pixel = Pixel::new(232, 121, 100, 35); // Active bg
-pub const TASKBAR_FOREGROUND_HOVER: Pixel = Pixel::new(240, 150, 120, 55);
-pub const TASKBAR_BORDER: Pixel = Pixel::new(160, 130, 110, 30); // Warm glass edge
-pub const TASKBAR_TEXT: Pixel = Pixel::new(235, 228, 220, 240); // Warm white
-
 // Active app indicator dots (warm coral dots below icons)
 pub const DOCK_INDICATOR_ACTIVE: Pixel = Pixel::new(232, 121, 100, 255); // Coral
 pub const DOCK_INDICATOR_GLOW: Pixel = Pixel::new(232, 121, 100, 50); // Glow halo

@@ -39,11 +39,11 @@ pub enum IconType {
 /// Grid layout constants — scaled for 1920×1080
 pub(crate) const ICON_GRID_X: i32 = 28; // Left margin for desktop area
 pub(crate) const ICON_GRID_Y: i32 = 18; // Top margin
-pub(crate) const ICON_GRID_SPACING_X: i32 = 110; // Horizontal spacing between columns
-pub(crate) const ICON_GRID_SPACING_Y: i32 = 100; // Vertical spacing — compact for 1080p
-pub(crate) const ICON_WIDTH: u32 = 80; // gridEntryWidth
-pub(crate) const ICON_HEIGHT: u32 = 78; // gridEntryHeight
-pub(crate) const ICON_SIZE_ACTUAL: i32 = 48; // Actual icon size (48x48 pixels)
+pub(crate) const ICON_GRID_SPACING_X: i32 = 128; // Horizontal spacing between columns
+pub(crate) const ICON_GRID_SPACING_Y: i32 = 112; // Vertical spacing — compact for 1080p
+pub(crate) const ICON_WIDTH: u32 = 112; // gridEntryWidth
+pub(crate) const ICON_HEIGHT: u32 = 92; // gridEntryHeight
+pub(crate) const ICON_SIZE_ACTUAL: i32 = 40; // Actual icon size (Lucide box)
 pub(crate) const TEXT_LABEL_MARGIN_TOP: i32 = 6; // Space between icon and text
 pub(crate) const TEXT_LABEL_PADDING_LEFT: i32 = 10; // Left padding for text
 

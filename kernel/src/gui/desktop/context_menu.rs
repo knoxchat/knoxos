@@ -3,7 +3,6 @@ use crate::gui::colors;
 use crate::gui::font_engine;
 use crate::gui::framebuffer::{FrameBuffer, Pixel, Rect};
 use crate::gui::icon_theme;
-use crate::gui::icon_theme::IconCategory;
 
 use super::apps::open_application;
 use super::files::{create_desktop_file, create_desktop_folder};
@@ -127,86 +126,10 @@ pub(crate) fn draw_context_menu(fb: &mut FrameBuffer) {
                 fb.fill_rounded_rect_aa(item_rect, colors::SELECTION, 4);
             }
 
-            // Small icon for each menu item via icon_theme (16×16)
             let icon_x = mx + 8;
             let icon_y = iy + (CONTEXT_ITEM_HEIGHT as i32 - 16) / 2;
-            match item.action {
-                ContextAction::OpenTerminal => {
-                    icon_theme::draw_tiny_icon(
-                        fb,
-                        icon_x,
-                        icon_y,
-                        IconCategory::Apps,
-                        "utilities-x-terminal",
-                    );
-                }
-                ContextAction::OpenExplorer => {
-                    icon_theme::draw_tiny_icon(fb, icon_x, icon_y, IconCategory::Places, "folder");
-                }
-                ContextAction::OpenBrowser => {
-                    icon_theme::draw_tiny_icon(
-                        fb,
-                        icon_x,
-                        icon_y,
-                        IconCategory::Apps,
-                        "web-browser",
-                    );
-                }
-                ContextAction::Refresh => {
-                    icon_theme::draw_tiny_icon(
-                        fb,
-                        icon_x,
-                        icon_y,
-                        IconCategory::Actions,
-                        "view-refresh",
-                    );
-                }
-                ContextAction::NewFile => {
-                    icon_theme::draw_tiny_icon(
-                        fb,
-                        icon_x,
-                        icon_y,
-                        IconCategory::Actions,
-                        "document-new",
-                    );
-                }
-                ContextAction::NewFolder => {
-                    icon_theme::draw_tiny_icon(
-                        fb,
-                        icon_x,
-                        icon_y,
-                        IconCategory::Actions,
-                        "folder-new",
-                    );
-                }
-                ContextAction::TakeScreenshot | ContextAction::TakeScreenshotRegion => {
-                    icon_theme::draw_tiny_icon(
-                        fb,
-                        icon_x,
-                        icon_y,
-                        IconCategory::Apps,
-                        "accessories-screenshot",
-                    );
-                }
-                ContextAction::ChangeWallpaper => {
-                    icon_theme::draw_tiny_icon(
-                        fb,
-                        icon_x,
-                        icon_y,
-                        IconCategory::Apps,
-                        "accessories-painting",
-                    );
-                }
-                ContextAction::DisplaySettings => {
-                    icon_theme::draw_tiny_icon(
-                        fb,
-                        icon_x,
-                        icon_y,
-                        IconCategory::Apps,
-                        "org.gnome.Settings",
-                    );
-                }
-                _ => {}
+            if let Some(name) = icon_theme::for_action(item.action) {
+                icon_theme::draw_tiny_icon(fb, icon_x, icon_y, name);
             }
 
             font_engine::draw_ui_text(
@@ -243,49 +166,7 @@ pub fn handle_context_menu_click(x: i32, y: i32) -> bool {
             let action = item.action;
             drop(menu);
             close_context_menu();
-
-            match action {
-                ContextAction::OpenTerminal => {
-                    open_application("Terminal", IconType::Terminal);
-                }
-                ContextAction::OpenExplorer => {
-                    open_application("Files", IconType::Folder);
-                }
-                ContextAction::OpenBrowser => {
-                    open_application("Browser", IconType::Globe);
-                }
-                ContextAction::NewFile => {
-                    create_desktop_file();
-                }
-                ContextAction::NewFolder => {
-                    create_desktop_folder();
-                }
-                ContextAction::Refresh => {
-                    crate::gui::request_redraw();
-                }
-                ContextAction::TakeScreenshot => {
-                    crate::gui::screenshot::take_screenshot(
-                        crate::gui::screenshot::CaptureMode::FullScreen,
-                    );
-                }
-                ContextAction::TakeScreenshotRegion => {
-                    crate::gui::screenshot::take_screenshot(
-                        crate::gui::screenshot::CaptureMode::Region,
-                    );
-                }
-                ContextAction::ChangeWallpaper => {
-                    // Open Settings on Personalization tab
-                    open_application("Settings", IconType::Settings);
-                    crate::gui::settings::SETTINGS_STATE.lock().active_tab =
-                        crate::gui::settings::SettingsTab::Personalization;
-                }
-                ContextAction::DisplaySettings => {
-                    open_application("Settings", IconType::Settings);
-                    crate::gui::settings::SETTINGS_STATE.lock().active_tab =
-                        crate::gui::settings::SettingsTab::Display;
-                }
-                _ => {}
-            }
+            execute_action(action);
             return true;
         }
         iy += CONTEXT_ITEM_HEIGHT as i32;
@@ -294,4 +175,42 @@ pub fn handle_context_menu_click(x: i32, y: i32) -> bool {
     drop(menu);
     close_context_menu();
     false
+}
+
+/// Run a desktop context-menu action (shared with the GPUI menu, D9.7).
+pub fn execute_action(action: ContextAction) {
+    match action {
+        ContextAction::OpenTerminal => {
+            open_application("Terminal", IconType::Terminal);
+        }
+        ContextAction::OpenExplorer => {
+            open_application("Files", IconType::Folder);
+        }
+        ContextAction::OpenBrowser => {
+            open_application("Browser", IconType::Globe);
+        }
+        ContextAction::NewFile => {
+            create_desktop_file();
+        }
+        ContextAction::NewFolder => {
+            create_desktop_folder();
+        }
+        ContextAction::Refresh => {
+            crate::gui::request_redraw();
+        }
+        ContextAction::TakeScreenshot | ContextAction::TakeScreenshotRegion => {
+            crate::gui::screenshot::open_dialog();
+        }
+        ContextAction::ChangeWallpaper => {
+            open_application("Settings", IconType::Settings);
+            crate::gui::settings::SETTINGS_STATE.lock().active_tab =
+                crate::gui::settings::SettingsTab::Personalization;
+        }
+        ContextAction::DisplaySettings => {
+            open_application("Settings", IconType::Settings);
+            crate::gui::settings::SETTINGS_STATE.lock().active_tab =
+                crate::gui::settings::SettingsTab::Display;
+        }
+        _ => {}
+    }
 }

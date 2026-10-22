@@ -3,27 +3,32 @@ use crate::gui::desktop;
 use crate::gui::startmenu;
 use crate::gui::taskbar;
 use crate::gui::window;
-use crate::gui::window::WindowContentType;
+use crate::gui::window::{ViewKind, WindowContentType};
 
 /// Handle right-click (context menu)
 pub(super) fn handle_right_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     let taskbar_y = screen_h as i32 - crate::gui::scale::taskbar_height() as i32;
 
-    // Close any open tray context menu first
-    if crate::gui::system_tray::is_context_menu_open()
-        && crate::gui::system_tray::handle_context_menu_click(x, y)
+    // D9.6: Alt-Tab / overview consume the click (dismiss on right-click).
+    if crate::gui::gpui_platform::switcher_is_live()
+        && (crate::gui::expose::is_visible() || crate::gui::alt_tab::is_visible())
     {
+        let _ = crate::gui::gpui_platform::pointer_down_button(x, y, knox_gpui::MouseButton::Right);
+        crate::gui::request_redraw();
         return;
     }
 
-    // On taskbar — check if right-clicking on a tray icon
-    if y >= taskbar_y {
-        if let Some((tray_x, dock_cy)) = crate::gui::taskbar::tray_layout(screen_w, screen_h) {
-            if crate::gui::system_tray::handle_right_click(x, y, tray_x, dock_cy) {
-                return;
-            }
-        }
-        // Right-click elsewhere on taskbar — show taskbar context menu
+    // D9.5: tray icons and their menus are GPUI panel children.
+    if crate::gui::gpui_platform::panel_is_live()
+        && crate::gui::gpui_platform::pointer_down_button(x, y, knox_gpui::MouseButton::Right)
+    {
+        crate::gui::gpui_platform::damage_proof();
+        crate::gui::request_taskbar_redraw();
+        return;
+    }
+
+    // On taskbar — show taskbar context menu (legacy dock only).
+    if !crate::gui::gpui_platform::panel_is_live() && y >= taskbar_y {
         crate::gui::taskbar::show_context_menu(x, y);
         return;
     }
@@ -32,7 +37,7 @@ pub(super) fn handle_right_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     let wm = window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.window_at(x, y) {
         if let Some(win) = wm.windows.iter().rev().find(|w| w.id == wid) {
-            if win.content_type == WindowContentType::FileExplorer {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Files) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
@@ -47,6 +52,11 @@ pub(super) fn handle_right_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     }
     drop(wm);
 
+    if crate::gui::gpui_platform::pointer_down_button(x, y, knox_gpui::MouseButton::Right) {
+        crate::gui::gpui_platform::damage_proof();
+        return;
+    }
+
     // Show desktop context menu
     desktop::show_context_menu(x, y);
 }
@@ -59,6 +69,10 @@ fn handle_chrome_button_click(x: i32, y: i32, screen_w: u32, screen_h: u32) -> b
     let mut hit: Option<(window::WindowId, u8)> = None;
     for win in wm.windows.iter().rev() {
         if !win.is_visible() {
+            continue;
+        }
+        // D10.5: CSD buttons are GPUI hitboxes; keep WM resize edges.
+        if win.uses_csd() {
             continue;
         }
         if win.closeable && win.close_button_rect().contains(x, y) {
@@ -85,9 +99,9 @@ fn handle_chrome_button_click(x: i32, y: i32, screen_w: u32, screen_h: u32) -> b
 
     let old_rect = win.rect;
     let id = win.id;
-    let is_terminal = win.content_type == WindowContentType::Terminal;
-    let is_browser = win.content_type == WindowContentType::Browser;
-    let is_ai = win.content_type == WindowContentType::AIAssistant;
+    let is_terminal = win.content_type == WindowContentType::TerminalSurface;
+    let is_browser = win.content_type == WindowContentType::Gpui(ViewKind::Browser);
+    let is_ai = win.content_type == WindowContentType::Gpui(ViewKind::Chat);
     let tab_ids: alloc::vec::Vec<u32> = win.terminal_tabs.clone();
     drop(wm);
 
@@ -156,34 +170,58 @@ fn handle_chrome_button_click(x: i32, y: i32, screen_w: u32, screen_h: u32) -> b
 pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     // If login screen is active, route clicks there
     if !crate::gui::login::is_logged_in() {
-        crate::gui::login::handle_click(x, y, screen_w as i32, screen_h as i32);
+        if crate::gui::gpui_platform::session_is_live() {
+            let _ =
+                crate::gui::gpui_platform::session_pointer_down(x, y, knox_gpui::MouseButton::Left);
+        } else {
+            crate::gui::login::handle_click(x, y, screen_w as i32, screen_h as i32);
+        }
         crate::gui::request_redraw();
         return;
     }
 
     // If screen is locked, route clicks to lock screen
     if crate::gui::lock_screen::is_locked() {
-        crate::gui::lock_screen::handle_click(x, y, screen_w as i32, screen_h as i32);
+        if crate::gui::gpui_platform::session_is_live() {
+            let _ =
+                crate::gui::gpui_platform::session_pointer_down(x, y, knox_gpui::MouseButton::Left);
+        } else {
+            crate::gui::lock_screen::handle_click(x, y, screen_w as i32, screen_h as i32);
+        }
         crate::gui::request_redraw();
         return;
     }
 
     // Check context menu first (if visible, clicking an item)
-    if desktop::handle_context_menu_click(x, y) {
+    if crate::gui::gpui_platform::desktop_is_live() {
+        if crate::gui::gpui_platform::desktop_menu_open() {
+            if crate::gui::gpui_platform::pointer_down(x, y) {
+                crate::gui::request_redraw();
+                return;
+            }
+        }
+    } else if desktop::handle_context_menu_click(x, y) {
         crate::gui::request_redraw();
         return;
     }
 
-    // Exposé / Mission Control — intercepts clicks when visible
-    if crate::gui::expose::is_visible() {
-        if let Some(wid) = crate::gui::expose::handle_click(x, y) {
-            let mut wm = window::WINDOW_MANAGER.lock();
-            wm.focus_window(wid);
-            drop(wm);
-            taskbar::set_active(wid);
+    // Alt-Tab / Mission Control — intercepts clicks when visible (D9.6 GPUI).
+    if crate::gui::expose::is_visible() || crate::gui::alt_tab::is_visible() {
+        if crate::gui::gpui_platform::switcher_is_live() {
+            let _ = crate::gui::gpui_platform::pointer_down(x, y);
+            crate::gui::request_redraw();
+            return;
         }
-        crate::gui::request_redraw();
-        return;
+        if crate::gui::expose::is_visible() {
+            if let Some(wid) = crate::gui::expose::handle_click(x, y) {
+                let mut wm = window::WINDOW_MANAGER.lock();
+                wm.focus_window(wid);
+                drop(wm);
+                taskbar::set_active(wid);
+            }
+            crate::gui::request_redraw();
+            return;
+        }
     }
 
     // Check taskbar context menu
@@ -192,8 +230,27 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
         return;
     }
 
-    // File picker modal — intercepts all clicks when visible
+    // File picker / screenshot / installer Dialog overlays (D11.10).
+    if crate::gui::gpui_platform::dialogs_is_live()
+        && (crate::gui::file_picker::is_visible()
+            || crate::gui::screenshot::is_dialog_open()
+            || crate::gui::installer::is_active())
+    {
+        let _ = crate::gui::gpui_platform::dialogs_pointer_down(x, y, knox_gpui::MouseButton::Left);
+        crate::gui::request_redraw();
+        return;
+    }
     if crate::gui::file_picker::handle_click(x, y) {
+        crate::gui::request_redraw();
+        return;
+    }
+    if crate::gui::installer::is_active() {
+        crate::gui::installer::handle_click(
+            x as usize,
+            y as usize,
+            screen_w as usize,
+            screen_h as usize,
+        );
         crate::gui::request_redraw();
         return;
     }
@@ -204,86 +261,38 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
         return;
     }
 
-    // Check tray context menu
-    if crate::gui::system_tray::is_context_menu_open()
-        && crate::gui::system_tray::handle_context_menu_click(x, y)
-    {
-        crate::gui::request_redraw();
-        return;
-    }
-
-    // Check toast notification clicks (top-right toasts)
-    if crate::gui::notifications::handle_toast_click(x, y, screen_w as i32) {
-        crate::gui::request_redraw();
-        return;
-    }
-
-    // Check notification panel clicks
-    if crate::gui::notifications::is_panel_open()
-        && crate::gui::notifications::handle_panel_click(x, y, screen_w as i32, screen_h as i32)
-    {
-        crate::gui::request_redraw();
-        return;
-    }
+    // D9.4 / D9.5: toast, notification-center, and tray-menu clicks are GPUI.
 
     // Check taskbar clicks BEFORE start menu, so clicking the start button
     // properly toggles the menu (instead of close→reopen race)
     let taskbar_y = screen_h as i32 - crate::gui::scale::taskbar_height() as i32;
-    if y >= taskbar_y && taskbar::handle_click(x, y, screen_w, screen_h) {
+    if crate::gui::gpui_platform::panel_is_live() {
+        if crate::gui::gpui_platform::pointer_down(x, y) {
+            crate::gui::gpui_platform::damage_proof();
+            crate::gui::request_taskbar_redraw();
+            return;
+        }
+    } else if y >= taskbar_y && taskbar::handle_click(x, y, screen_w, screen_h) {
         crate::gui::request_taskbar_redraw();
         return;
     }
 
     // Check start menu (if visible, clicking a menu item or outside to close)
     if startmenu::is_visible() {
-        if let Some(item) = startmenu::handle_click(x, y) {
+        if crate::gui::gpui_platform::launcher_is_live() {
+            startmenu::close();
+        } else if let Some(item) = startmenu::handle_click(x, y) {
             crate::serial_println!("[KnoxOS] Start menu: Opening {}", item.name);
             desktop::open_application(&item.name, item.icon_type);
             return;
+        } else {
+            // If clicking outside the menu (and not on taskbar which was handled above), close it
+            startmenu::close();
         }
-        // If clicking outside the menu (and not on taskbar which was handled above), close it
-        startmenu::close();
     }
 
-    // Check system popups (calendar, volume, quick settings)
-    if crate::gui::popups::any_popup_open() {
-        let sw = screen_w as i32;
-        let sh = screen_h as i32;
-        if crate::gui::popups::handle_calendar_click(x, y, sw, sh) {
-            crate::gui::request_redraw();
-            return;
-        }
-        if crate::gui::popups::handle_volume_click(x, y, sw, sh) {
-            crate::gui::request_redraw();
-            return;
-        }
-        if crate::gui::popups::handle_quick_settings_click(x, y, sw, sh) {
-            crate::gui::request_redraw();
-            return;
-        }
-        // Click outside all popups — close them
-        crate::gui::popups::close_all_popups();
-    }
-
-    // Check notification panel — clicking INSIDE the panel is handled by the
-    // earlier handle_panel_click call.  Clicking OUTSIDE closes the panel but
-    // lets the click fall through to the underlying element (consistent with
-    // start menu / popup behavior).
-    {
-        let mut nc = crate::gui::notifications::NOTIFICATIONS.lock();
-        if nc.panel_open {
-            let panel_w: u32 = 340;
-            let panel_x = screen_w as i32 - panel_w as i32 - 8;
-            let panel_rect = crate::gui::framebuffer::Rect::new(panel_x, 36, panel_w, 400);
-            if panel_rect.contains(x, y) {
-                // Click inside panel — already handled above; consume
-                drop(nc);
-                return;
-            }
-            // Click outside — close panel and fall through
-            nc.panel_open = false;
-        }
-    }
+    // D9.3 / D9.4: OSD flyouts and the notification center are GPUI overlays
+    // dispatched in `gpui_platform::pointer_down`. Outside clicks close there.
 
     // Title-bar buttons must win over the top-right resize grab zone.
     if handle_chrome_button_click(x, y, screen_w, screen_h) {
@@ -312,6 +321,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     // Check windows (top to bottom z-order)
     let wm = window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.window_at(x, y) {
+        crate::gui::gpui_platform::release_key_focus();
         drop(wm);
 
         let mut wm = window::WINDOW_MANAGER.lock();
@@ -320,12 +330,12 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
         // Check title bar buttons (using scale-aware button rects)
         if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
             let close_rect = win.close_button_rect();
-            if win.closeable && close_rect.contains(x, y) {
+            if !win.uses_csd() && win.closeable && close_rect.contains(x, y) {
                 let id = win.id;
                 let old_rect = win.rect;
-                let is_terminal = win.content_type == WindowContentType::Terminal;
-                let is_browser = win.content_type == WindowContentType::Browser;
-                let is_ai = win.content_type == WindowContentType::AIAssistant;
+                let is_terminal = win.content_type == WindowContentType::TerminalSurface;
+                let is_browser = win.content_type == WindowContentType::Gpui(ViewKind::Browser);
+                let is_ai = win.content_type == WindowContentType::Gpui(ViewKind::Chat);
                 // Collect terminal tab IDs before closing
                 let tab_ids: alloc::vec::Vec<u32> = win.terminal_tabs.clone();
                 drop(wm);
@@ -359,7 +369,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                 crate::gui::request_window_redraw(old_rect);
                 return;
             }
-            if win.maximizable && win.maximize_button_rect().contains(x, y) {
+            if !win.uses_csd() && win.maximizable && win.maximize_button_rect().contains(x, y) {
                 let id = win.id;
                 let old_rect = win.rect;
                 drop(wm);
@@ -380,7 +390,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                 }
                 return;
             }
-            if win.minimizable && win.minimize_button_rect().contains(x, y) {
+            if !win.uses_csd() && win.minimizable && win.minimize_button_rect().contains(x, y) {
                 let id = win.id;
                 let old_rect = win.rect;
                 drop(wm);
@@ -407,11 +417,19 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on window content (settings tabs, etc.)
-            if win.content_type == WindowContentType::Settings {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Settings) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
-                    handle_settings_content_click(x, y, wid);
+                    if crate::gui::gpui_platform::settings_is_live() {
+                        crate::gui::gpui_platform::settings_pointer_down(
+                            x,
+                            y,
+                            knox_gpui::MouseButton::Left,
+                        );
+                    } else {
+                        handle_settings_content_click(x, y, wid);
+                    }
                     taskbar::set_active(wid);
                     crate::gui::damage_window(wid);
                     return;
@@ -419,11 +437,19 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on AI assistant content
-            if win.content_type == WindowContentType::AIAssistant {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Chat) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
-                    crate::gui::ai_assistant::handle_click(wid, x, y);
+                    if crate::gui::gpui_platform::chat_is_live() {
+                        crate::gui::gpui_platform::chat_pointer_down(
+                            x,
+                            y,
+                            knox_gpui::MouseButton::Left,
+                        );
+                    } else {
+                        crate::gui::ai_assistant::handle_click(wid, x, y);
+                    }
                     taskbar::set_active(wid);
                     crate::gui::damage_window(wid);
                     return;
@@ -431,21 +457,29 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on browser window content
-            if win.content_type == WindowContentType::Browser {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Browser) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     let scroll = win.scroll_y;
                     drop(wm);
-                    crate::gui::browser::handle_browser_click(
-                        wid,
-                        x,
-                        y,
-                        content.x,
-                        content.y,
-                        content.width,
-                        content.height,
-                        scroll,
-                    );
+                    if crate::gui::gpui_platform::browse_is_live() {
+                        crate::gui::gpui_platform::browse_pointer_down(
+                            x,
+                            y,
+                            knox_gpui::MouseButton::Left,
+                        );
+                    } else {
+                        crate::gui::browser::handle_browser_click(
+                            wid,
+                            x,
+                            y,
+                            content.x,
+                            content.y,
+                            content.width,
+                            content.height,
+                            scroll,
+                        );
+                    }
                     taskbar::set_active(wid);
                     crate::gui::damage_window(wid);
                     return;
@@ -453,11 +487,46 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on file explorer content
-            if win.content_type == WindowContentType::FileExplorer {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Files) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
-                    crate::gui::explorer::handle_click(wid, x, y);
+                    if crate::gui::gpui_platform::files_is_live() {
+                        crate::gui::gpui_platform::files_pointer_down(
+                            x,
+                            y,
+                            knox_gpui::MouseButton::Left,
+                        );
+                    } else {
+                        crate::gui::explorer::handle_click(wid, x, y);
+                    }
+                    taskbar::set_active(wid);
+                    crate::gui::damage_window(wid);
+                    return;
+                }
+            }
+
+            let utility_live = crate::gui::gpui_platform::apps_is_live()
+                && matches!(
+                    win.content_type,
+                    WindowContentType::Gpui(ViewKind::Archive)
+                        | WindowContentType::Gpui(ViewKind::Disks)
+                        | WindowContentType::Gpui(ViewKind::Bluetooth)
+                        | WindowContentType::Gpui(ViewKind::Calendar)
+                        | WindowContentType::Gpui(ViewKind::Logs)
+                        | WindowContentType::Gpui(ViewKind::Updater)
+                        | WindowContentType::Gpui(ViewKind::Software)
+                        | WindowContentType::Gpui(ViewKind::Image)
+                );
+            if utility_live {
+                let content = win.content_rect();
+                if content.contains(x, y) {
+                    drop(wm);
+                    crate::gui::gpui_platform::apps_pointer_down(
+                        x,
+                        y,
+                        knox_gpui::MouseButton::Left,
+                    );
                     taskbar::set_active(wid);
                     crate::gui::damage_window(wid);
                     return;
@@ -465,7 +534,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on archive viewer content
-            if win.content_type == WindowContentType::ArchiveViewer {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Archive) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
@@ -477,7 +546,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on disk utility content
-            if win.content_type == WindowContentType::DiskUtility {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Disks) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
@@ -489,7 +558,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on bluetooth manager content
-            if win.content_type == WindowContentType::BluetoothManager {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Bluetooth) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
@@ -501,7 +570,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on calendar app content
-            if win.content_type == WindowContentType::CalendarApp {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Calendar) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
@@ -513,7 +582,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on log viewer content
-            if win.content_type == WindowContentType::LogViewer {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Logs) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
@@ -525,7 +594,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on software updater content
-            if win.content_type == WindowContentType::SoftwareUpdater {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Updater) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
@@ -537,7 +606,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on software center content
-            if win.content_type == WindowContentType::SoftwareCenter {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Software) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
@@ -549,11 +618,19 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on setup wizard content
-            if win.content_type == WindowContentType::SetupWizard {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Wizard) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
-                    crate::gui::setup_wizard::handle_click(wid, x, y);
+                    if crate::gui::gpui_platform::dialogs_is_live() {
+                        crate::gui::gpui_platform::dialogs_pointer_down(
+                            x,
+                            y,
+                            knox_gpui::MouseButton::Left,
+                        );
+                    } else {
+                        crate::gui::setup_wizard::handle_click(wid, x, y);
+                    }
                     taskbar::set_active(wid);
                     crate::gui::damage_window(wid);
                     return;
@@ -561,11 +638,36 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on task manager content
-            if win.content_type == WindowContentType::TaskManager {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Tasks) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
-                    crate::gui::task_manager::handle_click(wid, content, x, y);
+                    if crate::gui::gpui_platform::tasks_is_live() {
+                        crate::gui::gpui_platform::tasks_pointer_down(
+                            x,
+                            y,
+                            knox_gpui::MouseButton::Left,
+                        );
+                    } else {
+                        crate::gui::task_manager::handle_click(wid, content, x, y);
+                    }
+                    taskbar::set_active(wid);
+                    crate::gui::damage_window(wid);
+                    return;
+                }
+            }
+
+            if win.content_type == WindowContentType::Gpui(ViewKind::Editor) {
+                let content = win.content_rect();
+                if content.contains(x, y) {
+                    drop(wm);
+                    if crate::gui::gpui_platform::editor_is_live() {
+                        crate::gui::gpui_platform::editor_pointer_down(
+                            x,
+                            y,
+                            knox_gpui::MouseButton::Left,
+                        );
+                    }
                     taskbar::set_active(wid);
                     crate::gui::damage_window(wid);
                     return;
@@ -573,11 +675,19 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on calculator content
-            if win.content_type == WindowContentType::Calculator {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Calculator) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
-                    crate::gui::calculator::handle_click(wid, content, x, y);
+                    if crate::gui::gpui_platform::calc_is_live() {
+                        crate::gui::gpui_platform::calc_pointer_down(
+                            x,
+                            y,
+                            knox_gpui::MouseButton::Left,
+                        );
+                    } else {
+                        crate::gui::calculator::handle_click(wid, content, x, y);
+                    }
                     taskbar::set_active(wid);
                     crate::gui::damage_window(wid);
                     return;
@@ -585,7 +695,7 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on image viewer content
-            if win.content_type == WindowContentType::ImageViewer {
+            if win.content_type == WindowContentType::Gpui(ViewKind::Image) {
                 let content = win.content_rect();
                 if content.contains(x, y) {
                     drop(wm);
@@ -596,10 +706,28 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
                 }
             }
 
-            // ── Ctrl+Click on terminal content → open URL ──
-            if win.content_type == WindowContentType::Terminal {
+            // ── Terminal chrome (GPUI) / Ctrl+Click URL / fallback tab bar ──
+            if win.content_type == WindowContentType::TerminalSurface {
                 let content = win.content_rect();
-                let tab_bar_h: i32 = if win.terminal_tabs.len() > 1 { 26 } else { 0 };
+                let gpui = crate::gui::gpui_platform::term_is_live();
+                let tab_bar_h: i32 = if gpui {
+                    crate::gui::gpui_platform::TERM_CHROME_H
+                } else if win.terminal_tabs.len() > 1 {
+                    26
+                } else {
+                    0
+                };
+                if gpui && content.contains(x, y) && y < content.y + tab_bar_h {
+                    drop(wm);
+                    crate::gui::gpui_platform::term_pointer_down(
+                        x,
+                        y,
+                        knox_gpui::MouseButton::Left,
+                    );
+                    taskbar::set_active(wid);
+                    crate::gui::damage_window(wid);
+                    return;
+                }
                 let term_area = crate::gui::framebuffer::Rect::new(
                     content.x,
                     content.y + tab_bar_h,
@@ -623,7 +751,10 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for clicks on terminal tab bar
-            if win.content_type == WindowContentType::Terminal && win.terminal_tabs.len() > 1 {
+            if win.content_type == WindowContentType::TerminalSurface
+                && !crate::gui::gpui_platform::term_is_live()
+                && win.terminal_tabs.len() > 1
+            {
                 let content = win.content_rect();
                 let tab_bar_h = 26i32;
                 if y >= content.y && y < content.y + tab_bar_h {
@@ -685,8 +816,8 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
             }
 
             // Check for scrollbar thumb click — start scrollbar drag
-            if win.content_type != WindowContentType::Terminal
-                && win.content_type != WindowContentType::Empty
+            if win.content_type != WindowContentType::TerminalSurface
+                && win.content_type != WindowContentType::ShmEmpty
             {
                 let content = win.content_rect();
                 let sb_w = 12i32; // hit target wider than visual 6-8px
@@ -760,6 +891,24 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
 
     drop(wm);
 
+    // Knox GPUI proof window (not a WM client). Consume so desktop icons
+    // and rubber-band do not steal the click. VirtIO-tablet absolute
+    // coordinates arrive here via `set_absolute_mouse` (D6.1).
+    if crate::gui::gpui_platform::pointer_down(x, y) {
+        crate::gui::gpui_platform::damage_proof();
+        return;
+    }
+
+    crate::gui::gpui_platform::release_key_focus();
+
+    // D9.7: desktop icons / rubber-band start are a GPUI layer.
+    if crate::gui::gpui_platform::desktop_is_live() {
+        if crate::gui::gpui_platform::desktop_pointer_down(x, y, knox_gpui::MouseButton::Left) {
+            crate::gui::request_redraw();
+            return;
+        }
+    }
+
     // Click on desktop (no window found)
     desktop::handle_click(x, y);
 }
@@ -767,6 +916,11 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
 /// Handle double click
 pub(super) fn handle_double_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     // File picker modal — intercept double clicks when visible
+    if crate::gui::gpui_platform::dialogs_is_live() && crate::gui::file_picker::is_visible() {
+        crate::gui::file_picker::confirm();
+        crate::gui::request_redraw();
+        return;
+    }
     if crate::gui::file_picker::handle_double_click(x, y) {
         return;
     }
@@ -795,11 +949,15 @@ pub(super) fn handle_double_click(x: i32, y: i32, screen_w: u32, screen_h: u32) 
                     return;
                 }
                 // Double-click in file explorer content → navigate/open
-                if win.content_type == WindowContentType::FileExplorer {
+                if win.content_type == WindowContentType::Gpui(ViewKind::Files) {
                     let content = win.content_rect();
                     if content.contains(x, y) {
                         drop(wm);
-                        crate::gui::explorer::handle_double_click(wid, x, y);
+                        if crate::gui::gpui_platform::files_is_live() {
+                            crate::gui::explorer::activate_selected(wid);
+                        } else {
+                            crate::gui::explorer::handle_double_click(wid, x, y);
+                        }
                         crate::gui::request_redraw();
                         return;
                     }
@@ -823,7 +981,7 @@ pub(super) fn handle_middle_click_paste(x: i32, y: i32) {
     let wm = window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.window_at(x, y) {
         if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
-            if win.content_type == WindowContentType::Terminal {
+            if win.content_type == WindowContentType::TerminalSurface {
                 let term_id = if !win.terminal_tabs.is_empty() {
                     win.terminal_tabs
                         .get(win.terminal_active_tab)

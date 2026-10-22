@@ -1287,16 +1287,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Load persisted settings before drawing desktop
     gui::settings_persist::init();
+    gui::login::boot();
 
-    // Draw the desktop environment
-    serial_println!("[KnoxOS] Drawing desktop environment...");
-    gui::desktop::draw_desktop();
+    // D12.1: do not paint the desktop until login::is_logged_in().
+    if gui::login::is_logged_in() {
+        serial_println!("[KnoxOS] Drawing desktop environment...");
+        gui::desktop::draw_desktop();
+        gui::notifications::system(
+            "Welcome to KnoxOS",
+            "Desktop environment loaded successfully",
+        );
+    } else {
+        serial_println!("[KnoxOS] Login required — desktop deferred");
+        gui::login::present_frame();
+    }
 
-    // Fire welcome notification
-    gui::notifications::system(
-        "Welcome to KnoxOS",
-        "Desktop environment loaded successfully",
-    );
+    // Commit boot writes before the desktop is declared ready so the
+    // redraw loop does not flush leftover dirty pages a second later.
+    knoxos_kernel::page_cache::sync_all();
 
     serial_println!("[KnoxOS] ════════════════════════════════════════════════");
     serial_println!("[KnoxOS]   KnoxOS Desktop Environment ready!");
@@ -1378,7 +1386,7 @@ async fn gui_redraw_loop() {
         if term_dirty {
             let wm = gui::window::WINDOW_MANAGER.lock();
             for win in wm.windows.iter() {
-                if win.content_type == gui::window::WindowContentType::Terminal {
+                if win.content_type == gui::window::WindowContentType::TerminalSurface {
                     gui::push_damage(win.rect);
                 }
             }
@@ -1395,20 +1403,29 @@ async fn gui_redraw_loop() {
                 gui::NEEDS_REDRAW.store(true, core::sync::atomic::Ordering::Relaxed);
             } else {
                 let _ = gui::take_cursor_redraw();
-                let damage = gui::take_damage();
-                if damage.is_empty() {
-                    let (sw, sh) = gui::cached_screen_size();
-                    gui::desktop::draw_desktop_damaged(&[gui::framebuffer::Rect::new(
-                        0, 0, sw as u32, sh as u32,
-                    )]);
+                if !gui::login::is_logged_in() {
+                    let _ = gui::take_damage();
+                    gui::login::present_frame();
                 } else {
-                    gui::desktop::draw_desktop_damaged(&damage);
+                    let damage = gui::take_damage();
+                    if damage.is_empty() {
+                        let (sw, sh) = gui::cached_screen_size();
+                        gui::desktop::draw_desktop_damaged(&[gui::framebuffer::Rect::new(
+                            0, 0, sw as u32, sh as u32,
+                        )]);
+                    } else {
+                        gui::desktop::draw_desktop_damaged(&damage);
+                    }
                 }
                 gui::set_last_present_tsc(gui::read_tsc_public());
                 knoxos_kernel::gpu_compositor::pace_frame();
             }
         } else if need_cursor {
-            gui::update_cursor_only();
+            if !gui::login::is_logged_in() {
+                gui::login::present_frame();
+            } else {
+                gui::update_cursor_only();
+            }
         }
 
         gui::drag_and_drop::on_end_frame();

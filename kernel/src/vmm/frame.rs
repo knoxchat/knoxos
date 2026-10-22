@@ -13,11 +13,12 @@ use super::layout::PAGE_SIZE;
 use super::page_table::snapshot_kernel_l4;
 use super::selftest::{buddy_ram_self_test, cow_fault_self_test};
 
-/// Physical buddy allocator (order 0 = 4 KiB … order 10 = 4 MiB).
+/// Physical buddy allocator (order 0 = 4 KiB … order 12 = 16 MiB).
 ///
+/// Order 11 (8 MiB) is required for a 1920×1080×4 VirtIO-GPU scanout (D13.1).
 /// Frames are merged with their buddy on free so alloc/free of the 32 MiB
 /// VMM pool does not leak. Callers still allocate one page at a time.
-const BUDDY_MAX_ORDER: usize = 10;
+const BUDDY_MAX_ORDER: usize = 12;
 
 pub struct PhysicalFramePool {
     /// Free blocks of size `PAGE_SIZE << order`

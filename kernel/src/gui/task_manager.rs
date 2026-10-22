@@ -8,7 +8,7 @@ use spin::Mutex;
 use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 const ARCH_NAME: &str = if cfg!(target_arch = "x86_64") {
     "x86_64"
@@ -32,6 +32,8 @@ struct TaskManagerState {
     tab: TaskManagerTab,
     selected: i32,
     scroll_y: i32,
+    sort_col: Option<usize>,
+    sort_asc: bool,
 }
 
 lazy_static! {
@@ -55,7 +57,8 @@ const TAB_LABELS: &[(&str, TaskManagerTab)] = &[
 
 pub fn open() {
     let mut win = window::Window::new("Task Manager", 200, 80, 720, 520);
-    win.content_type = WindowContentType::TaskManager;
+    win.content_type = WindowContentType::Gpui(ViewKind::Tasks);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -67,6 +70,8 @@ pub fn open() {
         tab: TaskManagerTab::Processes,
         selected: -1,
         scroll_y: 0,
+        sort_col: None,
+        sort_asc: true,
     });
 
     super::taskbar::add_entry(wid, "Task Manager");
@@ -80,6 +85,10 @@ pub fn close(wid: WindowId) {
 }
 
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, _scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_tasks(fb, wid, area);
+        return;
+    }
     let states = STATES.lock();
     let state = match states.iter().find(|s| s.window_id == wid) {
         Some(s) => s,
@@ -332,13 +341,13 @@ fn draw_windows_tab(
         .iter()
         .map(|win| {
             let type_str = match win.content_type {
-                WindowContentType::Terminal => "Terminal",
-                WindowContentType::FileExplorer => "File Explorer",
-                WindowContentType::Browser => "Browser",
-                WindowContentType::AIAssistant => "AI Assistant",
-                WindowContentType::TextEditor => "Text Editor",
-                WindowContentType::Settings => "Settings",
-                WindowContentType::TaskManager => "Task Manager",
+                WindowContentType::TerminalSurface => "Terminal",
+                WindowContentType::Gpui(ViewKind::Files) => "File Explorer",
+                WindowContentType::Gpui(ViewKind::Browser) => "Browser",
+                WindowContentType::Gpui(ViewKind::Chat) => "AI Assistant",
+                WindowContentType::Gpui(ViewKind::Editor) => "Text Editor",
+                WindowContentType::Gpui(ViewKind::Settings) => "Settings",
+                WindowContentType::Gpui(ViewKind::Tasks) => "Task Manager",
                 _ => "Application",
             };
             let state_str = if !win.visible {
@@ -653,4 +662,216 @@ pub fn handle_scroll(wid: WindowId, delta: i32) -> bool {
     } else {
         false
     }
+}
+
+pub fn tab_index(tab: TaskManagerTab) -> usize {
+    match tab {
+        TaskManagerTab::Processes => 0,
+        TaskManagerTab::Windows => 1,
+        TaskManagerTab::Performance => 2,
+    }
+}
+
+pub fn tab_from_index(i: usize) -> TaskManagerTab {
+    match i {
+        1 => TaskManagerTab::Windows,
+        2 => TaskManagerTab::Performance,
+        _ => TaskManagerTab::Processes,
+    }
+}
+
+pub fn view_state(wid: WindowId) -> (TaskManagerTab, i32, i32, Option<usize>, bool) {
+    let states = STATES.lock();
+    states
+        .iter()
+        .find(|s| s.window_id == wid)
+        .map(|s| (s.tab, s.selected, s.scroll_y, s.sort_col, s.sort_asc))
+        .unwrap_or((TaskManagerTab::Processes, -1, 0, None, true))
+}
+
+pub fn set_tab(wid: WindowId, tab: TaskManagerTab) {
+    let mut states = STATES.lock();
+    if let Some(state) = states.iter_mut().find(|s| s.window_id == wid) {
+        state.tab = tab;
+        state.selected = -1;
+        state.scroll_y = 0;
+    }
+}
+
+pub fn set_selected(wid: WindowId, index: i32) {
+    let mut states = STATES.lock();
+    if let Some(state) = states.iter_mut().find(|s| s.window_id == wid) {
+        state.selected = index;
+    }
+}
+
+pub fn set_scroll(wid: WindowId, offset: i32) {
+    let mut states = STATES.lock();
+    if let Some(state) = states.iter_mut().find(|s| s.window_id == wid) {
+        state.scroll_y = offset.max(0);
+    }
+}
+
+pub fn set_sort(wid: WindowId, col: usize) {
+    let mut states = STATES.lock();
+    if let Some(state) = states.iter_mut().find(|s| s.window_id == wid) {
+        if state.sort_col == Some(col) {
+            state.sort_asc = !state.sort_asc;
+        } else {
+            state.sort_col = Some(col);
+            state.sort_asc = true;
+        }
+    }
+}
+
+fn sort_string_rows(rows: &mut [Vec<String>], col: Option<usize>, asc: bool) {
+    let Some(c) = col else {
+        return;
+    };
+    rows.sort_by(|a, b| {
+        let av = a.get(c).map(String::as_str).unwrap_or("");
+        let bv = b.get(c).map(String::as_str).unwrap_or("");
+        if asc { av.cmp(bv) } else { bv.cmp(av) }
+    });
+}
+
+pub fn process_rows(wid: WindowId) -> Vec<Vec<String>> {
+    let (_, _, _, sort_col, sort_asc) = view_state(wid);
+    let pt = crate::process::PROCESS_TABLE.lock();
+    let mut rows: Vec<Vec<String>> = pt
+        .list_processes()
+        .iter()
+        .map(|p| {
+            let state_str = match p.state {
+                crate::process::ProcessState::Running => "Running",
+                crate::process::ProcessState::Ready => "Ready",
+                crate::process::ProcessState::Sleeping => "Sleeping",
+                crate::process::ProcessState::Stopped => "Stopped",
+                crate::process::ProcessState::Zombie => "Zombie",
+            };
+            alloc::vec![
+                format!("{}", p.pid),
+                p.name.clone(),
+                String::from(state_str),
+                format!("{}", p.priority),
+                format!("{}", p.uid),
+            ]
+        })
+        .collect();
+    drop(pt);
+    sort_string_rows(&mut rows, sort_col, sort_asc);
+    rows
+}
+
+pub fn window_rows(wid: WindowId) -> Vec<Vec<String>> {
+    let (_, _, _, sort_col, sort_asc) = view_state(wid);
+    let wm = window::WINDOW_MANAGER.lock();
+    let mut rows: Vec<Vec<String>> = wm
+        .windows
+        .iter()
+        .map(|win| {
+            let type_str = match win.content_type {
+                WindowContentType::TerminalSurface => "Terminal",
+                WindowContentType::Gpui(ViewKind::Files) => "File Explorer",
+                WindowContentType::Gpui(ViewKind::Browser) => "Browser",
+                WindowContentType::Gpui(ViewKind::Chat) => "AI Assistant",
+                WindowContentType::Gpui(ViewKind::Editor) => "Text Editor",
+                WindowContentType::Gpui(ViewKind::Settings) => "Settings",
+                WindowContentType::Gpui(ViewKind::Tasks) => "Task Manager",
+                _ => "Application",
+            };
+            let state_str = if !win.visible {
+                "Hidden"
+            } else if win.state == window::WindowState::Minimized {
+                "Minimized"
+            } else if win.state == window::WindowState::Maximized {
+                "Maximized"
+            } else {
+                "Normal"
+            };
+            alloc::vec![
+                format!("{}", win.id),
+                win.title.clone(),
+                String::from(type_str),
+                String::from(state_str),
+            ]
+        })
+        .collect();
+    drop(wm);
+    sort_string_rows(&mut rows, sort_col, sort_asc);
+    rows
+}
+
+pub struct PerfInfo {
+    pub mem_pct: i32,
+    pub rows: Vec<(String, String)>,
+}
+
+pub fn performance_info() -> PerfInfo {
+    let info = crate::sysinfo::get_sysinfo();
+    let total_mb = info.totalram / (1024 * 1024);
+    let free_mb = info.freeram / (1024 * 1024);
+    let used_mb = total_mb.saturating_sub(free_mb);
+    let mem_pct = (used_mb * 100).checked_div(total_mb).unwrap_or(0) as i32;
+    let l1 = (info.loads[0] * 100 / 65536) as u32;
+    let l5 = (info.loads[1] * 100 / 65536) as u32;
+    let l15 = (info.loads[2] * 100 / 65536) as u32;
+    let uptime_secs = info.uptime as u64;
+    let days = uptime_secs / 86400;
+    let hours = (uptime_secs % 86400) / 3600;
+    let mins = (uptime_secs % 3600) / 60;
+    let secs = uptime_secs % 60;
+    let ticks = crate::interrupts::get_ticks();
+    PerfInfo {
+        mem_pct,
+        rows: alloc::vec![
+            (String::from("Total"), format!("{} MiB", total_mb)),
+            (String::from("Used"), format!("{} MiB", used_mb)),
+            (String::from("Free"), format!("{} MiB", free_mb)),
+            (
+                String::from("Load avg"),
+                format!(
+                    "{}.{:02}  {}.{:02}  {}.{:02}",
+                    l1 / 100,
+                    l1 % 100,
+                    l5 / 100,
+                    l5 % 100,
+                    l15 / 100,
+                    l15 % 100
+                ),
+            ),
+            (String::from("Processes"), format!("{}", info.procs)),
+            (
+                String::from("Uptime"),
+                format!("{}d {}h {}m {}s", days, hours, mins, secs),
+            ),
+            (
+                String::from("Kernel"),
+                format!("KnoxOS v0.2.5 ({ARCH_NAME})")
+            ),
+            (String::from("Ticks"), format!("{ticks}")),
+        ],
+    }
+}
+
+pub fn end_selected(wid: WindowId) {
+    let sel = {
+        let states = STATES.lock();
+        states
+            .iter()
+            .find(|s| s.window_id == wid)
+            .map(|s| s.selected)
+            .unwrap_or(-1)
+    };
+    if sel < 0 {
+        return;
+    }
+    let rows = process_rows(wid);
+    let Some(row) = rows.get(sel as usize) else {
+        return;
+    };
+    let Ok(pid) = row.first().map(|s| s.as_str()).unwrap_or("").parse::<u32>() else {
+        return;
+    };
+    crate::process::kill(pid);
 }

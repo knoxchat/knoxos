@@ -6,6 +6,10 @@ use super::scale;
 /// current resolution, scale factor, supported video modes with bit depth
 /// and refresh rate.
 ///
+/// D13.6: KnoxOS still has **one** software framebuffer. These types describe
+/// that single FB. There is no per-monitor DPI, no virtual desktop spanning
+/// heads, and `position` is always `(0, 0)`.
+///
 /// Adapted from `winit/winit-core/src/monitor.rs`.
 use alloc::string::String;
 use alloc::vec::Vec;

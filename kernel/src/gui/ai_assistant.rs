@@ -11,7 +11,7 @@ use spin::Mutex;
 use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 /// Chat message
 #[derive(Debug, Clone)]
@@ -196,7 +196,7 @@ pub fn focused_ai_window_id() -> Option<WindowId> {
     let wm = window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.focused_window {
         if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
-            if win.content_type == WindowContentType::AIAssistant
+            if win.content_type == WindowContentType::Gpui(ViewKind::Chat)
                 && win.state != window::WindowState::Minimized
             {
                 return Some(wid);
@@ -291,6 +291,38 @@ pub fn handle_backspace(wid: WindowId) {
 
 pub fn handle_enter(wid: WindowId) {
     send_current_message(wid);
+}
+
+pub fn send(wid: WindowId) {
+    send_current_message(wid);
+}
+
+pub fn set_input_text(wid: WindowId, text: String) {
+    let mut states = AI_STATES.lock();
+    if let Some(state) = states.iter_mut().find(|s| s.window_id == wid) {
+        state.input_text = text;
+        state.input_cursor = state.input_text.len();
+    }
+}
+
+pub fn chat_snapshot(wid: WindowId) -> (alloc::vec::Vec<(bool, String)>, String, i32) {
+    let states = AI_STATES.lock();
+    let Some(s) = states.iter().find(|s| s.window_id == wid) else {
+        return (Vec::new(), String::new(), 0);
+    };
+    let msgs = s
+        .messages
+        .iter()
+        .map(|m| (matches!(m.role, Role::User), m.content.clone()))
+        .collect();
+    (msgs, s.input_text.clone(), s.scroll_y)
+}
+
+pub fn set_scroll(wid: WindowId, y: i32) {
+    let mut states = AI_STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        s.scroll_y = y.max(0);
+    }
 }
 
 pub fn handle_escape(wid: WindowId) {
@@ -588,6 +620,10 @@ fn generate_response(query: &str) -> String {
 
 /// Draw AI assistant content (called from window.rs draw_content dispatch)
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, content: Rect, scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_chat(fb, wid, content);
+        return;
+    }
     let states = AI_STATES.lock();
     let state = match states.iter().find(|s| s.window_id == wid) {
         Some(s) => s,

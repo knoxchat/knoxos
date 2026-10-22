@@ -39,12 +39,14 @@ pub use api::{
 pub use compositor::{COMPOSITOR, Compositor, Output};
 pub use gates::{
     GATE_F_HEIGHT, GATE_F_WIDTH, GATE_F1_MARKER, GATE_F2_MARKER, GATE_F3_MARKER, GATE_F4_MARKER,
-    GATE_F5_MARKER, GATE_F6_MARKER, GATE_F7_MARKER, GATE_TERM_IO_MARKER, GATE_TERM_MARKER,
-    GATE_TERM_PAINT_MARKER, GATE_WL_MARKER, WAYLAND_SOCKET_PATH, shm_pool_self_test,
+    GATE_F5_MARKER, GATE_F6_MARKER, GATE_F7_MARKER, GATE_GPUI_BUTTON_H, GATE_GPUI_BUTTON_W,
+    GATE_GPUI_CALC_H, GATE_GPUI_CALC_W, GATE_GPUI_RING3_CALC, GATE_TERM_IO_MARKER,
+    GATE_TERM_MARKER, GATE_TERM_PAINT_MARKER, GATE_WL_MARKER, WAYLAND_SOCKET_PATH,
+    shm_pool_self_test,
 };
 pub use present::{
     dismiss_gate_demo_windows, forget_window, present_unix_buffer, present_user_buffer,
-    pty_key_to_window, window_pty, window_shm_pixels,
+    pty_key_to_window, set_window_shm_pixels, window_pty, window_shm_pixels,
 };
 pub use protocol::{dispatch_client_bytes, on_client_connected};
 pub use seat::{PointerAxis, PointerButton, Seat};

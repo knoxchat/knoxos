@@ -59,6 +59,11 @@ fn serialize_settings() -> String {
         ));
     }
 
+    out.push_str(&format!(
+        "auto_login={}\n",
+        super::login::auto_login_enabled() as u8
+    ));
+
     out
 }
 
@@ -125,6 +130,9 @@ fn deserialize_settings(config: &str) {
             "priv_autoupdate" => {
                 let mut p = super::settings_ext::PRIVACY.lock();
                 p.auto_updates_enabled = val == "1";
+            }
+            "auto_login" => {
+                super::login::set_auto_login(val == "1");
             }
             _ => {
                 serial_println!("[settings_persist] Unknown key: {}", key);

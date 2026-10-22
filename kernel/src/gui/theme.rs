@@ -315,6 +315,7 @@ pub fn set_theme(theme: ThemeId) {
     ACTIVE_THEME_ID.store(theme as u8, Ordering::Relaxed);
     // Invalidate wallpaper cache so the new theme's wallpaper renders
     super::desktop::invalidate_wallpaper_cache();
+    super::gpui_platform::sync_theme();
 }
 
 /// Set a custom theme
@@ -322,6 +323,7 @@ pub fn set_custom_theme(colors: ThemeColors) {
     *CUSTOM_THEME.lock() = colors;
     ACTIVE_THEME_ID.store(ThemeId::Custom as u8, Ordering::Relaxed);
     super::desktop::invalidate_wallpaper_cache();
+    super::gpui_platform::sync_theme();
 }
 
 /// Cycle to the next theme
@@ -335,6 +337,7 @@ pub fn cycle_theme() {
     };
     ACTIVE_THEME_ID.store(next, Ordering::Relaxed);
     super::desktop::invalidate_wallpaper_cache();
+    super::gpui_platform::sync_theme();
 }
 
 /// Get a list of available theme names

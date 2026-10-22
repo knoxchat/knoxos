@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 KERNEL_DIR="$PROJECT_ROOT/kernel"
 BOOT_DIR="$PROJECT_ROOT/boot"
-TOOLS_DIR="$PROJECT_ROOT/tools/svg2rgba"
+TOOLS_DIR="$PROJECT_ROOT/tools/host-tests"
 KERNEL_CRATE="knoxos-kernel"
 KERNEL_TARGET="x86_64-unknown-none"
 
@@ -419,7 +419,7 @@ check_hygiene() {
 check_staged_lockfiles() {
   local root crate
   root="$(repo_root)"
-  for crate in kernel boot tools/svg2rgba; do
+  for crate in kernel boot tools/host-tests; do
     if git -C "$root" diff --cached --name-only | grep -qx "$crate/Cargo.toml"; then
       if ! git -C "$root" diff --cached --name-only | grep -qx "$crate/Cargo.lock"; then
         err "$crate/Cargo.toml is staged but $crate/Cargo.lock is not"

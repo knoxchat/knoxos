@@ -5,51 +5,14 @@ use super::colors;
 use super::font_engine;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
-use super::icon_theme::{self, IconCategory};
+use super::icon_theme;
 use super::scale;
 use super::window::*;
 
-/// Map WindowContentType to an icon theme (category, name) pair for the title bar icon.
-fn content_type_icon(ct: WindowContentType) -> Option<(IconCategory, &'static str)> {
-    match ct {
-        WindowContentType::Terminal => Some((IconCategory::Apps, "terminal-1")),
-        WindowContentType::FileExplorer => Some((IconCategory::Places, "folder")),
-        WindowContentType::Browser => Some((IconCategory::Apps, "internet-web-browser")),
-        WindowContentType::AIAssistant => Some((IconCategory::Apps, "ai-assistant")),
-        WindowContentType::TextEditor => Some((IconCategory::Apps, "accessories-text-editor")),
-        WindowContentType::Settings => Some((IconCategory::Apps, "org.gnome.Settings")),
-        WindowContentType::ArchiveViewer => Some((IconCategory::Apps, "archive-manager")),
-        WindowContentType::DiskUtility => Some((IconCategory::Apps, "disk-utility")),
-        WindowContentType::BluetoothManager => Some((IconCategory::Apps, "bluetooth")),
-        WindowContentType::CalendarApp => Some((IconCategory::Apps, "office-calendar")),
-        WindowContentType::LogViewer => Some((IconCategory::Apps, "accessories-text-editor")),
-        WindowContentType::SoftwareUpdater => Some((IconCategory::Apps, "software-center")),
-        WindowContentType::SoftwareCenter => Some((IconCategory::Apps, "software-center")),
-        WindowContentType::SetupWizard => Some((IconCategory::Apps, "org.gnome.Settings")),
-        WindowContentType::TaskManager => Some((IconCategory::Apps, "org.gnome.SystemMonitor")),
-        WindowContentType::Calculator => Some((IconCategory::Apps, "accessories-calculator")),
-        WindowContentType::ImageViewer => Some((IconCategory::Apps, "accessories-image-viewer")),
-        WindowContentType::Empty => None,
-    }
-}
-
 impl Window {
-    /// Draw a small window icon (16×16) using the icon theme system.
-    /// Falls back to hardcoded procedural icons if no theme icon is available.
+    /// Draw a small window icon (16×16) using Lucide.
     fn draw_window_icon(&self, fb: &mut FrameBuffer, x: i32, y: i32) {
-        // Try icon theme first
-        if let Some((category, name)) = content_type_icon(self.content_type) {
-            icon_theme::draw_tiny_icon(fb, x, y, category, name);
-            return;
-        }
-
-        // Fallback: generic window icon
-        let icon_color = if self.focused {
-            colors::WINDOW_TITLE_TEXT
-        } else {
-            colors::WINDOW_BUTTON_INACTIVE
-        };
-        fb.draw_rounded_rect(Rect::new(x + 1, y + 1, 14, 14), icon_color, 3, 1);
+        icon_theme::draw_tiny_icon(fb, x, y, icon_theme::for_content(self.content_type));
     }
 
     /// Draw the window on the framebuffer — Aurora design
@@ -113,8 +76,9 @@ impl Window {
 
         // ══════════════════════════════════════════════════════════
         // LIGHTWEIGHT SHADOW SYSTEM
+        // D10.4: CSD windows use Scene shadows, not this fill.
         // ══════════════════════════════════════════════════════════
-        if self.state == WindowState::Normal {
+        if self.decorations && self.state == WindowState::Normal {
             if self.focused {
                 for offset in (0i32..16).step_by(4) {
                     let alpha = (16 - offset).min(14) as u8;
@@ -222,7 +186,16 @@ impl Window {
 
         // ══════════════════════════════════════════════════════════
         // TITLE BAR — Frosted glass with depth gradient
+        // D10.2: skip SSD chrome when the client draws TitleBar CSD.
+        // Empty SHM keeps `decorations = true` (kernel bars).
         // ══════════════════════════════════════════════════════════
+        if !self.decorations {
+            self.draw_content(fb);
+            if is_anim {
+                self.rect = original_rect;
+            }
+            return;
+        }
         let title_top = if self.focused {
             Pixel::new(28, 26, 34, 240)
         } else {

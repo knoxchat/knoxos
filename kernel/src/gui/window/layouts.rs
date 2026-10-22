@@ -82,7 +82,7 @@ pub fn restore_layout(name: &str) -> bool {
         if let Some(win) = wm
             .windows
             .iter_mut()
-            .find(|w| w.content_type as u8 == saved.content_type as u8 && w.title == saved.title)
+            .find(|w| w.content_type == saved.content_type && w.title == saved.title)
         {
             win.rect = saved.rect;
             win.saved_rect = saved.rect;

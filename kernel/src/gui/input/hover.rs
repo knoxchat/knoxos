@@ -5,7 +5,7 @@ use crate::gui::desktop;
 use crate::gui::startmenu;
 use crate::gui::taskbar;
 use crate::gui::window;
-use crate::gui::window::WindowContentType;
+use crate::gui::window::{ViewKind, WindowContentType};
 
 /// Last widget hover token. When it changes, that window needs a composite so
 /// buttons/tabs actually highlight under the pointer.
@@ -35,14 +35,13 @@ pub(super) fn needs_overlay_hover_redraw(x: i32, y: i32, screen_w: i32, screen_h
         }
     }
     let taskbar_y = screen_h - crate::gui::scale::taskbar_height() as i32;
-    if crate::gui::system_tray::is_context_menu_open() {
-        crate::gui::system_tray::update_context_menu_hover(x, y);
-    }
     if y >= taskbar_y {
+        if crate::gui::gpui_platform::panel_is_live() {
+            return false;
+        }
         let old_hover = taskbar::TASKBAR.lock().hovered_entry;
         taskbar::update_hover(x, y, screen_w as u32, screen_h as u32);
         taskbar::update_window_preview(screen_w as u32, screen_h as u32);
-        crate::gui::system_tray::update_context_menu_hover(x, y);
         let new_hover = taskbar::TASKBAR.lock().hovered_entry;
         if old_hover != new_hover {
             crate::gui::request_taskbar_redraw();
@@ -76,7 +75,78 @@ fn hover_window_widgets(x: i32, y: i32) -> bool {
 
     let token = hover_token(wid, win.content_type, win.content_rect(), x, y, chrome);
     let rect = win.rect;
+    let calc_live = win.content_type == WindowContentType::Gpui(ViewKind::Calculator)
+        && crate::gui::gpui_platform::calc_is_live();
+    let settings_live = win.content_type == WindowContentType::Gpui(ViewKind::Settings)
+        && crate::gui::gpui_platform::settings_is_live();
+    let files_live = win.content_type == WindowContentType::Gpui(ViewKind::Files)
+        && crate::gui::gpui_platform::files_is_live();
+    let tasks_live = win.content_type == WindowContentType::Gpui(ViewKind::Tasks)
+        && crate::gui::gpui_platform::tasks_is_live();
+    let editor_live = win.content_type == WindowContentType::Gpui(ViewKind::Editor)
+        && crate::gui::gpui_platform::editor_is_live();
+    let chat_live = win.content_type == WindowContentType::Gpui(ViewKind::Chat)
+        && crate::gui::gpui_platform::chat_is_live();
+    let browse_live = win.content_type == WindowContentType::Gpui(ViewKind::Browser)
+        && crate::gui::gpui_platform::browse_is_live();
+    let term_live = win.content_type == WindowContentType::TerminalSurface
+        && crate::gui::gpui_platform::term_is_live();
+    let wizard_live = win.content_type == WindowContentType::Gpui(ViewKind::Wizard)
+        && crate::gui::gpui_platform::dialogs_is_live();
+    let apps_live = crate::gui::gpui_platform::apps_is_live()
+        && matches!(
+            win.content_type,
+            WindowContentType::Gpui(ViewKind::Archive)
+                | WindowContentType::Gpui(ViewKind::Disks)
+                | WindowContentType::Gpui(ViewKind::Bluetooth)
+                | WindowContentType::Gpui(ViewKind::Calendar)
+                | WindowContentType::Gpui(ViewKind::Logs)
+                | WindowContentType::Gpui(ViewKind::Updater)
+                | WindowContentType::Gpui(ViewKind::Software)
+                | WindowContentType::Gpui(ViewKind::Image)
+        );
     drop(wm);
+
+    if calc_live && crate::gui::gpui_platform::calc_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
+    if settings_live && crate::gui::gpui_platform::settings_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
+    if files_live && crate::gui::gpui_platform::files_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
+    if tasks_live && crate::gui::gpui_platform::tasks_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
+    if editor_live && crate::gui::gpui_platform::editor_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
+    if chat_live && crate::gui::gpui_platform::chat_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
+    if browse_live && crate::gui::gpui_platform::browse_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
+    if term_live && crate::gui::gpui_platform::term_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
+    if wizard_live && crate::gui::gpui_platform::dialogs_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
+    if apps_live && crate::gui::gpui_platform::apps_pointer_moved(x, y) {
+        crate::gui::request_window_redraw(rect);
+        return true;
+    }
 
     let old = LAST_HOVER_TOKEN.swap(token, Ordering::Relaxed);
     if old != token {
@@ -99,22 +169,22 @@ fn hover_token(
         cell = 0x4000;
     } else if content.contains(x, y) {
         cell = match kind {
-            WindowContentType::Calculator => calculator_cell(content, x, y),
-            WindowContentType::Settings => settings_cell(content, x, y),
-            WindowContentType::TaskManager => row_cell(content, x, y, 32),
-            WindowContentType::FileExplorer => row_cell(content, x, y, 28),
-            WindowContentType::SoftwareCenter
-            | WindowContentType::SoftwareUpdater
-            | WindowContentType::SetupWizard
-            | WindowContentType::LogViewer
-            | WindowContentType::ArchiveViewer
-            | WindowContentType::DiskUtility
-            | WindowContentType::BluetoothManager
-            | WindowContentType::CalendarApp
-            | WindowContentType::AIAssistant
-            | WindowContentType::ImageViewer
-            | WindowContentType::Browser
-            | WindowContentType::TextEditor => row_cell(content, x, y, 24),
+            WindowContentType::Gpui(ViewKind::Calculator) => calculator_cell(content, x, y),
+            WindowContentType::Gpui(ViewKind::Settings) => settings_cell(content, x, y),
+            WindowContentType::Gpui(ViewKind::Tasks) => row_cell(content, x, y, 32),
+            WindowContentType::Gpui(ViewKind::Files) => row_cell(content, x, y, 28),
+            WindowContentType::Gpui(ViewKind::Software)
+            | WindowContentType::Gpui(ViewKind::Updater)
+            | WindowContentType::Gpui(ViewKind::Wizard)
+            | WindowContentType::Gpui(ViewKind::Logs)
+            | WindowContentType::Gpui(ViewKind::Archive)
+            | WindowContentType::Gpui(ViewKind::Disks)
+            | WindowContentType::Gpui(ViewKind::Bluetooth)
+            | WindowContentType::Gpui(ViewKind::Calendar)
+            | WindowContentType::Gpui(ViewKind::Chat)
+            | WindowContentType::Gpui(ViewKind::Image)
+            | WindowContentType::Gpui(ViewKind::Browser)
+            | WindowContentType::Gpui(ViewKind::Editor) => row_cell(content, x, y, 24),
             _ => 1,
         };
     }

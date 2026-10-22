@@ -26,7 +26,10 @@ pub fn intensity() -> u8 {
 /// This reduces blue channel and slightly boosts red, simulating
 /// a warm color temperature (~3400K).
 ///
-/// Called from draw_desktop_damaged() after all rendering, before present.
+/// Called from draw_desktop_damaged() after all rendering (including GPUI
+/// store blits and Ring 3 SHM), before present. D16.3: this post-process
+/// is compositor-owned and covers GPUI pixels already on the FB. The zoom
+/// lens in `desktop/zoom.rs` is the same: it magnifies the composed frame.
 pub fn apply(fb: &mut FrameBuffer, region: Rect) {
     let strength = INTENSITY.load(Ordering::Relaxed) as u16;
     if strength == 0 {

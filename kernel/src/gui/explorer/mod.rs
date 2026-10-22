@@ -20,7 +20,7 @@ pub use address::{
     address_bar_backspace, address_bar_char, cancel_address_edit, confirm_address_edit,
     start_address_edit,
 };
-pub use click::{handle_click, handle_double_click, handle_right_click};
+pub use click::{activate_selected, handle_click, handle_double_click, handle_right_click};
 pub use drag::{
     accept_file_drop, cancel_file_drag, dragged_file_path, is_file_drag_active, start_file_drag,
 };

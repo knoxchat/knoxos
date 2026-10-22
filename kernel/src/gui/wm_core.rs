@@ -24,6 +24,7 @@ impl WindowManager {
     }
 
     pub fn add_window(&mut self, mut window: Window) {
+        freeze_hand_drawn_content_type(window.content_type);
         apply_window_rules(&mut window);
 
         let (sw, sh) = super::screen_size();

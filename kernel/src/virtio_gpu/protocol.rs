@@ -78,9 +78,10 @@ pub(super) const VIRTIO_GPU_FLAG_FENCE: u32 = 1;
 pub(super) const GPU_RESP_OK_MIN: u32 = 0x1100;
 pub(super) const GPU_RESP_OK_MAX: u32 = 0x11FF;
 
-pub(super) const SCANOUT_W: u32 = 64;
-pub(super) const SCANOUT_H: u32 = 64;
-pub(super) const SCANOUT_BYTES: usize = (SCANOUT_W * SCANOUT_H * 4) as usize;
+pub(super) const FALLBACK_SCANOUT_W: u32 = 64;
+pub(super) const FALLBACK_SCANOUT_H: u32 = 64;
+pub(super) const FALLBACK_SCANOUT_BYTES: usize =
+    (FALLBACK_SCANOUT_W * FALLBACK_SCANOUT_H * 4) as usize;
 pub(super) const CURSOR_PX: u32 = 64;
 pub(super) const CURSOR_BYTES: usize = (CURSOR_PX * CURSOR_PX * 4) as usize;
 pub(super) const BOUNCE_CMD: usize = 0;

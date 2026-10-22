@@ -54,7 +54,7 @@ const BASE_MAX_BOX_HALF: u32 = 4;
 /// Minimum visible pixels on screen to prevent dragging off at 1.0x
 const BASE_MIN_VISIBLE_PX: u32 = 40;
 /// Taskbar height base at 1.0x
-const BASE_TASKBAR_HEIGHT: u32 = 54;
+const BASE_TASKBAR_HEIGHT: u32 = 64;
 /// Base title left padding at 1.0x
 const BASE_TITLE_PAD_LEFT: u32 = 14;
 

@@ -1,48 +1,14 @@
 //! Boot Splash Screen — Early graphical feedback during OS initialization
 //!
-//! Displays a centered KnoxOS logo and progress bar on the framebuffer while
-//! kernel subsystems are being initialized. Called from `kernel_main()` right
-//! after framebuffer init, before any other subsystem needs the display.
+//! Aurora background + Knox UI Splash card (Progress / Spinner / Tag).
+//! Fonts and the GPUI platform are brought up in `gui::init_framebuffer`
+//! before the first `draw_splash`.
 
 use crate::gui::font_engine::{self, FontId};
 use crate::gui::fonts;
 use crate::gui::framebuffer::{FrameBuffer, Pixel, Rect};
-use crate::gui::splash_type::{self, SplashBitmap};
+use crate::gui::gpui_platform;
 use crate::serial_println;
-
-const BAR_W: u32 = 280;
-const BAR_H: u32 = 4;
-
-struct SplashLayout {
-    logo_y: i32,
-    tagline_y: i32,
-    version_y: i32,
-    bar_x: u32,
-    bar_y: u32,
-    status_y: i32,
-}
-
-fn splash_layout(w: i32, h: i32) -> SplashLayout {
-    let logo_y = h / 2 - 92;
-    let tagline_y = logo_y + splash_type::LOGO.height as i32 + 24;
-    let version_y = tagline_y + splash_type::TAGLINE.height as i32 + 16;
-    let bar_x = (w as u32 - BAR_W) / 2;
-    let bar_y = (version_y + splash_type::VERSION.height as i32 + 18) as u32;
-    let status_y = bar_y as i32 + BAR_H as i32 + 16;
-    SplashLayout {
-        logo_y,
-        tagline_y,
-        version_y,
-        bar_x,
-        bar_y,
-        status_y,
-    }
-}
-
-fn blit_centered(fb: &mut FrameBuffer, bm: &SplashBitmap, y: i32, color: Pixel) {
-    let x = (fb.width as i32 - bm.width as i32) / 2;
-    font_engine::blit_alpha(fb, x, y, bm.width, bm.height, bm.pixels, color, 32);
-}
 
 fn draw_centered(
     fb: &mut FrameBuffer,
@@ -65,152 +31,108 @@ fn draw_centered(
     );
 }
 
-/// Draw the full boot splash (background + logo + tagline + progress bar)
-pub fn draw_splash(fb: &mut FrameBuffer) {
-    let w = fb.width as i32;
-    let h = fb.height as i32;
-
-    // ── Deep space gradient background ──────────────────────────────
-    for y in 0..h {
-        let t = y as f32 / h as f32;
-        let r = (8.0 + t * 20.0) as u8;
-        let g = (6.0 + t * 12.0) as u8;
-        let b = (24.0 + t * 40.0) as u8;
-        fb.fill_rect(
-            Rect {
-                x: 0,
-                y,
-                width: w as u32,
-                height: 1,
-            },
-            Pixel::rgb(r, g, b),
-        );
-    }
-
-    // ── Scatter some dim "star" dots ────────────────────────────────
-    let star_seeds: [(i32, i32, u8); 30] = [
-        (120, 80, 70),
-        (340, 150, 50),
-        (580, 60, 80),
-        (800, 200, 40),
-        (1000, 90, 65),
-        (1200, 170, 55),
-        (1400, 50, 75),
-        (1600, 130, 45),
-        (1780, 80, 60),
-        (200, 400, 50),
-        (500, 350, 70),
-        (900, 450, 40),
-        (1100, 380, 55),
-        (1350, 500, 65),
-        (1550, 420, 50),
-        (1700, 550, 45),
-        (100, 600, 60),
-        (350, 700, 40),
-        (600, 650, 55),
-        (850, 750, 70),
-        (1050, 680, 45),
-        (1250, 800, 50),
-        (1450, 720, 65),
-        (1650, 850, 55),
-        (250, 900, 40),
-        (550, 950, 60),
-        (750, 880, 50),
-        (950, 1000, 45),
-        (1150, 960, 55),
-        (1500, 1020, 60),
-    ];
-    for &(sx, sy, brightness) in &star_seeds {
-        if sx < w && sy < h {
-            fb.set_pixel(
-                sx as usize,
-                sy as usize,
-                Pixel::new(
-                    brightness,
-                    brightness,
-                    (brightness as u16 + 40).min(255) as u8,
-                    brightness,
-                ),
-            );
-        }
-    }
-
-    // ── Inter Bold wordmark + Inter Regular supporting copy ─────────
-    let layout = splash_layout(w, h);
-
-    blit_centered(
-        fb,
-        &splash_type::LOGO,
-        layout.logo_y + 3,
-        Pixel::new(6, 8, 22, 140),
-    );
-    blit_centered(
-        fb,
-        &splash_type::LOGO,
-        layout.logo_y,
-        Pixel::new(236, 242, 255, 255),
-    );
-    blit_centered(
-        fb,
-        &splash_type::TAGLINE,
-        layout.tagline_y,
-        Pixel::new(156, 172, 208, 230),
-    );
-    blit_centered(
-        fb,
-        &splash_type::VERSION,
-        layout.version_y,
-        Pixel::new(112, 128, 168, 210),
-    );
-    blit_centered(
-        fb,
-        &splash_type::STATUS,
-        layout.status_y,
-        Pixel::new(132, 148, 188, 210),
-    );
-
-    // ── Progress bar track (empty) ──────────────────────────────────
+fn fill_aurora(fb: &mut FrameBuffer) {
     fb.fill_rect(
         Rect {
-            x: layout.bar_x as i32,
-            y: layout.bar_y as i32,
-            width: BAR_W,
-            height: BAR_H,
+            x: 0,
+            y: 0,
+            width: fb.width as u32,
+            height: fb.height as u32,
         },
-        Pixel::new(40, 40, 60, 120),
+        Pixel::rgb(22, 20, 26),
     );
+}
 
-    // Present to hardware framebuffer
+fn paint_card(fb: &mut FrameBuffer, percent: u32) {
+    let percent = percent.min(100);
+    let phase = (percent as f32) / 100.0;
+    if gpui_platform::is_ready() && font_engine::is_ready() {
+        gpui_platform::blit_splash_card(fb, percent, phase);
+        return;
+    }
+    let dest = gpui_platform::splash_card_rect(fb.width as i32, fb.height as i32);
+    fb.fill_rect(dest, Pixel::rgb(44, 40, 50));
+    let cx = dest.x + dest.width as i32 / 2;
+    let mut y = dest.y + 48;
+    font_engine::draw_text_centered(
+        fb,
+        cx,
+        y,
+        "KnoxOS",
+        FontId::UiBold,
+        44,
+        Pixel::rgb(240, 232, 224),
+        0,
+    );
+    y += 56;
+    draw_centered(
+        fb,
+        y,
+        "SI-native Operating System",
+        FontId::Ui,
+        13,
+        0,
+        Pixel::rgb(140, 130, 120),
+    );
+    y += 28;
+    draw_centered(
+        fb,
+        y,
+        "v0.2.5",
+        FontId::Ui,
+        font_engine::CAPTION_SIZE,
+        0,
+        Pixel::rgb(140, 130, 120),
+    );
+    y += 36;
+    let bar_w = 300i32;
+    let bar_x = cx - bar_w / 2;
+    fb.fill_rect(
+        Rect {
+            x: bar_x,
+            y,
+            width: bar_w as u32,
+            height: 8,
+        },
+        Pixel::rgb(55, 50, 62),
+    );
+    let fill_w = (bar_w as u32 * percent / 100).max(if percent > 0 { 8 } else { 0 });
+    if fill_w > 0 {
+        fb.fill_rect(
+            Rect {
+                x: bar_x,
+                y,
+                width: fill_w,
+                height: 8,
+            },
+            Pixel::rgb(232, 121, 100),
+        );
+    }
+    y += 24;
+    draw_centered(
+        fb,
+        y,
+        knox_ui::splash_status(percent),
+        FontId::Ui,
+        13,
+        0,
+        Pixel::rgb(140, 130, 120),
+    );
+}
+
+/// Draw the full boot splash (background + Knox UI card).
+pub fn draw_splash(fb: &mut FrameBuffer) {
+    fill_aurora(fb);
+    paint_card(fb, 0);
     fb.present();
-
     serial_println!("[KnoxOS] Boot splash displayed");
 }
 
-/// Update the progress bar on the splash screen (0..100)
+/// Update the splash progress (0..100) by re-rasterizing the card.
 pub fn update_progress(fb: &mut FrameBuffer, percent: u32) {
-    let w = fb.width as i32;
-    let h = fb.height as i32;
-
-    let layout = splash_layout(w, h);
-    let fill_w = (BAR_W * percent.min(100)) / 100;
-    if fill_w > 0 {
-        // Gradient fill: blue → cyan
-        for dx in 0..fill_w {
-            let t = dx as f32 / BAR_W as f32;
-            let r = (60.0 + t * 40.0) as u8;
-            let g = (130.0 + t * 80.0) as u8;
-            let b = (220.0 + t * 35.0) as u8;
-            for dy in 0..BAR_H {
-                fb.set_pixel(
-                    (layout.bar_x + dx) as usize,
-                    (layout.bar_y + dy) as usize,
-                    Pixel::rgb(r, g, b),
-                );
-            }
-        }
-        // Only present the progress bar region for speed
-        fb.present_rect(layout.bar_x as i32, layout.bar_y as i32, BAR_W, BAR_H);
-    }
+    paint_card(fb, percent);
+    let dest = gpui_platform::splash_card_rect(fb.width as i32, fb.height as i32);
+    fb.present_rect(dest.x, dest.y, dest.width, dest.height);
 }
 
 /// Clear the splash screen (draw black) before transitioning to desktop
@@ -310,15 +232,18 @@ pub fn draw_boot_menu(fb: &mut FrameBuffer, selected: usize) {
 
     // Title
     let title_y = 56i32;
-    blit_centered(
+    draw_centered(
         fb,
-        &splash_type::MENU_TITLE,
         title_y,
-        Pixel::new(236, 242, 255, 255),
+        "KnoxOS Boot Menu",
+        FontId::UiBold,
+        font_engine::TITLE_SIZE,
+        0,
+        Pixel::rgb(240, 232, 224),
     );
 
     // Separator line
-    let sep_y = title_y + splash_type::MENU_TITLE.height as i32 + 20;
+    let sep_y = title_y + font_engine::TITLE_SIZE as i32 + 20;
     fb.fill_rect(
         Rect {
             x: w / 4,

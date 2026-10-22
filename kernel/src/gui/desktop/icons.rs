@@ -3,7 +3,6 @@ use crate::gui::colors;
 use crate::gui::font_engine;
 use crate::gui::framebuffer::{FrameBuffer, Pixel, Rect};
 use crate::gui::icon_theme;
-use crate::gui::icon_theme::IconCategory;
 use crate::gui::icons;
 
 use super::types::{
@@ -13,13 +12,24 @@ use super::types::{
 /// Draw all desktop icons
 pub(crate) fn draw_desktop_icons(fb: &mut FrameBuffer) {
     let desktop = DESKTOP.lock();
+    // D9.7: static icons are a GPUI layer. D9.9: the floating drag preview
+    // stays compositor-owned (no extra full-screen GPUI pass).
+    let gpui = crate::gui::gpui_platform::desktop_is_live();
 
     for (i, icon) in desktop.icons.iter().enumerate() {
         // If this icon is being dragged, draw a dim ghost at original position
         // and draw the actual icon at the drag position
         let is_dragging = desktop.dragging_icon == Some(i);
 
+        if gpui && !is_dragging {
+            continue;
+        }
+
         if is_dragging {
+            if gpui {
+                // Ghost is painted by the GPUI icon layer at the original cell.
+                continue;
+            }
             // Ghost at original position (30% opacity via dimmer color)
             let ghost_alpha = Pixel::new(100, 90, 80, 40);
             fb.fill_rounded_rect_aa(
@@ -91,29 +101,9 @@ pub(crate) fn draw_desktop_icons(fb: &mut FrameBuffer) {
     }
 }
 
-/// Map desktop IconType to icon_theme (category, name) pairs
-pub(crate) fn icon_type_theme(icon_type: IconType) -> (IconCategory, &'static str) {
-    match icon_type {
-        IconType::MyPC => (IconCategory::Devices, "computer"),
-        IconType::Folder => (IconCategory::Places, "folder"),
-        IconType::Document => (IconCategory::Mimetypes, "text-x-generic"),
-        IconType::Globe => (IconCategory::Apps, "web-browser"),
-        IconType::Terminal => (IconCategory::Apps, "utilities-x-terminal"),
-        IconType::MediaPlayer => (IconCategory::Apps, "multimedia-video-player"),
-        IconType::Game => (IconCategory::Categories, "applications-games"),
-        IconType::AIBrain => (IconCategory::Apps, "preferences-system"),
-        IconType::Settings => (IconCategory::Apps, "org.gnome.Settings"),
-        IconType::Trash => (IconCategory::Places, "user-trash"),
-        IconType::Image => (IconCategory::Mimetypes, "image-x-generic"),
-        IconType::Archive => (IconCategory::Mimetypes, "application-zip"),
-        IconType::Script => (IconCategory::Mimetypes, "text-x-script"),
-    }
-}
-
-/// Helper: draw the icon graphic by type using icon_theme (48×48)
+/// Helper: draw the icon graphic by type using Lucide (48×48)
 fn draw_icon_graphic(fb: &mut FrameBuffer, ix: i32, iy: i32, icon_type: IconType) {
-    let (category, name) = icon_type_theme(icon_type);
-    icon_theme::draw_desktop_icon(fb, ix, iy, category, name);
+    icon_theme::draw_desktop_icon(fb, ix, iy, icon_theme::for_desktop(icon_type));
 }
 
 /// Draw a centered icon label below the icon using font_engine with shadow

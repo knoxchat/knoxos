@@ -132,7 +132,7 @@ pub fn handle_key(key: TerminalKey) {
     if let Some(wid) = wm.focused_window {
         let is_term = wm.windows.iter().any(|w| {
             w.id == wid
-                && w.content_type == crate::gui::window::WindowContentType::Terminal
+                && w.content_type == crate::gui::window::WindowContentType::TerminalSurface
                 && w.state != crate::gui::window::WindowState::Minimized
         });
         drop(wm);
@@ -164,7 +164,7 @@ pub fn render(fb: &mut FrameBuffer, rect: Rect) {
     let wm = crate::gui::window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.focused_window {
         let is_term = wm.windows.iter().any(|w| {
-            w.id == wid && w.content_type == crate::gui::window::WindowContentType::Terminal
+            w.id == wid && w.content_type == crate::gui::window::WindowContentType::TerminalSurface
         });
         drop(wm);
         if is_term {

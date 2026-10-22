@@ -2,7 +2,7 @@
 use alloc::format;
 
 use crate::gui::framebuffer::Rect;
-use crate::gui::window::{self, ExplorerSort, WindowContentType, WindowId};
+use crate::gui::window::{self, ExplorerSort, ViewKind, WindowContentType, WindowId};
 
 use super::actions::{build_context_menu, confirm_rename, execute_action, open_file_in_editor};
 use super::address::start_address_edit;
@@ -29,7 +29,7 @@ pub fn handle_click(wid: WindowId, x: i32, y: i32) -> bool {
         None => return false,
     };
 
-    if win.content_type != WindowContentType::FileExplorer {
+    if win.content_type != WindowContentType::Gpui(ViewKind::Files) {
         return false;
     }
 
@@ -161,6 +161,42 @@ pub fn handle_click(wid: WindowId, x: i32, y: i32) -> bool {
     false
 }
 
+pub fn activate_selected(wid: WindowId) -> bool {
+    let wm = window::WINDOW_MANAGER.lock();
+    let win = match wm.windows.iter().find(|w| w.id == wid) {
+        Some(w) => w,
+        None => return false,
+    };
+    if win.content_type != WindowContentType::Gpui(ViewKind::Files) {
+        return false;
+    }
+    let selected = win.explorer_selected;
+    if selected < 0 {
+        return false;
+    }
+    let cur_path = current_path(&win.title);
+    let show_hidden = win.explorer_show_hidden;
+    let sort = win.explorer_sort;
+    let sort_asc = win.explorer_sort_asc;
+    drop(wm);
+    let mut entries = read_entries(&cur_path, show_hidden);
+    sort_entries(&mut entries, sort, sort_asc);
+    let Some(entry) = entries.get(selected as usize) else {
+        return false;
+    };
+    let full_path = if cur_path == "/" {
+        format!("/{}", entry.name)
+    } else {
+        format!("{}/{}", cur_path, entry.name)
+    };
+    if entry.is_dir {
+        navigate_to(wid, &full_path);
+    } else {
+        open_file_in_editor(&full_path);
+    }
+    true
+}
+
 /// Handle a double-click inside the file explorer content area
 /// Returns true if the click was consumed
 pub fn handle_double_click(wid: WindowId, x: i32, y: i32) -> bool {
@@ -170,7 +206,7 @@ pub fn handle_double_click(wid: WindowId, x: i32, y: i32) -> bool {
         None => return false,
     };
 
-    if win.content_type != WindowContentType::FileExplorer {
+    if win.content_type != WindowContentType::Gpui(ViewKind::Files) {
         return false;
     }
 
@@ -219,7 +255,7 @@ pub fn handle_right_click(wid: WindowId, x: i32, y: i32) -> bool {
         None => return false,
     };
 
-    if win.content_type != WindowContentType::FileExplorer {
+    if win.content_type != WindowContentType::Gpui(ViewKind::Files) {
         return false;
     }
 

@@ -2,37 +2,39 @@
 
 # 7. GUI & Desktop Environment
 
-**Grade: Live (99%)** · `gui/` 162 files, ~91,700 lines
+**Grade: Live** · Knox GPUI is the live toolkit (`./run.sh`). Compositor stays in-kernel.
 
-The compositor is the most complete **product** in the tree. It is not a Unix display server.
+The session chrome, catalog gallery, and in-process apps are Knox GPUI views (`crates/knox-gpui` + `crates/knox-ui`) rastered in software and blitted by the compositor. This is not a 99% hand-drawn painter and not an unused widget stack beside the desktop.
 
 ### Live
-- [x] 32bpp BGRA software FB, double-buffer, ≤16 damage rects, `present_rect`
-- [x] Window manager: z-order, focus, min/max, snap, workspaces, chrome, shadows, animations
-- [x] Desktop, wallpaper, icons, context menu, pill taskbar, tray, start menu, Alt-Tab, hot corners
-- [x] TTF raster, glyph cache, subpixel/grayscale, CJK, RTL runs, KnoxUI widgets, immediate-mode UI. Title `'i'` keeps a stem (`GATE_FONT title`).
-- [x] Mouse (click/drag/resize) via VirtIO-tablet absolute + USB digitizer + PS/2 aux (`GATE_VIRTIO input tablet`), keyboard focus, shortcuts, theme (dark/light), notifications
-- [x] Lock/login screens, screenshot, in-process DnD, blur, night light, on-screen keyboard
-- [x] Clipboard used by terminal/explorer/input (`clipboard.rs`)
-- [x] **In-kernel apps remaining**: none on the start menu. Terminal is Ring 3 `openpty`+SHM (`GATE_TERM pty interactive`). Calculator (F6) and Files (F7) are Ring 3 SHM; Browser/Editor/Settings/Task Manager/AI plus Image Viewer/Logs/Calendar/Disks/Bluetooth/Updater/Software Center/Setup Wizard/Archive launch userspace SHM.
-- [x] **Widget hover/press** — calculator keys and settings tabs highlight under the pointer; retained widgets (`Button`/`Checkbox`/`Toggle`/`TextInput`) have `update_pointer`
-- [x] **Frame input latch** — `gui::input::frame_input()` feeds KnoxUI / `Ui::button_at` with press/release edges
-- [x] **Window-local damage** — content clicks, chrome hover, and clock ticks composite the window/taskbar instead of 1920×1080
-- [x] **Faster software blit** — opaque `fill_rect` stamps packed BGRA; `fill_rounded_rect_aa` fills the body as rects and AA-only the corners
 
-### Unused / stub
-- [x] **Wayland protocol** — `/dev/wl0` ioctl (F1–F2), AF_UNIX `/run/wayland-0` (F5), and `wl_display` object opcodes (`GATE_WL display protocol`)
-- [x] **GPU compositor** — `gpu_compositor` init + VSync; desktop present flushes through VirtIO-GPU (`GATE_GPU desktop scanout`). VGA blit remains for `-vga std`. VirtIO-GPU 2D scanout of a 64×64 host resource is live (F8).
-- [x] **Client isolation (demo)** — Gate F Ring 3 clients paint SHM (F1–F7); Calculator and Files are Empty+SHM (`GATE_F6 calculator userspace`, `GATE_F7 files userspace`). Browser/Editor/Settings/Task Manager/AI plus Calendar/Logs/Disks launch userspace SHM. Start-menu Terminal is Empty+SHM after Ring 3 `openpty` (`GATE_TERM pty interactive`). First SHM frame paints `"ok"` glyphs (`GATE_TERM shm paint`).
-- [x] Hardware cursor — VirtIO-GPU cursorq KAT (`GATE_F8 hw cursor`). Software arrow still blits on `-vga std` (the cocoa window); the 64×64 plane is empty and not that scanout.
-- [x] VSync software VBlank on the live present path (`GATE_VSYNC paced`); desktop present also flushes VirtIO-GPU (`GATE_GPU desktop scanout`)
-- [x] Start-menu **Paint / Video Player / Webamp / Doom / ClassiCube / Quake III** removed; Paint is a Ring 3 SHM client (F4)
-- [x] IME — pinyin `"ni"` → `你` (`GATE_IME compose`)
-- [x] TrueType bytecode hinting — SVTCA/PUSHB/MDAP round-to-grid (`GATE_TTF hint`)
-- [x] HDR, VRR — PQ EOTF + Adaptive-Sync range (`GATE_HDR pq`, `GATE_VRR range`). Full IME framework later.
+- [x] 32bpp BGRA software FB, double-buffer, ≤16 damage rects, `present_rect`
+- [x] Window manager: z-order, focus, min/max, snap, workspaces, CSD TitleBar for GPUI views, SSD for Ring 3 SHM
+- [x] **Panel / dock, launcher, OSD, notify, tray, Alt-Tab, desktop icons, hot corners** as Knox GPUI (`GATE_GPUI panel` / `launcher` / `osd` / `notify` / `tray` / `alt-tab` / `desktop` / `hot corner`)
+- [x] TTF via `font_engine` into the Scene atlas. Title `'i'` keeps a stem (`GATE_FONT title`)
+- [x] Mouse (VirtIO-tablet absolute + USB digitizer + PS/2 aux), Tab focus rings, `cmd-k` keymap (`command_palette`)
+- [x] Login / lock as GPUI Dialogs (`GATE_GPUI login`); auto-login default true so QEMU GATEs still reach the desktop
+- [x] Calculator, Settings, Files, Task Manager, Editor, Browser, AI, Terminal chrome, utilities, installer/picker as GPUI views
+- [x] Kit catalog gallery (`GATE_GPUI kit gallery`)
+- [x] Scene dirty regions (typing damages the focused field, not 1920×1080)
+- [x] Opaque fill SIMD on x86_64 (`GATE_GPUI simd fill`)
+- [x] VirtIO-GPU scanout at FB size (`GATE_GPUI gpu scanout`). Software arrow on `-vga std`
+- [x] Night light and zoom lens are compositor post-process on the composed FB (including GPUI blits)
+- [x] High-contrast + reduced-motion tokens from Settings; panel clock and launcher labels follow `locale.rs`
+- [x] Keyboard cheat-sheet is a GPUI Dialog (`?` / Ctrl+/); lists D6.3 `cmd-k` / `command_palette`
+- [x] Ring 3 can present Knox GPUI rasters via `/run/wayland-0` at **window size** (`GATE_GPUI ring3 calc`). C ABI: `knox_ui_raster_button` / `knox_ui_raster_calculator`. Desktop Calculator prefers that client; in-kernel GPUI calc is the fallback
+- [x] Wayland SHM (`/dev/wl0`, `/run/wayland-0`, `wl_display` opcodes)
+- [x] Dead stacks removed: `knoxui/`, unused `widgets/`, `gui/wayland_server.rs`, Zed / Longbridge reference trees
+
+### Unused / later
+
+- [x] Hardware cursor plane — not the cocoa `-vga std` pointer; software arrow stays
+- [x] Multi-monitor is still one FB (`monitor.rs` types; no fake per-head DPI)
+- Ring 3 Rust GUI runtime (D15.2 documents the C ABI until musl Rust exists)
 
 ### Perfect-OS next steps
-1. Freeze new in-kernel apps. Calculator (F6), Files (F7), and Terminal (`GATE_TERM`) are Ring 3. Every new app should be a userspace binary.
-2. ~~Wayland over Unix sockets~~ F5 live. ~~`wl_display` object protocol~~ `GATE_WL` live. ~~VirtIO-GPU scanout + hardware cursor~~ F8 live. ~~Desktop GPU scanout~~ `GATE_GPU` live.
+
+1. A musl-linked Ring 3 client that *calls* `knox_ui_raster_*` itself (today the kernel rasters into the SHM the client presents).
+2. Interactive Ring 3 calc (re-raster SHM on key), matching Terminal's PTY model.
 
 ---

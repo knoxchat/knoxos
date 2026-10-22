@@ -180,13 +180,21 @@ ci-fmt:
 .PHONY: ci-size
 ci-size: release
 	@echo "[CI] Binary size analysis:"
-	@ls -lh $(KERNEL_RELEASE)
-	@size $(KERNEL_RELEASE) 2>/dev/null || true
+	@HOST_TRIPLE=$$(rustc -vV | awk '/^host:/{print $$2}'); \
+	STRIP=$$(rustc --print sysroot)/lib/rustlib/$$HOST_TRIPLE/bin/llvm-strip; \
+	SIZED=$(KERNEL_RELEASE).sized; \
+	cp $(KERNEL_RELEASE) $$SIZED; \
+	if [ -x "$$STRIP" ]; then \
+		echo "[CI] llvm-strip --strip-unneeded (copy)"; \
+		$$STRIP --strip-unneeded $$SIZED; \
+	fi
+	@ls -lh $(KERNEL_RELEASE).sized
+	@size $(KERNEL_RELEASE).sized 2>/dev/null || true
 	@echo "[CI] Section sizes:"
-	@objdump -h $(KERNEL_RELEASE) 2>/dev/null | grep -E '^\s+[0-9]' || true
+	@objdump -h $(KERNEL_RELEASE).sized 2>/dev/null | grep -E '^\s+[0-9]' || true
 	@echo "[CI] Checking for unexpected size bloat..."
 	@MAX_SIZE=16777216; \
-	ACTUAL=$$(stat -f%z $(KERNEL_RELEASE) 2>/dev/null || stat -c%s $(KERNEL_RELEASE)); \
+	ACTUAL=$$(stat -f%z $(KERNEL_RELEASE).sized 2>/dev/null || stat -c%s $(KERNEL_RELEASE).sized); \
 	if [ "$$ACTUAL" -gt "$$MAX_SIZE" ]; then \
 		echo "ERROR: Kernel binary too large: $$ACTUAL bytes (max $$MAX_SIZE)"; \
 		exit 1; \

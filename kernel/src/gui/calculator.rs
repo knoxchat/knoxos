@@ -8,7 +8,7 @@ use spin::Mutex;
 use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 // ─── State ──────────────────────────────────────────────────────────
 
@@ -42,8 +42,10 @@ const BUTTON_ROWS: &[&[(&str, char)]] = &[
 
 pub fn open() {
     let mut win = window::Window::new("Calculator", 400, 140, 320, 440);
-    win.content_type = WindowContentType::Calculator;
+    win.content_type = WindowContentType::Gpui(ViewKind::Calculator);
     win.resizable = false;
+    // D11.1: in-process GPUI view draws TitleBar CSD.
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -64,11 +66,49 @@ pub fn open() {
     super::sounds::window_open();
 }
 
+/// Bind calculator state to an existing Ring 3 SHM window (D15.3).
+pub fn attach(wid: WindowId) {
+    if STATES.lock().iter().any(|s| s.window_id == wid) {
+        return;
+    }
+    STATES.lock().push(CalcState {
+        window_id: wid,
+        display: String::from("0"),
+        stored: 0.0,
+        pending_op: None,
+        new_number: true,
+        history: String::new(),
+    });
+    super::taskbar::add_entry(wid, "Calculator");
+    super::taskbar::set_active(wid);
+    super::sounds::window_open();
+}
+
+pub fn is_attached(wid: WindowId) -> bool {
+    STATES.lock().iter().any(|s| s.window_id == wid)
+}
+
 pub fn close(wid: WindowId) {
     STATES.lock().retain(|s| s.window_id != wid);
 }
 
+pub fn snapshot(wid: WindowId) -> Option<(String, String)> {
+    STATES
+        .lock()
+        .iter()
+        .find(|s| s.window_id == wid)
+        .map(|s| (s.display.clone(), s.history.clone()))
+}
+
+pub(crate) fn apply_key(wid: WindowId, code: char) {
+    process_input(wid, code);
+}
+
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, _scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_calc(fb, wid, area);
+        return;
+    }
     let (mx, my, mouse_down) = {
         let mouse = crate::gui::input::MOUSE.lock();
         (mouse.x, mouse.y, mouse.left_button)

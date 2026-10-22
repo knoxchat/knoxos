@@ -6,10 +6,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use spin::Mutex;
 
-use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
-use super::window::{WINDOW_MANAGER, WindowContentType, WindowId};
+use super::window::{ViewKind, WINDOW_MANAGER, WindowContentType, WindowId};
 
 lazy_static::lazy_static! {
     pub static ref EXPOSE_STATE: Mutex<ExposeState> = Mutex::new(ExposeState::new());
@@ -48,6 +47,7 @@ impl ExposeState {
 
 /// Toggle the Exposé overlay
 pub fn toggle() {
+    super::alt_tab::dismiss();
     let mut state = EXPOSE_STATE.lock();
     if state.visible {
         state.visible = false;
@@ -60,6 +60,7 @@ pub fn toggle() {
 
 /// Show the Exposé overlay
 pub fn show() {
+    super::alt_tab::dismiss();
     let mut state = EXPOSE_STATE.lock();
     if state.visible {
         return;
@@ -146,7 +147,8 @@ pub fn handle_click(mx: i32, my: i32) -> Option<WindowId> {
     None
 }
 
-/// Draw the Exposé overlay
+/// Draw the Exposé overlay.
+/// Fallback only: the live path is `gpui_platform::switcher` (D9.6).
 pub fn draw(fb: &mut FrameBuffer) {
     let mut state = EXPOSE_STATE.lock();
     if !state.visible || state.entries.is_empty() {
@@ -317,24 +319,24 @@ fn compute_columns(n: usize, avail_w: i32, avail_h: i32) -> usize {
 /// Get a background color for a given content type
 fn content_type_color(ct: WindowContentType) -> Pixel {
     match ct {
-        WindowContentType::Terminal => Pixel::new(25, 28, 38, 230),
-        WindowContentType::Browser => Pixel::new(40, 45, 58, 230),
-        WindowContentType::FileExplorer => Pixel::new(30, 38, 48, 230),
-        WindowContentType::Settings => Pixel::new(22, 28, 38, 230),
-        WindowContentType::AIAssistant => Pixel::new(18, 22, 38, 230),
-        WindowContentType::TextEditor => Pixel::new(28, 28, 30, 230),
-        WindowContentType::Empty => Pixel::new(35, 40, 52, 230),
-        WindowContentType::ArchiveViewer => Pixel::new(45, 40, 28, 230),
-        WindowContentType::DiskUtility => Pixel::new(30, 40, 52, 230),
-        WindowContentType::BluetoothManager => Pixel::new(18, 35, 55, 230),
-        WindowContentType::CalendarApp => Pixel::new(50, 28, 28, 230),
-        WindowContentType::LogViewer => Pixel::new(28, 32, 28, 230),
-        WindowContentType::SoftwareUpdater => Pixel::new(22, 38, 28, 230),
-        WindowContentType::SoftwareCenter => Pixel::new(28, 32, 52, 230),
-        WindowContentType::SetupWizard => Pixel::new(22, 42, 32, 230),
-        WindowContentType::TaskManager => Pixel::new(38, 32, 48, 230),
-        WindowContentType::Calculator => Pixel::new(32, 32, 42, 230),
-        WindowContentType::ImageViewer => Pixel::new(28, 28, 32, 230),
+        WindowContentType::TerminalSurface => Pixel::new(25, 28, 38, 230),
+        WindowContentType::Gpui(ViewKind::Browser) => Pixel::new(40, 45, 58, 230),
+        WindowContentType::Gpui(ViewKind::Files) => Pixel::new(30, 38, 48, 230),
+        WindowContentType::Gpui(ViewKind::Settings) => Pixel::new(22, 28, 38, 230),
+        WindowContentType::Gpui(ViewKind::Chat) => Pixel::new(18, 22, 38, 230),
+        WindowContentType::Gpui(ViewKind::Editor) => Pixel::new(28, 28, 30, 230),
+        WindowContentType::ShmEmpty => Pixel::new(35, 40, 52, 230),
+        WindowContentType::Gpui(ViewKind::Archive) => Pixel::new(45, 40, 28, 230),
+        WindowContentType::Gpui(ViewKind::Disks) => Pixel::new(30, 40, 52, 230),
+        WindowContentType::Gpui(ViewKind::Bluetooth) => Pixel::new(18, 35, 55, 230),
+        WindowContentType::Gpui(ViewKind::Calendar) => Pixel::new(50, 28, 28, 230),
+        WindowContentType::Gpui(ViewKind::Logs) => Pixel::new(28, 32, 28, 230),
+        WindowContentType::Gpui(ViewKind::Updater) => Pixel::new(22, 38, 28, 230),
+        WindowContentType::Gpui(ViewKind::Software) => Pixel::new(28, 32, 52, 230),
+        WindowContentType::Gpui(ViewKind::Wizard) => Pixel::new(22, 42, 32, 230),
+        WindowContentType::Gpui(ViewKind::Tasks) => Pixel::new(38, 32, 48, 230),
+        WindowContentType::Gpui(ViewKind::Calculator) => Pixel::new(32, 32, 42, 230),
+        WindowContentType::Gpui(ViewKind::Image) => Pixel::new(28, 28, 32, 230),
     }
 }
 
@@ -343,24 +345,24 @@ fn draw_expose_icon(fb: &mut FrameBuffer, cx: i32, cy: i32, ct: WindowContentTyp
     let color = Pixel::new(100, 150, 220, 140);
 
     match ct {
-        WindowContentType::Terminal => {
+        WindowContentType::TerminalSurface => {
             // >_ prompt icon (larger)
             fb.fill_rect(Rect::new(cx - 18, cy - 6, 9, 3), color);
             fb.fill_rect(Rect::new(cx - 18, cy - 3, 3, 9), color);
             fb.fill_rect(Rect::new(cx - 9, cy + 6, 16, 3), color);
         }
-        WindowContentType::Browser => {
+        WindowContentType::Gpui(ViewKind::Browser) => {
             // Globe
             fb.draw_rounded_rect(Rect::new(cx - 16, cy - 16, 32, 32), color, 16, 2);
             fb.fill_rect(Rect::new(cx - 14, cy - 1, 28, 2), color);
             fb.fill_rect(Rect::new(cx - 1, cy - 14, 2, 28), color);
         }
-        WindowContentType::FileExplorer => {
+        WindowContentType::Gpui(ViewKind::Files) => {
             // Folder
             fb.fill_rounded_rect_aa(Rect::new(cx - 16, cy - 8, 32, 20), color, 4);
             fb.fill_rect(Rect::new(cx - 16, cy - 12, 16, 6), color);
         }
-        WindowContentType::Settings => {
+        WindowContentType::Gpui(ViewKind::Settings) => {
             // Gear
             fb.draw_rounded_rect(Rect::new(cx - 10, cy - 10, 20, 20), color, 10, 3);
             fb.fill_rect(Rect::new(cx - 1, cy - 16, 2, 6), color);
@@ -368,11 +370,11 @@ fn draw_expose_icon(fb: &mut FrameBuffer, cx: i32, cy: i32, ct: WindowContentTyp
             fb.fill_rect(Rect::new(cx - 16, cy - 1, 6, 2), color);
             fb.fill_rect(Rect::new(cx + 10, cy - 1, 6, 2), color);
         }
-        WindowContentType::AIAssistant => {
+        WindowContentType::Gpui(ViewKind::Chat) => {
             fb.fill_circle_aa(cx, cy, 14, color);
             fb.fill_circle_aa(cx, cy, 7, Pixel::new(0, 200, 255, 100));
         }
-        WindowContentType::TextEditor => {
+        WindowContentType::Gpui(ViewKind::Editor) => {
             fb.fill_rounded_rect_aa(Rect::new(cx - 12, cy - 16, 24, 32), color, 3);
             for i in 0..5 {
                 fb.fill_rect(
@@ -381,12 +383,12 @@ fn draw_expose_icon(fb: &mut FrameBuffer, cx: i32, cy: i32, ct: WindowContentTyp
                 );
             }
         }
-        WindowContentType::TaskManager => {
+        WindowContentType::Gpui(ViewKind::Tasks) => {
             fb.fill_rect(Rect::new(cx - 10, cy + 2, 6, 10), Pixel::rgb(82, 139, 255));
             fb.fill_rect(Rect::new(cx - 2, cy - 6, 6, 18), Pixel::rgb(60, 180, 100));
             fb.fill_rect(Rect::new(cx + 6, cy - 2, 6, 14), Pixel::rgb(230, 180, 40));
         }
-        WindowContentType::Calculator => {
+        WindowContentType::Gpui(ViewKind::Calculator) => {
             fb.fill_rounded_rect_aa(Rect::new(cx - 12, cy - 12, 24, 24), color, 4);
             fb.fill_rect(Rect::new(cx - 7, cy - 7, 5, 5), Pixel::new(40, 50, 60, 180));
             fb.fill_rect(Rect::new(cx + 2, cy - 7, 5, 5), Pixel::new(40, 50, 60, 180));

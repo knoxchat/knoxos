@@ -267,9 +267,9 @@ fn process_mouse_byte(byte: u8) {
 
             drop(mouse);
 
-            // Close context menus on any left click
+            // Close desktop context menus on any left click. The GPUI tray
+            // menu is closed by overlay hit-testing in `pointer_down_button`.
             desktop::close_context_menu();
-            crate::gui::system_tray::close_context_menu();
 
             if is_double_click {
                 super::frame::note_double_click();
@@ -304,12 +304,15 @@ fn process_mouse_byte(byte: u8) {
             handle_drag(x, y);
         } else if moved {
             drop(mouse);
+            if session_pointer_only(x, y) {
+                return;
+            }
             // Always update cursor type based on position first (resize cursors, hand, etc.)
             // This is lightweight — just sets an atomic u8.
             crate::gui::desktop::update_cursor_for_position(x, y);
 
-            // Exposé hover tracking
-            if crate::gui::expose::is_visible() {
+            // Exposé hover tracking (legacy painter). GPUI switcher owns hover when live.
+            if crate::gui::expose::is_visible() && !crate::gui::gpui_platform::switcher_is_live() {
                 crate::gui::expose::handle_mouse_move(x, y);
             }
 
@@ -320,6 +323,8 @@ fn process_mouse_byte(byte: u8) {
                 if y < taskbar_y
                     && !startmenu::is_visible()
                     && !crate::gui::popups::any_popup_open()
+                    && !crate::gui::expose::is_visible()
+                    && !crate::gui::alt_tab::is_visible()
                 {
                     let mut wm = window::WINDOW_MANAGER.lock();
                     if let Some(hover_id) = wm.window_at(x, y) {
@@ -339,7 +344,9 @@ fn process_mouse_byte(byte: u8) {
             // highlights (context menu items, start menu, popups), use a full redraw.
             // For everything else (taskbar, title bars, resize edges, desktop), use
             // the fast cursor-only path — the cursor type was already updated above.
-            if needs_overlay_hover_redraw(x, y, screen_w, screen_h) {
+            if crate::gui::gpui_platform::pointer_moved(x, y) {
+                crate::gui::gpui_platform::damage_proof();
+            } else if needs_overlay_hover_redraw(x, y, screen_w, screen_h) {
                 crate::gui::request_redraw();
             } else {
                 crate::gui::request_cursor_redraw();
@@ -352,6 +359,9 @@ fn process_mouse_byte(byte: u8) {
 /// Coordinates are already in screen pixels. No mouse acceleration is applied.
 /// Handles button transitions (click, release, drag) and scroll identically
 /// to the PS/2 path but without relative-to-absolute conversion.
+///
+/// D6.1: GPUI clicks use this same path (`handle_click` → `pointer_down`).
+/// Do not convert tablet samples to relative motion.
 pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool, scroll: i8) {
     let (screen_w, screen_h) = crate::gui::cached_screen_size();
 
@@ -428,7 +438,6 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
         drop(mouse);
 
         desktop::close_context_menu();
-        crate::gui::system_tray::close_context_menu();
 
         if is_double_click {
             super::frame::note_double_click();
@@ -463,17 +472,25 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
         handle_drag(cx, cy);
     } else if moved {
         drop(mouse);
+        if session_pointer_only(cx, cy) {
+            return;
+        }
         // Update cursor type (resize cursors, hand, etc.)
         crate::gui::desktop::update_cursor_for_position(cx, cy);
 
-        if crate::gui::expose::is_visible() {
+        if crate::gui::expose::is_visible() && !crate::gui::gpui_platform::switcher_is_live() {
             crate::gui::expose::handle_mouse_move(cx, cy);
         }
 
         // Focus-follows-mouse
         if focus_mode() == FocusMode::FocusFollowsMouse {
             let taskbar_y = screen_h - crate::gui::scale::taskbar_height() as i32;
-            if cy < taskbar_y && !startmenu::is_visible() && !crate::gui::popups::any_popup_open() {
+            if cy < taskbar_y
+                && !startmenu::is_visible()
+                && !crate::gui::popups::any_popup_open()
+                && !crate::gui::expose::is_visible()
+                && !crate::gui::alt_tab::is_visible()
+            {
                 let mut wm = window::WINDOW_MANAGER.lock();
                 if let Some(hover_id) = wm.window_at(cx, cy) {
                     if wm.focused_window != Some(hover_id) {
@@ -486,7 +503,9 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
         }
 
         crate::gui::hot_corners::update(cx, cy, screen_w, screen_h);
-        if needs_overlay_hover_redraw(cx, cy, screen_w, screen_h) {
+        if crate::gui::gpui_platform::pointer_moved(cx, cy) {
+            crate::gui::gpui_platform::damage_proof();
+        } else if needs_overlay_hover_redraw(cx, cy, screen_w, screen_h) {
             crate::gui::request_redraw();
         } else {
             crate::gui::request_cursor_redraw();
@@ -494,6 +513,18 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
     } else {
         drop(mouse);
     }
+}
+
+fn session_pointer_only(x: i32, y: i32) -> bool {
+    if crate::gui::login::is_logged_in() && !crate::gui::lock_screen::is_locked() {
+        return false;
+    }
+    if crate::gui::gpui_platform::pointer_moved(x, y) {
+        crate::gui::request_redraw();
+    } else {
+        crate::gui::request_cursor_redraw();
+    }
+    true
 }
 
 /// If a handler already queued damage (or a full redraw), keep it.

@@ -72,6 +72,22 @@ lazy_static::lazy_static! {
 }
 
 static SELECTING_REGION: AtomicBool = AtomicBool::new(false);
+static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// Open the GPUI capture-mode Dialog (D11.10).
+pub fn open_dialog() {
+    DIALOG_OPEN.store(true, Ordering::SeqCst);
+    crate::gui::request_redraw();
+}
+
+pub fn close_dialog() {
+    DIALOG_OPEN.store(false, Ordering::SeqCst);
+    crate::gui::request_redraw();
+}
+
+pub fn is_dialog_open() -> bool {
+    DIALOG_OPEN.load(Ordering::SeqCst)
+}
 
 /// Check if the user is currently selecting a region
 pub fn is_selecting_region() -> bool {

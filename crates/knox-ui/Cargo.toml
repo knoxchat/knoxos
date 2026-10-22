@@ -1,0 +1,46 @@
+[package]
+name = "knox-ui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+license = "MIT"
+description = "no_std component catalog for the KnoxOS desktop"
+authors = ["KnoxOS Contributors"]
+publish = false
+
+# Keep this crate no_std. Forbidden deps are listed in README.md.
+[dependencies]
+knox-gpui = { path = "../knox-gpui" }
+libm = "0.2.16"
+
+[lints.clippy]
+byte_char_slices = "allow"
+chunks_exact_to_as_chunks = "allow"
+collapsible_if = "allow"
+collapsible_match = "allow"
+doc_lazy_continuation = "allow"
+drain_collect = "allow"
+empty_line_after_doc_comments = "allow"
+excessive_precision = "allow"
+field_reassign_with_default = "allow"
+for_kv_map = "allow"
+inherent_to_string = "allow"
+iter_cloned_collect = "allow"
+len_without_is_empty = "allow"
+len_zero = "allow"
+let_and_return = "allow"
+manual_clamp = "allow"
+manual_range_patterns = "allow"
+manual_repeat_n = "allow"
+manual_slice_fill = "allow"
+missing_safety_doc = "allow"
+needless_range_loop = "allow"
+needless_return = "allow"
+question_mark = "allow"
+redundant_closure = "allow"
+should_implement_trait = "allow"
+single_match = "allow"
+too_many_arguments = "allow"
+undocumented_unsafe_blocks = "deny"
+unnecessary_map_or = "allow"
+vec_box = "allow"

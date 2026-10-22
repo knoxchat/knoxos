@@ -10,8 +10,9 @@ use super::compositor::COMPOSITOR;
 use super::gates::{
     GATE_F_HEIGHT, GATE_F_WIDTH, GATE_F2_MARKER, GATE_F3_MAGIC, GATE_F3_MARKER, GATE_F4_MAGIC,
     GATE_F4_MARKER, GATE_F5_MARKER, GATE_F6_MAGIC, GATE_F6_MARKER, GATE_F7_MAGIC, GATE_F7_MARKER,
-    GATE_TERM_MAGIC, GATE_TERM_MARKER, WAYLAND_SOCKET_PATH, is_known_shm_magic,
-    paint_term_first_frame, shm_title_for_magic,
+    GATE_GPUI_BUTTON_MAGIC, GATE_GPUI_CALC_MAGIC, GATE_GPUI_RING3_CALC, GATE_TERM_MAGIC,
+    GATE_TERM_MARKER, WAYLAND_SOCKET_PATH, is_known_shm_magic, paint_term_first_frame,
+    shm_title_for_magic,
 };
 use super::shm::PixelFormat;
 
@@ -26,17 +27,44 @@ lazy_static::lazy_static! {
     static ref WINDOW_PTY: Mutex<BTreeMap<u32, u32>> = Mutex::new(BTreeMap::new());
 }
 
+fn peek_gpui_header(pid: u32, vaddr: u64) -> (u32, u32, bool, bool) {
+    let mut head = [0u8; 12];
+    crate::vmm::read_user_memory(pid, vaddr, &mut head);
+    let mut wh = [0u8; 4];
+    if head[0..4] == GATE_GPUI_CALC_MAGIC {
+        wh.copy_from_slice(&head[4..8]);
+        let w = u32::from_le_bytes(wh).clamp(64, 1920);
+        wh.copy_from_slice(&head[8..12]);
+        let h = u32::from_le_bytes(wh).clamp(64, 1080);
+        (w, h, true, false)
+    } else if head[0..4] == GATE_GPUI_BUTTON_MAGIC {
+        wh.copy_from_slice(&head[4..8]);
+        let w = u32::from_le_bytes(wh).clamp(64, 1920);
+        wh.copy_from_slice(&head[8..12]);
+        let h = u32::from_le_bytes(wh).clamp(64, 1080);
+        (w, h, false, true)
+    } else {
+        (GATE_F_WIDTH, GATE_F_HEIGHT, false, false)
+    }
+}
+
 /// Present a Ring 3 SHM buffer as a compositor surface + desktop window.
 ///
-/// `vaddr` is the client’s mmap’d 64×64 BGRA buffer. Pixels are copied into a
-/// kernel SHM pool (F2) and a chrome window blits them. F3/F4 magics force
-/// `WindowContentType::Empty` so the terminal and launcher are not in-kernel
-/// app enums.
+/// Gate F clients mmap 64×64. D15 GPUI magics carry width/height in the
+/// header and present at **window size** via `/run/wayland-0`.
 pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
-    let len = (GATE_F_WIDTH * GATE_F_HEIGHT * 4) as usize;
+    let (width, height, gpui_calc, gpui_btn) = peek_gpui_header(pid, vaddr);
+    let len = (width as usize)
+        .saturating_mul(height as usize)
+        .saturating_mul(4);
     let mut pixels = vec![0u8; len];
     crate::vmm::read_user_memory(pid, vaddr, &mut pixels);
-    let term_painted = paint_term_first_frame(&mut pixels);
+    let _term_painted = paint_term_first_frame(&mut pixels);
+    if gpui_btn {
+        let _ = knox_ui::raster_button_to_shm(width, height, &mut pixels);
+    } else if gpui_calc {
+        let _ = knox_ui::raster_calculator_to_shm(width, height, &mut pixels);
+    }
 
     let mut comp = COMPOSITOR.lock();
     let pool = comp.create_shm_pool(-1, len, pid);
@@ -47,9 +75,9 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     let Some(buf) = comp.create_shm_buffer(
         pool,
         0,
-        GATE_F_WIDTH,
-        GATE_F_HEIGHT,
-        GATE_F_WIDTH * 4,
+        width,
+        height,
+        width * 4,
         PixelFormat::Bgra8888,
         pid,
     ) else {
@@ -59,12 +87,19 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     let sid = comp.create_surface(pid);
     comp.create_toplevel(sid);
     let title = shm_title_for_magic(&pixels);
+    let title = if gpui_calc {
+        "Calculator"
+    } else if gpui_btn {
+        "Knox GPUI"
+    } else {
+        title
+    };
     comp.toplevel_set_title(sid, title);
     if !comp.attach_shm_buffer(sid, buf, 0, 0) {
         serial_println!("[WL] Gate F FAILED: attach");
         return false;
     }
-    comp.surface_damage(sid, 0, 0, GATE_F_WIDTH as i32, GATE_F_HEIGHT as i32);
+    comp.surface_damage(sid, 0, 0, width as i32, height as i32);
     comp.surface_commit(sid);
     let roundtrip = comp.read_from_pool(pool, 0, 4);
     drop(comp);
@@ -72,28 +107,66 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     if let Some(&existing) = CLIENT_WINDOWS.lock().get(&pid) {
         WINDOW_PIXELS
             .lock()
-            .insert(existing, (pixels.clone(), GATE_F_WIDTH, GATE_F_HEIGHT));
+            .insert(existing, (pixels.clone(), width, height));
         crate::gui::request_redraw();
+        if gpui_calc {
+            emit_ring3_calc(existing, width, height);
+            return true;
+        }
+        if gpui_btn {
+            return true;
+        }
         return magic_ok_for(&pixels, &roundtrip, existing, sid, pid, title);
     }
 
-    let mut win = crate::gui::window::Window::new(title, 120, 80, 280, 200);
-    win.content_type = crate::gui::window::WindowContentType::Empty;
+    let (win_w, win_h) = if gpui_calc || gpui_btn {
+        (width.max(160), height.max(120) + 32)
+    } else {
+        (280, 200)
+    };
+    let mut win = crate::gui::window::Window::new(title, 120, 80, win_w, win_h);
+    win.content_type = crate::gui::window::WindowContentType::ShmEmpty;
     let wid = win.id;
     crate::gui::window::WINDOW_MANAGER.lock().add_window(win);
     CLIENT_WINDOWS.lock().insert(pid, wid);
     WINDOW_SURFACES.lock().insert(wid, sid);
     WINDOW_PIXELS
         .lock()
-        .insert(wid, (pixels.clone(), GATE_F_WIDTH, GATE_F_HEIGHT));
+        .insert(wid, (pixels.clone(), width, height));
     if pixels.get(0..4) == Some(&GATE_TERM_MAGIC[..]) {
         if let Some(pty) = crate::pty::pty_for_pid(pid) {
             WINDOW_PTY.lock().insert(wid, pty);
         }
     }
     crate::gui::request_redraw();
+    if gpui_calc {
+        emit_ring3_calc(wid, width, height);
+        return true;
+    }
+    if gpui_btn {
+        return true;
+    }
 
     magic_ok_for(&pixels, &roundtrip, wid, sid, pid, title)
+}
+
+fn emit_ring3_calc(wid: u32, width: u32, height: u32) {
+    crate::gui::calculator::attach(wid);
+    serial_println!(
+        "[WL] {} (window={} {}x{} SHM via {}, not 64x64)",
+        GATE_GPUI_RING3_CALC,
+        wid,
+        width,
+        height,
+        WAYLAND_SOCKET_PATH
+    );
+}
+
+/// Replace SHM pixels for an existing Ring 3 window (interactive calc).
+pub fn set_window_shm_pixels(window_id: u32, pixels: Vec<u8>, width: u32, height: u32) {
+    WINDOW_PIXELS
+        .lock()
+        .insert(window_id, (pixels, width, height));
 }
 
 fn magic_ok_for(
@@ -120,7 +193,7 @@ fn magic_ok_for(
         );
         if pixels[0..4] == GATE_F3_MAGIC {
             serial_println!(
-                "[WL] {} (window={} content=Empty, not WindowContentType::Terminal)",
+                "[WL] {} (window={} content=Empty, not WindowContentType::TerminalSurface)",
                 GATE_F3_MARKER,
                 wid
             );
@@ -134,21 +207,21 @@ fn magic_ok_for(
         }
         if pixels[0..4] == GATE_F6_MAGIC {
             serial_println!(
-                "[WL] {} (window={} content=Empty SHM, not WindowContentType::Calculator)",
+                "[WL] {} (window={} content=Empty SHM, not WindowContentType::Gpui(ViewKind::Calculator))",
                 GATE_F6_MARKER,
                 wid
             );
         }
         if pixels[0..4] == GATE_F7_MAGIC {
             serial_println!(
-                "[WL] {} (window={} content=Empty SHM, not WindowContentType::FileExplorer)",
+                "[WL] {} (window={} content=Empty SHM, not WindowContentType::Gpui(ViewKind::Files))",
                 GATE_F7_MARKER,
                 wid
             );
         }
         if pixels[0..4] == GATE_TERM_MAGIC {
             serial_println!(
-                "[WL] {} (window={} content=Empty SHM, openpty live, not WindowContentType::Terminal)",
+                "[WL] {} (window={} content=Empty SHM, openpty live, not WindowContentType::TerminalSurface)",
                 GATE_TERM_MARKER,
                 wid
             );

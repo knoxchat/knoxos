@@ -7,10 +7,11 @@
 ///   - cmap table (Unicode → glyph ID mapping)
 ///   - hmtx / hhea (horizontal metrics / advance widths)
 ///   - head (units-per-em, bounding box)
-///   - Simple + composite glyphs
+///   - Simple + composite glyphs (components, scales, XY offsets)
 ///
-/// The rasterizer uses a scanline fill algorithm with 4× vertical
-/// super-sampling for anti-aliased output.
+/// The rasterizer uses a non-zero winding scanline fill with 8×4
+/// super-sampling at UI sizes, 1px padding, and ~0.4px stem darkening so
+/// 13px Inter stems do not dropout.
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -77,8 +78,8 @@ pub struct Contour {
 
 #[derive(Clone, Copy)]
 pub struct GlyphPoint {
-    pub x: i16,
-    pub y: i16,
+    pub x: i32,
+    pub y: i32,
     pub on_curve: bool,
 }
 
@@ -452,6 +453,10 @@ impl TtfFont {
 
     /// Load a glyph outline from the glyf table
     pub fn load_glyph(&self, glyph_id: u16) -> Option<GlyphOutline> {
+        self.load_glyph_depth(glyph_id, 0)
+    }
+
+    fn load_glyph_depth(&self, glyph_id: u16, depth: u8) -> Option<GlyphOutline> {
         let loca = self.find_table(TAG_LOCA)?;
         let glyf = self.find_table(TAG_GLYF)?;
         let hmtx = self.find_table(TAG_HMTX)?;
@@ -531,8 +536,7 @@ impl TtfFont {
         let contours = if num_contours >= 0 {
             self.parse_simple_glyph(glyf, go, num_contours as usize)
         } else {
-            // Composite glyph — simplified: just return empty
-            Vec::new()
+            self.parse_composite_glyph(glyf, go, depth)
         };
 
         Some(GlyphOutline {
@@ -583,11 +587,13 @@ impl TtfFont {
                 }
                 let repeat = glyf[pos] as usize;
                 pos += 1;
-                for _ in 0..repeat {
+                let remaining = num_points.saturating_sub(flags.len());
+                for _ in 0..repeat.min(remaining) {
                     flags.push(flag);
                 }
             }
         }
+        flags.truncate(num_points);
 
         // Parse x-coordinates
         let mut x_coords = Vec::with_capacity(num_points);
@@ -646,8 +652,8 @@ impl TtfFont {
             let mut points = Vec::new();
             for j in start..=end.min(num_points - 1) {
                 points.push(GlyphPoint {
-                    x: x_coords[j],
-                    y: y_coords[j],
+                    x: x_coords[j] as i32,
+                    y: y_coords[j] as i32,
                     on_curve: flags[j] & 0x01 != 0,
                 });
             }
@@ -657,81 +663,214 @@ impl TtfFont {
 
         contours
     }
+
+    /// Decode a TrueType composite (`numberOfContours < 0`): components,
+    /// optional 2.14 scales, and XY offsets. Nested composites are allowed.
+    fn parse_composite_glyph(&self, glyf: &[u8], offset: usize, depth: u8) -> Vec<Contour> {
+        if depth >= 8 {
+            return Vec::new();
+        }
+        const ARG_WORDS: u16 = 0x0001;
+        const ARGS_XY: u16 = 0x0002;
+        const HAVE_SCALE: u16 = 0x0008;
+        const MORE: u16 = 0x0020;
+        const HAVE_XY_SCALE: u16 = 0x0040;
+        const HAVE_2X2: u16 = 0x0080;
+
+        let mut pos = offset + 10;
+        let mut contours = Vec::new();
+        loop {
+            if pos + 4 > glyf.len() {
+                break;
+            }
+            let flags = u16::from_be_bytes([glyf[pos], glyf[pos + 1]]);
+            let gid = u16::from_be_bytes([glyf[pos + 2], glyf[pos + 3]]);
+            pos += 4;
+
+            let mut dx = 0.0f32;
+            let mut dy = 0.0f32;
+            if flags & ARG_WORDS != 0 {
+                if pos + 4 > glyf.len() {
+                    break;
+                }
+                let a1 = i16::from_be_bytes([glyf[pos], glyf[pos + 1]]) as f32;
+                let a2 = i16::from_be_bytes([glyf[pos + 2], glyf[pos + 3]]) as f32;
+                pos += 4;
+                if flags & ARGS_XY != 0 {
+                    dx = a1;
+                    dy = a2;
+                }
+            } else {
+                if pos + 2 > glyf.len() {
+                    break;
+                }
+                let a1 = glyf[pos] as i8 as f32;
+                let a2 = glyf[pos + 1] as i8 as f32;
+                pos += 2;
+                if flags & ARGS_XY != 0 {
+                    dx = a1;
+                    dy = a2;
+                }
+            }
+
+            let mut xx = 1.0f32;
+            let mut xy = 0.0f32;
+            let mut yx = 0.0f32;
+            let mut yy = 1.0f32;
+            if flags & HAVE_SCALE != 0 {
+                if pos + 2 > glyf.len() {
+                    break;
+                }
+                let s = i16::from_be_bytes([glyf[pos], glyf[pos + 1]]) as f32 / 16384.0;
+                pos += 2;
+                xx = s;
+                yy = s;
+            } else if flags & HAVE_XY_SCALE != 0 {
+                if pos + 4 > glyf.len() {
+                    break;
+                }
+                xx = i16::from_be_bytes([glyf[pos], glyf[pos + 1]]) as f32 / 16384.0;
+                yy = i16::from_be_bytes([glyf[pos + 2], glyf[pos + 3]]) as f32 / 16384.0;
+                pos += 4;
+            } else if flags & HAVE_2X2 != 0 {
+                if pos + 8 > glyf.len() {
+                    break;
+                }
+                xx = i16::from_be_bytes([glyf[pos], glyf[pos + 1]]) as f32 / 16384.0;
+                xy = i16::from_be_bytes([glyf[pos + 2], glyf[pos + 3]]) as f32 / 16384.0;
+                yx = i16::from_be_bytes([glyf[pos + 4], glyf[pos + 5]]) as f32 / 16384.0;
+                yy = i16::from_be_bytes([glyf[pos + 6], glyf[pos + 7]]) as f32 / 16384.0;
+                pos += 8;
+            }
+
+            if let Some(child) = self.load_glyph_depth(gid, depth + 1) {
+                for contour in &child.contours {
+                    contours.push(transform_contour(contour, xx, xy, yx, yy, dx, dy));
+                }
+            }
+
+            if flags & MORE == 0 {
+                break;
+            }
+        }
+        contours
+    }
+}
+
+fn transform_contour(
+    contour: &Contour,
+    xx: f32,
+    xy: f32,
+    yx: f32,
+    yy: f32,
+    dx: f32,
+    dy: f32,
+) -> Contour {
+    Contour {
+        points: contour
+            .points
+            .iter()
+            .map(|p| {
+                let x = p.x as f32;
+                let y = p.y as f32;
+                GlyphPoint {
+                    x: (xx * x + xy * y + dx) as i32,
+                    y: (yx * x + yy * y + dy) as i32,
+                    on_curve: p.on_curve,
+                }
+            })
+            .collect(),
+    }
 }
 
 // ─── Rasterizer ──────────────────────────────────────────────────────
 
-/// Flatten a quadratic Bézier contour into line segments, properly handling
-/// on-curve and off-curve control points per the TrueType specification.
-/// Off-curve points are quadratic Bézier control points; consecutive
-/// off-curve points have implied on-curve midpoints between them.
-fn flatten_contour(contour: &Contour, scale: f32) -> Vec<(f32, f32)> {
-    let pts = &contour.points;
-    let n = pts.len();
+fn add_quad(out: &mut Vec<(f32, f32)>, p0: (f32, f32), p1: (f32, f32), p2: (f32, f32)) {
+    let dx = p2.0 - p0.0;
+    let dy = p2.1 - p0.1;
+    let cdx = p1.0 - p0.0;
+    let cdy = p1.1 - p0.1;
+    let approx = 0.5 * (libm::sqrtf(dx * dx + dy * dy) + libm::sqrtf(cdx * cdx + cdy * cdy));
+    let steps = (approx * 2.0).clamp(4.0, 16.0) as usize;
+    for s in 1..=steps {
+        let t = s as f32 / steps as f32;
+        let inv = 1.0 - t;
+        out.push((
+            inv * inv * p0.0 + 2.0 * inv * t * p1.0 + t * t * p2.0,
+            inv * inv * p0.1 + 2.0 * inv * t * p1.1 + t * t * p2.1,
+        ));
+    }
+}
+
+/// Flatten a quadratic Bézier contour into pixel-space line segments.
+/// `embolden_px` expands the contour away from its centroid (stem darkening).
+fn flatten_contour(contour: &Contour, scale: f32, embolden_px: f32) -> Vec<(f32, f32)> {
+    let n = contour.points.len();
     if n < 2 {
         return Vec::new();
     }
 
-    let mut result: Vec<(f32, f32)> = Vec::new();
+    let mut pts: Vec<(f32, f32, bool)> = contour
+        .points
+        .iter()
+        .map(|p| (p.x as f32 * scale, p.y as f32 * scale, p.on_curve))
+        .collect();
 
-    // Find the first on-curve point (or synthesize one)
-    let first_on = if pts[0].on_curve {
-        (pts[0].x as f32, pts[0].y as f32)
-    } else if pts[n - 1].on_curve {
-        (pts[n - 1].x as f32, pts[n - 1].y as f32)
+    if embolden_px > 0.0 && n >= 3 {
+        let nf = n as f32;
+        let mut cx = 0.0f32;
+        let mut cy = 0.0f32;
+        for p in &pts {
+            cx += p.0;
+            cy += p.1;
+        }
+        cx /= nf;
+        cy /= nf;
+        for p in &mut pts {
+            let dx = p.0 - cx;
+            let dy = p.1 - cy;
+            let len = libm::sqrtf(dx * dx + dy * dy);
+            if len > 0.05 {
+                p.0 += dx / len * embolden_px;
+                p.1 += dy / len * embolden_px;
+            }
+        }
+    }
+
+    let mut result: Vec<(f32, f32)> = Vec::new();
+    let first = if pts[0].2 {
+        (pts[0].0, pts[0].1)
+    } else if pts[n - 1].2 {
+        (pts[n - 1].0, pts[n - 1].1)
     } else {
-        // Both first and last are off-curve: start at their midpoint
         (
-            (pts[0].x as f32 + pts[n - 1].x as f32) * 0.5,
-            (pts[0].y as f32 + pts[n - 1].y as f32) * 0.5,
+            (pts[0].0 + pts[n - 1].0) * 0.5,
+            (pts[0].1 + pts[n - 1].1) * 0.5,
         )
     };
-
-    result.push(first_on);
-    let mut last = first_on;
-    // Skip the duplicated start point when the contour begins on-curve.
-    let mut i = if pts[0].on_curve { 1 } else { 0 };
+    result.push(first);
+    let mut last = first;
+    let mut i = if pts[0].2 { 1 } else { 0 };
 
     while i < n {
-        let p = &pts[i];
-        if p.on_curve {
-            last = (p.x as f32, p.y as f32);
+        if pts[i].2 {
+            last = (pts[i].0, pts[i].1);
             result.push(last);
             i += 1;
         } else {
-            // Off-curve control point — find the next on-curve (or implied midpoint)
-            let ctrl = (p.x as f32, p.y as f32);
+            let ctrl = (pts[i].0, pts[i].1);
             let next_idx = (i + 1) % n;
-            let next_p = &pts[next_idx];
-            let end = if next_p.on_curve {
+            let end = if pts[next_idx].2 {
                 i += 2;
-                (next_p.x as f32, next_p.y as f32)
+                (pts[next_idx].0, pts[next_idx].1)
             } else {
-                // Implied on-curve midpoint between two off-curve points
                 i += 1;
                 (
-                    (ctrl.0 + next_p.x as f32) * 0.5,
-                    (ctrl.1 + next_p.y as f32) * 0.5,
+                    (ctrl.0 + pts[next_idx].0) * 0.5,
+                    (ctrl.1 + pts[next_idx].1) * 0.5,
                 )
             };
-
-            // Adaptive subdivision: ~1 segment per output pixel of curve length.
-            let dx = end.0 - last.0;
-            let dy = end.1 - last.1;
-            let cdx = ctrl.0 - last.0;
-            let cdy = ctrl.1 - last.1;
-            let approx_len =
-                (libm::sqrtf(dx * dx + dy * dy) + libm::sqrtf(cdx * cdx + cdy * cdy)) * 0.5;
-            let steps = (approx_len * scale).clamp(6.0, 32.0) as usize;
-
-            // Subdivide quadratic Bézier: P(t) = (1-t)²·last + 2(1-t)t·ctrl + t²·end
-            for s in 1..=steps {
-                let t = s as f32 / steps as f32;
-                let inv = 1.0 - t;
-                let x = inv * inv * last.0 + 2.0 * inv * t * ctrl.0 + t * t * end.0;
-                let y = inv * inv * last.1 + 2.0 * inv * t * ctrl.1 + t * t * end.1;
-                result.push((x, y));
-            }
+            add_quad(&mut result, last, ctrl, end);
             last = end;
         }
     }
@@ -739,44 +878,73 @@ fn flatten_contour(contour: &Contour, scale: f32) -> Vec<(f32, f32)> {
     result
 }
 
-/// Rasterize a glyph outline into an alpha bitmap using scanline fill
-/// with 4×4 super-sampling for high-quality anti-aliasing.
-/// Properly handles quadratic Bézier curves (TrueType outlines).
+/// Rasterize a glyph outline into an 8-bit coverage bitmap.
+///
+/// UI sizes (≤24px) use 8×4 super-sampling, 1px padding, and ~0.4px stem
+/// darkening so 1px Inter stems survive without TrueType bytecode hinting.
+/// Coverage is mapped so ~40% of samples already read as opaque ink.
 fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) -> GlyphBitmap {
-    let scale = px_size / units_per_em as f32;
-    let width = libm::ceilf((outline.x_max - outline.x_min) as f32 * scale) as usize + 2;
-    let height = libm::ceilf((outline.y_max - outline.y_min) as f32 * scale) as usize + 2;
+    let scale = if units_per_em == 0 {
+        1.0
+    } else {
+        px_size / units_per_em as f32
+    };
+    let advance = libm::roundf(outline.advance_width as f32 * scale).max(1.0) as i32;
 
-    if width == 0 || height == 0 || outline.contours.is_empty() {
+    if outline.contours.is_empty() {
         return GlyphBitmap {
-            width: width.max(1),
-            height: height.max(1),
-            bearing_x: (outline.lsb as f32 * scale) as i32,
-            bearing_y: (outline.y_max as f32 * scale) as i32,
-            advance: (outline.advance_width as f32 * scale) as i32,
-            pixels: vec![0u8; width.max(1) * height.max(1)],
+            width: 1,
+            height: 1,
+            bearing_x: 0,
+            bearing_y: 0,
+            advance,
+            pixels: vec![0u8; 1],
         };
     }
 
-    // 4×4 super-sampling (both horizontal and vertical) for full AA
-    let ss_x = 4usize;
-    let ss_y = 4usize;
+    let embolden_px = if px_size < 24.0 {
+        0.40 * (1.0 - (px_size / 24.0) * 0.4)
+    } else {
+        0.0
+    };
+    let pad = 1.0 + embolden_px;
+    let x_min_px = outline.x_min as f32 * scale - pad;
+    let y_min_px = outline.y_min as f32 * scale - pad;
+    let x_max_px = outline.x_max as f32 * scale + pad;
+    let y_max_px = outline.y_max as f32 * scale + pad;
+
+    let width = libm::ceilf(x_max_px - x_min_px).max(1.0) as usize;
+    let height = libm::ceilf(y_max_px - y_min_px).max(1.0) as usize;
+    if width > 512 || height > 512 {
+        return GlyphBitmap {
+            width: 1,
+            height: 1,
+            bearing_x: 0,
+            bearing_y: 0,
+            advance,
+            pixels: vec![0u8; 1],
+        };
+    }
+
+    let (ss_x, ss_y) = if px_size <= 24.0 {
+        (8usize, 4usize)
+    } else {
+        (4usize, 4usize)
+    };
     let ss_width = width * ss_x;
     let ss_height = height * ss_y;
-    let total_samples = ss_x * ss_y; // 16 samples per output pixel
     let mut coverage = vec![0u32; width * height];
 
-    // Pre-flatten all contours (handles Bézier curves correctly)
     let flattened: Vec<Vec<(f32, f32)>> = outline
         .contours
         .iter()
-        .map(|c| flatten_contour(c, scale))
+        .map(|c| flatten_contour(c, scale, embolden_px))
         .collect();
 
     // TrueType fill rule is non-zero winding (not even-odd). Inter Bold in
     // particular uses overlapping contours; even-odd punches holes in stems.
     for sy in 0..ss_height {
-        let y_f = outline.y_max as f32 - (sy as f32 + 0.5) / (ss_y as f32 * scale);
+        let y_f = y_max_px - (sy as f32 + 0.5) / ss_y as f32;
         let mut hits: Vec<(f32, i32)> = Vec::new();
 
         for flat_pts in &flattened {
@@ -795,7 +963,7 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
                 let t = (y_f - y0) / (y1 - y0);
                 let x_i = x0 + t * (x1 - x0);
                 let dir = if y1 > y0 { 1 } else { -1 };
-                hits.push(((x_i - outline.x_min as f32) * scale * ss_x as f32, dir));
+                hits.push(((x_i - x_min_px) * ss_x as f32, dir));
             }
         }
 
@@ -823,18 +991,25 @@ fn rasterize_outline(outline: &GlyphOutline, units_per_em: u16, px_size: f32) ->
         }
     }
 
-    // Convert coverage to alpha (16 samples per pixel from 4×4 SS)
+    let samples = (ss_x * ss_y) as u32;
+    // At UI sizes, treat ~40% coverage as opaque so a 1px stem that only
+    // covers a few supersamples still reads as ink (FreeType-style darkening).
+    let denom = if px_size < 18.0 {
+        (samples * 2 / 5).max(1)
+    } else {
+        samples
+    };
     let mut pixels = vec![0u8; width * height];
     for i in 0..pixels.len() {
-        pixels[i] = ((coverage[i] * 255) / total_samples as u32).min(255) as u8;
+        pixels[i] = ((coverage[i] * 255) / denom).min(255) as u8;
     }
 
     GlyphBitmap {
         width,
         height,
-        bearing_x: (outline.lsb as f32 * scale) as i32,
-        bearing_y: (outline.y_max as f32 * scale) as i32,
-        advance: (outline.advance_width as f32 * scale) as i32,
+        bearing_x: libm::roundf(x_min_px) as i32,
+        bearing_y: libm::roundf(y_max_px) as i32,
+        advance,
         pixels,
     }
 }

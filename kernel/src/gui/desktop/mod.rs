@@ -12,7 +12,10 @@ mod wallpaper;
 mod zoom;
 
 pub use apps::{open_application, open_browser_at, open_editor_at, open_explorer_at};
-pub use context_menu::{close_context_menu, handle_context_menu_click, show_context_menu};
+pub use context_menu::{
+    close_context_menu, execute_action as execute_context_action, handle_context_menu_click,
+    show_context_menu,
+};
 pub use cursor::{
     CURSOR_H, CURSOR_SAVE_H, CURSOR_SAVE_PAD, CURSOR_SAVE_W, CURSOR_W, CursorTheme, CursorType,
     cursor_colors, cursor_theme, draw_cursor, get_cursor_type, invalidate_cursor_bg,
@@ -24,8 +27,9 @@ pub use folder::{
     empty_trash, move_to_trash, restore_from_trash, sync_desktop_folder, trash_count,
 };
 pub use interaction::{
-    cancel_icon_drag, finish_rubber_band, handle_click, handle_double_click, handle_icon_drag,
-    handle_icon_drop, handle_rubber_band_drag, is_dragging_icon, is_rubber_band_active,
+    begin_rubber_band, cancel_icon_drag, finish_rubber_band, handle_click, handle_double_click,
+    handle_icon_drag, handle_icon_drop, handle_rubber_band_drag, is_dragging_icon,
+    is_rubber_band_active, press_icon,
 };
 pub use types::{
     CONTEXT_MENU, ContextAction, ContextMenuItem, DESKTOP, Desktop, DesktopContextMenu,
@@ -33,19 +37,31 @@ pub use types::{
 };
 pub use wallpaper::invalidate_wallpaper_cache;
 
-pub(crate) use icons::icon_type_theme;
+use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, Ordering};
+use spin::Mutex;
 
 use super::FRAMEBUFFER;
 use super::framebuffer::Rect;
 use super::startmenu;
 use super::taskbar;
 use super::window;
+use crate::serial_println;
 
 use context_menu::{CONTEXT_MENU_WIDTH, draw_context_menu};
 use icons::{draw_desktop_icons, draw_rubber_band};
 use interaction::draw_snap_preview;
 use wallpaper::{WALLPAPER_CACHE, draw_wallpaper};
 use zoom::apply_zoom_lens;
+
+/// Heap stack for the compositor. First GPUI pump lays out the kit gallery
+/// plus shell windows; that depth overflows the bootloader stack and double
+/// faults (RSP lands in unmapped memory, no guard page).
+const COMPOSE_STACK_BYTES: usize = 512 * 1024;
+static COMPOSE_STACK: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+static COMPOSE_DAMAGE: Mutex<Vec<Rect>> = Mutex::new(Vec::new());
+static COMPOSE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static COMPOSE_STACK_GATE: AtomicBool = AtomicBool::new(false);
 
 /// Draw the complete desktop (called at startup and on redraws).
 ///
@@ -59,15 +75,81 @@ use zoom::apply_zoom_lens;
 ///  - Click/scroll pushes damage for just the affected widget/area
 ///  - Full redraws (resolution change, first paint) push a screen-sized rect
 pub fn draw_desktop_damaged(damage: &[Rect]) {
+    if COMPOSE_ACTIVE.load(Ordering::SeqCst) {
+        draw_desktop_damaged_inner(damage);
+        return;
+    }
+    {
+        let mut slot = COMPOSE_DAMAGE.lock();
+        slot.clear();
+        slot.extend_from_slice(damage);
+    }
+    COMPOSE_ACTIVE.store(true, Ordering::SeqCst);
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: GUI is single-threaded; the compose Vec is initialized once
+    // and never moved; `compose_trampoline` returns to this asm.
+    unsafe {
+        call_on_compose_stack();
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    compose_trampoline();
+    COMPOSE_ACTIVE.store(false, Ordering::SeqCst);
+}
+
+fn compose_stack_top() -> u64 {
+    let mut g = COMPOSE_STACK.lock();
+    let stack = g.get_or_insert_with(|| alloc::vec![0u8; COMPOSE_STACK_BYTES]);
+    let top = stack.as_ptr() as u64 + stack.len() as u64;
+    drop(g);
+    top & !0xF
+}
+
+extern "C" fn compose_trampoline() {
+    #[cfg(target_arch = "x86_64")]
+    if !COMPOSE_STACK_GATE.swap(true, Ordering::SeqCst) {
+        let rsp: u64;
+        // SAFETY: reads RSP only.
+        unsafe {
+            core::arch::asm!("mov {}, rsp", out(reg) rsp, options(nomem, nostack));
+        }
+        serial_println!("[desktop] trampoline rsp={:#x}", rsp);
+    }
+    let damage = COMPOSE_DAMAGE.lock().clone();
+    draw_desktop_damaged_inner(&damage);
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn call_on_compose_stack() {
+    let top = compose_stack_top();
+    // SAFETY: r12 holds the compose top and rbx the old RSP (both callee-saved
+    // across the C call). `{top}` is copied into r12 *before* rbx is reused so
+    // LLVM cannot allocate `{top}` to rbx and turn the switch into a no-op.
+    unsafe {
+        core::arch::asm!(
+            "push rbx",
+            "push r12",
+            "mov r12, {top}",
+            "mov rbx, rsp",
+            "mov rsp, r12",
+            "call {entry}",
+            "mov rsp, rbx",
+            "pop r12",
+            "pop rbx",
+            top = in(reg) top,
+            entry = sym compose_trampoline,
+            clobber_abi("C"),
+            options(nostack),
+        );
+    }
+}
+
+fn draw_desktop_damaged_inner(damage: &[Rect]) {
     // Read mouse position BEFORE locking FRAMEBUFFER to avoid deadlock.
     let (mx, my) = {
         let mouse = super::input::MOUSE.lock();
         (mouse.x, mouse.y)
     };
-    let frame_input = super::input::frame_input();
-
     if let Some(ref mut fb) = *FRAMEBUFFER.lock() {
-        super::ui::UI_MEMORY.lock().begin_frame(&frame_input);
         super::FRAME_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
         let screen_w = fb.width as u32;
@@ -124,7 +206,7 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
         // Update taskbar/dock hover state and auto-hide animation
         taskbar::update_hover(mx, my, screen_w, screen_h);
         taskbar::update_auto_hide(my, screen_h);
-        if startmenu::is_visible() {
+        if startmenu::is_visible() && !super::gpui_platform::launcher_is_live() {
             startmenu::update_hover(mx, my);
         }
 
@@ -185,6 +267,9 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
             fb.push_clip(damage_union);
         }
 
+        // D2.5: Knox GPUI pump — proof card is a window store blit (D1.7 scene).
+        super::gpui_platform::pump(fb, screen_w, screen_h, damage_union, is_full);
+
         // Desktop widgets — rendered on wallpaper surface before icons/windows
         {
             let widget_area = super::desktop_widgets::bounding_rect(screen_w);
@@ -193,7 +278,8 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
             }
         }
 
-        // Desktop icons — only if damage overlaps the icon area (top-left region)
+        // Desktop icons — GPUI layer (D9.7) blits in pump. Compositor still
+        // paints the in-flight drag preview (D9.9).
         {
             let icon_area = Rect::new(0, 0, 200, screen_h);
             if is_full || damage_union.intersects(&icon_area) {
@@ -201,14 +287,18 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
             }
         }
 
-        // Rubber band selection overlay
-        draw_rubber_band(fb);
+        // Rubber band — GPUI when live (D9.7).
+        if !super::gpui_platform::desktop_is_live() {
+            draw_rubber_band(fb);
+        }
 
         // Taskbar — only if damage overlaps the taskbar strip at screen bottom
         {
             let taskbar_y = screen_h as i32 - super::scale::taskbar_height() as i32;
             let taskbar_area = Rect::new(0, taskbar_y, screen_w, super::scale::taskbar_height());
-            if is_full || damage_union.intersects(&taskbar_area) {
+            if !super::gpui_platform::panel_is_live()
+                && (is_full || damage_union.intersects(&taskbar_area))
+            {
                 taskbar::draw_taskbar(fb);
             }
         }
@@ -219,21 +309,31 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
         // Snap preview — only while dragging
         draw_snap_preview(fb, mx, my);
 
-        // Alt+Tab overlay — drawn above all windows
-        if super::alt_tab::is_visible() {
-            super::alt_tab::draw(fb);
-        }
-
-        // Exposé / Mission Control overlay — drawn above all windows
-        if super::expose::is_visible() {
-            super::expose::draw(fb);
+        // Alt+Tab / overview — GPUI overlays (D9.6); old painters are fallback.
+        if super::gpui_platform::switcher_is_live() {
+            super::gpui_platform::present_switcher(fb, damage_union, is_full);
+        } else {
+            if super::alt_tab::is_visible() {
+                super::alt_tab::draw(fb);
+            }
+            if super::expose::is_visible() {
+                super::expose::draw(fb);
+            }
         }
 
         // Overlays — only if damage overlaps their approximate regions or if visible
-        if is_full || startmenu::is_visible() {
+        if super::gpui_platform::launcher_is_live() {
+            if startmenu::is_visible() {
+                super::gpui_platform::present_launcher(fb, damage_union, is_full);
+            }
+        } else if is_full || startmenu::is_visible() {
             startmenu::draw_start_menu(fb);
         }
-        {
+        if super::gpui_platform::desktop_is_live() {
+            if super::gpui_platform::desktop_menu_open() {
+                super::gpui_platform::present_desktop_menu(fb, damage_union, is_full);
+            }
+        } else {
             let cm = CONTEXT_MENU.lock();
             if cm.visible {
                 let cm_rect = Rect::new(cm.x, cm.y, CONTEXT_MENU_WIDTH, 200);
@@ -245,13 +345,11 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
                 }
             }
         }
-        if is_full || super::popups::any_popup_open() {
-            super::popups::draw_calendar(fb);
-            super::popups::draw_volume_popup(fb);
-            super::popups::draw_quick_settings(fb);
+        if super::gpui_platform::osd_is_live() {
+            super::gpui_platform::present_osd(fb, damage_union, is_full);
         }
-        if is_full || super::system_tray::is_context_menu_open() {
-            super::system_tray::draw_context_menu(fb);
+        if super::gpui_platform::tray_menu_open() {
+            super::gpui_platform::present_tray_menu(fb, damage_union, is_full);
         }
         if is_full || super::taskbar::is_context_menu_open() {
             super::taskbar::draw_context_menu(fb);
@@ -259,25 +357,43 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
         if is_full || super::taskbar::is_preview_visible() {
             super::taskbar::draw_window_preview(fb);
         }
-        if is_full
-            || super::notifications::NOTIFICATIONS
-                .lock()
-                .has_visible_toasts()
-        {
-            super::notifications::draw_toasts(fb);
-        }
-        if is_full || super::notifications::is_panel_open() {
-            super::notifications::draw_notification_panel(fb);
+        if super::gpui_platform::notify_is_live() {
+            super::gpui_platform::present_notify(fb, damage_union, is_full);
         }
 
-        // File picker modal overlay — drawn above everything except cursor
-        if is_full || super::file_picker::is_visible() {
+        // File picker / screenshot / installer Dialog overlays (D11.10).
+        if super::gpui_platform::dialogs_is_live() {
+            if super::file_picker::is_visible() {
+                super::gpui_platform::present_picker(fb, damage_union, is_full);
+            }
+            if super::screenshot::is_dialog_open() {
+                super::gpui_platform::present_shot(fb, damage_union, is_full);
+            }
+            if super::installer::is_active() {
+                super::gpui_platform::present_install(fb, damage_union, is_full);
+            }
+        } else if is_full || super::file_picker::is_visible() {
             super::file_picker::draw(fb);
+        } else if super::installer::is_active() {
+            super::installer::render(fb);
         }
 
-        // Keyboard shortcuts overlay
-        if is_full || super::shortcuts_overlay::is_visible() {
-            super::shortcuts_overlay::draw(fb);
+        // D12.2 lock overlay (desktop remains underneath).
+        if super::lock_screen::is_locked() {
+            if super::gpui_platform::session_is_live() {
+                super::gpui_platform::present_lock(fb, damage_union, is_full);
+            } else {
+                super::lock_screen::draw_lock_screen(fb);
+            }
+        }
+
+        // Keyboard shortcuts overlay (D16.2 GPUI Dialog).
+        if super::shortcuts_overlay::is_visible() {
+            if super::gpui_platform::is_ready() {
+                super::gpui_platform::present_shortcuts(fb, damage_union, is_full);
+            } else if is_full || super::shortcuts_overlay::is_visible() {
+                super::shortcuts_overlay::draw(fb);
+            }
         }
 
         // Tick system sounds (turns off speaker after tone duration)
@@ -347,21 +463,19 @@ pub fn on_timer_tick(ticks: u64) {
     taskbar::update_clock(ticks);
     let new_clock = taskbar::get_clock_text();
 
-    // Tick notification animations — check if any are actively animating
+    // Tick notification auto-dismiss; GPUI toasts/center damage their overlay.
     let mut notifs = super::notifications::NOTIFICATIONS.lock();
-    let has_active = notifs
-        .notifications
-        .iter()
-        .any(|n| !n.dismissed && (n.anim_progress < 255 || n.sliding_out));
+    let before = notifs.has_visible_toasts() || notifs.panel_open;
     notifs.tick();
+    let after = notifs.has_visible_toasts() || notifs.panel_open;
     drop(notifs);
+    if before || after {
+        super::gpui_platform::notify_damage();
+    }
 
     // Clock lives in the desktop widget card + taskbar strip — not the whole FB.
     if old_clock != new_clock {
         super::request_taskbar_redraw();
         super::request_desktop_widget_redraw();
-    }
-    if has_active {
-        super::request_redraw();
     }
 }

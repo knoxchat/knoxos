@@ -1,6 +1,6 @@
 /// GUI Module - Framebuffer-based Desktop Environment
 /// Cross-architecture (x86_64, aarch64, riscv64) desktop environment.
-/// Uses scalable TrueType fonts via font_engine, icons from ./icons/ theme.
+/// Uses scalable TrueType fonts via font_engine and Lucide strokes for icons.
 pub mod alt_tab;
 pub mod arch_display;
 pub mod browser;
@@ -19,7 +19,6 @@ pub mod fonts;
 pub mod framebuffer;
 pub mod hack_font;
 pub mod hack_font_hd;
-pub mod icon_data;
 pub mod icon_theme;
 pub mod icons;
 pub mod image_viewer;
@@ -34,7 +33,6 @@ pub mod popups;
 pub mod settings;
 pub mod shortcuts_overlay;
 pub mod sounds;
-pub mod splash_type;
 pub mod startmenu;
 pub mod system_tray;
 pub mod task_manager;
@@ -43,7 +41,6 @@ pub mod theme;
 pub mod truetype;
 pub mod unicode;
 pub mod wallpaper;
-pub mod widgets;
 pub mod window;
 pub mod wm_animation;
 pub mod wm_chrome;
@@ -79,9 +76,6 @@ pub mod id;
 pub mod layout;
 pub mod response;
 pub mod ui;
-
-// ─── KnoxUI Component Library (panels, tables, trees, overlays…) ────
-pub mod knoxui;
 
 // ─── Phase 30+ GUI sub-modules (status.md remaining items) ──────────
 pub mod accessibility;
@@ -140,7 +134,10 @@ pub mod complex_text;
 pub mod display_hotplug;
 pub mod gesture;
 pub mod vsync;
-pub mod wayland_server;
+
+// Knox GPUI platform backend (`desktopDE-impl.md` D0.4+). Parent `gui`
+// module is `#[cfg(feature = "gui")]` in `lib.rs`.
+pub mod gpui_platform;
 
 #[cfg(not(target_arch = "x86_64"))]
 use crate::arch_compat::bootloader_shim::info::Optional;
@@ -150,6 +147,10 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use spin::Mutex;
 
 pub use framebuffer::FrameBuffer;
+
+/// Keep the no_std toolkit crates in the kernel link (D0.1).
+const _KNOX_GPUI_VERSION: &str = knox_gpui::VERSION;
+const _KNOX_UI_VERSION: &str = knox_ui::VERSION;
 
 /// Saved physical memory offset for runtime resolution switching
 static PHYS_MEM_OFFSET: AtomicU64 = AtomicU64::new(0);
@@ -335,6 +336,10 @@ pub fn damage_window(id: window::WindowId) {
 
 /// Damage the taskbar strip (clock, dock hover, tray).
 pub fn request_taskbar_redraw() {
+    if gpui_platform::panel_is_live() {
+        gpui_platform::panel_damage();
+        return;
+    }
     let (sw, sh) = cached_screen_size();
     let th = scale::taskbar_height();
     push_damage(framebuffer::Rect::new(0, sh - th as i32, sw as u32, th));
@@ -353,6 +358,7 @@ pub fn request_redraw_at(x: i32, y: i32) {
         || popups::any_popup_open()
         || notifications::is_panel_open()
         || expose::is_visible()
+        || alt_tab::is_visible()
         || file_picker::is_visible()
         || shortcuts_overlay::is_visible()
         || system_tray::is_context_menu_open()
@@ -565,7 +571,11 @@ pub fn init_framebuffer(
     // Initialize font engine (scalable TrueType rendering)
     font_engine::init();
 
-    // Initialize icon theme (load icons from ./icons/)
+    simd_pixels::init();
+
+    // Knox GPUI platform (D0.4) — after fonts; raster/pump come later.
+    gpui_platform::init();
+
     icon_theme::init();
 }
 
@@ -810,16 +820,10 @@ pub fn redraw_if_needed() {
 
         // If not logged in, draw login screen instead of desktop
         if !login::is_logged_in() {
-            if let Some(ref mut fb) = *FRAMEBUFFER.lock() {
-                login::draw_login_screen(fb);
-                fb.present();
-            }
+            login::present_frame();
         } else if lock_screen::is_locked() {
-            // Screen locked — draw desktop then overlay lock screen
-            if let Some(ref mut fb) = *FRAMEBUFFER.lock() {
-                lock_screen::draw_lock_screen(fb);
-                fb.present();
-            }
+            // Screen locked — compose desktop then overlay lock screen
+            desktop::draw_desktop();
         } else {
             desktop::draw_desktop();
         }
@@ -931,76 +935,5 @@ pub fn clear_all_dirty() {
     WINDOW_DIRTY.lock().clear();
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// GPU Compositing Offload   (31.7)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-/// Whether GPU-accelerated compositing is available and enabled
-static GPU_COMPOSITING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-
-/// Enable GPU compositing (call after GPU driver is initialized)
-pub fn enable_gpu_compositing() {
-    GPU_COMPOSITING.store(true, core::sync::atomic::Ordering::Relaxed);
-    crate::serial_println!("[GUI] GPU compositing enabled");
-}
-
-/// Disable GPU compositing (fallback to CPU)
-pub fn disable_gpu_compositing() {
-    GPU_COMPOSITING.store(false, core::sync::atomic::Ordering::Relaxed);
-}
-
-/// Check if GPU compositing is active
-pub fn is_gpu_compositing() -> bool {
-    GPU_COMPOSITING.load(core::sync::atomic::Ordering::Relaxed)
-}
-
-/// Composite a source rect onto a destination using GPU hardware.
-/// Falls back to CPU blit if GPU compositing is not available.
-pub fn gpu_composite_rect(
-    fb: &mut framebuffer::FrameBuffer,
-    src_x: i32,
-    src_y: i32,
-    dst_x: i32,
-    dst_y: i32,
-    w: u32,
-    h: u32,
-    alpha: u8,
-) {
-    if GPU_COMPOSITING.load(core::sync::atomic::Ordering::Relaxed) {
-        // GPU path: submit blit command to GPU command buffer
-        // For now, fall through to CPU as GPU command submission
-        // requires the GPU driver to be fully initialized
-        crate::serial_println!(
-            "[GPU-Comp] Blit {}x{} from ({},{}) to ({},{}) alpha={}",
-            w,
-            h,
-            src_x,
-            src_y,
-            dst_x,
-            dst_y,
-            alpha
-        );
-    }
-    // CPU fallback: direct pixel copy with alpha blend
-    for dy in 0..h as i32 {
-        for dx in 0..w as i32 {
-            let sx = src_x + dx;
-            let sy = src_y + dy;
-            let dxx = dst_x + dx;
-            let dyy = dst_y + dy;
-            if sx >= 0
-                && sy >= 0
-                && dxx >= 0
-                && dyy >= 0
-                && (dxx as usize) < fb.width
-                && (dyy as usize) < fb.height
-                && (sx as usize) < fb.width
-                && (sy as usize) < fb.height
-            {
-                let src_pixel = fb.get_pixel(sx as usize, sy as usize);
-                let blended = framebuffer::Pixel::new(src_pixel.r, src_pixel.g, src_pixel.b, alpha);
-                fb.blend_pixel(dxx as usize, dyy as usize, blended);
-            }
-        }
-    }
-}
+// D13.5: nested-loop `gpu_composite_rect` is gone. Live present uses
+// `gpu_compositor::pace_frame` plus VirtIO-GPU `present_desktop_fb`.

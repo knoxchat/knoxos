@@ -6,6 +6,26 @@ use super::types::Window;
 
 impl Window {
     pub(super) fn draw_terminal_content(&self, fb: &mut FrameBuffer, content: Rect) {
+        if crate::gui::gpui_platform::is_ready() {
+            crate::gui::gpui_platform::present_term(fb, self.id, content);
+            let chrome = crate::gui::gpui_platform::TERM_CHROME_H;
+            let term_area = Rect::new(
+                content.x,
+                content.y + chrome,
+                content.width,
+                content.height.saturating_sub(chrome as u32),
+            );
+            let term_id = if !self.terminal_tabs.is_empty() {
+                self.terminal_tabs
+                    .get(self.terminal_active_tab)
+                    .copied()
+                    .unwrap_or(self.id)
+            } else {
+                self.id
+            };
+            crate::terminal::render_for_window(term_id, fb, term_area);
+            return;
+        }
         // ── Terminal tab bar (only if multiple tabs) ──
         let tab_bar_h: i32 = if self.terminal_tabs.len() > 1 { 26 } else { 0 };
 

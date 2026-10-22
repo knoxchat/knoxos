@@ -135,6 +135,73 @@ pub fn close() {
     picker.cancelled = true;
 }
 
+/// Snapshot for the GPUI Dialog (D11.10).
+pub struct PickerSnap {
+    pub mode: FilePickerMode,
+    pub path: String,
+    pub entries: Vec<(String, bool)>,
+    pub selected: i32,
+    pub filename: String,
+    pub can_back: bool,
+    pub can_fwd: bool,
+}
+
+pub const SIDEBAR: &[(&str, &str)] = &[
+    ("Home", "/home"),
+    ("Documents", "/home/documents"),
+    ("Downloads", "/home/downloads"),
+    ("Pictures", "/home/pictures"),
+    ("Music", "/home/music"),
+    ("Root", "/"),
+];
+
+pub fn snapshot() -> PickerSnap {
+    let p = FILE_PICKER.lock();
+    PickerSnap {
+        mode: p.mode,
+        path: p.current_path.clone(),
+        entries: p
+            .entries
+            .iter()
+            .map(|e| (e.name.clone(), e.is_dir))
+            .collect(),
+        selected: p.selected_index,
+        filename: p.filename.clone(),
+        can_back: p.history_idx > 0,
+        can_fwd: p.history_idx + 1 < p.history.len(),
+    }
+}
+
+pub fn select_index(i: i32) {
+    let mut p = FILE_PICKER.lock();
+    if i >= 0 && (i as usize) < p.entries.len() {
+        p.selected_index = i;
+        if p.mode == FilePickerMode::Save && !p.entries[i as usize].is_dir {
+            p.filename = p.entries[i as usize].name.clone();
+        }
+    }
+}
+
+pub fn confirm() {
+    confirm_selection();
+}
+
+pub fn go_up() {
+    navigate_up();
+}
+
+pub fn go_back() {
+    navigate_back();
+}
+
+pub fn go_forward() {
+    navigate_forward();
+}
+
+pub fn go_to(path: &str) {
+    navigate_to(path);
+}
+
 /// Check if picker is open
 pub fn is_visible() -> bool {
     FILE_PICKER.lock().visible

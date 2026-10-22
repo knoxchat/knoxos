@@ -92,6 +92,26 @@ pub(super) fn run_gate_f7() {
     );
 }
 
+pub(super) fn run_gate_gpui_ring3() {
+    serial_println!("[user_task] D15: Ring 3 Knox GPUI SHM at window size");
+    let elf = crate::init::gpui_button_client_elf_data();
+    if let Some(pid) = spawn_or_log(&elf, "gpui-btn") {
+        // SAFETY: live Ring 3 context; switch until the desktop is current.
+        unsafe {
+            run_until_desktop(pid);
+        }
+        let _ = reap_child(pid);
+    }
+    let elf = crate::init::gpui_calc_client_elf_data();
+    if let Some(pid) = spawn_or_log(&elf, "gpui-calc") {
+        // SAFETY: live Ring 3 context; switch until the desktop is current.
+        unsafe {
+            run_until_desktop(pid);
+        }
+        let _ = reap_child(pid);
+    }
+}
+
 pub(super) fn run_gate_term() {
     serial_println!("[user_task] Gate TERM: Ring 3 openpty + SHM terminal");
     let elf = crate::init::pty_terminal_client_elf_data();

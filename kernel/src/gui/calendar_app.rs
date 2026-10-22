@@ -10,7 +10,7 @@ use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::theme;
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 struct CalendarState {
     window_id: WindowId,
@@ -38,7 +38,8 @@ const DOW_H: i32 = 24;
 pub fn open() {
     let dt = crate::rtc::read_rtc();
     let mut win = window::Window::new("Calendar", 200, 80, 370, 400);
-    win.content_type = WindowContentType::CalendarApp;
+    win.content_type = WindowContentType::Gpui(ViewKind::Calendar);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -69,7 +70,36 @@ pub fn on_window_closed(wid: WindowId) {
 
 // ─── Drawing ────────────────────────────────────────────────────────
 
+pub fn current_view(wid: WindowId) -> (i32, u8, u8, u8, u16) {
+    let states = STATES.lock();
+    states
+        .iter()
+        .find(|s| s.window_id == wid)
+        .map(|s| {
+            (
+                s.year as i32,
+                s.month,
+                s.today_day,
+                s.today_month,
+                s.today_year,
+            )
+        })
+        .unwrap_or((2026, 10, 22, 10, 2026))
+}
+
+pub fn set_view(wid: WindowId, year: i32, month: u8) {
+    let mut states = STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        s.year = year.clamp(1, 9999) as u16;
+        s.month = month.clamp(1, 12);
+    }
+}
+
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, content: Rect, _scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_apps(fb, wid, content);
+        return;
+    }
     let states = STATES.lock();
     let state = match states.iter().find(|s| s.window_id == wid) {
         Some(s) => s,

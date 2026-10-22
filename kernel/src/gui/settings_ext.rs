@@ -358,6 +358,29 @@ pub fn get_datetime() -> (bool, bool, bool) {
     (dt.use_ntp, dt.use_24h_format, dt.show_seconds)
 }
 
+pub fn current_timezone_name() -> String {
+    DATETIME.lock().timezone.name.clone()
+}
+
+pub fn toggle_datetime_flag(which: &str) -> bool {
+    let mut dt = DATETIME.lock();
+    match which {
+        "ntp" => {
+            dt.use_ntp = !dt.use_ntp;
+            dt.use_ntp
+        }
+        "24h" => {
+            dt.use_24h_format = !dt.use_24h_format;
+            dt.use_24h_format
+        }
+        "seconds" => {
+            dt.show_seconds = !dt.show_seconds;
+            dt.show_seconds
+        }
+        _ => false,
+    }
+}
+
 /// Set timezone
 pub fn set_timezone(name: &str) {
     let tzs = common_timezones();

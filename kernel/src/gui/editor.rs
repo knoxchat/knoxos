@@ -645,6 +645,104 @@ pub fn new_empty(wid: WindowId) {
     EDITOR_STATES.lock().insert(wid, EditorTabState::new());
 }
 
+#[derive(Clone, Copy)]
+enum PickerIntent {
+    Open,
+    Save,
+}
+
+static PICKER_INTENT: Mutex<Option<(WindowId, PickerIntent)>> = Mutex::new(None);
+
+/// Open the file picker to load a buffer into `wid`.
+pub fn request_open(wid: WindowId) {
+    *PICKER_INTENT.lock() = Some((wid, PickerIntent::Open));
+    crate::gui::file_picker::open("/home/user/Documents");
+    crate::gui::request_redraw();
+}
+
+/// Save, or open the save picker when the buffer has no path.
+pub fn request_save(wid: WindowId) {
+    let filename = {
+        let states = EDITOR_STATES.lock();
+        states.get(&wid).and_then(|ts| ts.active().filename.clone())
+    };
+    if filename.is_some() {
+        handle_save(wid);
+        return;
+    }
+    *PICKER_INTENT.lock() = Some((wid, PickerIntent::Save));
+    crate::gui::file_picker::save("/home/user/Documents", "untitled.txt");
+    crate::gui::request_redraw();
+}
+
+/// Apply a completed file-picker result to the waiting editor.
+pub fn poll_picker() {
+    if PICKER_INTENT.lock().is_none() {
+        return;
+    }
+    let Some(path) = crate::gui::file_picker::take_result() else {
+        if !crate::gui::file_picker::is_visible() {
+            let _ = PICKER_INTENT.lock().take();
+        }
+        return;
+    };
+    let Some((wid, intent)) = PICKER_INTENT.lock().take() else {
+        return;
+    };
+    match intent {
+        PickerIntent::Open => open_file(wid, &path),
+        PickerIntent::Save => {
+            let mut states = EDITOR_STATES.lock();
+            if let Some(ts) = states.get_mut(&wid) {
+                ts.active_mut().filename = Some(path);
+                let _ = ts.active_mut().save();
+            }
+        }
+    }
+    crate::gui::damage_window(wid);
+}
+
+pub fn tab_labels(wid: WindowId) -> (Vec<String>, usize) {
+    let states = EDITOR_STATES.lock();
+    let Some(ts) = states.get(&wid) else {
+        return (vec![String::from("untitled")], 0);
+    };
+    let labels: Vec<String> = ts
+        .tabs
+        .iter()
+        .map(|t| {
+            t.filename
+                .as_deref()
+                .and_then(|p| p.rsplit('/').next())
+                .map(String::from)
+                .unwrap_or_else(|| String::from("untitled"))
+        })
+        .collect();
+    (labels, ts.active_tab)
+}
+
+pub fn buffer_text(wid: WindowId) -> (String, usize, usize, usize, String) {
+    let states = EDITOR_STATES.lock();
+    let Some(ts) = states.get(&wid) else {
+        return (String::new(), 0, 0, 0, String::from("New file"));
+    };
+    let s = ts.active();
+    (
+        s.lines.join("\n"),
+        s.cursor_line,
+        s.cursor_col,
+        s.scroll_offset,
+        s.status_msg.clone(),
+    )
+}
+
+pub fn set_scroll_lines(wid: WindowId, lines: usize) {
+    let mut states = EDITOR_STATES.lock();
+    if let Some(ts) = states.get_mut(&wid) {
+        ts.active_mut().scroll_offset = lines;
+    }
+}
+
 /// Remove editor state when window closes
 pub fn close_editor(wid: WindowId) {
     EDITOR_STATES.lock().remove(&wid);
@@ -812,6 +910,17 @@ pub fn handle_arrow(wid: WindowId, key: KeyCode) {
 
 /// Handle Ctrl+S save
 pub fn handle_save(wid: WindowId) {
+    let has_path = {
+        let states = EDITOR_STATES.lock();
+        states
+            .get(&wid)
+            .and_then(|ts| ts.active().filename.clone())
+            .is_some()
+    };
+    if !has_path {
+        request_save(wid);
+        return;
+    }
     let mut states = EDITOR_STATES.lock();
     if let Some(ts) = states.get_mut(&wid) {
         let state = ts.active_mut();

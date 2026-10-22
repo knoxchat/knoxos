@@ -6,10 +6,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use spin::Mutex;
 
-use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
-use super::window::{WINDOW_MANAGER, WindowContentType, WindowId};
+use super::window::{ViewKind, WINDOW_MANAGER, WindowContentType, WindowId};
 
 /// Global Alt+Tab state
 lazy_static::lazy_static! {
@@ -46,6 +45,7 @@ impl AltTabState {
 /// Show the Alt+Tab overlay and populate it with current windows.
 /// `reverse` = true means the user pressed Shift+Alt+Tab.
 pub fn show(reverse: bool) {
+    super::expose::dismiss();
     let mut state = ALT_TAB.lock();
     let wm = WINDOW_MANAGER.lock();
 
@@ -119,7 +119,8 @@ pub fn is_visible() -> bool {
     ALT_TAB.lock().visible
 }
 
-/// Draw the Alt+Tab overlay on the framebuffer
+/// Draw the Alt+Tab overlay on the framebuffer.
+/// Fallback only: the live path is `gpui_platform::switcher` (D9.6).
 pub fn draw(fb: &mut FrameBuffer) {
     let state = ALT_TAB.lock();
     if !state.visible || state.entries.is_empty() {
@@ -182,24 +183,24 @@ pub fn draw(fb: &mut FrameBuffer) {
 
         // Window type icon/color preview
         let content_color = match entry.content_type {
-            WindowContentType::Terminal => Pixel::rgb(30, 30, 40),
-            WindowContentType::Browser => Pixel::rgb(45, 50, 60),
-            WindowContentType::FileExplorer => Pixel::rgb(35, 40, 50),
-            WindowContentType::Settings => Pixel::rgb(25, 30, 40),
-            WindowContentType::AIAssistant => Pixel::rgb(20, 25, 40),
-            WindowContentType::TextEditor => Pixel::rgb(30, 30, 30),
-            WindowContentType::Empty => Pixel::rgb(40, 45, 55),
-            WindowContentType::ArchiveViewer => Pixel::rgb(50, 45, 30),
-            WindowContentType::DiskUtility => Pixel::rgb(35, 45, 55),
-            WindowContentType::BluetoothManager => Pixel::rgb(20, 40, 60),
-            WindowContentType::CalendarApp => Pixel::rgb(55, 30, 30),
-            WindowContentType::LogViewer => Pixel::rgb(30, 35, 30),
-            WindowContentType::SoftwareUpdater => Pixel::rgb(25, 40, 30),
-            WindowContentType::SoftwareCenter => Pixel::rgb(30, 35, 55),
-            WindowContentType::SetupWizard => Pixel::rgb(25, 45, 35),
-            WindowContentType::TaskManager => Pixel::rgb(40, 35, 50),
-            WindowContentType::Calculator => Pixel::rgb(35, 35, 45),
-            WindowContentType::ImageViewer => Pixel::rgb(30, 30, 35),
+            WindowContentType::TerminalSurface => Pixel::rgb(30, 30, 40),
+            WindowContentType::Gpui(ViewKind::Browser) => Pixel::rgb(45, 50, 60),
+            WindowContentType::Gpui(ViewKind::Files) => Pixel::rgb(35, 40, 50),
+            WindowContentType::Gpui(ViewKind::Settings) => Pixel::rgb(25, 30, 40),
+            WindowContentType::Gpui(ViewKind::Chat) => Pixel::rgb(20, 25, 40),
+            WindowContentType::Gpui(ViewKind::Editor) => Pixel::rgb(30, 30, 30),
+            WindowContentType::ShmEmpty => Pixel::rgb(40, 45, 55),
+            WindowContentType::Gpui(ViewKind::Archive) => Pixel::rgb(50, 45, 30),
+            WindowContentType::Gpui(ViewKind::Disks) => Pixel::rgb(35, 45, 55),
+            WindowContentType::Gpui(ViewKind::Bluetooth) => Pixel::rgb(20, 40, 60),
+            WindowContentType::Gpui(ViewKind::Calendar) => Pixel::rgb(55, 30, 30),
+            WindowContentType::Gpui(ViewKind::Logs) => Pixel::rgb(30, 35, 30),
+            WindowContentType::Gpui(ViewKind::Updater) => Pixel::rgb(25, 40, 30),
+            WindowContentType::Gpui(ViewKind::Software) => Pixel::rgb(30, 35, 55),
+            WindowContentType::Gpui(ViewKind::Wizard) => Pixel::rgb(25, 45, 35),
+            WindowContentType::Gpui(ViewKind::Tasks) => Pixel::rgb(40, 35, 50),
+            WindowContentType::Gpui(ViewKind::Calculator) => Pixel::rgb(35, 35, 45),
+            WindowContentType::Gpui(ViewKind::Image) => Pixel::rgb(30, 30, 35),
         };
         fb.fill_rounded_rect_aa(thumb_rect, content_color, 8);
         fb.draw_rounded_rect(thumb_rect, Pixel::new(80, 90, 110, 80), 8, 1);
@@ -233,137 +234,7 @@ pub fn draw(fb: &mut FrameBuffer) {
     }
 }
 
-/// Draw a simple icon representing the window content type
+/// Draw a Lucide glyph representing the window content type.
 pub fn draw_content_type_icon(fb: &mut FrameBuffer, cx: i32, cy: i32, ct: WindowContentType) {
-    let icon_color = Pixel::new(120, 160, 220, 120);
-
-    match ct {
-        WindowContentType::Terminal => {
-            // Terminal: >_ prompt
-            fb.fill_rect(Rect::new(cx - 12, cy - 4, 6, 2), icon_color);
-            fb.fill_rect(Rect::new(cx - 12, cy - 2, 2, 6), icon_color);
-            fb.fill_rect(Rect::new(cx - 6, cy + 4, 10, 2), icon_color);
-        }
-        WindowContentType::Browser => {
-            // Globe icon (circle with horizontal lines)
-            fb.draw_rounded_rect(Rect::new(cx - 10, cy - 10, 20, 20), icon_color, 10, 1);
-            fb.fill_rect(Rect::new(cx - 8, cy - 1, 16, 2), icon_color);
-            fb.fill_rect(Rect::new(cx - 1, cy - 8, 2, 16), icon_color);
-        }
-        WindowContentType::FileExplorer => {
-            // Folder icon
-            fb.fill_rounded_rect_aa(Rect::new(cx - 10, cy - 6, 20, 14), icon_color, 3);
-            fb.fill_rect(Rect::new(cx - 10, cy - 8, 10, 4), icon_color);
-        }
-        WindowContentType::Settings => {
-            // Gear: circle with notches
-            fb.draw_rounded_rect(Rect::new(cx - 6, cy - 6, 12, 12), icon_color, 6, 2);
-            fb.fill_rect(Rect::new(cx - 1, cy - 10, 2, 4), icon_color);
-            fb.fill_rect(Rect::new(cx - 1, cy + 6, 2, 4), icon_color);
-            fb.fill_rect(Rect::new(cx - 10, cy - 1, 4, 2), icon_color);
-            fb.fill_rect(Rect::new(cx + 6, cy - 1, 4, 2), icon_color);
-        }
-        WindowContentType::AIAssistant => {
-            // Brain/sparkle icon
-            fb.fill_circle_aa(cx, cy, 8, icon_color);
-            fb.fill_circle_aa(cx, cy, 4, Pixel::new(0, 200, 255, 80));
-        }
-        WindowContentType::TextEditor => {
-            // Document with lines
-            fb.fill_rounded_rect_aa(Rect::new(cx - 8, cy - 10, 16, 20), icon_color, 2);
-            for i in 0..4 {
-                fb.fill_rect(
-                    Rect::new(cx - 5, cy - 6 + i * 4, 10, 1),
-                    Pixel::new(40, 50, 60, 180),
-                );
-            }
-        }
-        WindowContentType::Empty => {
-            // Generic window icon
-            fb.draw_rounded_rect(Rect::new(cx - 10, cy - 8, 20, 16), icon_color, 4, 1);
-            fb.fill_rect(Rect::new(cx - 10, cy - 8, 20, 4), icon_color);
-        }
-        WindowContentType::ArchiveViewer => {
-            // Archive/zip icon — stacked pages
-            fb.fill_rounded_rect_aa(Rect::new(cx - 8, cy - 8, 16, 16), icon_color, 2);
-            fb.fill_rect(
-                Rect::new(cx - 5, cy - 4, 10, 1),
-                Pixel::new(40, 50, 60, 180),
-            );
-            fb.fill_rect(Rect::new(cx - 5, cy, 8, 1), Pixel::new(40, 50, 60, 180));
-            fb.fill_rect(Rect::new(cx - 5, cy + 4, 6, 1), Pixel::new(40, 50, 60, 180));
-        }
-        WindowContentType::DiskUtility => {
-            // Disk icon
-            fb.fill_circle_aa(cx, cy, 8, icon_color);
-            fb.fill_circle_aa(cx, cy, 3, Pixel::new(40, 50, 60, 180));
-        }
-        WindowContentType::BluetoothManager => {
-            // BT icon
-            fb.fill_rect(Rect::new(cx - 1, cy - 8, 2, 16), icon_color);
-            fb.draw_line_aa(cx - 6, cy - 4, cx + 4, cy + 4, icon_color);
-            fb.draw_line_aa(cx - 6, cy + 4, cx + 4, cy - 4, icon_color);
-        }
-        WindowContentType::CalendarApp => {
-            // Calendar icon
-            fb.fill_rounded_rect_aa(Rect::new(cx - 8, cy - 8, 16, 16), icon_color, 2);
-            fb.fill_rect(
-                Rect::new(cx - 5, cy - 2, 10, 1),
-                Pixel::new(40, 50, 60, 180),
-            );
-            fb.fill_rect(
-                Rect::new(cx - 5, cy + 2, 10, 1),
-                Pixel::new(40, 50, 60, 180),
-            );
-        }
-        WindowContentType::LogViewer => {
-            // Log lines icon
-            fb.fill_rect(Rect::new(cx - 7, cy - 6, 14, 2), Pixel::rgb(80, 200, 120));
-            fb.fill_rect(Rect::new(cx - 7, cy - 1, 10, 2), Pixel::rgb(220, 180, 40));
-            fb.fill_rect(Rect::new(cx - 7, cy + 4, 12, 2), Pixel::rgb(220, 80, 60));
-        }
-        WindowContentType::SoftwareUpdater => {
-            // Shield icon
-            fb.fill_rounded_rect_aa(
-                Rect::new(cx - 6, cy - 8, 12, 16),
-                Pixel::rgb(60, 160, 80),
-                3,
-            );
-            fb.fill_rect(Rect::new(cx - 3, cy - 3, 6, 2), icon_color);
-            fb.fill_rect(Rect::new(cx - 1, cy - 5, 2, 6), icon_color);
-        }
-        WindowContentType::SoftwareCenter => {
-            fb.fill_rounded_rect_aa(
-                Rect::new(cx - 6, cy - 5, 12, 12),
-                Pixel::rgb(74, 144, 217),
-                3,
-            );
-            fb.fill_rect(Rect::new(cx - 2, cy - 8, 4, 4), Pixel::rgb(74, 144, 217));
-        }
-        WindowContentType::SetupWizard => {
-            fb.fill_circle_aa(cx, cy, 8, Pixel::rgb(46, 204, 113));
-            fb.fill_circle_aa(cx, cy, 3, icon_color);
-        }
-        WindowContentType::TaskManager => {
-            // Bar chart icon
-            fb.fill_rect(Rect::new(cx - 6, cy + 2, 4, 6), Pixel::rgb(82, 139, 255));
-            fb.fill_rect(Rect::new(cx - 1, cy - 4, 4, 12), Pixel::rgb(60, 180, 100));
-            fb.fill_rect(Rect::new(cx + 4, cy - 1, 4, 9), Pixel::rgb(230, 180, 40));
-        }
-        WindowContentType::Calculator => {
-            // Calculator icon: grid dots
-            fb.fill_rounded_rect_aa(Rect::new(cx - 8, cy - 8, 16, 16), icon_color, 3);
-            fb.fill_rect(Rect::new(cx - 5, cy - 5, 3, 3), Pixel::new(40, 50, 60, 180));
-            fb.fill_rect(Rect::new(cx + 2, cy - 5, 3, 3), Pixel::new(40, 50, 60, 180));
-            fb.fill_rect(Rect::new(cx - 5, cy + 2, 3, 3), Pixel::new(40, 50, 60, 180));
-            fb.fill_rect(Rect::new(cx + 2, cy + 2, 3, 3), Pixel::new(40, 50, 60, 180));
-        }
-        WindowContentType::ImageViewer => {
-            // Picture icon: mountain in frame
-            fb.draw_rounded_rect(Rect::new(cx - 8, cy - 6, 16, 12), icon_color, 2, 1);
-            fb.fill_circle_aa(cx + 3, cy - 2, 2, Pixel::rgb(255, 220, 80));
-            fb.draw_line_aa(cx - 6, cy + 4, cx - 1, cy - 1, Pixel::rgb(80, 180, 80));
-            fb.draw_line_aa(cx - 1, cy - 1, cx + 5, cy + 4, Pixel::rgb(80, 180, 80));
-        }
-    }
+    super::icon_theme::draw_small_icon(fb, cx - 12, cy - 12, super::icon_theme::for_content(ct));
 }

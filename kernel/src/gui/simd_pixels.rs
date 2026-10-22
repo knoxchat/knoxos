@@ -18,10 +18,39 @@ use core::sync::atomic::{AtomicBool, Ordering};
 static SSE2_AVAILABLE: AtomicBool = AtomicBool::new(false);
 static AVX2_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
+/// Turn on x87/SSE so explicit XMM intrinsics (`ai::simd`, host-side
+/// knox-gpui SSE2) do not #UD. The kernel target JSON keeps `-sse2` so
+/// rustc still will not emit SSE in ordinary code.
+#[cfg(target_arch = "x86_64")]
+fn enable_sse() {
+    static MXCSR_DEFAULT: u32 = 0x1F80;
+    // SAFETY: CR0.EM/TS must be clear and CR4.OSFXSR set before any FXSAVE
+    // or XMM instruction; `fninit`/`ldmxcsr` then load a known x87/MXCSR.
+    // Idempotent if the bootloader already enabled FXSR.
+    unsafe {
+        let mut cr0: u64;
+        core::arch::asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack));
+        cr0 &= !((1u64 << 2) | (1u64 << 3));
+        cr0 |= 1 << 1;
+        core::arch::asm!("mov cr0, {}", in(reg) cr0, options(nomem, nostack));
+        let mut cr4: u64;
+        core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack));
+        cr4 |= (1 << 9) | (1 << 10);
+        core::arch::asm!("mov cr4, {}", in(reg) cr4, options(nomem, nostack));
+        core::arch::asm!("fninit", options(nomem, nostack));
+        core::arch::asm!(
+            "ldmxcsr [{mxcsr}]",
+            mxcsr = in(reg) core::ptr::addr_of!(MXCSR_DEFAULT),
+            options(nostack)
+        );
+    }
+}
+
 /// Detect SIMD capabilities via CPUID (x86_64) or equivalent
 pub fn detect_simd() {
     #[cfg(target_arch = "x86_64")]
     {
+        enable_sse();
         let cpuid = crate::arch_compat::raw_cpuid::CpuId::new();
 
         if let Some(features) = cpuid.get_feature_info() {
@@ -240,6 +269,9 @@ pub fn copy_row_with_alpha(dst: &mut [Pixel], src: &[Pixel], alpha: u8) {
     }
 }
 
+/// Serial marker grepped by `tests/run_integration.sh` (D13.4).
+pub const GATE_GPUI_SIMD_FILL: &str = "GATE_GPUI simd fill";
+
 /// Initialize SIMD pixel operations
 pub fn init() {
     detect_simd();
@@ -248,4 +280,8 @@ pub fn init() {
         has_sse2(),
         has_avx2()
     );
+    #[cfg(target_arch = "x86_64")]
+    if has_sse2() {
+        serial_println!("[gpui] {}", GATE_GPUI_SIMD_FILL);
+    }
 }

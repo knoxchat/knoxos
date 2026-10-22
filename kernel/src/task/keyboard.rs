@@ -87,6 +87,7 @@ mod pc_keyboard_stubs {
         PageDown,
         Oem2,
         Oem7,
+        Spacebar,
         Unknown,
     }
     #[derive(Debug, Clone)]
@@ -140,6 +141,7 @@ use pc_keyboard_stubs as pc_keyboard;
 #[cfg(not(target_arch = "x86_64"))]
 use pc_keyboard_stubs::{DecodedKey, HandleControl, KeyCode, PS2Keyboard, ScancodeSet1, layouts};
 
+use crate::gui::window::ViewKind;
 use crate::serial_println;
 use crate::terminal::TerminalKey;
 use spin::Mutex;
@@ -150,10 +152,23 @@ static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
 
 /// Global Ctrl key state — used by GUI code (e.g. Ctrl+Click on URLs)
 static CTRL_HELD_GLOBAL: AtomicBool = AtomicBool::new(false);
+static SHIFT_HELD_GLOBAL: AtomicBool = AtomicBool::new(false);
+static ALT_HELD_GLOBAL: AtomicBool = AtomicBool::new(false);
+static SUPER_HELD_GLOBAL: AtomicBool = AtomicBool::new(false);
 
 /// Check if Ctrl is currently held down
 pub fn is_ctrl_held() -> bool {
     CTRL_HELD_GLOBAL.load(Ordering::Relaxed)
+}
+
+/// Current modifier chord for GPUI (D6.1).
+pub fn modifiers() -> knox_gpui::Modifiers {
+    knox_gpui::Modifiers::new(
+        CTRL_HELD_GLOBAL.load(Ordering::Relaxed),
+        ALT_HELD_GLOBAL.load(Ordering::Relaxed),
+        SHIFT_HELD_GLOBAL.load(Ordering::Relaxed),
+        SUPER_HELD_GLOBAL.load(Ordering::Relaxed),
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -490,6 +505,7 @@ pub async fn process_keypresses() {
     let mut shift_held = false;
     let mut alt_held = false;
     let mut super_held = false;
+    let mut super_combo = false;
 
     serial_println!("[KnoxOS] Keyboard handler started");
 
@@ -510,9 +526,11 @@ pub async fn process_keypresses() {
                             }
                             KeyCode::LShift | KeyCode::RShift => {
                                 shift_held = is_press;
+                                SHIFT_HELD_GLOBAL.store(is_press, Ordering::Relaxed);
                             }
                             KeyCode::LAlt | KeyCode::RAltGr => {
                                 alt_held = is_press;
+                                ALT_HELD_GLOBAL.store(is_press, Ordering::Relaxed);
                                 // Alt released while Alt+Tab overlay is visible → confirm selection
                                 if !is_press && crate::gui::alt_tab::is_visible() {
                                     if let Some(wid) = crate::gui::alt_tab::confirm() {
@@ -525,9 +543,30 @@ pub async fn process_keypresses() {
                                 }
                             }
                             KeyCode::LWin | KeyCode::RWin => {
-                                super_held = is_press;
+                                if is_press {
+                                    super_held = true;
+                                    super_combo = false;
+                                    SUPER_HELD_GLOBAL.store(true, Ordering::Relaxed);
+                                } else {
+                                    let tap = super_held && !super_combo;
+                                    super_held = false;
+                                    SUPER_HELD_GLOBAL.store(false, Ordering::Relaxed);
+                                    if tap {
+                                        crate::gui::startmenu::toggle();
+                                        crate::gui::request_redraw();
+                                        let _ = keyboard.process_keyevent(key_event);
+                                        continue;
+                                    }
+                                }
                             }
                             _ => {}
+                        }
+
+                        if is_press
+                            && super_held
+                            && !matches!(key_event.code, KeyCode::LWin | KeyCode::RWin)
+                        {
+                            super_combo = true;
                         }
 
                         // ── Login screen key routing ──
@@ -684,6 +723,14 @@ pub async fn process_keypresses() {
                                 let _ = keyboard.process_keyevent(key_event);
                                 continue;
                             }
+
+                            // Super+Space: session launcher (D9.2)
+                            if key_event.code == KeyCode::Spacebar {
+                                crate::gui::startmenu::toggle();
+                                crate::gui::request_redraw();
+                                let _ = keyboard.process_keyevent(key_event);
+                                continue;
+                            }
                         }
 
                         // Alt+Tab: Show/cycle Alt+Tab window switcher overlay
@@ -696,6 +743,19 @@ pub async fn process_keypresses() {
                                 crate::gui::alt_tab::show(shift_held);
                             }
                             crate::gui::request_redraw();
+                            let _ = keyboard.process_keyevent(key_event);
+                            continue;
+                        }
+
+                        // Knox GPUI (D6): Tab, keymap, focused field
+                        if try_dispatch_gpui_key(
+                            key_event.code,
+                            is_press,
+                            ctrl_held,
+                            alt_held,
+                            shift_held,
+                            super_held,
+                        ) {
                             let _ = keyboard.process_keyevent(key_event);
                             continue;
                         }
@@ -719,10 +779,12 @@ pub async fn process_keypresses() {
                                     .iter()
                                     .find(|w| w.id == wid)
                                     .map(|w| w.content_type);
-                                let is_terminal =
-                                    ct == Some(crate::gui::window::WindowContentType::Terminal);
-                                let is_browser =
-                                    ct == Some(crate::gui::window::WindowContentType::Browser);
+                                let is_terminal = ct
+                                    == Some(crate::gui::window::WindowContentType::TerminalSurface);
+                                let is_browser = ct
+                                    == Some(crate::gui::window::WindowContentType::Gpui(
+                                        ViewKind::Browser,
+                                    ));
                                 drop(wm);
                                 // Terminal: Ctrl+W = delete previous word; Browser: Ctrl+W = close tab
                                 // Let these windows handle the key themselves instead of closing
@@ -740,11 +802,15 @@ pub async fn process_keypresses() {
                             }
                         }
 
-                        // Ctrl+/: Toggle keyboard shortcuts overlay
-                        if is_press && ctrl_held && !alt_held && key_event.code == KeyCode::Oem2 {
-                            crate::gui::shortcuts_overlay::toggle();
-                            let _ = keyboard.process_keyevent(key_event);
-                            continue;
+                        // Ctrl+/ or Shift+/ (`?`): Toggle keyboard shortcuts overlay
+                        if is_press && !alt_held && key_event.code == KeyCode::Oem2 {
+                            let question = shift_held && !ctrl_held;
+                            let ctrl_slash = ctrl_held && !shift_held;
+                            if question || ctrl_slash {
+                                crate::gui::shortcuts_overlay::toggle();
+                                let _ = keyboard.process_keyevent(key_event);
+                                continue;
+                            }
                         }
 
                         // Alt+F4: Close focused window
@@ -756,10 +822,12 @@ pub async fn process_keypresses() {
                                     .iter()
                                     .find(|w| w.id == wid)
                                     .map(|w| w.content_type);
-                                let is_terminal =
-                                    ct == Some(crate::gui::window::WindowContentType::Terminal);
-                                let is_browser =
-                                    ct == Some(crate::gui::window::WindowContentType::Browser);
+                                let is_terminal = ct
+                                    == Some(crate::gui::window::WindowContentType::TerminalSurface);
+                                let is_browser = ct
+                                    == Some(crate::gui::window::WindowContentType::Gpui(
+                                        ViewKind::Browser,
+                                    ));
                                 drop(wm);
                                 crate::gui::window::WINDOW_MANAGER.lock().close_window(wid);
                                 crate::gui::taskbar::remove_entry(wid);
@@ -777,7 +845,13 @@ pub async fn process_keypresses() {
 
                         // Escape: Cancel drag/resize operations, close menus
                         if is_press && key_event.code == KeyCode::Escape {
-                            // Close Exposé first
+                            // Close Alt-Tab / Exposé first
+                            if crate::gui::alt_tab::is_visible() {
+                                crate::gui::alt_tab::dismiss();
+                                crate::gui::request_redraw();
+                                let _ = keyboard.process_keyevent(key_event);
+                                continue;
+                            }
                             if crate::gui::expose::is_visible() {
                                 crate::gui::expose::dismiss();
                                 crate::gui::request_redraw();
@@ -1128,10 +1202,10 @@ fn focused_terminal_window_id() -> Option<u32> {
             if win.state == crate::gui::window::WindowState::Minimized {
                 return None;
             }
-            if win.content_type == crate::gui::window::WindowContentType::Terminal {
+            if win.content_type == crate::gui::window::WindowContentType::TerminalSurface {
                 return Some(wid);
             }
-            if win.content_type == crate::gui::window::WindowContentType::Empty
+            if win.content_type == crate::gui::window::WindowContentType::ShmEmpty
                 && crate::wayland::window_pty(wid).is_some()
             {
                 return Some(wid);
@@ -1146,7 +1220,7 @@ fn focused_browser_window_id() -> Option<u32> {
     let wm = crate::gui::window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.focused_window {
         if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
-            if win.content_type == crate::gui::window::WindowContentType::Browser
+            if win.content_type == crate::gui::window::WindowContentType::Gpui(ViewKind::Browser)
                 && win.state != crate::gui::window::WindowState::Minimized
             {
                 return Some(wid);
@@ -1161,7 +1235,7 @@ fn focused_explorer_window_id() -> Option<u32> {
     let wm = crate::gui::window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.focused_window {
         if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
-            if win.content_type == crate::gui::window::WindowContentType::FileExplorer
+            if win.content_type == crate::gui::window::WindowContentType::Gpui(ViewKind::Files)
                 && win.state != crate::gui::window::WindowState::Minimized
             {
                 return Some(wid);
@@ -1176,7 +1250,7 @@ fn focused_editor_window_id() -> Option<u32> {
     let wm = crate::gui::window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.focused_window {
         if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
-            if win.content_type == crate::gui::window::WindowContentType::TextEditor
+            if win.content_type == crate::gui::window::WindowContentType::Gpui(ViewKind::Editor)
                 && win.state != crate::gui::window::WindowState::Minimized
             {
                 return Some(wid);
@@ -1191,7 +1265,7 @@ fn focused_settings_window_id() -> Option<u32> {
     let wm = crate::gui::window::WINDOW_MANAGER.lock();
     if let Some(wid) = wm.focused_window {
         if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
-            if win.content_type == crate::gui::window::WindowContentType::Settings
+            if win.content_type == crate::gui::window::WindowContentType::Gpui(ViewKind::Settings)
                 && win.state != crate::gui::window::WindowState::Minimized
             {
                 return Some(wid);
@@ -1297,6 +1371,12 @@ fn handle_key_press(character: char, ctrl_held: bool, shift_held: bool) {
             }
             return; // still waiting for second char
         }
+    }
+
+    // Knox GPUI focused Input / IME (D6.4)
+    if crate::gui::gpui_platform::char_input(character) {
+        crate::gui::request_redraw();
+        return;
     }
 
     // ── Global zoom shortcuts (Ctrl+=/Ctrl+-/Ctrl+0) (17.9) ──
@@ -1790,4 +1870,79 @@ fn handle_key_press(character: char, ctrl_held: bool, shift_held: bool) {
             // Other keys on the desktop (no focused terminal)
         }
     }
+}
+
+fn try_dispatch_gpui_key(
+    code: KeyCode,
+    is_press: bool,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    super_key: bool,
+) -> bool {
+    let mods = knox_gpui::Modifiers::new(ctrl, alt, shift, super_key);
+    crate::gui::gpui_platform::set_modifiers(mods);
+    if !is_press {
+        return false;
+    }
+    let Some(key) = gpui_key(code) else {
+        return false;
+    };
+    crate::gui::gpui_platform::key_down(key, mods)
+}
+
+fn gpui_key(code: KeyCode) -> Option<knox_gpui::Key> {
+    use knox_gpui::Key;
+    Some(match code {
+        KeyCode::Tab => Key::Tab,
+        KeyCode::Return | KeyCode::NumpadEnter => Key::Enter,
+        KeyCode::Escape => Key::Escape,
+        KeyCode::Backspace => Key::Backspace,
+        KeyCode::Delete => Key::Delete,
+        KeyCode::ArrowLeft => Key::Left,
+        KeyCode::ArrowRight => Key::Right,
+        KeyCode::ArrowUp => Key::Up,
+        KeyCode::ArrowDown => Key::Down,
+        KeyCode::Home => Key::Home,
+        KeyCode::End => Key::End,
+        KeyCode::PageUp => Key::PageUp,
+        KeyCode::PageDown => Key::PageDown,
+        KeyCode::A => Key::Char('a'),
+        KeyCode::B => Key::Char('b'),
+        KeyCode::C => Key::Char('c'),
+        KeyCode::D => Key::Char('d'),
+        KeyCode::E => Key::Char('e'),
+        KeyCode::F => Key::Char('f'),
+        KeyCode::G => Key::Char('g'),
+        KeyCode::H => Key::Char('h'),
+        KeyCode::I => Key::Char('i'),
+        KeyCode::J => Key::Char('j'),
+        KeyCode::K => Key::Char('k'),
+        KeyCode::L => Key::Char('l'),
+        KeyCode::M => Key::Char('m'),
+        KeyCode::N => Key::Char('n'),
+        KeyCode::O => Key::Char('o'),
+        KeyCode::P => Key::Char('p'),
+        KeyCode::Q => Key::Char('q'),
+        KeyCode::R => Key::Char('r'),
+        KeyCode::S => Key::Char('s'),
+        KeyCode::T => Key::Char('t'),
+        KeyCode::U => Key::Char('u'),
+        KeyCode::V => Key::Char('v'),
+        KeyCode::W => Key::Char('w'),
+        KeyCode::X => Key::Char('x'),
+        KeyCode::Y => Key::Char('y'),
+        KeyCode::Z => Key::Char('z'),
+        KeyCode::Key1 => Key::Char('1'),
+        KeyCode::Key2 => Key::Char('2'),
+        KeyCode::Key3 => Key::Char('3'),
+        KeyCode::Key4 => Key::Char('4'),
+        KeyCode::Key5 => Key::Char('5'),
+        KeyCode::Key6 => Key::Char('6'),
+        KeyCode::Key7 => Key::Char('7'),
+        KeyCode::Key8 => Key::Char('8'),
+        KeyCode::Key9 => Key::Char('9'),
+        KeyCode::Key0 => Key::Char('0'),
+        _ => return None,
+    })
 }

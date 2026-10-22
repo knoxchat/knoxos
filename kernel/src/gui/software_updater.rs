@@ -10,7 +10,7 @@ use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::theme;
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 use crate::package_manager::{self, PKG_MANAGER, PackageState, Version};
 
 struct UpdateEntry {
@@ -38,7 +38,8 @@ lazy_static! {
 /// Open the software updater window
 pub fn open() {
     let mut win = window::Window::new("Software Updater", 180, 100, 560, 440);
-    win.content_type = WindowContentType::SoftwareUpdater;
+    win.content_type = WindowContentType::Gpui(ViewKind::Updater);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -93,8 +94,84 @@ pub fn open() {
     super::request_redraw();
 }
 
+pub fn updater_snapshot(wid: WindowId) -> (Vec<String>, u8, String) {
+    let states = STATES.lock();
+    let Some(s) = states.iter().find(|s| s.window_id == wid) else {
+        return (Vec::new(), 0, String::new());
+    };
+    let rows = s
+        .entries
+        .iter()
+        .map(|e| {
+            format!(
+                "{}  {} → {}  {} B",
+                e.name, e.current_ver, e.new_ver, e.size_bytes
+            )
+        })
+        .collect();
+    (rows, s.progress, s.status_msg.clone())
+}
+
+pub fn check_updates(wid: WindowId) {
+    let mut states = STATES.lock();
+    let Some(state) = states.iter_mut().find(|s| s.window_id == wid) else {
+        return;
+    };
+    let mgr = PKG_MANAGER.lock();
+    let updates = mgr.check_updates();
+    state.entries.clear();
+    for (name, cur, new) in &updates {
+        let desc = mgr
+            .get_info(name)
+            .map(|p| p.description.clone())
+            .unwrap_or_default();
+        let size = mgr.get_info(name).map(|p| p.size_bytes).unwrap_or(0);
+        state.entries.push(UpdateEntry {
+            name: name.clone(),
+            description: desc,
+            current_ver: format!("{}", cur),
+            new_ver: format!("{}", new),
+            size_bytes: size,
+            selected: true,
+        });
+    }
+    drop(mgr);
+    state.status_msg = if state.entries.is_empty() {
+        String::from("System is up to date")
+    } else {
+        format!("{} update(s) available", state.entries.len())
+    };
+}
+
+pub fn apply_updates(wid: WindowId) {
+    let mut states = STATES.lock();
+    let Some(state) = states.iter_mut().find(|s| s.window_id == wid) else {
+        return;
+    };
+    let selected: Vec<String> = state
+        .entries
+        .iter()
+        .filter(|e| e.selected)
+        .map(|e| e.name.clone())
+        .collect();
+    if !selected.is_empty() {
+        let mut mgr = PKG_MANAGER.lock();
+        for name in &selected {
+            let _ = mgr.upgrade(name);
+        }
+        drop(mgr);
+        state.entries.retain(|e| !e.selected);
+        state.status_msg = String::from("Updates applied successfully");
+        state.progress = 100;
+    }
+}
+
 /// Draw updater content
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_apps(fb, wid, area);
+        return;
+    }
     let tc = theme::colors();
     let accent = colors::accent();
     let mut states = STATES.lock();

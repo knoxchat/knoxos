@@ -2,7 +2,7 @@
 use alloc::format;
 
 use crate::gui::event_types::KeyCode;
-use crate::gui::window::{self, ExplorerAction, WindowContentType, WindowId};
+use crate::gui::window::{self, ExplorerAction, ViewKind, WindowContentType, WindowId};
 
 use super::actions::{
     cancel_rename, confirm_rename, execute_action, open_file_in_editor, rename_backspace,
@@ -24,7 +24,7 @@ pub fn handle_key(wid: WindowId, key: KeyCode, ctrl: bool, shift: bool) -> bool 
         None => return false,
     };
 
-    if win.content_type != WindowContentType::FileExplorer {
+    if win.content_type != WindowContentType::Gpui(ViewKind::Files) {
         return false;
     }
 

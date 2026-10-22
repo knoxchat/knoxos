@@ -1,4 +1,4 @@
-/// Settings Panel — Rendered inside a Window with WindowContentType::Settings
+/// Settings Panel — Rendered inside a Window with WindowContentType::Gpui(ViewKind::Settings)
 /// Provides system configuration tabs: Display, Sound, Network, System, About.
 mod about;
 mod chrome;
@@ -124,6 +124,16 @@ lazy_static::lazy_static! {
 }
 
 /// Tabs definition
+pub fn tab_at(index: usize) -> SettingsTab {
+    TABS.get(index)
+        .map(|(t, _, _)| *t)
+        .unwrap_or(SettingsTab::Display)
+}
+
+pub fn tab_index(tab: SettingsTab) -> usize {
+    TABS.iter().position(|(t, _, _)| *t == tab).unwrap_or(0)
+}
+
 pub(super) const TABS: &[(SettingsTab, &str, &str)] = &[
     (SettingsTab::Display, "Display", "D"),
     (SettingsTab::Sound, "Sound", "S"),

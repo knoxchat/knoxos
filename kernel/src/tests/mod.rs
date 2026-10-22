@@ -71,8 +71,6 @@ mod service_manager_tests;
 #[rustfmt::skip]
 mod hwtest_tests;
 #[rustfmt::skip]
-mod gui_widget_tests;
-#[rustfmt::skip]
 mod fs_stress_tests;
 #[rustfmt::skip]
 mod network_conformance_tests;

@@ -7,6 +7,10 @@ use super::types::Window;
 
 impl Window {
     pub(super) fn draw_browser_content(&mut self, fb: &mut FrameBuffer, content: Rect) {
+        if crate::gui::gpui_platform::is_ready() {
+            crate::gui::gpui_platform::present_browse(fb, self.id, content);
+            return;
+        }
         // Get browser state for this window
         let browsers = crate::gui::browser::BROWSERS.lock();
         let state = browsers.get(&self.id);

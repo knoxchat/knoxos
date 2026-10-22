@@ -11,7 +11,7 @@ use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::theme;
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 /// An entry displayed in the archive viewer
 #[derive(Clone)]
@@ -42,7 +42,8 @@ const HEADER_HEIGHT: i32 = 40;
 /// Open an empty Archive Manager window (start menu / desktop).
 pub fn open() {
     let mut win = window::Window::new("Archive Manager", 200, 100, 650, 450);
-    win.content_type = WindowContentType::ArchiveViewer;
+    win.content_type = WindowContentType::Gpui(ViewKind::Archive);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -74,7 +75,8 @@ pub fn open_archive(path: &str) {
 
     let title = format!("Archive — {}", path);
     let mut win = window::Window::new(&title, 200, 100, 650, 450);
-    win.content_type = WindowContentType::ArchiveViewer;
+    win.content_type = WindowContentType::Gpui(ViewKind::Archive);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -105,8 +107,61 @@ pub fn on_window_closed(wid: WindowId) {
 
 // ─── Drawing ────────────────────────────────────────────────────────
 
+pub fn archive_snapshot(wid: WindowId) -> (String, Vec<String>, Option<usize>, bool) {
+    let states = ARCHIVE_STATES.lock();
+    let Some(s) = states.iter().find(|s| s.window_id == wid) else {
+        return (String::from("No archive open"), Vec::new(), None, false);
+    };
+    let rows = s
+        .entries
+        .iter()
+        .map(|e| {
+            if e.is_dir {
+                format!("{}/", e.path)
+            } else {
+                format!("{}  {} B", e.path, e.size)
+            }
+        })
+        .collect();
+    let sel = if s.selected >= 0 {
+        Some(s.selected as usize)
+    } else {
+        None
+    };
+    (s.archive_path.clone(), rows, sel, s.extracted)
+}
+
+pub fn select_entry(wid: WindowId, i: usize) {
+    let mut states = ARCHIVE_STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        s.selected = i as i32;
+    }
+}
+
+pub fn extract_current(wid: WindowId) {
+    let path = {
+        let states = ARCHIVE_STATES.lock();
+        states
+            .iter()
+            .find(|s| s.window_id == wid)
+            .map(|s| s.archive_path.clone())
+    };
+    let Some(path) = path else {
+        return;
+    };
+    extract_archive(&path);
+    let mut states = ARCHIVE_STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        s.extracted = true;
+    }
+}
+
 /// Draw the archive viewer content inside its window
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, content: Rect, scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_apps(fb, wid, content);
+        return;
+    }
     let states = ARCHIVE_STATES.lock();
     let state = match states.iter().find(|s| s.window_id == wid) {
         Some(s) => s,

@@ -9,6 +9,10 @@ use super::types::{ExplorerAction, ExplorerSort, Window};
 
 impl Window {
     pub(super) fn draw_file_explorer_content(&mut self, fb: &mut FrameBuffer, content: Rect) {
+        if crate::gui::gpui_platform::is_ready() {
+            crate::gui::gpui_platform::present_files(fb, self.id, content);
+            return;
+        }
         use crate::gui::explorer;
 
         let current_path = explorer::current_path(&self.title);

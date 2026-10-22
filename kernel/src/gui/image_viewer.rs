@@ -8,7 +8,7 @@ use spin::Mutex;
 use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 // ─── State ──────────────────────────────────────────────────────────
 
@@ -42,7 +42,8 @@ pub fn open() {
 
 pub fn open_with_path(path: &str) {
     let mut win = window::Window::new("Image Viewer", 200, 80, 800, 600);
-    win.content_type = WindowContentType::ImageViewer;
+    win.content_type = WindowContentType::Gpui(ViewKind::Image);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -212,7 +213,82 @@ fn decode_tga(data: &[u8]) -> Option<(u32, u32, Vec<u32>)> {
 
 // ─── Drawing ────────────────────────────────────────────────────────
 
+static PICKER_TARGET: Mutex<Option<WindowId>> = Mutex::new(None);
+
+pub fn request_open(wid: WindowId) {
+    *PICKER_TARGET.lock() = Some(wid);
+    super::file_picker::open("/home/user/Pictures");
+    super::request_redraw();
+}
+
+pub fn poll_picker() {
+    if PICKER_TARGET.lock().is_none() {
+        return;
+    }
+    let Some(path) = super::file_picker::take_result() else {
+        if !super::file_picker::is_visible() {
+            let _ = PICKER_TARGET.lock().take();
+        }
+        return;
+    };
+    let Some(wid) = PICKER_TARGET.lock().take() else {
+        return;
+    };
+    load_file(wid, &path);
+    crate::gui::damage_window(wid);
+}
+
+pub fn zoom_in_pub(wid: WindowId) {
+    zoom_in(wid);
+}
+
+pub fn zoom_out_pub(wid: WindowId) {
+    zoom_out(wid);
+}
+
+pub fn zoom_fit_pub(wid: WindowId) {
+    let area = {
+        let wm = window::WINDOW_MANAGER.lock();
+        wm.windows
+            .iter()
+            .find(|w| w.id == wid)
+            .map(|w| w.rect)
+            .unwrap_or_else(|| Rect::new(0, 0, 800, 600))
+    };
+    fit_to_window(wid, area);
+}
+
+pub fn zoom_reset_pub(wid: WindowId) {
+    set_zoom(wid, 100);
+}
+
+pub fn image_snapshot(wid: WindowId) -> (String, u32, u32, Vec<u8>, String) {
+    let states = STATES.lock();
+    let Some(s) = states.iter().find(|s| s.window_id == wid) else {
+        return (String::new(), 0, 0, Vec::new(), String::from("No image"));
+    };
+    let mut bgra = Vec::with_capacity(s.pixels.len() * 4);
+    for px in &s.pixels {
+        let a = (*px >> 24) as u8;
+        let r = (*px >> 16) as u8;
+        let g = (*px >> 8) as u8;
+        let b = *px as u8;
+        bgra.extend_from_slice(&[b, g, r, a]);
+    }
+    (
+        s.file_path.clone(),
+        s.img_width,
+        s.img_height,
+        bgra,
+        s.status.clone(),
+    )
+}
+
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, _scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_apps(fb, wid, area);
+        return;
+    }
     let states = STATES.lock();
     let state = match states.iter().find(|s| s.window_id == wid) {
         Some(s) => s,

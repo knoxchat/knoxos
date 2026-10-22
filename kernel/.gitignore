@@ -3,8 +3,6 @@
 
 # Bootimage output
 *.bin
-!src/gui/icon_blob.bin
-!fonts/splash/*.bin
 *.iso
 *.img
 

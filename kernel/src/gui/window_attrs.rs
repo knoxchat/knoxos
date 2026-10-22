@@ -174,7 +174,7 @@ impl Default for WindowAttributes {
             window_level: WindowLevel::Normal,
             preferred_theme: None,
             active: true,
-            content_type: super::window::WindowContentType::Empty,
+            content_type: super::window::WindowContentType::ShmEmpty,
         }
     }
 }

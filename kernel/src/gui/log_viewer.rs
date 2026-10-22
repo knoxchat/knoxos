@@ -11,7 +11,7 @@ use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::theme;
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 use crate::dmesg::{self, LogEntry, LogLevel};
 
 struct LogViewState {
@@ -37,7 +37,8 @@ pub fn open() {
     let last_seq = entries.last().map(|e| e.seq).unwrap_or(0);
 
     let mut win = window::Window::new("Log Viewer", 120, 80, 700, 520);
-    win.content_type = WindowContentType::LogViewer;
+    win.content_type = WindowContentType::Gpui(ViewKind::Logs);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -57,8 +58,25 @@ pub fn open() {
     super::request_redraw();
 }
 
+pub fn set_filter(level: u8) {
+    FILTER_LEVEL.store(level, Ordering::Relaxed);
+}
+
+pub fn log_lines() -> Vec<String> {
+    let level = FILTER_LEVEL.load(Ordering::Relaxed);
+    dmesg::read_all()
+        .into_iter()
+        .filter(|e| e.level as u8 <= level)
+        .map(|e| format!("[{}] {}: {}", e.seq, e.level.prefix(), e.message))
+        .collect()
+}
+
 /// Draw log viewer content
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_apps(fb, wid, area);
+        return;
+    }
     let tc = theme::colors();
     let accent = colors::accent();
     let mut states = STATES.lock();

@@ -28,8 +28,6 @@ use super::font_engine;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::icon_theme;
-use super::icon_theme::IconCategory;
-use super::icons;
 
 const ARCH_NAME: &str = if cfg!(target_arch = "x86_64") {
     "x86_64"
@@ -435,6 +433,16 @@ impl StartMenu {
                 icon_type: super::desktop::IconType::Document,
                 keywords: String::from("archive manager zip tar gz extract compress"),
                 pinned: false,
+                launch_count: 0,
+                last_launched: 0,
+            },
+            StartMenuItem {
+                name: String::from("Kit Gallery"),
+                description: String::from("Knox UI component catalog"),
+                category: MenuCategory::Development,
+                icon_type: super::desktop::IconType::Game,
+                keywords: String::from("gpui kit gallery ui widgets components catalog"),
+                pinned: true,
                 launch_count: 0,
                 last_launched: 0,
             },
@@ -852,6 +860,9 @@ fn generate_ai_response(input: &str) -> ChatMessage {
 /// Draw the start menu on the framebuffer — Aurora style floating panel
 /// Appears centered above the floating dock.
 pub fn draw_start_menu(fb: &mut FrameBuffer) {
+    if super::gpui_platform::launcher_is_live() {
+        return;
+    }
     let menu = START_MENU.lock();
     if !menu.visible {
         return;
@@ -1283,8 +1294,7 @@ fn draw_apps_content(
         // Icon (24×24)
         let icon_x = panel_x + ITEM_INSET + 14;
         let icon_y = item_y + (MENU_ITEM_HEIGHT as i32 - ITEM_ICON_SIZE) / 2;
-        let (cat, iname) = super::desktop::icon_type_theme(item.icon_type);
-        icon_theme::draw_small_icon(fb, icon_x, icon_y, cat, iname);
+        icon_theme::draw_small_icon(fb, icon_x, icon_y, icon_theme::for_desktop(item.icon_type));
 
         // App name + description
         let text_x = icon_x + ITEM_ICON_SIZE + ICON_TEXT_GAP;
@@ -2060,6 +2070,9 @@ fn tab_hit_test(
 
 /// Handle a click on the start menu, returns true if consumed
 pub fn handle_click(x: i32, y: i32) -> Option<StartMenuItem> {
+    if super::gpui_platform::launcher_is_live() {
+        return None;
+    }
     let mut menu = START_MENU.lock();
     if !menu.visible {
         return None;
@@ -2236,6 +2249,12 @@ pub fn handle_click(x: i32, y: i32) -> Option<StartMenuItem> {
 /// Toggle the start menu visibility
 pub fn toggle() {
     START_MENU.lock().toggle();
+    if is_visible() {
+        super::gpui_platform::launcher_reset();
+        super::gpui_platform::claim_key_focus();
+    } else {
+        super::gpui_platform::release_key_focus();
+    }
     super::request_redraw();
 }
 
@@ -2250,6 +2269,7 @@ pub fn close() {
     if menu.visible {
         menu.visible = false;
         drop(menu);
+        super::gpui_platform::release_key_focus();
         super::request_redraw();
     }
 }
@@ -2326,6 +2346,9 @@ pub fn update_hover(mouse_x: i32, mouse_y: i32) {
 /// Handle keyboard input when command center is visible.
 /// Returns true if the key was consumed.
 pub fn handle_key(scancode: u8, ch: Option<char>) -> bool {
+    if super::gpui_platform::launcher_is_live() {
+        return false;
+    }
     let mut menu = START_MENU.lock();
     if !menu.visible {
         return false;

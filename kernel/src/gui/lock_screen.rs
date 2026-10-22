@@ -61,9 +61,42 @@ impl LockState {
     }
 }
 
+/// Snapshot for the GPUI lock Dialog (D12.2).
+pub struct LockSnap {
+    pub username: String,
+    pub password_mask: String,
+    pub error: String,
+}
+
+fn mask_dots(len: usize) -> String {
+    let mut s = String::new();
+    for _ in 0..len.min(40) {
+        s.push('\u{2022}');
+    }
+    s
+}
+
 /// Check if screen is locked
 pub fn is_locked() -> bool {
     SCREEN_LOCKED.load(Ordering::Relaxed)
+}
+
+pub fn snapshot() -> LockSnap {
+    let username = {
+        let name = LOCKED_USER.lock();
+        let len = *LOCKED_USER_LEN.lock();
+        let mut s = String::new();
+        for &b in &name[..len] {
+            s.push(b as char);
+        }
+        s
+    };
+    let state = LOCK_STATE.lock();
+    LockSnap {
+        username,
+        password_mask: mask_dots(state.password_len),
+        error: String::from(state.error_str()),
+    }
 }
 
 /// Lock the screen

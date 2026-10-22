@@ -55,9 +55,7 @@ impl WindowRule {
 
     /// Check if this rule matches a given window
     pub fn matches(&self, content_type: WindowContentType, title: &str) -> bool {
-        let type_match = self
-            .match_content_type
-            .is_none_or(|ct| ct as u8 == content_type as u8);
+        let type_match = self.match_content_type.is_none_or(|ct| ct == content_type);
         let title_match = self.match_title.is_empty() || title.contains(self.match_title.as_str());
         type_match && title_match
     }

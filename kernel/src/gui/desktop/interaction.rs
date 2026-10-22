@@ -114,6 +114,11 @@ pub(crate) fn draw_snap_preview(fb: &mut FrameBuffer, mx: i32, my: i32) {
 pub fn handle_click(x: i32, y: i32) {
     // Close start menu if open and clicking outside
     if startmenu::is_visible() {
+        if crate::gui::gpui_platform::launcher_is_live() {
+            startmenu::close();
+            crate::gui::request_redraw();
+            return;
+        }
         if let Some(item) = startmenu::handle_click(x, y) {
             crate::serial_println!("[KnoxOS] Start menu: Opening {}", item.name);
             open_application(&item.name, item.icon_type);
@@ -125,52 +130,55 @@ pub fn handle_click(x: i32, y: i32) {
         return;
     }
 
+    let clicked = {
+        let desktop = DESKTOP.lock();
+        desktop
+            .icons
+            .iter()
+            .position(|icon| Rect::new(icon.x, icon.y, ICON_WIDTH, ICON_HEIGHT).contains(x, y))
+    };
+    match clicked {
+        Some(idx) => press_icon(idx, x, y),
+        None => begin_rubber_band(x, y),
+    }
+}
+
+/// Select an icon, start compositor DnD (D9.9), and open it (legacy single-click).
+pub fn press_icon(idx: usize, x: i32, y: i32) {
     let mut desktop = DESKTOP.lock();
-
-    // Check if clicking on an icon
-    let mut clicked_icon: Option<(usize, bool)> = None; // (index, was_already_selected)
-    for (i, icon) in desktop.icons.iter().enumerate() {
-        let icon_rect = Rect::new(icon.x, icon.y, ICON_WIDTH, ICON_HEIGHT);
-        if icon_rect.contains(x, y) {
-            clicked_icon = Some((i, icon.selected));
-            break;
-        }
+    if idx >= desktop.icons.len() {
+        return;
     }
-
-    match clicked_icon {
-        Some((idx, _was_selected)) => {
-            for (i, icon) in desktop.icons.iter_mut().enumerate() {
-                icon.selected = i == idx;
-            }
-            desktop.selected_icon = Some(idx);
-            let name = desktop.icons[idx].name.clone();
-            let icon_type = desktop.icons[idx].icon_type;
-            desktop.dragging_icon = Some(idx);
-            desktop.drag_offset_x = x - desktop.icons[idx].x;
-            desktop.drag_offset_y = y - desktop.icons[idx].y;
-            desktop.drag_x = desktop.icons[idx].x;
-            desktop.drag_y = desktop.icons[idx].y;
-            drop(desktop);
-            crate::serial_println!("[KnoxOS] Opening: {}", name);
-            open_application(&name, icon_type);
-            crate::gui::request_redraw();
-            return;
-        }
-        None => {
-            // Clicked on empty desktop — deselect all and start rubber band
-            for icon in desktop.icons.iter_mut() {
-                icon.selected = false;
-            }
-            desktop.selected_icon = None;
-            desktop.rubber_band = Some(RubberBand {
-                start_x: x,
-                start_y: y,
-                end_x: x,
-                end_y: y,
-            });
-        }
+    for (i, icon) in desktop.icons.iter_mut().enumerate() {
+        icon.selected = i == idx;
     }
+    desktop.selected_icon = Some(idx);
+    let name = desktop.icons[idx].name.clone();
+    let icon_type = desktop.icons[idx].icon_type;
+    desktop.dragging_icon = Some(idx);
+    desktop.drag_offset_x = x - desktop.icons[idx].x;
+    desktop.drag_offset_y = y - desktop.icons[idx].y;
+    desktop.drag_x = desktop.icons[idx].x;
+    desktop.drag_y = desktop.icons[idx].y;
+    drop(desktop);
+    crate::serial_println!("[KnoxOS] Opening: {}", name);
+    open_application(&name, icon_type);
+    crate::gui::request_redraw();
+}
 
+/// Deselect icons and start a rubber-band from `(x, y)`.
+pub fn begin_rubber_band(x: i32, y: i32) {
+    let mut desktop = DESKTOP.lock();
+    for icon in desktop.icons.iter_mut() {
+        icon.selected = false;
+    }
+    desktop.selected_icon = None;
+    desktop.rubber_band = Some(RubberBand {
+        start_x: x,
+        start_y: y,
+        end_x: x,
+        end_y: y,
+    });
     drop(desktop);
     crate::gui::request_redraw();
 }

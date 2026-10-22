@@ -10,7 +10,7 @@ use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::theme;
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 struct BtManagerState {
     window_id: WindowId,
@@ -29,7 +29,8 @@ const HEADER_HEIGHT: i32 = 56;
 
 pub fn open() {
     let mut win = window::Window::new("Bluetooth", 220, 100, 500, 420);
-    win.content_type = WindowContentType::BluetoothManager;
+    win.content_type = WindowContentType::Gpui(ViewKind::Bluetooth);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -57,7 +58,67 @@ pub fn on_window_closed(wid: WindowId) {
 
 // ─── Drawing ────────────────────────────────────────────────────────
 
+pub fn toggle_radio() {
+    let mut qs = super::popups::QUICK_SETTINGS.lock();
+    qs.bluetooth_enabled = !qs.bluetooth_enabled;
+}
+
+pub fn toggle_scan(wid: WindowId) {
+    let mut states = STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        s.scanning = !s.scanning;
+    }
+}
+
+pub fn select_device(wid: WindowId, i: usize) {
+    let mut states = STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        s.selected = i as i32;
+    }
+}
+
+pub fn bt_snapshot(wid: WindowId) -> (bool, bool, Vec<String>, Option<usize>) {
+    let enabled = super::popups::QUICK_SETTINGS.lock().bluetooth_enabled;
+    let (scanning, selected) = {
+        let states = STATES.lock();
+        states
+            .iter()
+            .find(|s| s.window_id == wid)
+            .map(|s| {
+                (
+                    s.scanning,
+                    if s.selected >= 0 {
+                        Some(s.selected as usize)
+                    } else {
+                        None
+                    },
+                )
+            })
+            .unwrap_or((false, None))
+    };
+    let rows: Vec<String> = crate::bluetooth::get_discovered_devices()
+        .iter()
+        .map(|d| {
+            format!(
+                "{}  {} dBm  {}",
+                if d.name.is_empty() {
+                    "unknown"
+                } else {
+                    d.name.as_str()
+                },
+                d.rssi,
+                if d.connected { "connected" } else { "idle" }
+            )
+        })
+        .collect();
+    (enabled, scanning, rows, selected)
+}
+
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, content: Rect, scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_apps(fb, wid, content);
+        return;
+    }
     let states = STATES.lock();
     let state = match states.iter().find(|s| s.window_id == wid) {
         Some(s) => s,

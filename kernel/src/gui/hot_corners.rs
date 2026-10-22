@@ -153,18 +153,25 @@ fn detect_corner(mx: i32, my: i32, screen_w: i32, screen_h: i32) -> u8 {
     }
 }
 
+pub const GATE_GPUI_HOT_CORNER: &str = "GATE_GPUI hot corner";
+
+static HOT_CORNER_GATE: AtomicBool = AtomicBool::new(false);
+
+pub fn emit_gate() {
+    if HOT_CORNER_GATE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    crate::serial_println!("[gpui] {}", GATE_GPUI_HOT_CORNER);
+}
+
 /// Execute the action for a hot corner
 fn execute_action(action: HotCornerAction) {
     match action {
         HotCornerAction::None => {}
         HotCornerAction::ShowAllWindows => {
-            // Toggle alt-tab overlay (exposé-like)
-            if super::alt_tab::is_visible() {
-                super::alt_tab::dismiss();
-            } else {
-                super::alt_tab::show(false);
-            }
-            super::request_redraw();
+            // D9.8: keep dwell logic; open the GPUI overview overlay.
+            super::expose::toggle();
+            super::gpui_platform::switcher_damage();
         }
         HotCornerAction::ShowDesktop => {
             // Minimize all visible windows
@@ -175,7 +182,7 @@ fn execute_action(action: HotCornerAction) {
                 .filter(|w| w.is_visible())
                 .map(|w| w.id)
                 .collect();
-            let (sw, sh) = super::screen_size();
+            let (_sw, _sh) = super::screen_size();
             for id in ids {
                 wm.minimize_window(id);
             }
@@ -184,10 +191,11 @@ fn execute_action(action: HotCornerAction) {
         }
         HotCornerAction::NotificationCenter => {
             super::notifications::toggle_panel();
-            super::request_redraw();
+            super::gpui_platform::notify_damage();
         }
         HotCornerAction::StartMenu => {
             super::startmenu::toggle();
+            super::gpui_platform::launcher_reset();
             super::request_redraw();
         }
         HotCornerAction::LockScreen => {

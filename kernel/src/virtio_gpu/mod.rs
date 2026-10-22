@@ -42,7 +42,7 @@ pub use device::{
     resource_create_2d, resource_create_3d, resource_flush, resource_unref, set_scanout, submit_3d,
     transfer_to_host_2d, update_cursor,
 };
-pub use gates::{GATE_F8_CURSOR, GATE_F8_SCANOUT, GATE_GPU_MARKER};
+pub use gates::{GATE_F8_CURSOR, GATE_F8_SCANOUT, GATE_GPU_MARKER, GATE_GPUI_GPU_SCANOUT};
 pub use protocol::{
     VIRTIO_GPU_F_CONTEXT_INIT, VIRTIO_GPU_F_EDID, VIRTIO_GPU_F_RESOURCE_BLOB,
     VIRTIO_GPU_F_RESOURCE_UUID, VIRTIO_GPU_F_VIRGL, VIRTIO_GPU_MAX_SCANOUTS, VirtioGpuCmd,
@@ -58,7 +58,6 @@ use crate::serial_println;
 use cmds::scanout_self_test;
 use device::seed_software_device;
 use pci::{enable_pci_bus_master, find_virtio_gpu};
-use protocol::{SCANOUT_H, SCANOUT_W};
 use vq::{LIVE_GPU, init_legacy, init_modern};
 
 /// Initialize the VirtIO GPU device
@@ -101,6 +100,6 @@ pub fn init() {
     );
 
     let _ = scanout_self_test(&mut gpu);
+    seed_software_device(gpu.scanout_w, gpu.scanout_h);
     *LIVE_GPU.lock() = Some(gpu);
-    seed_software_device(SCANOUT_W, SCANOUT_H);
 }

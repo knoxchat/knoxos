@@ -203,6 +203,10 @@ Kernel: Rust bare-metal",
     }
 
     pub(super) fn draw_editor_content(&mut self, fb: &mut FrameBuffer, content: Rect) {
+        if crate::gui::gpui_platform::is_ready() {
+            crate::gui::gpui_platform::present_editor(fb, self.id, content);
+            return;
+        }
         let total_content_h = crate::gui::editor::draw(fb, content, self.scroll_y, self.id);
         let line_h = 14i32;
         let status_h = 22i32;
@@ -238,6 +242,10 @@ Kernel: Rust bare-metal",
     }
 
     pub(super) fn draw_settings_content(&mut self, fb: &mut FrameBuffer, content: Rect) {
+        if crate::gui::gpui_platform::is_ready() {
+            crate::gui::gpui_platform::present_settings(fb, self.id, content);
+            return;
+        }
         // Use the global shared settings state
         let state = crate::gui::settings::SETTINGS_STATE.lock();
         let total_h = crate::gui::settings::draw_settings(fb, content, &state, self.scroll_y);

@@ -288,6 +288,7 @@ extern "C" fn gate_boot_body() {
     run_gate_g4_audit();
     run_gate_f6();
     run_gate_f7();
+    run_gate_gpui_ring3();
     run_gate_term();
     run_gate_i4();
 }
@@ -298,49 +299,62 @@ pub fn spawn_launcher_app(name: &str) {
     let _ = spawn_or_log(&elf, name);
 }
 
-/// Spawn a Ring 3 calculator SHM client (not `WindowContentType::Calculator`).
+/// Spawn a Ring 3 calculator SHM client (not `WindowContentType::Gpui(ViewKind::Calculator)`).
 pub fn spawn_calculator_app() {
     let elf = crate::init::calculator_client_elf_data();
     let _ = spawn_or_log(&elf, "Calculator");
 }
 
-/// Spawn a Ring 3 Files SHM client (not `WindowContentType::FileExplorer`).
+/// D15.3: window-sized Knox GPUI calculator via `/run/wayland-0`.
+pub fn spawn_gpui_ring3_calc() -> bool {
+    let elf = crate::init::gpui_calc_client_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "gpui-calc") else {
+        return false;
+    };
+    // SAFETY: live Ring 3 context; switch until the desktop is current.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    true
+}
+
+/// Spawn a Ring 3 Files SHM client (not `WindowContentType::Gpui(ViewKind::Files)`).
 pub fn spawn_files_app() {
     let elf = crate::init::files_client_elf_data();
     let _ = spawn_or_log(&elf, "Files");
 }
 
-/// Spawn a Ring 3 Settings SHM client (not `WindowContentType::Settings`).
+/// Spawn a Ring 3 Settings SHM client (not `WindowContentType::Gpui(ViewKind::Settings)`).
 pub fn spawn_settings_app() {
     let elf = crate::init::settings_client_elf_data();
     let _ = spawn_or_log(&elf, "Settings");
 }
 
-/// Spawn a Ring 3 Task Manager SHM client (not `WindowContentType::TaskManager`).
+/// Spawn a Ring 3 Task Manager SHM client (not `WindowContentType::Gpui(ViewKind::Tasks)`).
 pub fn spawn_taskmgr_app() {
     let elf = crate::init::taskmgr_client_elf_data();
     let _ = spawn_or_log(&elf, "Task Manager");
 }
 
-/// Spawn a Ring 3 Editor SHM client (not `WindowContentType::TextEditor`).
+/// Spawn a Ring 3 Editor SHM client (not `WindowContentType::Gpui(ViewKind::Editor)`).
 pub fn spawn_editor_app() {
     let elf = crate::init::editor_client_elf_data();
     let _ = spawn_or_log(&elf, "Editor");
 }
 
-/// Spawn a Ring 3 Browser SHM client (not `WindowContentType::Browser`).
+/// Spawn a Ring 3 Browser SHM client (not `WindowContentType::Gpui(ViewKind::Browser)`).
 pub fn spawn_browser_app() {
     let elf = crate::init::browser_client_elf_data();
     let _ = spawn_or_log(&elf, "Browser");
 }
 
-/// Spawn a Ring 3 AI Assistant SHM client (not `WindowContentType::AIAssistant`).
+/// Spawn a Ring 3 AI Assistant SHM client (not `WindowContentType::Gpui(ViewKind::Chat)`).
 pub fn spawn_ai_app() {
     let elf = crate::init::ai_client_elf_data();
     let _ = spawn_or_log(&elf, "AI Assistant");
 }
 
-/// Spawn a Ring 3 PTY terminal (start-menu Terminal, not `WindowContentType::Terminal`).
+/// Spawn a Ring 3 PTY terminal (start-menu Terminal, not `WindowContentType::TerminalSurface`).
 pub fn spawn_pty_terminal_app() -> Option<Pid> {
     let elf = crate::init::pty_terminal_client_elf_data();
     spawn_or_log(&elf, "Terminal")

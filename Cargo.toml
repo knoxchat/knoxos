@@ -1,7 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["kernel", "boot", "tools/svg2rgba", "tools/host-tests"]
-default-members = ["tools/svg2rgba", "tools/host-tests"]
+members = [
+    "kernel",
+    "boot",
+    "tools/host-tests",
+    "crates/knox-gpui",
+    "crates/knox-ui",
+]
+default-members = ["tools/host-tests"]
 # Kernel is `x86_64-unknown-none` + build-std. Build it with
 # `./scripts/kernel-cargo.sh build --release` (or `make kernel`) so host
 # `cargo test` never tries to compile the none target.

@@ -59,27 +59,55 @@ impl ResizeEdge {
 /// Resize grab zone width in pixels
 pub const RESIZE_BORDER: i32 = 5;
 
-/// Type of window content to render
+/// Which Knox GPUI view a `WindowContentType::Gpui` window hosts (D11.11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewKind {
+    Files,
+    Browser,
+    Chat,
+    Editor,
+    Settings,
+    Archive,
+    Disks,
+    Bluetooth,
+    Calendar,
+    Logs,
+    Updater,
+    Software,
+    Wizard,
+    Tasks,
+    Calculator,
+    Image,
+}
+
+/// Type of window content to render.
+///
+/// D11.11: three compositor kinds. App identity for GPUI views is [`ViewKind`].
+/// Ring 3 clients stay [`Self::ShmEmpty`]. The PTY surface is [`Self::TerminalSurface`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowContentType {
-    Empty,
-    Terminal,
-    FileExplorer,
-    Browser,
-    AIAssistant,
-    TextEditor,
-    Settings,
-    ArchiveViewer,
-    DiskUtility,
-    BluetoothManager,
-    CalendarApp,
-    LogViewer,
-    SoftwareUpdater,
-    SoftwareCenter,
-    SetupWizard,
-    TaskManager,
-    Calculator,
-    ImageViewer,
+    ShmEmpty,
+    TerminalSurface,
+    Gpui(ViewKind),
+}
+
+impl WindowContentType {
+    pub fn view(self) -> Option<ViewKind> {
+        match self {
+            Self::Gpui(kind) => Some(kind),
+            _ => None,
+        }
+    }
+}
+
+/// Exhaustive compositor kinds. New apps are [`WindowContentType::Gpui`], not
+/// a new `draw_content` arm.
+#[inline]
+pub fn freeze_hand_drawn_content_type(content_type: WindowContentType) {
+    match content_type {
+        WindowContentType::ShmEmpty | WindowContentType::TerminalSurface => {}
+        WindowContentType::Gpui(_) => {}
+    }
 }
 
 /// A window in the desktop environment

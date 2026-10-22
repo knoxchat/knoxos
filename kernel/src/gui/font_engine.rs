@@ -167,38 +167,83 @@ pub const GATE_FONT_TITLE_MARKER: &str = "GATE_FONT title";
 
 fn title_self_test() -> bool {
     let _ = rasterize_glyph(FontId::UiBold, 'i', 13);
-    let coverage = {
+    let _ = rasterize_glyph(FontId::Ui, ':', 13);
+    let _ = rasterize_glyph(FontId::Ui, 'm', 13);
+    let (coverage, colon_runs, m_ink) = {
         let cache = GLYPH_CACHE.lock();
-        let key = GlyphKey {
+        let i_key = GlyphKey {
             font: FontId::UiBold,
             codepoint: b'i' as u32,
             size_px: 13,
         };
-        cache
-            .get(&key)
-            .map(|g| g.bitmap.iter().any(|&b| b > 0) && g.advance >= 3)
-            .unwrap_or(false)
+        let colon_key = GlyphKey {
+            font: FontId::Ui,
+            codepoint: b':' as u32,
+            size_px: 13,
+        };
+        let m_key = GlyphKey {
+            font: FontId::Ui,
+            codepoint: b'm' as u32,
+            size_px: 13,
+        };
+        let coverage = cache
+            .get(&i_key)
+            .map(|g| g.bitmap.iter().any(|&b| b > 40) && g.advance >= 3)
+            .unwrap_or(false);
+        let colon_runs = cache
+            .get(&colon_key)
+            .map(|g| ink_row_runs(&g.bitmap, g.width, g.height))
+            .unwrap_or(0);
+        let m_ink = cache
+            .get(&m_key)
+            .map(|g| g.bitmap.iter().filter(|&&b| b > 40).count())
+            .unwrap_or(0);
+        (coverage, colon_runs, m_ink)
     };
     let full = measure_text("Terminal", FontId::UiBold, 13);
     let gap = measure_text("Termnal", FontId::UiBold, 13);
-    let ok = coverage && full > gap;
+    // Composite ':' is two dots; a failed composite decode is empty or one blob.
+    let ok = coverage && full > gap && colon_runs >= 2 && m_ink >= 12;
     if ok {
         crate::serial_println!(
-            "[fonts] {} (\"Terminal\" {}px > \"Termnal\" {}px)",
+            "[fonts] {} (\"Terminal\" {}px > \"Termnal\" {}px colon_runs={} m_ink={})",
             GATE_FONT_TITLE_MARKER,
             full,
-            gap
+            gap,
+            colon_runs,
+            m_ink
         );
         true
     } else {
         crate::serial_println!(
-            "[fonts] GATE_FONT FAILED title cov={} full={} gap={}",
+            "[fonts] GATE_FONT FAILED title cov={} full={} gap={} colon_runs={} m_ink={}",
             coverage,
             full,
-            gap
+            gap,
+            colon_runs,
+            m_ink
         );
         false
     }
+}
+
+fn ink_row_runs(bitmap: &[u8], width: u16, height: u16) -> u32 {
+    let w = width as usize;
+    if w == 0 {
+        return 0;
+    }
+    let mut runs = 0u32;
+    let mut prev = false;
+    for row in 0..height as usize {
+        let start = row * w;
+        let end = (start + w).min(bitmap.len());
+        let ink = bitmap[start..end].iter().any(|&b| b > 40);
+        if ink && !prev {
+            runs += 1;
+        }
+        prev = ink;
+    }
+    runs
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -249,17 +294,21 @@ fn rasterize_glyph(font_id: FontId, ch: char, size_px: u16) -> Option<GlyphKey> 
         }
     }
     let mut bitmap = bitmap?;
-    if bitmap.pixels.iter().all(|&p| p == 0) && ch.is_ascii_alphabetic() {
+    let empty = bitmap.width == 0 || bitmap.height == 0 || bitmap.pixels.iter().all(|&p| p == 0);
+    // Last-resort stem so a failed outline still occupies the advance. Real
+    // letters (including composite 'i' / ':') come from the TTF rasterizer.
+    if empty && ch != ' ' && ch.is_ascii_alphabetic() {
         let h = (size_px as usize * 3 / 4).max(4);
-        bitmap.width = 1;
+        let w = 2usize;
+        bitmap.width = w;
         bitmap.height = h;
         bitmap.bearing_x = 0;
         bitmap.bearing_y = h as i32;
-        bitmap.advance = (size_px as i32 / 3).max(3);
-        bitmap.pixels = vec![255u8; h];
+        bitmap.advance = (size_px as i32 / 4).max(3);
+        bitmap.pixels = vec![220u8; w * h];
     }
-    if ch.is_ascii_alphabetic() {
-        bitmap.advance = bitmap.advance.max(size_px as i32 / 3);
+    if bitmap.advance < 1 {
+        bitmap.advance = 1;
     }
 
     let cached = CachedGlyph {
@@ -281,6 +330,34 @@ fn rasterize_glyph(font_id: FontId, ch: char, size_px: u16) -> Option<GlyphKey> 
     }
     cache.insert(key, cached);
     Some(key)
+}
+
+/// Coverage bitmap for Knox GPUI (`PlatformTextSystem`, D5.1).
+pub struct GlyphCoverage {
+    pub width: u16,
+    pub height: u16,
+    pub bearing_x: i16,
+    pub bearing_y: i16,
+    pub advance: u16,
+    pub coverage: Vec<u8>,
+}
+
+pub fn glyph_coverage(font: FontId, ch: char, size_px: u16) -> Option<GlyphCoverage> {
+    let key = rasterize_glyph(font, ch, size_px)?;
+    let cache = GLYPH_CACHE.lock();
+    let g = cache.get(&key)?;
+    Some(GlyphCoverage {
+        width: g.width,
+        height: g.height,
+        bearing_x: g.bearing_x,
+        bearing_y: g.bearing_y,
+        advance: g.advance,
+        coverage: g
+            .bitmap
+            .iter()
+            .map(|&c| apply_stem_darkening(sharpen_coverage(c, size_px), size_px))
+            .collect(),
+    })
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -416,29 +493,35 @@ pub fn measure_text_tracked(text: &str, font: FontId, size_px: u16, tracking: i3
     width.max(0) as u32
 }
 
-/// Sharpen coverage to reduce AA fringe blur (matches fonts.rs behavior).
-/// Disabled at display sizes so TrueType outlines keep their natural curves.
+/// Contrast curve. A strong S-curve (delta = (c-128)/2) mapped coverage
+/// below ~43 to 0 and deleted 13px Inter stems. UI sizes keep linear coverage.
 #[inline(always)]
 fn sharpen_coverage(cov: u8, size_px: u16) -> u8 {
-    if cov == 0 || cov == 255 || size_px >= 24 {
+    if cov == 0 || cov == 255 || size_px < 24 {
         return cov;
     }
     let c = cov as i32;
-    let delta = (c - 128) * 128 / 256; // strength = 128
-    let result = c + delta;
-    result.clamp(0, 255) as u8
+    let delta = (c - 128) * 48 / 256;
+    (c + delta).clamp(0, 255) as u8
 }
 
-/// Apply stem darkening to improve thin-stem legibility (matches fonts.rs).
-/// Display sizes already have enough weight from the outline.
+/// Light extra weight on mid-coverage pixels. The rasterizer already
+/// stem-darkens outlines; this only lifts remaining AA fringe.
 #[inline(always)]
 fn apply_stem_darkening(coverage: u8, size_px: u16) -> u8 {
-    if coverage == 0 || coverage == 255 || size_px >= 28 {
+    if coverage == 0 || coverage == 255 {
+        return coverage;
+    }
+    let factor = match size_px {
+        0..=14 => 36,
+        15..=23 => 20,
+        _ => 0,
+    };
+    if factor == 0 {
         return coverage;
     }
     let c = coverage as u32;
-    let boost = 25u32 * (255 - c) / 255; // factor = 25
-    (c + boost).min(255) as u8
+    (c + factor * (255 - c) / 255).min(255) as u8
 }
 
 /// Blit a packed 8-bit alpha mask (row-major) with gamma-correct blending.

@@ -1,5 +1,5 @@
 /// File drag-and-drop (9.27 & 9.70)
-use crate::gui::window::{self, WindowContentType, WindowId};
+use crate::gui::window::{self, ViewKind, WindowContentType, WindowId};
 
 use super::entries::{read_entries, sort_entries};
 use super::path::current_path;
@@ -62,7 +62,7 @@ pub fn accept_file_drop(wid: WindowId) -> bool {
         Some(w) => w,
         None => return false,
     };
-    if win.content_type != WindowContentType::FileExplorer {
+    if win.content_type != WindowContentType::Gpui(ViewKind::Files) {
         return false;
     }
     let dst_dir = current_path(&win.title);

@@ -312,9 +312,10 @@ nix-build: ## Build using Nix
 nix-shell: ## Enter Nix development shell
 	nix develop
 
-host-test: ## Host-side parser tests (no QEMU)
+host-test: ## Host-side parser + GPUI raster tests (no QEMU)
 	@echo "$(BLUE)[KnoxOS] Host tests...$(NC)"
 	@cargo test -p knoxos-host-tests
+	@cargo test -p knox-gpui
 	@echo "$(GREEN)[✓] Host tests passed$(NC)"
 
 ci-all: ## Run all CI checks locally

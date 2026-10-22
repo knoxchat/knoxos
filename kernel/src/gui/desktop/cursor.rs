@@ -1,4 +1,8 @@
-/// Mouse cursor themes, types, drawing, and background save/restore
+/// Mouse cursor themes, types, drawing, and background save/restore.
+///
+/// D9.9: the pointer sprite stays compositor-owned (software blit / hw
+/// cursorq). GPUI only reports [`crate::gui::gpui_platform::CursorStyle`];
+/// it does not paint a cursor layer.
 use spin::Mutex;
 
 use crate::gui::framebuffer::{FrameBuffer, Pixel, Rect};
@@ -280,6 +284,10 @@ pub fn update_cursor_for_position(mx: i32, my: i32) {
         ResizeEdge::TopRight => CursorType::ResizeNorthEast,
         ResizeEdge::BottomLeft => CursorType::ResizeSouthWest,
         ResizeEdge::None => {
+            if let Some(style) = crate::gui::gpui_platform::cursor_style_at(mx, my) {
+                set_cursor_type(gpui_cursor_type(style));
+                return;
+            }
             // Check if hovering over a desktop icon — show hand cursor
             if is_over_desktop_icon(mx, my) {
                 CursorType::PointingHand
@@ -289,6 +297,23 @@ pub fn update_cursor_for_position(mx: i32, my: i32) {
         }
     };
     set_cursor_type(ct);
+}
+
+fn gpui_cursor_type(style: crate::gui::gpui_platform::CursorStyle) -> CursorType {
+    use crate::gui::gpui_platform::CursorStyle;
+    match style {
+        CursorStyle::Arrow => CursorType::Default,
+        CursorStyle::IBeam => CursorType::Text,
+        CursorStyle::PointingHand => CursorType::PointingHand,
+        CursorStyle::ResizeEast => CursorType::ResizeEast,
+        CursorStyle::ResizeWest => CursorType::ResizeWest,
+        CursorStyle::ResizeNorth => CursorType::ResizeNorth,
+        CursorStyle::ResizeSouth => CursorType::ResizeSouth,
+        CursorStyle::ResizeNorthEast => CursorType::ResizeNorthEast,
+        CursorStyle::ResizeNorthWest => CursorType::ResizeNorthWest,
+        CursorStyle::ResizeSouthEast => CursorType::ResizeSouthEast,
+        CursorStyle::ResizeSouthWest => CursorType::ResizeSouthWest,
+    }
 }
 
 /// Save/restore area dimensions.

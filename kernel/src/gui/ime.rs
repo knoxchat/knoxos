@@ -613,6 +613,24 @@ pub fn is_overlay_visible() -> bool {
     ime.visible && ime.mode != ImeMode::Off
 }
 
+/// Feed a character through the live IME (D6.4). `None` = composing.
+pub fn process_char(c: char) -> Option<String> {
+    IME.lock().process_key(c)
+}
+
+pub fn is_composing() -> bool {
+    let ime = IME.lock();
+    ime.mode != ImeMode::Off && ime.visible
+}
+
+pub fn set_cursor_position(x: i32, y: i32) {
+    IME.lock().set_cursor_position(x, y);
+}
+
+pub fn cancel_compose() {
+    IME.lock().cancel();
+}
+
 pub const GATE_IME_MARKER: &str = "GATE_IME compose";
 
 fn compose_self_test() -> bool {

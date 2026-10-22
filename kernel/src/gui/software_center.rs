@@ -10,7 +10,7 @@ use super::colors;
 use super::fonts;
 use super::framebuffer::{FrameBuffer, Pixel, Rect};
 use super::theme;
-use super::window::{self, WindowContentType, WindowId};
+use super::window::{self, ViewKind, WindowContentType, WindowId};
 
 // ── Views ────────────────────────────────────────────────────────────
 
@@ -230,7 +230,8 @@ lazy_static! {
 
 pub fn open() {
     let mut win = window::Window::new("Software Center", 100, 60, 640, 500);
-    win.content_type = WindowContentType::SoftwareCenter;
+    win.content_type = WindowContentType::Gpui(ViewKind::Software);
+    win.decorations = false;
     let wid = win.id;
 
     let mut wm = window::WINDOW_MANAGER.lock();
@@ -250,7 +251,98 @@ pub fn open() {
     super::request_redraw();
 }
 
+pub fn set_tab(wid: WindowId, i: usize) {
+    let view = match i {
+        1 => SwView::Categories,
+        2 => SwView::Installed,
+        3 => SwView::Updates,
+        _ => SwView::Featured,
+    };
+    let mut states = STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        s.view = view;
+        s.scroll_y = 0;
+        s.detail_idx = None;
+        if view != SwView::Featured {
+            s.selected_category = None;
+        }
+    }
+}
+
+pub fn select_app(wid: WindowId, i: usize) {
+    let mut states = STATES.lock();
+    if let Some(s) = states.iter_mut().find(|s| s.window_id == wid) {
+        if s.view == SwView::Categories {
+            if i < AppCategory::ALL.len() {
+                s.selected_category = Some(AppCategory::ALL[i]);
+                s.view = SwView::Featured;
+            }
+            return;
+        }
+        s.detail_idx = Some(i);
+        s.view = SwView::AppDetail;
+    }
+}
+
+pub fn software_snapshot(wid: WindowId) -> (usize, Vec<String>, String) {
+    let states = STATES.lock();
+    let Some(s) = states.iter().find(|s| s.window_id == wid) else {
+        return (0, Vec::new(), String::new());
+    };
+    let tab = match s.view {
+        SwView::Featured | SwView::AppDetail => 0,
+        SwView::Categories => 1,
+        SwView::Installed => 2,
+        SwView::Updates => 3,
+    };
+    let rows: Vec<String> = if s.view == SwView::Categories {
+        AppCategory::ALL
+            .iter()
+            .map(|c| String::from(c.label()))
+            .collect()
+    } else if s.view == SwView::AppDetail {
+        if let Some(i) = s.detail_idx {
+            if i < DEFAULT_APPS.len() {
+                let a = &DEFAULT_APPS[i];
+                return (
+                    tab,
+                    alloc::vec![format!(
+                        "{}  {}  {} MB  {}",
+                        a.name, a.version, a.size_mb, a.description
+                    )],
+                    String::from(a.name),
+                );
+            }
+        }
+        Vec::new()
+    } else {
+        DEFAULT_APPS
+            .iter()
+            .filter(|a| match s.view {
+                SwView::Installed => a.installed,
+                SwView::Updates => a.update_available,
+                SwView::Featured => s.selected_category.map(|c| a.category == c).unwrap_or(true),
+                _ => true,
+            })
+            .map(|a| {
+                format!(
+                    "{}  {}  {} MB{}",
+                    a.name,
+                    a.version,
+                    a.size_mb,
+                    if a.installed { "  installed" } else { "" }
+                )
+            })
+            .collect()
+    };
+    (tab, rows, String::from("Software Center"))
+}
+
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, _scroll_y: i32) {
+    if crate::gui::gpui_platform::is_ready() {
+        crate::gui::gpui_platform::present_apps(fb, wid, area);
+        return;
+    }
     let tc = theme::colors();
     let accent = colors::accent();
     let mut states = STATES.lock();

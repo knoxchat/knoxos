@@ -9,7 +9,7 @@ pub fn display_client_elf_data() -> Vec<u8> {
 }
 
 /// Gate F3: same SHM present path, dark terminal pixels, isolated from
-/// `WindowContentType::Terminal`.
+/// `WindowContentType::TerminalSurface`.
 pub fn terminal_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF1A_1A1A, b"GATE_F3 terminal isolated\n")
 }
@@ -19,14 +19,34 @@ pub fn launcher_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF33_66CC, b"GATE_F4 launcher userspace\n")
 }
 
-/// Gate F6: Calculator is a Ring 3 SHM client, not `WindowContentType::Calculator`.
+/// Gate F6: Calculator is a Ring 3 SHM client, not `WindowContentType::Gpui(ViewKind::Calculator)`.
 pub fn calculator_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF20_C997, b"GATE_F6 calculator userspace\n")
 }
 
-/// Gate F7: Files is a Ring 3 SHM client, not `WindowContentType::FileExplorer`.
+/// Gate F7: Files is a Ring 3 SHM client, not `WindowContentType::Gpui(ViewKind::Files)`.
 pub fn files_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF4E_8A26, b"GATE_F7 files userspace\n")
+}
+
+/// D15.2: window-sized Button SHM via `/run/wayland-0`.
+pub fn gpui_button_client_elf_data() -> Vec<u8> {
+    gpui_shm_unix_client_elf(
+        u32::from_le_bytes(*b"GPUI"),
+        crate::wayland::GATE_GPUI_BUTTON_W,
+        crate::wayland::GATE_GPUI_BUTTON_H,
+        b"GATE_GPUI ring3 button\n",
+    )
+}
+
+/// D15.3: window-sized Calculator SHM via `/run/wayland-0`.
+pub fn gpui_calc_client_elf_data() -> Vec<u8> {
+    gpui_shm_unix_client_elf(
+        u32::from_le_bytes(*b"GPUC"),
+        crate::wayland::GATE_GPUI_CALC_W,
+        crate::wayland::GATE_GPUI_CALC_H,
+        b"GATE_GPUI ring3 calc\n",
+    )
 }
 
 /// Ring 3 `openpty` + SHM present — interactive PTY path is userspace-shaped.
@@ -174,27 +194,27 @@ pub fn pty_terminal_client_elf_data() -> Vec<u8> {
     build_static_user_elf(&code)
 }
 
-/// Settings is a Ring 3 SHM client, not `WindowContentType::Settings`.
+/// Settings is a Ring 3 SHM client, not `WindowContentType::Gpui(ViewKind::Settings)`.
 pub fn settings_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF38_3840, b"GATE_F8 settings userspace\n")
 }
 
-/// Task Manager is a Ring 3 SHM client, not `WindowContentType::TaskManager`.
+/// Task Manager is a Ring 3 SHM client, not `WindowContentType::Gpui(ViewKind::Tasks)`.
 pub fn taskmgr_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF48_3248, b"GATE_F9 taskmgr userspace\n")
 }
 
-/// Editor is a Ring 3 SHM client, not `WindowContentType::TextEditor`.
+/// Editor is a Ring 3 SHM client, not `WindowContentType::Gpui(ViewKind::Editor)`.
 pub fn editor_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF1E_1E1E, b"GATE_F10 editor userspace\n")
 }
 
-/// Browser is a Ring 3 SHM client, not `WindowContentType::Browser`.
+/// Browser is a Ring 3 SHM client, not `WindowContentType::Gpui(ViewKind::Browser)`.
 pub fn browser_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF28_2D3A, b"GATE_F11 browser userspace\n")
 }
 
-/// AI Assistant is a Ring 3 SHM client, not `WindowContentType::AIAssistant`.
+/// AI Assistant is a Ring 3 SHM client, not `WindowContentType::Gpui(ViewKind::Chat)`.
 pub fn ai_client_elf_data() -> Vec<u8> {
     shm_present_client_elf(0xFF12_1626, b"GATE_F12 ai userspace\n")
 }
@@ -240,6 +260,121 @@ pub fn wayland_unix_client_elf_data() -> Vec<u8> {
     emit(&mut code, &[0x48, 0xC7, 0xC1, 0x00, 0x10, 0x00, 0x00]);
     emit(&mut code, &[0xB8, 0xEE, 0xFF, 0xC0, 0xFF]);
     emit(&mut code, &[0xF3, 0xAB]);
+
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x29, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC6, 0x01, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0x31, 0xD2]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    js(&mut code, &mut rels, "fail");
+    emit(&mut code, &[0x49, 0x89, 0xC4]);
+
+    emit(&mut code, &[0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0x31, 0xC0]);
+    emit(&mut code, &[0x48, 0x89, 0xE7]);
+    emit(&mut code, &[0x48, 0xC7, 0xC1, 0x10, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0xF3, 0x48, 0xAB]);
+    emit(&mut code, &[0x66, 0xC7, 0x04, 0x24, 0x01, 0x00]);
+    emit(&mut code, &[0x48, 0x8D, 0x3C, 0x24]);
+    emit(&mut code, &[0x48, 0x83, 0xC7, 0x02]);
+    lea_rsi(&mut code, &mut rels, "path");
+    emit(&mut code, &[0x48, 0xC7, 0xC1, 0x0F, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0xF3, 0xA4]);
+
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x2A, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x4C, 0x89, 0xE7]);
+    emit(&mut code, &[0x48, 0x89, 0xE6]);
+    emit(&mut code, &[0x48, 0xC7, 0xC2, 0x6E, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    js(&mut code, &mut rels, "fail");
+
+    emit(&mut code, &[0x4C, 0x89, 0x2C, 0x24]);
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x2C, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x4C, 0x89, 0xE7]);
+    emit(&mut code, &[0x48, 0x89, 0xE6]);
+    emit(&mut code, &[0x48, 0xC7, 0xC2, 0x08, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x4D, 0x31, 0xD2]);
+    emit(&mut code, &[0x4D, 0x31, 0xC0]);
+    emit(&mut code, &[0x4D, 0x31, 0xC9]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x83, 0xF8, 0x08]);
+    jne(&mut code, &mut rels, "fail");
+
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00]);
+    lea_rsi(&mut code, &mut rels, "marker");
+    let n = marker.len() as u32;
+    emit(&mut code, &[0x48, 0xC7, 0xC2]);
+    emit(&mut code, &n.to_le_bytes());
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x31, 0xFF]);
+    emit(&mut code, &[0xEB, 0x07]);
+    labels.insert("fail", code.len());
+    emit(&mut code, &[0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x0F, 0x05]);
+    labels.insert("path", code.len());
+    emit(&mut code, b"/run/wayland-0\0");
+    labels.insert("marker", code.len());
+    emit(&mut code, marker);
+
+    for (off, name) in rels {
+        let target = *labels.get(name).expect(name);
+        let disp = (target as i32).wrapping_sub((off as i32) + 4);
+        code[off..off + 4].copy_from_slice(&disp.to_le_bytes());
+    }
+    build_static_user_elf(&code)
+}
+
+/// mmap window-sized SHM, write GPUI header, `connect(/run/wayland-0)`, send vaddr.
+fn gpui_shm_unix_client_elf(magic: u32, width: u32, height: u32, marker: &[u8]) -> Vec<u8> {
+    let bytes = (width as u64)
+        .saturating_mul(height as u64)
+        .saturating_mul(4);
+    let mmap_len = ((bytes + 0xFFF) & !0xFFF).max(0x4000) as u32;
+    let mut code = Vec::new();
+    let mut rels: Vec<(usize, &'static str)> = Vec::new();
+    let mut labels = BTreeMap::new();
+
+    let mut emit = |code: &mut Vec<u8>, bytes: &[u8]| code.extend_from_slice(bytes);
+    let mut js = |code: &mut Vec<u8>, rels: &mut Vec<(usize, &'static str)>, name: &'static str| {
+        emit(code, &[0x0F, 0x88]);
+        rels.push((code.len(), name));
+        emit(code, &[0, 0, 0, 0]);
+    };
+    let mut jne =
+        |code: &mut Vec<u8>, rels: &mut Vec<(usize, &'static str)>, name: &'static str| {
+            emit(code, &[0x0F, 0x85]);
+            rels.push((code.len(), name));
+            emit(code, &[0, 0, 0, 0]);
+        };
+    let mut lea_rsi =
+        |code: &mut Vec<u8>, rels: &mut Vec<(usize, &'static str)>, name: &'static str| {
+            emit(code, &[0x48, 0x8D, 0x35]);
+            rels.push((code.len(), name));
+            emit(code, &[0, 0, 0, 0]);
+        };
+
+    emit(&mut code, &[0x48, 0xC7, 0xC0, 0x09, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x48, 0x31, 0xFF]);
+    emit(&mut code, &[0x48, 0xC7, 0xC6]);
+    emit(&mut code, &mmap_len.to_le_bytes());
+    emit(&mut code, &[0x48, 0xC7, 0xC2, 0x03, 0x00, 0x00, 0x00]);
+    emit(&mut code, &[0x49, 0xC7, 0xC2, 0x22, 0x80, 0x00, 0x00]);
+    emit(&mut code, &[0x49, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]);
+    emit(&mut code, &[0x4D, 0x31, 0xC9]);
+    emit(&mut code, &[0x0F, 0x05]);
+    emit(&mut code, &[0x48, 0x85, 0xC0]);
+    js(&mut code, &mut rels, "fail");
+    emit(&mut code, &[0x49, 0x89, 0xC5]);
+    emit(&mut code, &[0x41, 0xC7, 0x45, 0x00]);
+    emit(&mut code, &magic.to_le_bytes());
+    emit(&mut code, &[0x41, 0xC7, 0x45, 0x04]);
+    emit(&mut code, &width.to_le_bytes());
+    emit(&mut code, &[0x41, 0xC7, 0x45, 0x08]);
+    emit(&mut code, &height.to_le_bytes());
 
     emit(&mut code, &[0x48, 0xC7, 0xC0, 0x29, 0x00, 0x00, 0x00]);
     emit(&mut code, &[0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00]);

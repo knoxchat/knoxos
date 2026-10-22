@@ -15,7 +15,7 @@ use super::decorations::{
 };
 use super::types::{
     BORDER_WIDTH, CURRENT_WORKSPACE, ExplorerSort, MAX_SCROLL_Y, NEXT_WINDOW_ID, ResizeEdge,
-    WORKSPACE_ALL, Window, WindowContentType, WindowState,
+    ViewKind, WORKSPACE_ALL, Window, WindowContentType, WindowState,
 };
 
 impl Window {
@@ -25,44 +25,44 @@ impl Window {
         *id_lock += 1;
 
         let content_type = if title.contains("Terminal") {
-            WindowContentType::Terminal
+            WindowContentType::TerminalSurface
         } else if title.contains("Files")
             || title.contains("/home")
             || title.contains("File Manager")
         {
-            WindowContentType::FileExplorer
+            WindowContentType::Gpui(ViewKind::Files)
         } else if title.contains("Browser") || title.contains("Vivaldi") {
-            WindowContentType::Browser
+            WindowContentType::Gpui(ViewKind::Browser)
         } else if title.contains("AI") {
-            WindowContentType::AIAssistant
+            WindowContentType::Gpui(ViewKind::Chat)
         } else if title.contains("Editor") || title.contains("Vim") || title.contains("Monaco") {
-            WindowContentType::TextEditor
+            WindowContentType::Gpui(ViewKind::Editor)
         } else if title.contains("Settings") {
-            WindowContentType::Settings
+            WindowContentType::Gpui(ViewKind::Settings)
         } else if title.contains("Task Manager") {
-            WindowContentType::TaskManager
+            WindowContentType::Gpui(ViewKind::Tasks)
         } else if title.contains("Calculator") {
-            WindowContentType::Calculator
+            WindowContentType::Gpui(ViewKind::Calculator)
         } else if title.contains("Image Viewer") {
-            WindowContentType::ImageViewer
+            WindowContentType::Gpui(ViewKind::Image)
         } else if title.contains("Log Viewer") || title.contains("Logs") {
-            WindowContentType::LogViewer
+            WindowContentType::Gpui(ViewKind::Logs)
         } else if title.contains("Calendar") {
-            WindowContentType::CalendarApp
+            WindowContentType::Gpui(ViewKind::Calendar)
         } else if title.contains("Archive") {
-            WindowContentType::ArchiveViewer
+            WindowContentType::Gpui(ViewKind::Archive)
         } else if title.contains("Disk") || title.contains("Disks") {
-            WindowContentType::DiskUtility
+            WindowContentType::Gpui(ViewKind::Disks)
         } else if title.contains("Bluetooth") {
-            WindowContentType::BluetoothManager
+            WindowContentType::Gpui(ViewKind::Bluetooth)
         } else if title.contains("Software Updater") || title.contains("Updates") {
-            WindowContentType::SoftwareUpdater
+            WindowContentType::Gpui(ViewKind::Updater)
         } else if title.contains("Software Center") || title.contains("App Store") {
-            WindowContentType::SoftwareCenter
+            WindowContentType::Gpui(ViewKind::Software)
         } else if title.contains("Setup") || title.contains("Wizard") {
-            WindowContentType::SetupWizard
+            WindowContentType::Gpui(ViewKind::Wizard)
         } else {
-            WindowContentType::Empty
+            WindowContentType::ShmEmpty
         };
 
         Self {
@@ -252,6 +252,11 @@ impl Window {
         self.visible && self.state != WindowState::Minimized && on_workspace
     }
 
+    /// D10.2: in-process GPUI views draw TitleBar CSD; Ring 3 SHM keeps SSD.
+    pub fn uses_csd(&self) -> bool {
+        !self.decorations
+    }
+
     // Animation methods moved to wm_animation.rs
 
     /// Ensure the window stays at least partially on screen — scale-aware
@@ -350,6 +355,9 @@ impl Window {
 
     /// Get the content area rectangle — scale-aware
     pub fn content_rect(&self) -> Rect {
+        if self.uses_csd() {
+            return self.rect;
+        }
         let tb = scaled_title_bar_height();
         Rect::new(
             self.rect.x + BORDER_WIDTH as i32,
@@ -361,6 +369,9 @@ impl Window {
 
     /// Check if a point is within the title bar (excluding buttons)
     pub fn hit_test_titlebar(&self, x: i32, y: i32) -> bool {
+        if self.uses_csd() {
+            return false;
+        }
         self.title_bar_rect().contains(x, y)
     }
 
