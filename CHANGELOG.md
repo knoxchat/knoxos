@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **FUSE FLUSH** — FLUSH after WRITE succeeds; unknown nodeid fails (`GATE_FUSE flush`).
+- **FUSE FSYNCDIR** — FSYNCDIR of a directory succeeds; a file or unknown nodeid fails (`GATE_FUSE fsyncdir`).
+- **D-Bus ReloadConfig** — empty method return (`GATE_DBUS reload`).
+- **D-Bus BecomeMonitor** — method return, then signals without AddMatch (`GATE_DBUS monitor`).
+- **XHCI Reset Endpoint** — Halted bulk IN (DCI 5) Command Completion cc=1 (`GATE_USB xhci resetep`).
+- **XHCI Set TR Dequeue Pointer** — Stopped extra pipe Command Completion cc=1 (`GATE_USB xhci settr`).
+- **NFS NVERIFY** — mismatch is NFS4_OK; match is NFS4ERR_SAME; missing FH is NOFILEHANDLE (`GATE_NFS nverify`).
+- **NFS SETCLIENTID_CONFIRM** — issued client_id is OK; wrong id is STALE_CLIENTID (`GATE_NFS confirm`).
+- **FUSE OPEN** — OPEN of a known inode returns fh=nodeid; unknown nodeid fails (`GATE_FUSE open`).
+- **FUSE RELEASE** — RELEASE after OPEN succeeds; missing nodeid or mismatched fh fails (`GATE_FUSE release`).
+- **D-Bus ADT session** — `GetAdtAuditSessionData` returns the session bytes for unique and well-known names (`GATE_DBUS adt`).
+- **D-Bus activation environment** — `UpdateActivationEnvironment` returns a method reply for `a{ss}` (`GATE_DBUS env`).
+- **XHCI Evaluate Context** — Command Completion cc=1 (`GATE_USB xhci eval`).
+- **XHCI Stop Endpoint** — bulk OUT (DCI 2) Command Completion cc=1 (`GATE_USB xhci stop`).
+- **NFS PUTPUBFH** — PUTPUBFH after LOOKUP is the export root (`GATE_NFS putpubfh`).
+- **NFS VERIFY** — matching size is NFS4_OK; mismatch is NFS4ERR_NOT_SAME; missing FH is NOFILEHANDLE (`GATE_NFS verify`).
+- **FUSE ACCESS** — ACCESS grants file bits from mode, not an echo of the mask (`GATE_FUSE access`).
+- **FUSE FSYNC** — FSYNC after WRITE succeeds; unknown nodeid fails (`GATE_FUSE fsync`).
+- **D-Bus SELinux context** — `GetConnectionSELinuxSecurityContext` returns the context for unique and well-known names (`GATE_DBUS selinux`).
+- **D-Bus AppArmor profile** — `GetConnectionAppArmorSecurityContext` returns `unconfined` (`GATE_DBUS apparmor`).
+- **XHCI No-Op Command** — Command Completion cc=1 (`GATE_USB xhci noop`).
+- **XHCI Disable Slot** — Command Completion cc=1 (`GATE_USB xhci disable`).
+- **NFS LOOKUPP** — LOOKUPP of a child is the export root; LOOKUPP of root is `NFS4ERR_NOENT` (`GATE_NFS lookupp`).
+- **NFS RESTOREFH** — RESTOREFH restores SAVEFH; missing SAVEFH is `NFS4ERR_NOFILEHANDLE` (`GATE_NFS restorefh`).
 - **Tree** — hardware under `kernel/src/drivers/`; VFS under `fs/`; MM under `mm/`; CPU under `arch/`; process under `sched/`; pipes/SHM/PTY under `ipc/`; LSM under `security/`; DHCP/DNS/IPv6 under `net/`; TLS under `crypto/tls/`; kernel-hosted userland under `compat/`. Crate-root re-exports (`crate::pci`, `crate::vfs`, …) unchanged.
 - **Syscall ABI** — `SyscallNumber`, `SyscallError`, Linux `stat`/`statx`, and `sockaddr_*` live in workspace crate `abi/` (`knox-abi`); handlers stay in `kernel/src/syscall/`.
 - **Userspace** — hello, init, sh, calculator, Files, term, paint, and other SHM clients are authored under `userspace/apps/`; `knox-gpui` / `knox-ui` / `ld.so` / musl sources live under `userspace/libs/`. The kernel still embeds those ELFs (`GATE_BM1` / `GATE_BM3` / `GATE_BM4`).

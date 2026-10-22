@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Integration **497/497**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Integration **521/521**.
 
 ---
 
@@ -57,6 +57,8 @@ A dynamically linked musl binary runs (BM4). VirtIO-GPU scanout + hardware curso
 
 Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md](remaining.md) from this section are **done**, including this batch:
 
+- FUSE FLUSH (`GATE_FUSE flush`); FUSE FSYNCDIR (`GATE_FUSE fsyncdir`); D-Bus ReloadConfig (`GATE_DBUS reload`); D-Bus BecomeMonitor (`GATE_DBUS monitor`); XHCI Reset Endpoint (`GATE_USB xhci resetep`); XHCI Set TR Dequeue Pointer (`GATE_USB xhci settr`); NFS NVERIFY (`GATE_NFS nverify`); NFS SETCLIENTID_CONFIRM (`GATE_NFS confirm`)
+
 - rtl8139 TX→RX (`GATE_RTL8139 send`); CIFS SMB2 (`GATE_CIFS smb2`); GPOS kern (`GATE_GPOS kern`); AMDGPU firmware (`GATE_AMDGPU fw`); AX211 TLV (`GATE_AX211 fw`); FUSE LOOKUP+READ (`GATE_FUSE lookup`)
 - KVM software EPT+HLT (`GATE_KVM ept`, `GATE_KVM vmlaunch`); OCI unshare+pivot_root (`GATE_OCI start`); ZFS uberblock (`GATE_ZFS block`); WPA3-SAE (`GATE_WPA3 sae`); bridge FDB (`GATE_BRIDGE fdb`); TLS 1.3 handshake (`GATE_TLS13 hs`); GPU matmul (`GATE_GPU matmul`); SDPA+KV (`GATE_AI attn`); assistant chat (`GATE_AI chat`); NFS4 COMPOUND (`GATE_NFS compound`); Broadcom `BRCMFW` (`GATE_BRCM fw`); Thunderbolt hop (`GATE_TB hop`)
 - X.509 RSA over TBS (`GATE_TLS13 x509`); dpkg ar+tar (`GATE_DPKG deb`); TPM PCR extend (`GATE_TPM pcr`); BPE `"the"` (`GATE_AI vocab`); CPIO newc (`GATE_CPIO newc`); title `'i'` (`GATE_FONT title`); Terminal SHM glyphs (`GATE_TERM shm paint`)
@@ -74,6 +76,8 @@ Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md]
 - FUSE MKNOD (`GATE_FUSE mknod`); FUSE STATFS (`GATE_FUSE statfs`); D-Bus RemoveMatch (`GATE_DBUS remove`); D-Bus GetId (`GATE_DBUS id`); XHCI SET_FEATURE (`GATE_USB xhci set`); XHCI bulk IN (`GATE_USB xhci bulkin`); NFS SETATTR (`GATE_NFS setattr`); NFS READDIR (`GATE_NFS readdir`)
 - FUSE SETXATTR (`GATE_FUSE setxattr`); FUSE GETXATTR (`GATE_FUSE getxattr`); D-Bus StartServiceByName (`GATE_DBUS start`); D-Bus GetConnectionCredentials (`GATE_DBUS creds`); XHCI SET_DESCRIPTOR (`GATE_USB xhci stdesc`); XHCI isochronous IN (`GATE_USB xhci isoch`); NFS ACCESS (`GATE_NFS access`); NFS COMMIT (`GATE_NFS commit`)
 - FUSE LISTXATTR (`GATE_FUSE listxattr`); FUSE REMOVEXATTR (`GATE_FUSE removexattr`); D-Bus ListActivatableNames (`GATE_DBUS activate`); D-Bus ListQueuedOwners (`GATE_DBUS queue`); XHCI GET_DESCRIPTOR(String) (`GATE_USB xhci string`); XHCI interrupt IN (`GATE_USB xhci intr`); NFS GETFH (`GATE_NFS getfh`); NFS PUTFH (`GATE_NFS putfh`)
+- FUSE ACCESS (`GATE_FUSE access`); FUSE FSYNC (`GATE_FUSE fsync`); D-Bus SELinux context (`GATE_DBUS selinux`); D-Bus AppArmor profile (`GATE_DBUS apparmor`); XHCI No-Op Command (`GATE_USB xhci noop`); XHCI Disable Slot (`GATE_USB xhci disable`); NFS LOOKUPP (`GATE_NFS lookupp`); NFS RESTOREFH (`GATE_NFS restorefh`)
+- FUSE OPEN (`GATE_FUSE open`); FUSE RELEASE (`GATE_FUSE release`); D-Bus ADT session (`GATE_DBUS adt`); D-Bus UpdateActivationEnvironment (`GATE_DBUS env`); XHCI Evaluate Context (`GATE_USB xhci eval`); XHCI Stop Endpoint (`GATE_USB xhci stop`); NFS PUTPUBFH (`GATE_NFS putpubfh`); NFS VERIFY (`GATE_NFS verify`)
 - TLS 1.3 HKDF (`GATE_TLS13 hkdf`); HDR/VRR (`GATE_HDR pq`, `GATE_VRR range`); e1000 `Socket::send` (`GATE_E1000 send`); eBPF/sched_ext (`GATE_EBPF exec`); Wi-Fi Beacon+PMK (`GATE_WIFI pmk`); i915 modeset (`GATE_I915 modeset`); Btrfs ramdisk (`GATE_BTRFS block`); VLAN 802.1Q (`GATE_VLAN tag`)
 
 Earlier in this section:

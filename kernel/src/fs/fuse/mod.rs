@@ -17,27 +17,33 @@ mod ops;
 mod protocol;
 
 pub use gates::{
-    GATE_FUSE_CREATE_MARKER, GATE_FUSE_GETATTR_MARKER, GATE_FUSE_GETXATTR_MARKER,
-    GATE_FUSE_LINK_MARKER, GATE_FUSE_LISTXATTR_MARKER, GATE_FUSE_MARKER, GATE_FUSE_MKDIR_MARKER,
-    GATE_FUSE_MKNOD_MARKER, GATE_FUSE_READDIR_MARKER, GATE_FUSE_REMOVEXATTR_MARKER,
+    GATE_FUSE_ACCESS_MARKER, GATE_FUSE_CREATE_MARKER, GATE_FUSE_FLUSH_MARKER,
+    GATE_FUSE_FSYNC_MARKER, GATE_FUSE_FSYNCDIR_MARKER, GATE_FUSE_GETATTR_MARKER,
+    GATE_FUSE_GETXATTR_MARKER, GATE_FUSE_LINK_MARKER, GATE_FUSE_LISTXATTR_MARKER, GATE_FUSE_MARKER,
+    GATE_FUSE_MKDIR_MARKER, GATE_FUSE_MKNOD_MARKER, GATE_FUSE_OPEN_MARKER,
+    GATE_FUSE_READDIR_MARKER, GATE_FUSE_RELEASE_MARKER, GATE_FUSE_REMOVEXATTR_MARKER,
     GATE_FUSE_RENAME_MARKER, GATE_FUSE_RMDIR_MARKER, GATE_FUSE_SETATTR_MARKER,
     GATE_FUSE_SETXATTR_MARKER, GATE_FUSE_STATFS_MARKER, GATE_FUSE_SYMLINK_MARKER,
-    GATE_FUSE_UNLINK_MARKER, GATE_FUSE_WRITE_MARKER, create_self_test, getattr_self_test,
-    getxattr_self_test, link_self_test, listxattr_self_test, mkdir_self_test, mknod_self_test,
-    readdir_self_test, removexattr_self_test, rename_self_test, rmdir_self_test, setattr_self_test,
-    setxattr_self_test, statfs_self_test, symlink_self_test, unlink_self_test, write_self_test,
+    GATE_FUSE_UNLINK_MARKER, GATE_FUSE_WRITE_MARKER, access_self_test, create_self_test,
+    flush_self_test, fsync_self_test, fsyncdir_self_test, getattr_self_test, getxattr_self_test,
+    link_self_test, listxattr_self_test, mkdir_self_test, mknod_self_test, open_self_test,
+    readdir_self_test, release_self_test, removexattr_self_test, rename_self_test, rmdir_self_test,
+    setattr_self_test, setxattr_self_test, statfs_self_test, symlink_self_test, unlink_self_test,
+    write_self_test,
 };
 pub use mount::{
     FuseMount, FuseRequest, list_mounts, loopback_put, mount, read_request, unmount, write_response,
 };
 pub use ops::{
-    fuse_create, fuse_getattr, fuse_getxattr, fuse_link, fuse_listxattr, fuse_lookup, fuse_mkdir,
-    fuse_mknod, fuse_read, fuse_readdir, fuse_readlink, fuse_removexattr, fuse_rename, fuse_rmdir,
+    fuse_access, fuse_create, fuse_flush, fuse_fsync, fuse_fsyncdir, fuse_getattr, fuse_getxattr,
+    fuse_link, fuse_listxattr, fuse_lookup, fuse_mkdir, fuse_mknod, fuse_open, fuse_read,
+    fuse_readdir, fuse_readlink, fuse_release, fuse_removexattr, fuse_rename, fuse_rmdir,
     fuse_setattr, fuse_setxattr, fuse_statfs, fuse_symlink, fuse_unlink, fuse_write,
 };
 pub use protocol::{
-    FuseAttr, FuseEntry, FuseInHeader, FuseOpcode, FuseOutHeader, FuseStatfs, parse_fuse_dirents,
-    parse_fuse_entry, parse_fuse_statfs,
+    FUSE_R_OK, FUSE_W_OK, FUSE_X_OK, FuseAttr, FuseEntry, FuseInHeader, FuseOpcode, FuseOutHeader,
+    FuseStatfs, mode_to_access, parse_fuse_dirents, parse_fuse_entry, parse_fuse_open,
+    parse_fuse_statfs,
 };
 
 use crate::serial_println;
@@ -65,4 +71,10 @@ pub fn init() {
     let _ = getxattr_self_test();
     let _ = listxattr_self_test();
     let _ = removexattr_self_test();
+    let _ = access_self_test();
+    let _ = fsync_self_test();
+    let _ = open_self_test();
+    let _ = release_self_test();
+    let _ = flush_self_test();
+    let _ = fsyncdir_self_test();
 }

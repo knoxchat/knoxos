@@ -222,5 +222,29 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 211. **`/bin/sh` parser** — Ring 3 `/bin/sh` calls `ShellExecute`; kernel `compat/shell` implements it (`GATE_SH ring3 parser`).
 212. **D-Bus daemon** — Ring 3 process bind+listen `/run/dbus/system_bus_socket` (`GATE_DBUS daemon userspace`).
 213. **Wayland server** — Ring 3 process owns `/run/wayland-0`; compositor stays in-kernel (`GATE_WL server userspace`).
+214. **FUSE ACCESS** — granted bits from mode, not an echo of the request (`GATE_FUSE access`).
+215. **FUSE FSYNC** — WRITE then FSYNC; unknown nodeid fails (`GATE_FUSE fsync`).
+216. **D-Bus SELinux context** — unique and well-known names return the context (`GATE_DBUS selinux`).
+217. **D-Bus AppArmor profile** — unique and well-known names return `unconfined` (`GATE_DBUS apparmor`).
+218. **XHCI No-Op Command** — Command Completion cc=1 (`GATE_USB xhci noop`).
+219. **XHCI Disable Slot** — Command Completion cc=1 (`GATE_USB xhci disable`).
+220. **NFS LOOKUPP** — child LOOKUPP is the export root; root LOOKUPP is NOENT (`GATE_NFS lookupp`).
+221. **NFS RESTOREFH** — SAVEFH then RESTOREFH; missing is NOFILEHANDLE (`GATE_NFS restorefh`).
+222. **FUSE OPEN** — known inode returns fh=nodeid; unknown fails (`GATE_FUSE open`).
+223. **FUSE RELEASE** — OPEN then RELEASE; missing nodeid or mismatched fh fails (`GATE_FUSE release`).
+224. **D-Bus ADT session** — unique and well-known names return the session bytes (`GATE_DBUS adt`).
+225. **D-Bus activation environment** — `UpdateActivationEnvironment` method return (`GATE_DBUS env`).
+226. **XHCI Evaluate Context** — Command Completion cc=1 (`GATE_USB xhci eval`).
+227. **XHCI Stop Endpoint** — bulk OUT (DCI 2) Command Completion cc=1 (`GATE_USB xhci stop`).
+228. **NFS PUTPUBFH** — after LOOKUP, PUTPUBFH is the export root (`GATE_NFS putpubfh`).
+229. **NFS VERIFY** — matching size OK; mismatch NOT_SAME; missing FH NOFILEHANDLE (`GATE_NFS verify`).
+230. **FUSE FLUSH** — WRITE then FLUSH; unknown nodeid fails (`GATE_FUSE flush`).
+231. **FUSE FSYNCDIR** — directory succeeds; file or unknown nodeid fails (`GATE_FUSE fsyncdir`).
+232. **D-Bus ReloadConfig** — empty method return (`GATE_DBUS reload`).
+233. **D-Bus BecomeMonitor** — method return, then signals without AddMatch (`GATE_DBUS monitor`).
+234. **XHCI Reset Endpoint** — Halted bulk IN (DCI 5) Command Completion cc=1 (`GATE_USB xhci resetep`).
+235. **XHCI Set TR Dequeue Pointer** — Stopped extra pipe Command Completion cc=1 (`GATE_USB xhci settr`).
+236. **NFS NVERIFY** — mismatch OK; match SAME; missing FH NOFILEHANDLE (`GATE_NFS nverify`).
+237. **NFS SETCLIENTID_CONFIRM** — issued client_id OK; wrong id STALE_CLIENTID (`GATE_NFS confirm`).
 
-Integration: `./tests/run_integration.sh` **497/497** on QEMU (2026-10-22).
+Integration: `./tests/run_integration.sh` **521/521** on QEMU (2026-10-22).

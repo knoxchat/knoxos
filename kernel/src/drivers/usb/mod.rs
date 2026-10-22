@@ -29,18 +29,22 @@ pub use cdc::*;
 pub use control::*;
 pub use enumerate::{
     GATE_XHCI_ADDR_MARKER, GATE_XHCI_BULK_MARKER, GATE_XHCI_BULKIN_MARKER, GATE_XHCI_CLEAR_MARKER,
-    GATE_XHCI_CONFIG_MARKER, GATE_XHCI_DESC_MARKER, GATE_XHCI_ENUM_MARKER, GATE_XHCI_EP_MARKER,
-    GATE_XHCI_GETCFG_MARKER, GATE_XHCI_GETIFACE_MARKER, GATE_XHCI_IFACE_MARKER,
-    GATE_XHCI_INTR_MARKER, GATE_XHCI_ISOCH_MARKER, GATE_XHCI_SET_MARKER, GATE_XHCI_SETDESC_MARKER,
-    GATE_XHCI_SLOT_MARKER, GATE_XHCI_STATUS_MARKER, GATE_XHCI_STRING_MARKER, addr_self_test,
+    GATE_XHCI_CONFIG_MARKER, GATE_XHCI_DESC_MARKER, GATE_XHCI_DISABLE_MARKER,
+    GATE_XHCI_ENUM_MARKER, GATE_XHCI_EP_MARKER, GATE_XHCI_EVAL_MARKER, GATE_XHCI_GETCFG_MARKER,
+    GATE_XHCI_GETIFACE_MARKER, GATE_XHCI_IFACE_MARKER, GATE_XHCI_INTR_MARKER,
+    GATE_XHCI_ISOCH_MARKER, GATE_XHCI_NOOP_MARKER, GATE_XHCI_RESETEP_MARKER, GATE_XHCI_SET_MARKER,
+    GATE_XHCI_SETDESC_MARKER, GATE_XHCI_SETTR_MARKER, GATE_XHCI_SLOT_MARKER,
+    GATE_XHCI_STATUS_MARKER, GATE_XHCI_STOP_MARKER, GATE_XHCI_STRING_MARKER, addr_self_test,
     address_device, bulk_in, bulk_in_self_test, bulk_out, bulk_self_test, clear_feature,
-    clear_self_test, config_self_test, configure_endpoint, descriptor_self_test, enable_slot,
-    enum_self_test, enumerate_all_devices, enumerate_device, ep_self_test, get_config_descriptor,
-    get_configuration, get_device_descriptor, get_interface, get_status, get_string_descriptor,
-    getcfg_self_test, getiface_self_test, iface_self_test, interrupt_in, interrupt_in_self_test,
-    isoch_in, isoch_in_self_test, poll_events, poll_transfer_event, set_configuration,
-    set_descriptor, set_descriptor_self_test, set_feature, set_interface, set_self_test,
-    slot_self_test, status_self_test, string_self_test, submit_interrupt_urb,
+    clear_self_test, config_self_test, configure_endpoint, descriptor_self_test, disable_self_test,
+    disable_slot, enable_slot, enum_self_test, enumerate_all_devices, enumerate_device,
+    ep_self_test, eval_self_test, evaluate_context, get_config_descriptor, get_configuration,
+    get_device_descriptor, get_interface, get_status, get_string_descriptor, getcfg_self_test,
+    getiface_self_test, iface_self_test, interrupt_in, interrupt_in_self_test, isoch_in,
+    isoch_in_self_test, no_op_command, noop_self_test, poll_events, poll_transfer_event,
+    reset_endpoint, resetep_self_test, set_configuration, set_descriptor, set_descriptor_self_test,
+    set_feature, set_interface, set_self_test, set_tr_dequeue, settr_self_test, slot_self_test,
+    status_self_test, stop_endpoint, stop_self_test, string_self_test, submit_interrupt_urb,
     submit_interrupt_urb_for_hid,
 };
 pub use ethernet::*;
@@ -102,6 +106,12 @@ pub fn init() {
             let _ = isoch_in_self_test();
             let _ = string_self_test();
             let _ = interrupt_in_self_test();
+            let _ = noop_self_test();
+            let _ = disable_self_test();
+            let _ = eval_self_test();
+            let _ = stop_self_test();
+            let _ = resetep_self_test();
+            let _ = settr_self_test();
             let _ = enum_self_test();
 
             let dev_count = device_count();

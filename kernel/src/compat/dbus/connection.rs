@@ -31,6 +31,7 @@ pub fn connect(bus_type: BusType, pid: u32, uid: u32) -> ConnectionId {
         match_rules: Vec::new(),
         message_queue: Vec::new(),
         authenticated: true, // auto-authenticate in kernel
+        monitoring: false,
     };
 
     let mut bus = get_bus(bus_type).lock();

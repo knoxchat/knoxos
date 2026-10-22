@@ -6,10 +6,12 @@ use crate::serial_println;
 
 use super::mount::{loopback_put, mount};
 use super::ops::{
-    fuse_create, fuse_getattr, fuse_getxattr, fuse_link, fuse_listxattr, fuse_lookup, fuse_mkdir,
-    fuse_mknod, fuse_read, fuse_readdir, fuse_readlink, fuse_removexattr, fuse_rename, fuse_rmdir,
+    fuse_access, fuse_create, fuse_flush, fuse_fsync, fuse_fsyncdir, fuse_getattr, fuse_getxattr,
+    fuse_link, fuse_listxattr, fuse_lookup, fuse_mkdir, fuse_mknod, fuse_open, fuse_read,
+    fuse_readdir, fuse_readlink, fuse_release, fuse_removexattr, fuse_rename, fuse_rmdir,
     fuse_setattr, fuse_setxattr, fuse_statfs, fuse_symlink, fuse_unlink, fuse_write,
 };
+use super::protocol::{FUSE_R_OK, FUSE_W_OK, FUSE_X_OK};
 
 pub const GATE_FUSE_MARKER: &str = "GATE_FUSE lookup";
 const GATE_FUSE_PAYLOAD: &[u8] = b"knoxos-fuse\n";
@@ -953,4 +955,331 @@ pub fn removexattr_self_test() -> bool {
             false
         }
     }
+}
+
+pub const GATE_FUSE_ACCESS_MARKER: &str = "GATE_FUSE access";
+
+/// ACCESS must grant file bits from mode, not an echo of the request.
+pub fn access_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-ac";
+    let requested = FUSE_R_OK | FUSE_W_OK | FUSE_X_OK;
+    let file_bits = FUSE_R_OK | FUSE_W_OK;
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE access FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "ac.txt", b"x").is_err() {
+        serial_println!("[fuse] GATE_FUSE access FAILED: put");
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "ac.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE access FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let granted = match fuse_access(MP, looked.nodeid, requested) {
+        Ok(g) => g,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE access FAILED: access ({})", e);
+            return false;
+        }
+    };
+    if granted != file_bits || granted & FUSE_X_OK != 0 {
+        serial_println!(
+            "[fuse] GATE_FUSE access FAILED: granted={:#x} want={:#x}",
+            granted,
+            file_bits
+        );
+        return false;
+    }
+    if fuse_access(MP, 0xFFFF_FFFF, requested).is_ok() {
+        serial_println!("[fuse] GATE_FUSE access FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (ACCESS granted={:#x} ino={})",
+        GATE_FUSE_ACCESS_MARKER,
+        granted,
+        looked.nodeid
+    );
+    true
+}
+
+pub const GATE_FUSE_FSYNC_MARKER: &str = "GATE_FUSE fsync";
+const GATE_FUSE_FSYNC_PAYLOAD: &[u8] = b"knoxos-fuse-fs\n";
+
+/// FSYNC after WRITE must succeed; unknown nodeid must fail.
+pub fn fsync_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-fs";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE fsync FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "fs.txt", b"old").is_err() {
+        serial_println!("[fuse] GATE_FUSE fsync FAILED: put");
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "fs.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE fsync FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let written = match fuse_write(MP, looked.nodeid, 0, GATE_FUSE_FSYNC_PAYLOAD) {
+        Ok(n) => n,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE fsync FAILED: write ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_fsync(MP, looked.nodeid) {
+        serial_println!("[fuse] GATE_FUSE fsync FAILED: fsync ({})", e);
+        return false;
+    }
+    if fuse_fsync(MP, 0xFFFF_FFFF).is_ok() {
+        serial_println!("[fuse] GATE_FUSE fsync FAILED: missing nodeid succeeded");
+        return false;
+    }
+    match fuse_read(MP, looked.nodeid, 0, 64) {
+        Ok(data) if data == GATE_FUSE_FSYNC_PAYLOAD && written == GATE_FUSE_FSYNC_PAYLOAD.len() => {
+            serial_println!(
+                "[fuse] {} (WRITE+FSYNC+READ {} bytes ino={})",
+                GATE_FUSE_FSYNC_MARKER,
+                data.len(),
+                looked.nodeid
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[fuse] GATE_FUSE fsync FAILED written={} read_len={}",
+                written,
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_FUSE_OPEN_MARKER: &str = "GATE_FUSE open";
+
+/// OPEN of a known inode returns fh=nodeid; unknown nodeid fails.
+pub fn open_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-op";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE open FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "op.txt", b"open").is_err() {
+        serial_println!("[fuse] GATE_FUSE open FAILED: put");
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "op.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE open FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let (fh, flags) = match fuse_open(MP, looked.nodeid) {
+        Ok(pair) => pair,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE open FAILED: open ({})", e);
+            return false;
+        }
+    };
+    if fh != looked.nodeid || flags != 0 {
+        serial_println!(
+            "[fuse] GATE_FUSE open FAILED: fh={} flags={} want fh={}",
+            fh,
+            flags,
+            looked.nodeid
+        );
+        return false;
+    }
+    if fuse_open(MP, 0xFFFF_FFFF).is_ok() {
+        serial_println!("[fuse] GATE_FUSE open FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (OPEN fh={} flags={} ino={})",
+        GATE_FUSE_OPEN_MARKER,
+        fh,
+        flags,
+        looked.nodeid
+    );
+    true
+}
+
+pub const GATE_FUSE_RELEASE_MARKER: &str = "GATE_FUSE release";
+
+/// RELEASE after OPEN must succeed; unknown nodeid or mismatched fh must fail.
+pub fn release_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-rel";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE release FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "rel.txt", b"rel").is_err() {
+        serial_println!("[fuse] GATE_FUSE release FAILED: put");
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "rel.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE release FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let (fh, _) = match fuse_open(MP, looked.nodeid) {
+        Ok(pair) => pair,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE release FAILED: open ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_release(MP, looked.nodeid, fh) {
+        serial_println!("[fuse] GATE_FUSE release FAILED: release ({})", e);
+        return false;
+    }
+    if fuse_release(MP, 0xFFFF_FFFF, fh).is_ok() {
+        serial_println!("[fuse] GATE_FUSE release FAILED: missing nodeid succeeded");
+        return false;
+    }
+    if fuse_release(MP, looked.nodeid, fh.wrapping_add(1)).is_ok() {
+        serial_println!("[fuse] GATE_FUSE release FAILED: mismatched fh succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (OPEN+RELEASE fh={} ino={})",
+        GATE_FUSE_RELEASE_MARKER,
+        fh,
+        looked.nodeid
+    );
+    true
+}
+
+pub const GATE_FUSE_FLUSH_MARKER: &str = "GATE_FUSE flush";
+const GATE_FUSE_FLUSH_PAYLOAD: &[u8] = b"knoxos-fuse-fl\n";
+
+/// FLUSH after WRITE must succeed; unknown nodeid must fail.
+pub fn flush_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-fl";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE flush FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "fl.txt", b"old").is_err() {
+        serial_println!("[fuse] GATE_FUSE flush FAILED: put");
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "fl.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE flush FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let written = match fuse_write(MP, looked.nodeid, 0, GATE_FUSE_FLUSH_PAYLOAD) {
+        Ok(n) => n,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE flush FAILED: write ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_flush(MP, looked.nodeid) {
+        serial_println!("[fuse] GATE_FUSE flush FAILED: flush ({})", e);
+        return false;
+    }
+    if fuse_flush(MP, 0xFFFF_FFFF).is_ok() {
+        serial_println!("[fuse] GATE_FUSE flush FAILED: missing nodeid succeeded");
+        return false;
+    }
+    match fuse_read(MP, looked.nodeid, 0, 64) {
+        Ok(data) if data == GATE_FUSE_FLUSH_PAYLOAD && written == GATE_FUSE_FLUSH_PAYLOAD.len() => {
+            serial_println!(
+                "[fuse] {} (WRITE+FLUSH+READ {} bytes ino={})",
+                GATE_FUSE_FLUSH_MARKER,
+                data.len(),
+                looked.nodeid
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[fuse] GATE_FUSE flush FAILED written={} read_len={}",
+                written,
+                other.map(|d| d.len()).unwrap_or(0)
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_FUSE_FSYNCDIR_MARKER: &str = "GATE_FUSE fsyncdir";
+
+/// FSYNCDIR of a directory must succeed; a file or unknown nodeid must fail.
+pub fn fsyncdir_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-fd";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE fsyncdir FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "fd.txt", b"x").is_err() {
+        serial_println!("[fuse] GATE_FUSE fsyncdir FAILED: put");
+        return false;
+    }
+    let file = match fuse_lookup(MP, 1, "fd.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE fsyncdir FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let dir = match fuse_mkdir(MP, 1, "fd.dir") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE fsyncdir FAILED: mkdir ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_fsyncdir(MP, dir.nodeid) {
+        serial_println!("[fuse] GATE_FUSE fsyncdir FAILED: fsyncdir ({})", e);
+        return false;
+    }
+    if fuse_fsyncdir(MP, file.nodeid).is_ok() {
+        serial_println!("[fuse] GATE_FUSE fsyncdir FAILED: file nodeid succeeded");
+        return false;
+    }
+    if fuse_fsyncdir(MP, 0xFFFF_FFFF).is_ok() {
+        serial_println!("[fuse] GATE_FUSE fsyncdir FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (FSYNCDIR dir={} file rejected)",
+        GATE_FUSE_FSYNCDIR_MARKER,
+        dir.nodeid
+    );
+    true
 }

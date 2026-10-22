@@ -694,6 +694,54 @@ fn test_dbus_list_queued_owners() {
 }
 
 #[test_case]
+fn test_dbus_selinux_context() {
+    assert!(
+        crate::dbus::selinux_self_test(),
+        "GetConnectionSELinuxSecurityContext must return the context for unique and well-known names"
+    );
+}
+
+#[test_case]
+fn test_dbus_apparmor_profile() {
+    assert!(
+        crate::dbus::apparmor_self_test(),
+        "GetConnectionAppArmorSecurityContext must return the profile for unique and well-known names"
+    );
+}
+
+#[test_case]
+fn test_dbus_adt_session() {
+    assert!(
+        crate::dbus::adt_self_test(),
+        "GetAdtAuditSessionData must return the session bytes for unique and well-known names"
+    );
+}
+
+#[test_case]
+fn test_dbus_update_activation_environment() {
+    assert!(
+        crate::dbus::env_self_test(),
+        "UpdateActivationEnvironment must return a method reply for a{ss}"
+    );
+}
+
+#[test_case]
+fn test_dbus_reload_config() {
+    assert!(
+        crate::dbus::reload_self_test(),
+        "ReloadConfig must return a method reply"
+    );
+}
+
+#[test_case]
+fn test_dbus_become_monitor() {
+    assert!(
+        crate::dbus::monitor_self_test(),
+        "BecomeMonitor must reply and then deliver signals without AddMatch"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

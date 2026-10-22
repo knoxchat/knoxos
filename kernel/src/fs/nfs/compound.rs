@@ -13,8 +13,10 @@ use super::types::{
 #[derive(Debug, Clone)]
 pub enum NfsCompoundOp {
     PutRootFh,
+    PutPubFh,
     PutFh(NfsFileHandle),
     Lookup(String),
+    LookupP,
     GetFh,
     GetAttr(Vec<u32>), // attribute bitmap
     SetAttr(NfsStateId, NfsAttrs),
@@ -66,9 +68,18 @@ pub enum NfsCompoundOp {
     LockTest(NfsLock),
     SaveFh,
     RestoreFh,
+    Verify {
+        size: u64,
+    },
+    Nverify {
+        size: u64,
+    },
     Renew(u64), // client_id
     SetClientId {
         client_name: String,
+    },
+    SetClientIdConfirm {
+        client_id: u64,
     },
 }
 

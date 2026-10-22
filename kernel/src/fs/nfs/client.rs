@@ -98,6 +98,8 @@ pub struct NfsClient {
     export_dirs: BTreeSet<String>,
     uncommitted: BTreeMap<String, Vec<u8>>,
     fh_names: BTreeMap<NfsFileHandle, String>,
+    fh_parents: BTreeMap<NfsFileHandle, NfsFileHandle>,
+    pub(super) client_id_confirmed: bool,
 }
 
 impl NfsClient {
@@ -119,6 +121,8 @@ impl NfsClient {
             export_dirs: BTreeSet::new(),
             uncommitted: BTreeMap::new(),
             fh_names: BTreeMap::new(),
+            fh_parents: BTreeMap::new(),
+            client_id_confirmed: false,
         }
     }
 
@@ -174,6 +178,10 @@ impl NfsClient {
                 self.current_fh = Some(self.root_fh.clone());
                 NfsCompoundResult::Status(NfsStat::Ok)
             }
+            NfsCompoundOp::PutPubFh => {
+                self.current_fh = Some(self.root_fh.clone());
+                NfsCompoundResult::Status(NfsStat::Ok)
+            }
             NfsCompoundOp::PutFh(fh) => {
                 if *fh == self.root_fh || self.fh_names.contains_key(fh) {
                     self.current_fh = Some(fh.clone());
@@ -187,20 +195,36 @@ impl NfsClient {
                 None => NfsCompoundResult::Status(NfsStat::NoFileHandle),
             },
             NfsCompoundOp::Lookup(name) => {
-                if !self.export_files.contains_key(name) && !self.export_links.contains_key(name) {
+                if !self.export_files.contains_key(name)
+                    && !self.export_links.contains_key(name)
+                    && !self.export_dirs.contains(name)
+                {
                     return NfsCompoundResult::Status(NfsStat::Noent);
                 }
-                let mut child_fh = self
-                    .current_fh
-                    .as_ref()
-                    .map(|fh| fh.0.clone())
-                    .unwrap_or_default();
+                let parent = self.current_fh.clone();
+                let mut child_fh = parent.as_ref().map(|fh| fh.0.clone()).unwrap_or_default();
                 child_fh.extend_from_slice(name.as_bytes());
                 let hash = simple_hash(&child_fh);
                 let fh = NfsFileHandle::new(hash.to_le_bytes().to_vec());
                 self.fh_names.insert(fh.clone(), name.clone());
+                if let Some(parent) = parent {
+                    self.fh_parents.insert(fh.clone(), parent);
+                }
                 self.current_fh = Some(fh);
                 NfsCompoundResult::Status(NfsStat::Ok)
+            }
+            NfsCompoundOp::LookupP => {
+                let parent = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_parents.get(fh).cloned());
+                match parent {
+                    Some(fh) => {
+                        self.current_fh = Some(fh);
+                        NfsCompoundResult::Status(NfsStat::Ok)
+                    }
+                    None => NfsCompoundResult::Status(NfsStat::Noent),
+                }
             }
             NfsCompoundOp::GetAttr(_bitmap) => {
                 let fileid = self
@@ -545,16 +569,62 @@ impl NfsClient {
                 self.saved_fh = self.current_fh.clone();
                 NfsCompoundResult::Status(NfsStat::Ok)
             }
-            NfsCompoundOp::RestoreFh => {
-                self.current_fh = self.saved_fh.clone();
-                NfsCompoundResult::Status(NfsStat::Ok)
+            NfsCompoundOp::RestoreFh => match self.saved_fh.clone() {
+                Some(fh) => {
+                    self.current_fh = Some(fh);
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                }
+                None => NfsCompoundResult::Status(NfsStat::NoFileHandle),
+            },
+            NfsCompoundOp::Verify { size } => {
+                if self.current_fh.is_none() {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                }
+                let actual = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh))
+                    .and_then(|n| self.export_files.get(n))
+                    .map(|d| d.len() as u64)
+                    .unwrap_or(0);
+                if actual == *size {
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::NotSameAttr)
+                }
+            }
+            NfsCompoundOp::Nverify { size } => {
+                if self.current_fh.is_none() {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                }
+                let actual = self
+                    .current_fh
+                    .as_ref()
+                    .and_then(|fh| self.fh_names.get(fh))
+                    .and_then(|n| self.export_files.get(n))
+                    .map(|d| d.len() as u64)
+                    .unwrap_or(0);
+                if actual == *size {
+                    NfsCompoundResult::Status(NfsStat::NotSame)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                }
             }
             NfsCompoundOp::Renew(client_id) => NfsCompoundResult::Status(NfsStat::Ok),
             NfsCompoundOp::SetClientId { client_name } => {
                 self.client_id = simple_hash(client_name.as_bytes());
+                self.client_id_confirmed = false;
                 NfsCompoundResult::ClientId {
                     client_id: self.client_id,
                     verifier: rdtsc(),
+                }
+            }
+            NfsCompoundOp::SetClientIdConfirm { client_id } => {
+                if self.client_id != 0 && *client_id == self.client_id {
+                    self.client_id_confirmed = true;
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::StaleClientId)
                 }
             }
         }

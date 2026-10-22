@@ -330,6 +330,72 @@ fn test_xhci_interrupt_in() {
 }
 
 #[test_case]
+fn test_xhci_noop_command() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::noop_self_test(),
+        "XHCI No-Op Command must complete with cc=1"
+    );
+}
+
+#[test_case]
+fn test_xhci_disable_slot() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::disable_self_test(),
+        "XHCI Disable Slot must complete with cc=1"
+    );
+}
+
+#[test_case]
+fn test_xhci_evaluate_context() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::eval_self_test(),
+        "XHCI Evaluate Context must complete with cc=1"
+    );
+}
+
+#[test_case]
+fn test_xhci_stop_endpoint() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::stop_self_test(),
+        "XHCI Stop Endpoint must complete with cc=1"
+    );
+}
+
+#[test_case]
+fn test_xhci_reset_endpoint() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::resetep_self_test(),
+        "XHCI Reset Endpoint must complete with cc=1"
+    );
+}
+
+#[test_case]
+fn test_xhci_set_tr_dequeue() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::settr_self_test(),
+        "XHCI Set TR Dequeue Pointer must complete with cc=1"
+    );
+}
+
+#[test_case]
 fn test_fuse_write_roundtrip() {
     assert!(
         crate::fuse::write_self_test(),
@@ -462,6 +528,54 @@ fn test_fuse_removexattr_drops_name() {
     assert!(
         crate::fuse::removexattr_self_test(),
         "FUSE REMOVEXATTR must drop a stored name so a later GETXATTR fails"
+    );
+}
+
+#[test_case]
+fn test_fuse_access_bits() {
+    assert!(
+        crate::fuse::access_self_test(),
+        "FUSE ACCESS must grant file bits from mode, not echo the request"
+    );
+}
+
+#[test_case]
+fn test_fuse_fsync_after_write() {
+    assert!(
+        crate::fuse::fsync_self_test(),
+        "FUSE FSYNC after WRITE must succeed and unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_open_fh() {
+    assert!(
+        crate::fuse::open_self_test(),
+        "FUSE OPEN must return fh=nodeid and unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_release_after_open() {
+    assert!(
+        crate::fuse::release_self_test(),
+        "FUSE RELEASE after OPEN must succeed; missing nodeid or mismatched fh must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_flush_after_write() {
+    assert!(
+        crate::fuse::flush_self_test(),
+        "FUSE FLUSH after WRITE must succeed and unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_fsyncdir() {
+    assert!(
+        crate::fuse::fsyncdir_self_test(),
+        "FUSE FSYNCDIR of a directory must succeed; a file or unknown nodeid must fail"
     );
 }
 
@@ -658,6 +772,60 @@ fn test_nfs_putfh_restore() {
     assert!(
         crate::nfs::putfh_self_test(),
         "NFS4 PUTFH must restore a GETFH handle and reject an unknown handle as STALE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_lookupp_parent() {
+    assert!(
+        crate::nfs::lookupp_self_test(),
+        "NFS4 LOOKUPP of a child must return the export root; LOOKUPP of root is NOENT"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_restorefh() {
+    assert!(
+        crate::nfs::restorefh_self_test(),
+        "NFS4 RESTOREFH must restore SAVEFH and reject a missing SAVEFH as NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_putpubfh() {
+    assert!(
+        crate::nfs::putpubfh_self_test(),
+        "NFS4 PUTPUBFH after LOOKUP must set the current handle to the export root"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_verify() {
+    assert!(
+        crate::nfs::verify_self_test(),
+        "NFS4 VERIFY must accept a matching size, reject a mismatch as NOT_SAME, and missing FH as NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_nverify() {
+    assert!(
+        crate::nfs::nverify_self_test(),
+        "NFS4 NVERIFY must accept a mismatch, reject a match as SAME, and missing FH as NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_setclientid_confirm() {
+    assert!(
+        crate::nfs::confirm_self_test(),
+        "NFS4 SETCLIENTID_CONFIRM must accept the issued client_id and reject a wrong id as STALE_CLIENTID"
     );
 }
 

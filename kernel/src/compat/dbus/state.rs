@@ -26,6 +26,7 @@ pub struct Connection {
     pub match_rules: Vec<MatchRule>,
     pub message_queue: Vec<Message>,
     pub authenticated: bool,
+    pub monitoring: bool,
 }
 
 /// Signal match rule
@@ -75,6 +76,8 @@ pub(super) struct BusState {
     pub(super) activatable_names: BTreeSet<String>,
     pub(super) services: BTreeMap<String, ServiceInfo>, // registered service handlers
     pub(super) machine_id: String,
+    pub(super) activation_env: BTreeMap<String, String>,
+    pub(super) config_generation: u32,
 }
 
 /// A registered D-Bus service handler
@@ -93,6 +96,15 @@ pub const MACHINE_ID: &str = "0123456789abcdef0123456789abcdef";
 /// Well-known name advertised by `ListActivatableNames`.
 pub const GATE_ACTIVATABLE_NAME: &str = "org.knoxos.GateActivatable";
 
+/// SELinux context returned by `GetConnectionSELinuxSecurityContext`.
+pub const GATE_SELINUX_CONTEXT: &str = "system_u:system_r:unconfined_t:s0";
+
+/// AppArmor profile returned by `GetConnectionAppArmorSecurityContext`.
+pub const GATE_APPARMOR_PROFILE: &str = "unconfined";
+
+/// ADT audit session bytes returned by `GetAdtAuditSessionData`.
+pub const GATE_ADT_SESSION: &str = "knoxos-adt-session";
+
 fn default_activatable_names() -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     names.insert(String::from(GATE_ACTIVATABLE_NAME));
@@ -107,6 +119,8 @@ lazy_static::lazy_static! {
         activatable_names: default_activatable_names(),
         services: BTreeMap::new(),
         machine_id: String::from(MACHINE_ID),
+        activation_env: BTreeMap::new(),
+        config_generation: 0,
     });
 
     pub(super) static ref SESSION_BUS: Mutex<BusState> = Mutex::new(BusState {
@@ -116,6 +130,8 @@ lazy_static::lazy_static! {
         activatable_names: default_activatable_names(),
         services: BTreeMap::new(),
         machine_id: String::from(MACHINE_ID),
+        activation_env: BTreeMap::new(),
+        config_generation: 0,
     });
 }
 

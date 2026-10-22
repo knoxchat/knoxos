@@ -35,12 +35,16 @@ mod xdr;
 pub use client::{NfsClient, NfsMountOptions};
 pub use compound::{NfsCompoundOp, NfsCompoundResult};
 pub use gates::{
-    GATE_NFS_ACCESS_MARKER, GATE_NFS_COMMIT_MARKER, GATE_NFS_CREATE_MARKER, GATE_NFS_GETFH_MARKER,
-    GATE_NFS_LINK_MARKER, GATE_NFS_MARKER, GATE_NFS_PUTFH_MARKER, GATE_NFS_READDIR_MARKER,
-    GATE_NFS_READLINK_MARKER, GATE_NFS_REMOVE_MARKER, GATE_NFS_RENAME_MARKER,
-    GATE_NFS_SETATTR_MARKER, GATE_NFS_WRITE_MARKER, access_self_test, commit_self_test,
-    create_self_test, getfh_self_test, link_self_test, putfh_self_test, readdir_self_test,
-    readlink_self_test, remove_self_test, rename_self_test, setattr_self_test, write_self_test,
+    GATE_NFS_ACCESS_MARKER, GATE_NFS_COMMIT_MARKER, GATE_NFS_CONFIRM_MARKER,
+    GATE_NFS_CREATE_MARKER, GATE_NFS_GETFH_MARKER, GATE_NFS_LINK_MARKER, GATE_NFS_LOOKUPP_MARKER,
+    GATE_NFS_MARKER, GATE_NFS_NVERIFY_MARKER, GATE_NFS_PUTFH_MARKER, GATE_NFS_PUTPUBFH_MARKER,
+    GATE_NFS_READDIR_MARKER, GATE_NFS_READLINK_MARKER, GATE_NFS_REMOVE_MARKER,
+    GATE_NFS_RENAME_MARKER, GATE_NFS_RESTOREFH_MARKER, GATE_NFS_SETATTR_MARKER,
+    GATE_NFS_VERIFY_MARKER, GATE_NFS_WRITE_MARKER, access_self_test, commit_self_test,
+    confirm_self_test, create_self_test, getfh_self_test, link_self_test, lookupp_self_test,
+    nverify_self_test, putfh_self_test, putpubfh_self_test, readdir_self_test, readlink_self_test,
+    remove_self_test, rename_self_test, restorefh_self_test, setattr_self_test, verify_self_test,
+    write_self_test,
 };
 pub use mount::{NfsMount, list_nfs_mounts, nfs_mount, nfs_umount, proc_nfs_info};
 pub use rpc::{build_lookup_compound, nfs_mount_real, send_rpc};
@@ -82,4 +86,10 @@ pub fn init() {
     let _ = commit_self_test();
     let _ = getfh_self_test();
     let _ = putfh_self_test();
+    let _ = lookupp_self_test();
+    let _ = restorefh_self_test();
+    let _ = putpubfh_self_test();
+    let _ = verify_self_test();
+    let _ = nverify_self_test();
+    let _ = confirm_self_test();
 }

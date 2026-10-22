@@ -42,6 +42,28 @@ pub enum FuseOpcode {
     Destroy = 38,
 }
 
+/// POSIX `R_OK` — FUSE ACCESS request/grant bit.
+pub const FUSE_R_OK: u32 = 4;
+/// POSIX `W_OK` — FUSE ACCESS request/grant bit.
+pub const FUSE_W_OK: u32 = 2;
+/// POSIX `X_OK` — FUSE ACCESS request/grant bit.
+pub const FUSE_X_OK: u32 = 1;
+
+/// Owner rwx bits of `mode` as FUSE ACCESS grant bits.
+pub fn mode_to_access(mode: u32) -> u32 {
+    let mut granted = 0;
+    if mode & 0o400 != 0 {
+        granted |= FUSE_R_OK;
+    }
+    if mode & 0o200 != 0 {
+        granted |= FUSE_W_OK;
+    }
+    if mode & 0o100 != 0 {
+        granted |= FUSE_X_OK;
+    }
+    granted
+}
+
 /// FUSE request header (kernel → userspace)
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -171,4 +193,23 @@ pub fn parse_fuse_statfs(data: &[u8]) -> Option<FuseStatfs> {
         files: u64::from_le_bytes(data[20..28].try_into().ok()?),
         namelen: u32::from_le_bytes(data[28..32].try_into().ok()?),
     })
+}
+
+/// FUSE OPEN reply: fh u64, flags u32.
+pub(super) fn encode_open(fh: u64, flags: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(12);
+    out.extend_from_slice(&fh.to_le_bytes());
+    out.extend_from_slice(&flags.to_le_bytes());
+    out
+}
+
+/// Packed FUSE OPEN: fh u64, flags u32.
+pub fn parse_fuse_open(data: &[u8]) -> Option<(u64, u32)> {
+    if data.len() < 12 {
+        return None;
+    }
+    Some((
+        u64::from_le_bytes(data[0..8].try_into().ok()?),
+        u32::from_le_bytes(data[8..12].try_into().ok()?),
+    ))
 }

@@ -64,6 +64,18 @@ static ISOCH_IN_LIVE: AtomicBool = AtomicBool::new(false);
 static STRING_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when an interrupt IN Normal TRB got a Transfer Event (cc=1/13).
 static INTR_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when a No-Op Command returned Command Completion cc=1.
+static NOOP_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Disable Slot returned Command Completion cc=1.
+static DISABLE_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Evaluate Context returned Command Completion cc=1.
+static EVAL_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Stop Endpoint returned Command Completion cc=1.
+static STOP_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Reset Endpoint returned Command Completion cc=1.
+static RESETEP_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Set TR Dequeue Pointer returned Command Completion cc=1.
+static SETTR_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -85,6 +97,12 @@ pub const GATE_XHCI_SETDESC_MARKER: &str = "GATE_USB xhci stdesc";
 pub const GATE_XHCI_ISOCH_MARKER: &str = "GATE_USB xhci isoch";
 pub const GATE_XHCI_STRING_MARKER: &str = "GATE_USB xhci string";
 pub const GATE_XHCI_INTR_MARKER: &str = "GATE_USB xhci intr";
+pub const GATE_XHCI_NOOP_MARKER: &str = "GATE_USB xhci noop";
+pub const GATE_XHCI_DISABLE_MARKER: &str = "GATE_USB xhci disable";
+pub const GATE_XHCI_EVAL_MARKER: &str = "GATE_USB xhci eval";
+pub const GATE_XHCI_STOP_MARKER: &str = "GATE_USB xhci stop";
+pub const GATE_XHCI_RESETEP_MARKER: &str = "GATE_USB xhci resetep";
+pub const GATE_XHCI_SETTR_MARKER: &str = "GATE_USB xhci settr";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -2480,5 +2498,376 @@ pub fn interrupt_in_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_INTR_MARKER);
+    true
+}
+
+/// No-Op Command. Requires Command Completion cc=1 (no timeout fallback).
+pub fn no_op_command() -> bool {
+    serial_println!("[XHCI] No-Op Command");
+    let mut trb = Trb::new();
+    trb.set_type(TrbType::NoOpCommand);
+
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue No-Op Command");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            NOOP_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] No-Op Command succeeded");
+            return true;
+        }
+        serial_println!("[XHCI] No-Op Command failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] No-Op Command: timeout");
+    false
+}
+
+/// Disable Slot Command. Requires Command Completion cc=1 (no timeout fallback).
+pub fn disable_slot(slot_id: u8) -> bool {
+    serial_println!("[XHCI] Disable Slot for slot {}", slot_id);
+    let mut trb = Trb::new();
+    trb.set_type(TrbType::DisableSlot);
+    trb.control |= (slot_id as u32) << 24;
+
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue Disable Slot");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            DISABLE_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] Disable Slot succeeded for slot {}", slot_id);
+            return true;
+        }
+        serial_println!("[XHCI] Disable Slot failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Disable Slot: timeout");
+    false
+}
+
+/// Prove No-Op Command got a Command Completion (cc=1), not a timeout fallback.
+pub fn noop_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci noop skipped (no controller)");
+        return true;
+    }
+    if !NOOP_LIVE.load(Ordering::Relaxed) {
+        let _ = no_op_command();
+    }
+    if !NOOP_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: No-Op Command had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_NOOP_MARKER);
+    true
+}
+
+/// Prove Disable Slot got a Command Completion (cc=1), not a timeout fallback.
+pub fn disable_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci disable skipped (no controller)");
+        return true;
+    }
+    if !DISABLE_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = enable_slot() {
+            let _ = disable_slot(slot_id);
+        }
+    }
+    if !DISABLE_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Disable Slot had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_DISABLE_MARKER);
+    true
+}
+
+fn extra_addressed_slot() -> Option<u8> {
+    let slot_id = enable_slot()?;
+    let ports = enumerate_ports();
+    let (port, speed) = ports
+        .iter()
+        .find(|p| p.connected)
+        .map(|p| (p.port_num, p.speed))
+        .unwrap_or((1, UsbSpeed::High));
+    if address_device(slot_id, port, speed) {
+        Some(slot_id)
+    } else {
+        let _ = disable_slot(slot_id);
+        None
+    }
+}
+
+fn hid_slot() -> Option<u8> {
+    let xhci = XHCI.lock();
+    xhci.devices
+        .iter()
+        .find(|d| d.slot_id != 0)
+        .map(|d| d.slot_id)
+}
+
+/// Evaluate Context Command. Requires Command Completion cc=1 (no timeout fallback).
+pub fn evaluate_context(slot_id: u8) -> bool {
+    serial_println!("[XHCI] Evaluate Context for slot {}", slot_id);
+    let from_dev = {
+        let xhci = XHCI.lock();
+        xhci.devices
+            .iter()
+            .find(|d| d.slot_id == slot_id)
+            .map(|d| (d.port, d.speed))
+    };
+    let (port, speed) = from_dev.unwrap_or_else(|| {
+        enumerate_ports()
+            .into_iter()
+            .find(|p| p.connected)
+            .map(|p| (p.port_num, p.speed))
+            .unwrap_or((1, UsbSpeed::High))
+    });
+    let (input_ctx_ptr, _input_layout) = alloc_ring_buffer(4096);
+    let ctx_size = {
+        let xhci = XHCI.lock();
+        xhci.context_size.max(32) as u64
+    };
+    // SAFETY: input context is a DMA page we own.
+    unsafe {
+        let icc = dma_virt(input_ctx_ptr) as *mut u32;
+        *icc = 0;
+        // Add context flags: A0 Slot only.
+        *icc.add(1) = 0x01;
+    }
+    let speed_val = match speed {
+        UsbSpeed::Full => 1u32,
+        UsbSpeed::Low => 2,
+        UsbSpeed::High => 3,
+        UsbSpeed::Super => 4,
+        UsbSpeed::SuperPlus => 5,
+    };
+    // SAFETY: slot context sits at a documented offset in the input context.
+    unsafe {
+        let slot_ctx = (dma_virt(input_ctx_ptr) + ctx_size) as *mut u32;
+        *slot_ctx = (1 << 27) | (speed_val << 20);
+        *slot_ctx.add(1) = (port as u32) << 16;
+    }
+    let mut trb = Trb::new();
+    trb.param_lo = (input_ctx_ptr & 0xFFFFFFFF) as u32;
+    trb.param_hi = (input_ctx_ptr >> 32) as u32;
+    trb.set_type(TrbType::EvaluateContext);
+    trb.control |= (slot_id as u32) << 24;
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue Evaluate Context");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            EVAL_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] Evaluate Context succeeded for slot {}", slot_id);
+            return true;
+        }
+        serial_println!("[XHCI] Evaluate Context failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Evaluate Context: timeout");
+    false
+}
+
+/// Stop Endpoint Command. Requires Command Completion cc=1.
+pub fn stop_endpoint(slot_id: u8, dci: u8) -> bool {
+    serial_println!("[XHCI] Stop Endpoint slot {} dci {}", slot_id, dci);
+    let mut trb = Trb::new();
+    trb.set_type(TrbType::StopEndpoint);
+    trb.control |= (dci as u32) << 16;
+    trb.control |= (slot_id as u32) << 24;
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue Stop Endpoint");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            STOP_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] Stop Endpoint succeeded for slot {} dci {}",
+                slot_id,
+                dci
+            );
+            return true;
+        }
+        serial_println!("[XHCI] Stop Endpoint failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Stop Endpoint: timeout");
+    false
+}
+
+/// Prove Evaluate Context got a Command Completion (cc=1), not a timeout fallback.
+pub fn eval_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci eval skipped (no controller)");
+        return true;
+    }
+    if !EVAL_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = extra_addressed_slot() {
+            let _ = evaluate_context(slot_id);
+            let _ = disable_slot(slot_id);
+        } else if let Some(slot_id) = hid_slot() {
+            let _ = evaluate_context(slot_id);
+        }
+    }
+    if !EVAL_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Evaluate Context had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_EVAL_MARKER);
+    true
+}
+
+/// Prove Stop Endpoint on the bulk OUT pipe (DCI 2) got a Command Completion (cc=1).
+/// Uses the already-configured extra endpoint, not HID interrupt IN (DCI 3) and not EP0.
+pub fn stop_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci stop skipped (no controller)");
+        return true;
+    }
+    if !STOP_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            // DCI 2 = bulk OUT from bulk_self_test. Not HID interrupt IN.
+            if !stop_endpoint(slot_id, 2) {
+                let _ = stop_endpoint(slot_id, 5);
+            }
+        }
+    }
+    if !STOP_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Stop Endpoint had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_STOP_MARKER);
+    true
+}
+
+/// Reset Endpoint Command. Requires Command Completion cc=1 (endpoint must be Halted).
+pub fn reset_endpoint(slot_id: u8, dci: u8) -> bool {
+    serial_println!("[XHCI] Reset Endpoint slot {} dci {}", slot_id, dci);
+    let mut trb = Trb::new();
+    trb.set_type(TrbType::ResetEndpoint);
+    trb.control |= (dci as u32) << 16;
+    trb.control |= (slot_id as u32) << 24;
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue Reset Endpoint");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            RESETEP_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] Reset Endpoint succeeded for slot {} dci {}",
+                slot_id,
+                dci
+            );
+            return true;
+        }
+        serial_println!("[XHCI] Reset Endpoint failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Reset Endpoint: timeout");
+    false
+}
+
+/// Set TR Dequeue Pointer Command. Requires Command Completion cc=1 (endpoint Stopped).
+pub fn set_tr_dequeue(slot_id: u8, dci: u8) -> bool {
+    serial_println!("[XHCI] Set TR Dequeue Pointer slot {} dci {}", slot_id, dci);
+    let (ptr, enqueue, cycle, size) = {
+        let xhci = XHCI.lock();
+        let Some(rings) = xhci.transfer_rings.get(&slot_id) else {
+            serial_println!("[XHCI] Set TR Dequeue: no rings for slot {}", slot_id);
+            return false;
+        };
+        if rings.len() <= dci as usize {
+            serial_println!("[XHCI] Set TR Dequeue: no ring for dci {}", dci);
+            return false;
+        }
+        let ring = &rings[dci as usize];
+        (ring.ptr, ring.enqueue, ring.cycle, ring.size)
+    };
+    if ptr == 0 {
+        serial_println!("[XHCI] Set TR Dequeue: null ring");
+        return false;
+    }
+    let idx = if enqueue >= size { 0 } else { enqueue };
+    let dequeue = ptr + (idx * TRB_SIZE) as u64;
+    let mut set_tr = Trb::new();
+    set_tr.param_lo = (dequeue & !1) as u32 | u32::from(cycle);
+    set_tr.param_hi = (dequeue >> 32) as u32;
+    set_tr.set_type(TrbType::SetTRDequeuePointer);
+    set_tr.control |= (dci as u32) << 16;
+    set_tr.control |= (slot_id as u32) << 24;
+    if !enqueue_command(&set_tr) {
+        serial_println!("[XHCI] Failed to enqueue Set TR Dequeue Pointer");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            SETTR_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] Set TR Dequeue Pointer succeeded for slot {} dci {}",
+                slot_id,
+                dci
+            );
+            return true;
+        }
+        serial_println!("[XHCI] Set TR Dequeue Pointer failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Set TR Dequeue Pointer: timeout");
+    false
+}
+
+/// Prove Reset Endpoint on Halted bulk IN (DCI 5) got cc=1. Not HID interrupt IN.
+pub fn resetep_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci resetep skipped (no controller)");
+        return true;
+    }
+    if !RESETEP_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            // DCI 5 = bulk IN (Halted after bulk_in_self_test cc=6). Not HID IN.
+            if !reset_endpoint(slot_id, 5) {
+                let _ = reset_endpoint(slot_id, 7);
+            }
+        }
+    }
+    if !RESETEP_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Reset Endpoint had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_RESETEP_MARKER);
+    true
+}
+
+/// Prove Set TR Dequeue Pointer on a Stopped extra pipe got cc=1.
+pub fn settr_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci settr skipped (no controller)");
+        return true;
+    }
+    if !SETTR_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            // DCI 2 stopped by stop_self_test; DCI 5 stopped by resetep_self_test.
+            if !set_tr_dequeue(slot_id, 2) {
+                let _ = set_tr_dequeue(slot_id, 5);
+            }
+        }
+    }
+    if !SETTR_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Set TR Dequeue Pointer had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_SETTR_MARKER);
     true
 }

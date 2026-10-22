@@ -46,6 +46,8 @@ pub enum NfsStat {
     WrongSec = 10016,
     ClidInUse = 10017,
     Moved = 10019,
+    /// NFS4ERR_NOT_SAME — VERIFY found different attributes.
+    NotSameAttr = 10018,
     NoFileHandle = 10020,
     MinorVersMismatch = 10021,
     StaleClientId = 10022,

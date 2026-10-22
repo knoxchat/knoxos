@@ -4,7 +4,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::mount::{LOOPBACK, write_response};
-use super::protocol::{FuseOpcode, FuseStatfs, encode_dirent, encode_entry, encode_statfs};
+use super::protocol::{
+    FuseOpcode, FuseStatfs, encode_dirent, encode_entry, encode_open, encode_statfs,
+};
 
 pub(super) fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]) {
     if opcode != FuseOpcode::Lookup {
@@ -299,6 +301,9 @@ fn loopback_has_ino(lb: &super::mount::LoopbackFs, nodeid: u64) -> bool {
         || lb.links.values().any(|(ino, _)| *ino == nodeid)
         || lb.nodes.values().any(|(ino, _)| *ino == nodeid)
 }
+fn loopback_is_dir(lb: &super::mount::LoopbackFs, nodeid: u64) -> bool {
+    nodeid == 1 || lb.dirs.values().any(|&ino| ino == nodeid)
+}
 pub(super) fn serve_loopback_setxattr(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
     let Some(z) = req.iter().position(|&b| b == 0) else {
         return;
@@ -370,6 +375,87 @@ pub(super) fn serve_loopback_removexattr(mount_point: &str, unique: u64, nodeid:
         .map(|m| m.remove(name).is_some())
         .unwrap_or(false);
     if !removed {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_access(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    if req.len() < 4 {
+        return;
+    }
+    let requested = u32::from_le_bytes(req[0..4].try_into().unwrap_or([0; 4]));
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    let mode = if nodeid == 1 {
+        0o040755
+    } else if lb.files.values().any(|(ino, _)| *ino == nodeid) {
+        0o100644
+    } else if lb.dirs.values().any(|&ino| ino == nodeid) {
+        0o040755
+    } else if lb.links.values().any(|(ino, _)| *ino == nodeid) {
+        0o120777
+    } else if let Some(&(_, mode)) = lb.nodes.values().find(|(ino, _)| *ino == nodeid) {
+        mode
+    } else {
+        return;
+    };
+    drop(lbs);
+    let granted = super::protocol::mode_to_access(mode) & requested;
+    let _ = write_response(mount_point, unique, granted.to_le_bytes().to_vec());
+}
+pub(super) fn serve_loopback_fsync(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_open(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, encode_open(nodeid, 0));
+}
+pub(super) fn serve_loopback_release(mount_point: &str, unique: u64, nodeid: u64, fh: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) || fh != nodeid {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_flush(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_fsyncdir(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_is_dir(lb, nodeid) {
         return;
     }
     drop(lbs);

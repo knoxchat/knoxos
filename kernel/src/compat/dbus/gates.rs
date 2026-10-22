@@ -1,6 +1,8 @@
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
+use alloc::vec::Vec;
 
 use crate::serial_println;
 
@@ -10,7 +12,8 @@ use super::routing::{receive_message, send_message};
 use super::state::{
     BusType, DBUS_NAME_FLAG_DO_NOT_QUEUE, DBUS_REQUEST_NAME_REPLY_IN_QUEUE,
     DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, DBUS_START_REPLY_ALREADY_RUNNING,
-    DBUS_START_REPLY_SUCCESS, GATE_ACTIVATABLE_NAME, MACHINE_ID,
+    DBUS_START_REPLY_SUCCESS, GATE_ACTIVATABLE_NAME, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE,
+    GATE_SELINUX_CONTEXT, MACHINE_ID,
 };
 
 pub const GATE_DBUS_METHOD_MARKER: &str = "GATE_DBUS method";
@@ -1041,6 +1044,354 @@ pub fn queue_self_test() -> bool {
             owner_ok,
             queued_ok,
             listed
+        );
+        false
+    }
+}
+
+fn ay_utf8(body: &[DbusValue]) -> Option<String> {
+    let DbusValue::Array(items) = body.first()? else {
+        return None;
+    };
+    let mut bytes = Vec::new();
+    for v in items {
+        match v {
+            DbusValue::Byte(b) => bytes.push(*b),
+            _ => return None,
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
+
+pub const GATE_DBUS_SELINUX_MARKER: &str = "GATE_DBUS selinux";
+
+/// `GetConnectionSELinuxSecurityContext` must return the context for unique and well-known names.
+pub fn selinux_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateSelinux";
+    let owner = connect(BusType::System, 0xDB18, 1000);
+    let unique = format!(":1.{}", owner);
+
+    let mut get_unique = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionSELinuxSecurityContext",
+    );
+    get_unique.body = vec![DbusValue::String(unique)];
+    get_unique.signature = Some(String::from("s"));
+    let uniq_serial = send_message(BusType::System, owner, get_unique);
+    let unique_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(uniq_serial)
+                && ay_utf8(&msg.body).as_deref() == Some(GATE_SELINUX_CONTEXT)
+        })
+        .unwrap_or(false);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut get_wk = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionSELinuxSecurityContext",
+    );
+    get_wk.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    get_wk.signature = Some(String::from("s"));
+    let wk_serial = send_message(BusType::System, owner, get_wk);
+    let well_known_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(wk_serial)
+                && ay_utf8(&msg.body).as_deref() == Some(GATE_SELINUX_CONTEXT)
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if unique_ok && well_known_ok {
+        serial_println!(
+            "[dbus] {} (GetConnectionSELinuxSecurityContext unique+well-known)",
+            GATE_DBUS_SELINUX_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: selinux unique={} well_known={}",
+            unique_ok,
+            well_known_ok
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_APPARMOR_MARKER: &str = "GATE_DBUS apparmor";
+
+/// `GetConnectionAppArmorSecurityContext` must return the profile for unique and well-known names.
+pub fn apparmor_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateApparmor";
+    let owner = connect(BusType::System, 0xDB19, 1000);
+    let unique = format!(":1.{}", owner);
+
+    let mut get_unique = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionAppArmorSecurityContext",
+    );
+    get_unique.body = vec![DbusValue::String(unique)];
+    get_unique.signature = Some(String::from("s"));
+    let uniq_serial = send_message(BusType::System, owner, get_unique);
+    let unique_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(uniq_serial)
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::String(s)) if s == GATE_APPARMOR_PROFILE
+                )
+        })
+        .unwrap_or(false);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut get_wk = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionAppArmorSecurityContext",
+    );
+    get_wk.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    get_wk.signature = Some(String::from("s"));
+    let wk_serial = send_message(BusType::System, owner, get_wk);
+    let well_known_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(wk_serial)
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::String(s)) if s == GATE_APPARMOR_PROFILE
+                )
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if unique_ok && well_known_ok {
+        serial_println!(
+            "[dbus] {} (GetConnectionAppArmorSecurityContext unique+well-known)",
+            GATE_DBUS_APPARMOR_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: apparmor unique={} well_known={}",
+            unique_ok,
+            well_known_ok
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_ADT_MARKER: &str = "GATE_DBUS adt";
+
+/// `GetAdtAuditSessionData` must return the session bytes for unique and well-known names.
+pub fn adt_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateAdt";
+    let owner = connect(BusType::System, 0xDB1A, 1000);
+    let unique = format!(":1.{}", owner);
+
+    let mut get_unique = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetAdtAuditSessionData",
+    );
+    get_unique.body = vec![DbusValue::String(unique)];
+    get_unique.signature = Some(String::from("s"));
+    let uniq_serial = send_message(BusType::System, owner, get_unique);
+    let unique_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(uniq_serial)
+                && ay_utf8(&msg.body).as_deref() == Some(GATE_ADT_SESSION)
+        })
+        .unwrap_or(false);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut get_wk = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetAdtAuditSessionData",
+    );
+    get_wk.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    get_wk.signature = Some(String::from("s"));
+    let wk_serial = send_message(BusType::System, owner, get_wk);
+    let well_known_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(wk_serial)
+                && ay_utf8(&msg.body).as_deref() == Some(GATE_ADT_SESSION)
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if unique_ok && well_known_ok {
+        serial_println!(
+            "[dbus] {} (GetAdtAuditSessionData unique+well-known)",
+            GATE_DBUS_ADT_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: adt unique={} well_known={}",
+            unique_ok,
+            well_known_ok
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_ENV_MARKER: &str = "GATE_DBUS env";
+
+/// `UpdateActivationEnvironment` must return a method reply for `a{ss}`.
+pub fn env_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB1B, 1000);
+    let mut upd = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "UpdateActivationEnvironment",
+    );
+    upd.body = vec![DbusValue::Array(vec![DbusValue::DictEntry(
+        Box::new(DbusValue::String(String::from("KNOXOS_GATE"))),
+        Box::new(DbusValue::String(String::from("1"))),
+    )])];
+    upd.signature = Some(String::from("a{ss}"));
+    let serial = send_message(BusType::System, conn, upd);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| msg.reply_serial == Some(serial) && msg.body.is_empty())
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok {
+        serial_println!(
+            "[dbus] {} (UpdateActivationEnvironment method return)",
+            GATE_DBUS_ENV_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: UpdateActivationEnvironment");
+        false
+    }
+}
+
+pub const GATE_DBUS_RELOAD_MARKER: &str = "GATE_DBUS reload";
+
+/// `ReloadConfig` must return a method reply.
+pub fn reload_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB1C, 1000);
+    let reload = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ReloadConfig",
+    );
+    let serial = send_message(BusType::System, conn, reload);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && msg.body.is_empty()
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok {
+        serial_println!(
+            "[dbus] {} (ReloadConfig method return)",
+            GATE_DBUS_RELOAD_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: ReloadConfig");
+        false
+    }
+}
+
+pub const GATE_DBUS_MONITOR_MARKER: &str = "GATE_DBUS monitor";
+
+/// `BecomeMonitor` must reply, then signals are delivered without AddMatch.
+pub fn monitor_self_test() -> bool {
+    let listener = connect(BusType::System, 0xDB1D, 1000);
+    let emitter = connect(BusType::System, 0xDB1E, 1000);
+
+    let mut monitor_call = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Monitoring",
+        "BecomeMonitor",
+    );
+    monitor_call.body = vec![DbusValue::Array(Vec::new()), DbusValue::Uint32(0)];
+    monitor_call.signature = Some(String::from("asu"));
+    let serial = send_message(BusType::System, listener, monitor_call);
+    let replied = receive_message(BusType::System, listener)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn && msg.reply_serial == Some(serial)
+        })
+        .unwrap_or(false);
+
+    let ping = Message::signal("/org/knoxos/Gate", "org.knoxos.GateMonitor", "Ping");
+    let _ = send_message(BusType::System, emitter, ping);
+    let matched = receive_message(BusType::System, listener)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.interface.as_deref() == Some("org.knoxos.GateMonitor")
+                && msg.member.as_deref() == Some("Ping")
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, listener);
+    disconnect(BusType::System, emitter);
+    if replied && matched {
+        serial_println!(
+            "[dbus] {} (BecomeMonitor then signal without AddMatch)",
+            GATE_DBUS_MONITOR_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: BecomeMonitor replied={} matched={}",
+            replied,
+            matched
         );
         false
     }

@@ -10,7 +10,8 @@ use super::connection::{release_name_on_bus, request_name_on_bus};
 use super::protocol::{DbusValue, Message, MessageType};
 use super::state::{
     BusState, BusType, Connection, ConnectionId, DBUS_START_REPLY_ALREADY_RUNNING,
-    DBUS_START_REPLY_SUCCESS, MatchRule, get_bus,
+    DBUS_START_REPLY_SUCCESS, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE, GATE_SELINUX_CONTEXT,
+    MatchRule, get_bus,
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -91,6 +92,9 @@ pub fn send_message(bus_type: BusType, from: ConnectionId, msg: Message) -> u32 
 
 /// Check if a connection's match rules match a signal
 fn matches_signal(conn: &Connection, msg: &Message) -> bool {
+    if conn.monitoring && conn.match_rules.is_empty() {
+        return true;
+    }
     if conn.match_rules.is_empty() {
         return false;
     }
@@ -385,6 +389,123 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 reply.signature = Some(String::from("as"));
                 if let Some(c) = bus.connections.get_mut(&from) {
                     c.message_queue.push(reply);
+                }
+            }
+            "GetConnectionSELinuxSecurityContext" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let owner_id = bus.names.get(name).copied().or_else(|| {
+                    bus.connections
+                        .values()
+                        .find(|c| c.unique_name == name)
+                        .map(|c| c.id)
+                });
+                if owner_id.is_some() {
+                    let bytes: Vec<DbusValue> = GATE_SELINUX_CONTEXT
+                        .as_bytes()
+                        .iter()
+                        .copied()
+                        .map(DbusValue::Byte)
+                        .collect();
+                    let mut reply = Message::method_return(msg.header.serial);
+                    reply.body = vec![DbusValue::Array(bytes)];
+                    reply.signature = Some(String::from("ay"));
+                    if let Some(c) = bus.connections.get_mut(&from) {
+                        c.message_queue.push(reply);
+                    }
+                }
+            }
+            "GetConnectionAppArmorSecurityContext" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let owner_id = bus.names.get(name).copied().or_else(|| {
+                    bus.connections
+                        .values()
+                        .find(|c| c.unique_name == name)
+                        .map(|c| c.id)
+                });
+                if owner_id.is_some() {
+                    let mut reply = Message::method_return(msg.header.serial);
+                    reply.body = vec![DbusValue::String(String::from(GATE_APPARMOR_PROFILE))];
+                    reply.signature = Some(String::from("s"));
+                    if let Some(c) = bus.connections.get_mut(&from) {
+                        c.message_queue.push(reply);
+                    }
+                }
+            }
+            "GetAdtAuditSessionData" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let owner_id = bus.names.get(name).copied().or_else(|| {
+                    bus.connections
+                        .values()
+                        .find(|c| c.unique_name == name)
+                        .map(|c| c.id)
+                });
+                if owner_id.is_some() {
+                    let bytes: Vec<DbusValue> = GATE_ADT_SESSION
+                        .as_bytes()
+                        .iter()
+                        .copied()
+                        .map(DbusValue::Byte)
+                        .collect();
+                    let mut reply = Message::method_return(msg.header.serial);
+                    reply.body = vec![DbusValue::Array(bytes)];
+                    reply.signature = Some(String::from("ay"));
+                    if let Some(c) = bus.connections.get_mut(&from) {
+                        c.message_queue.push(reply);
+                    }
+                }
+            }
+            "UpdateActivationEnvironment" => {
+                if let Some(DbusValue::Array(items)) = msg.body.first() {
+                    for item in items {
+                        if let DbusValue::DictEntry(k, v) = item {
+                            if let (DbusValue::String(key), DbusValue::String(val)) =
+                                (k.as_ref(), v.as_ref())
+                            {
+                                bus.activation_env.insert(key.clone(), val.clone());
+                            }
+                        }
+                    }
+                }
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue
+                        .push(Message::method_return(msg.header.serial));
+                }
+            }
+            "ReloadConfig" => {
+                bus.config_generation = bus.config_generation.wrapping_add(1);
+                serial_println!("[dbus] ReloadConfig generation={}", bus.config_generation);
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue
+                        .push(Message::method_return(msg.header.serial));
+                }
+            }
+            _ => {
+                serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
+            }
+        }
+    } else if interface == "org.freedesktop.DBus.Monitoring" {
+        match member {
+            "BecomeMonitor" => {
+                if let Some(conn) = bus.connections.get_mut(&from) {
+                    conn.monitoring = true;
+                    if let Some(DbusValue::Array(rules)) = msg.body.first() {
+                        for rule in rules {
+                            if let DbusValue::String(s) = rule {
+                                conn.match_rules.push(parse_match_rule(s));
+                            }
+                        }
+                    }
+                    conn.message_queue
+                        .push(Message::method_return(msg.header.serial));
                 }
             }
             _ => {

@@ -4,17 +4,18 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::loopback::{
-    serve_loopback, serve_loopback_create, serve_loopback_getattr, serve_loopback_getxattr,
+    serve_loopback, serve_loopback_access, serve_loopback_create, serve_loopback_flush,
+    serve_loopback_fsync, serve_loopback_fsyncdir, serve_loopback_getattr, serve_loopback_getxattr,
     serve_loopback_link, serve_loopback_listxattr, serve_loopback_mkdir, serve_loopback_mknod,
-    serve_loopback_read, serve_loopback_readdir, serve_loopback_readlink,
-    serve_loopback_removexattr, serve_loopback_rename, serve_loopback_rmdir,
-    serve_loopback_setattr, serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_symlink,
-    serve_loopback_unlink, serve_loopback_write,
+    serve_loopback_open, serve_loopback_read, serve_loopback_readdir, serve_loopback_readlink,
+    serve_loopback_release, serve_loopback_removexattr, serve_loopback_rename,
+    serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setxattr, serve_loopback_statfs,
+    serve_loopback_symlink, serve_loopback_unlink, serve_loopback_write,
 };
 use super::mount::{send_request, take_response};
 use super::protocol::{
     FuseAttr, FuseEntry, FuseOpcode, FuseStatfs, parse_fuse_dirents, parse_fuse_entry,
-    parse_fuse_statfs,
+    parse_fuse_open, parse_fuse_statfs,
 };
 
 /// Handle a VFS lookup through FUSE
@@ -370,6 +371,59 @@ pub fn fuse_removexattr(mount_point: &str, nodeid: u64, name: &str) -> Result<()
         name.as_bytes().to_vec(),
     )?;
     serve_loopback_removexattr(mount_point, unique, nodeid, name.as_bytes());
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS access through FUSE. Request body is the POSIX mask (u32 LE).
+/// Reply is the granted bits (u32 LE), from the inode mode, not an echo of the mask.
+pub fn fuse_access(mount_point: &str, nodeid: u64, mask: u32) -> Result<u32, &'static str> {
+    let mut data = Vec::with_capacity(4);
+    data.extend_from_slice(&mask.to_le_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Access, nodeid, data.clone())?;
+    serve_loopback_access(mount_point, unique, nodeid, &data);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    if resp.len() < 4 {
+        return Err("short access");
+    }
+    Ok(u32::from_le_bytes(resp[0..4].try_into().unwrap_or([0; 4])))
+}
+/// Handle a VFS fsync through FUSE. Succeeds only for a known inode.
+pub fn fuse_fsync(mount_point: &str, nodeid: u64) -> Result<(), &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Fsync, nodeid, Vec::new())?;
+    serve_loopback_fsync(mount_point, unique, nodeid);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS open through FUSE. Reply is fh u64 + flags u32; unknown nodeid fails.
+pub fn fuse_open(mount_point: &str, nodeid: u64) -> Result<(u64, u32), &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Open, nodeid, Vec::new())?;
+    serve_loopback_open(mount_point, unique, nodeid);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    parse_fuse_open(&resp).ok_or("short open")
+}
+/// Handle a VFS release through FUSE. Request body is the fh (u64 LE).
+pub fn fuse_release(mount_point: &str, nodeid: u64, fh: u64) -> Result<(), &'static str> {
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::Release,
+        nodeid,
+        fh.to_le_bytes().to_vec(),
+    )?;
+    serve_loopback_release(mount_point, unique, nodeid, fh);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS flush through FUSE. Succeeds only for a known inode.
+pub fn fuse_flush(mount_point: &str, nodeid: u64) -> Result<(), &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Flush, nodeid, Vec::new())?;
+    serve_loopback_flush(mount_point, unique, nodeid);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS fsyncdir through FUSE. Succeeds only for a known directory.
+pub fn fuse_fsyncdir(mount_point: &str, nodeid: u64) -> Result<(), &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Fsyncdir, nodeid, Vec::new())?;
+    serve_loopback_fsyncdir(mount_point, unique, nodeid);
     take_response(mount_point, unique).ok_or("would block")?;
     Ok(())
 }
