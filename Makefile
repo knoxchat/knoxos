@@ -315,6 +315,7 @@ nix-shell: ## Enter Nix development shell
 host-test: ## Host-side parser + GPUI raster tests (no QEMU)
 	@echo "$(BLUE)[KnoxOS] Host tests...$(NC)"
 	@cargo test -p knoxos-host-tests
+	@cargo test -p knox-abi
 	@cargo test -p knox-gpui
 	@echo "$(GREEN)[✓] Host tests passed$(NC)"
 

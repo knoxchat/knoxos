@@ -966,6 +966,11 @@ pub fn handle_syscall(
         // ════════════════════════════════════════════════════════════
         SyscallNumber::Mkfifo => io::sys_mkfifo(arg1, arg2 as u32),
         SyscallNumber::Openpty => io::sys_openpty(arg1, arg2),
+        #[cfg(feature = "gui")]
+        SyscallNumber::KnoxUiRaster => io::sys_knox_ui_raster(arg1, arg2, arg3, arg4, arg5),
+        #[cfg(not(feature = "gui"))]
+        SyscallNumber::KnoxUiRaster => Err(SyscallError::NotImplemented),
+        SyscallNumber::ShellExecute => io::sys_shell_execute(arg1, arg2),
 
         // ════════════════════════════════════════════════════════════
         // ── KnoxOS KVM Virtualization ──────────────────────────────

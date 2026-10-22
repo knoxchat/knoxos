@@ -10,6 +10,7 @@
 - [x] Service manager `boot()` from `main.rs`; dependency-ish unit states
 - [x] In-memory D-Bus routing (`send_message`)
 - [x] **AF_UNIX system bus** — `/run/dbus/system_bus_socket` bind/listen/connect/send/recv (`GATE_L3 dbus unix`)
+- [x] **D-Bus daemon as a user process** on `/run/dbus/system_bus_socket` (`GATE_DBUS daemon userspace`); kernel `uds` remains for L3/host tests
 - [x] Cron field parser + `tick` → execute builtin/ELF
 - [x] dmesg ring, syslog structures
 - [x] PAM salted SHA-512 verify; session/seat structs

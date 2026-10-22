@@ -14,6 +14,7 @@
 
 ### Remaining (userspace-shaped)
 - [x] Shell as `/bin/sh` in Ring 3 attached to a PTY slave
+- [x] Ring 3 `/bin/sh` is the live parser; kernel `compat/shell` implements `ShellExecute` (`GATE_SH ring3 parser`)
 - [x] Live `sigreturn` for a custom SIGINT handler (B7)
 - [x] Full VT100/xterm-256 — CUP + SGR 256-color + ED (`GATE_VT100 xterm`)
 - [x] Here-docs, functions, `~/.profile` (`GATE_HEREDOC expand`, `GATE_PROFILE sourced`)

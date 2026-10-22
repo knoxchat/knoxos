@@ -35,11 +35,13 @@ Secure Boot keys (PK/KEK/db): `./scripts/secure-boot-enroll.sh`. OVMF vars enrol
 | `./tests/run_integration.sh` | QEMU boot; waits for serial markers (Gates B–I) |
 | `make status` | Check README, LICENSE, and images exist |
 
-The repo is one Cargo workspace (`kernel`, `boot`, `tools/*`). `cargo test` at the root runs host tools only. Build the kernel with `./scripts/kernel-cargo.sh build --release` or `make kernel`.
+The repo is one Cargo workspace (`kernel`, `boot`, `abi`, `userspace/libs/*`, `tools/*`). `cargo test` at the root runs host tools only. Build the kernel with `./scripts/kernel-cargo.sh build --release` or `make kernel`.
 
 ## Layout
 
-- `kernel/` — kernel crate (`src/main.rs` + `src/lib.rs`)
+- `userspace/` — Ring 3 apps and system libs (`libs/knox-gpui`, `libs/knox-ui`, `libs/ld.so`, `libs/libc`)
+- `abi/` — syscall numbers, errors, and `stat`/`socket` layouts (`knox-abi`)
+- `kernel/` — kernel crate (`src/main.rs` + `src/lib.rs`); hardware under `src/drivers/`
 - `boot/` — disk-image builder (`bootloader` crate)
 - `scripts/kernel-cargo.sh` — `x86_64-unknown-none` + `-Zbuild-std` wrapper (artifacts stay in `kernel/target`)
 - `status/` — production-readiness score (source of truth); start at [status/next.md](status/next.md)

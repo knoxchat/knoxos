@@ -1,0 +1,55 @@
+"""Gate B2 hello: write(1, "hello from userspace\\n", 21) then exit(0)."""
+
+from elfpack import build_static_user_elf
+
+CODE = bytes(
+    [
+        0x48,
+        0xC7,
+        0xC0,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x48,
+        0xC7,
+        0xC7,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x48,
+        0x8D,
+        0x35,
+        0x15,
+        0x00,
+        0x00,
+        0x00,
+        0x48,
+        0xC7,
+        0xC2,
+        0x15,
+        0x00,
+        0x00,
+        0x00,
+        0x0F,
+        0x05,
+        0x48,
+        0xC7,
+        0xC0,
+        0x3C,
+        0x00,
+        0x00,
+        0x00,
+        0x48,
+        0x31,
+        0xFF,
+        0x0F,
+        0x05,
+        *b"hello from userspace\n",
+    ]
+)
+
+
+def elf() -> bytes:
+    return build_static_user_elf(CODE)

@@ -1,6 +1,6 @@
 # Drivers (live vs stub)
 
-QEMU is the hardware. Tick a driver only when the virtqueue, DMA, or IRQ path round-trips on that machine.
+QEMU is the hardware. Tick a driver only when the virtqueue, DMA, or IRQ path round-trips on that machine. Sources live under `kernel/src/drivers/` (`crate::pci` and friends are re-exported).
 
 ## Live on the boot path
 

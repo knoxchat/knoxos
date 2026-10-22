@@ -15,6 +15,11 @@ tools/**/target/
 # QEMU / run leftovers
 serial.log
 nohup.out
+/run/
+tests/qemu_stderr.log
+tests/serial_output.log
+tests/aarch64-serial.log
+tests/riscv64-serial.log
 
 # Release / Secure Boot artifacts (private keys must not be committed)
 dist/

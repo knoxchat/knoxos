@@ -150,6 +150,11 @@ Details: [subsystems/13-binary-compat.md](subsystems/13-binary-compat.md)
 - [x] `dlopen` that maps `.so` via VMM (`open` + file-backed `mmap`, not `ldknoxos.rs` fake base) — **Gate BM2**
 - [x] Static musl CRT ABI (`_start` → `__libc_start_main` → `main`) — **Gate BM3**
 - [x] Dynamically linked musl binary for Ring 3 (`PT_INTERP` + `DT_NEEDED libc.so` + `__libc_start_main@plt`) — **Gate BM4**
+- [x] musl CRT client calls `KnoxUiRaster` (`GATE_GPUI musl raster`)
+- [x] Interactive Ring 3 calc re-rasters SHM on key (`GATE_GPUI ring3 calc key`)
+- [x] Ring 3 `/bin/sh` parser via `ShellExecute` (`GATE_SH ring3 parser`)
+- [x] D-Bus daemon as a user process (`GATE_DBUS daemon userspace`)
+- [x] Wayland listen owned by a user process (`GATE_WL server userspace`)
 
 ## 14. Internationalization & Fonts
 

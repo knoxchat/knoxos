@@ -3,7 +3,7 @@
 > **Last updated**: 2026-10-21
 > **Version**: 0.2.5 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.5)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
-> **Codebase**: 611 Rust files in `kernel/src` · ~347,000 lines · 408 `pub mod` entries
+> **Codebase**: 1035 Rust files in `kernel/src` (~28 at crate root) · ~388,000 lines · grouped under `drivers/` `fs/` `mm/` `arch/` `sched/` `ipc/` `security/` `net/` `crypto/` `compat/`
 > **Honesty rule**: a module that compiles is not a feature. Only **Live** work counts toward production.
 
 **Start here:** [next.md](next.md) — what to do first, in order.

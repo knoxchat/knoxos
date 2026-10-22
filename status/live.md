@@ -217,5 +217,10 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 206. **XHCI interrupt IN** — Interrupt IN Normal TRB Transfer Event (`GATE_USB xhci intr`).
 207. **NFS GETFH** — LOOKUP then GETFH is a child handle (`GATE_NFS getfh`).
 208. **NFS PUTFH** — restore GETFH handle; unknown is STALE (`GATE_NFS putfh`).
+209. **Ring 3 calc key** — attached SHM calculator re-rasters on `'7'` (`GATE_GPUI ring3 calc key`).
+210. **musl raster** — musl CRT `main` calls `KnoxUiRaster` and presents GPUM (`GATE_GPUI musl raster`).
+211. **`/bin/sh` parser** — Ring 3 `/bin/sh` calls `ShellExecute`; kernel `compat/shell` implements it (`GATE_SH ring3 parser`).
+212. **D-Bus daemon** — Ring 3 process bind+listen `/run/dbus/system_bus_socket` (`GATE_DBUS daemon userspace`).
+213. **Wayland server** — Ring 3 process owns `/run/wayland-0`; compositor stays in-kernel (`GATE_WL server userspace`).
 
-Integration: `./tests/run_integration.sh` **472/472** on QEMU (2026-10-21).
+Integration: `./tests/run_integration.sh` **497/497** on QEMU (2026-10-22).

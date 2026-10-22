@@ -245,6 +245,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "knox-abi"
+version = "0.2.5"
+
+[[package]]
 name = "knox-gpui"
 version = "0.1.0"
 dependencies = [
@@ -278,6 +282,7 @@ dependencies = [
  "bootloader_api",
  "conquer-once",
  "crossbeam-queue",
+ "knox-abi",
  "knox-gpui",
  "knox-ui",
  "lazy_static",

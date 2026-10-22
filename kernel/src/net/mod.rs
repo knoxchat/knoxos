@@ -61,3 +61,32 @@ pub fn init() {
         );
     }
 }
+
+// Folded crate-root net leftovers.
+#[cfg(feature = "stub-drivers")]
+pub mod bonding;
+pub mod bridge;
+pub mod dhcp;
+pub mod dns;
+pub mod firewall;
+pub mod http;
+pub mod ipv6;
+#[cfg(feature = "stub-drivers")]
+pub mod mdns;
+pub mod net_production;
+pub mod netfilter;
+pub mod netint;
+#[cfg(feature = "stub-drivers")]
+pub mod netns;
+pub mod ntp;
+#[cfg(feature = "stub-drivers")]
+pub mod quic;
+#[cfg(feature = "stub-drivers")]
+pub mod sctp;
+#[cfg(feature = "stub-drivers")]
+pub mod traffic_shaping;
+pub mod vlan;
+#[cfg(feature = "stub-drivers")]
+pub mod vpn;
+#[cfg(feature = "stub-drivers")]
+pub mod xdp;

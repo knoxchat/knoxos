@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Tree** — hardware under `kernel/src/drivers/`; VFS under `fs/`; MM under `mm/`; CPU under `arch/`; process under `sched/`; pipes/SHM/PTY under `ipc/`; LSM under `security/`; DHCP/DNS/IPv6 under `net/`; TLS under `crypto/tls/`; kernel-hosted userland under `compat/`. Crate-root re-exports (`crate::pci`, `crate::vfs`, …) unchanged.
+- **Syscall ABI** — `SyscallNumber`, `SyscallError`, Linux `stat`/`statx`, and `sockaddr_*` live in workspace crate `abi/` (`knox-abi`); handlers stay in `kernel/src/syscall/`.
+- **Userspace** — hello, init, sh, calculator, Files, term, paint, and other SHM clients are authored under `userspace/apps/`; `knox-gpui` / `knox-ui` / `ld.so` / musl sources live under `userspace/libs/`. The kernel still embeds those ELFs (`GATE_BM1` / `GATE_BM3` / `GATE_BM4`).
+- **Ring 3** — interactive calculator re-rasters SHM on key (`GATE_GPUI ring3 calc key`); musl CRT calls `KnoxUiRaster` (`GATE_GPUI musl raster`); `/bin/sh` is the live parser via `ShellExecute` (`GATE_SH ring3 parser`); D-Bus and Wayland listen sockets are Ring 3 processes (`GATE_DBUS daemon userspace`, `GATE_WL server userspace`).
+- **Artifact hygiene** — gitignore `run/` and QEMU serial logs.
+
 ## 0.2.5
 
 - **Desktop apps** — icon / start-menu / shortcut clicks open in-kernel Files, Terminal, Browser, Documents, AI Assistant, Settings, and Trash instead of Ring 3 SHM stubs.

@@ -11,7 +11,7 @@ Linux syscall **numbers** are not compatibility. A handler that returns `Ok(0)` 
 | ENOSYS | Honest reject (`-ENOSYS`) | `bpf`, `io_uring`, `kexec`, `adjtimex` |
 | No-op | Silent success — **do not add these** | Convert to ENOSYS or implement when you touch it |
 
-The dispatch table is `kernel/src/syscall/`. Letter gates **J–BL** in [status/gates/syscalls.md](../status/gates/syscalls.md) are QEMU proofs of individual calls (clone, namespaces, VFS, sockets). Adding another `GATE_xx` only to ENOSYS one unused number is not the critical path.
+Numbers, `SyscallError`, `stat`/`statx` layouts, and `sockaddr_*` live in [`abi/`](../abi/) (`knox-abi`). The dispatch table and handlers are `kernel/src/syscall/`. VFS inodes stay in `kernel/src/fs/`. Letter gates **J–BL** in [status/gates/syscalls.md](../status/gates/syscalls.md) are QEMU proofs of individual calls (clone, namespaces, VFS, sockets). Adding another `GATE_xx` only to ENOSYS one unused number is not the critical path.
 
 ## Userspace ABI
 

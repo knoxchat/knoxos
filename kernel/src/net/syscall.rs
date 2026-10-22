@@ -260,6 +260,14 @@ fn unix_send(
     Ok((buf.len(), present))
 }
 
+/// True when a stream socket is listening on `path`.
+pub fn unix_path_is_listening(path: &str) -> bool {
+    SOCKETS.lock().values().any(|s| {
+        s.state == SocketState::Listening
+            && matches!(&s.local_addr, Some(SocketAddress::Unix(p)) if p == path)
+    })
+}
+
 /// Bind + listen a Unix stream socket (kernel compositor / services).
 pub fn listen_unix_path(path: &str) -> Result<u32, i32> {
     let mut sock = Socket::new(AddressFamily::Unix, SocketType::Stream, 0);

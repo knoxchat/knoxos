@@ -1,2 +1,0 @@
-audio: Could not create a backend for voice `adc'
-qemu-system-x86_64: terminating on signal 15 from pid 16617 (<unknown process>)

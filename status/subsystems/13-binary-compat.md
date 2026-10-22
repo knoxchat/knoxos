@@ -21,6 +21,7 @@ Linux **syscall numbers 0–451** are named and mostly dispatched. That is **not
 - [x] **TLS `%fs`** — `arch_prctl(ARCH_SET_FS)` + restore on switch; Ring 3 `%fs:0` (L1). ELF initial-exec / general-dynamic still later.
 - [x] **Static musl CRT** — `_start` → `__libc_start_main` → `main` (not the hello fixture) (`GATE_BM3 musl abi`)
 - [x] **Dynamically linked musl** — PT_INTERP `ld-knoxos.so`, DT_NEEDED `libc.so`, crt1 `_start` → `__libc_start_main@plt` → `main` (`GATE_BM4 musl dynlink`)
+- [x] **musl UI raster** — static CRT `main` calls `KnoxUiRaster` then presents GPUM (`GATE_GPUI musl raster`)
 - [x] Signal trampoline + `rt_sigreturn` (custom SIGINT handler returns to `pause`)
 - [x] Working `fork` child that runs
 - [x] Working `clone(CLONE_VM)` child that shares CR3 (J1)

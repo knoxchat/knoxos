@@ -10,9 +10,9 @@ use super::compositor::COMPOSITOR;
 use super::gates::{
     GATE_F_HEIGHT, GATE_F_WIDTH, GATE_F2_MARKER, GATE_F3_MAGIC, GATE_F3_MARKER, GATE_F4_MAGIC,
     GATE_F4_MARKER, GATE_F5_MARKER, GATE_F6_MAGIC, GATE_F6_MARKER, GATE_F7_MAGIC, GATE_F7_MARKER,
-    GATE_GPUI_BUTTON_MAGIC, GATE_GPUI_CALC_MAGIC, GATE_GPUI_RING3_CALC, GATE_TERM_MAGIC,
-    GATE_TERM_MARKER, WAYLAND_SOCKET_PATH, is_known_shm_magic, paint_term_first_frame,
-    shm_title_for_magic,
+    GATE_GPUI_BUTTON_MAGIC, GATE_GPUI_CALC_MAGIC, GATE_GPUI_MUSL_MAGIC, GATE_GPUI_MUSL_RASTER,
+    GATE_GPUI_RING3_CALC, GATE_GPUI_RING3_CALC_KEY, GATE_TERM_MAGIC, GATE_TERM_MARKER,
+    WAYLAND_SOCKET_PATH, is_known_shm_magic, paint_term_first_frame, shm_title_for_magic,
 };
 use super::shm::PixelFormat;
 
@@ -27,7 +27,7 @@ lazy_static::lazy_static! {
     static ref WINDOW_PTY: Mutex<BTreeMap<u32, u32>> = Mutex::new(BTreeMap::new());
 }
 
-fn peek_gpui_header(pid: u32, vaddr: u64) -> (u32, u32, bool, bool) {
+fn peek_gpui_header(pid: u32, vaddr: u64) -> (u32, u32, bool, bool, bool) {
     let mut head = [0u8; 12];
     crate::vmm::read_user_memory(pid, vaddr, &mut head);
     let mut wh = [0u8; 4];
@@ -36,15 +36,21 @@ fn peek_gpui_header(pid: u32, vaddr: u64) -> (u32, u32, bool, bool) {
         let w = u32::from_le_bytes(wh).clamp(64, 1920);
         wh.copy_from_slice(&head[8..12]);
         let h = u32::from_le_bytes(wh).clamp(64, 1080);
-        (w, h, true, false)
+        (w, h, true, false, false)
     } else if head[0..4] == GATE_GPUI_BUTTON_MAGIC {
         wh.copy_from_slice(&head[4..8]);
         let w = u32::from_le_bytes(wh).clamp(64, 1920);
         wh.copy_from_slice(&head[8..12]);
         let h = u32::from_le_bytes(wh).clamp(64, 1080);
-        (w, h, false, true)
+        (w, h, false, true, false)
+    } else if head[0..4] == GATE_GPUI_MUSL_MAGIC {
+        wh.copy_from_slice(&head[4..8]);
+        let w = u32::from_le_bytes(wh).clamp(64, 1920);
+        wh.copy_from_slice(&head[8..12]);
+        let h = u32::from_le_bytes(wh).clamp(64, 1080);
+        (w, h, false, false, true)
     } else {
-        (GATE_F_WIDTH, GATE_F_HEIGHT, false, false)
+        (GATE_F_WIDTH, GATE_F_HEIGHT, false, false, false)
     }
 }
 
@@ -53,16 +59,18 @@ fn peek_gpui_header(pid: u32, vaddr: u64) -> (u32, u32, bool, bool) {
 /// Gate F clients mmap 64×64. D15 GPUI magics carry width/height in the
 /// header and present at **window size** via `/run/wayland-0`.
 pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
-    let (width, height, gpui_calc, gpui_btn) = peek_gpui_header(pid, vaddr);
+    let (width, height, gpui_calc, gpui_btn, gpui_musl) = peek_gpui_header(pid, vaddr);
     let len = (width as usize)
         .saturating_mul(height as usize)
         .saturating_mul(4);
     let mut pixels = vec![0u8; len];
     crate::vmm::read_user_memory(pid, vaddr, &mut pixels);
     let _term_painted = paint_term_first_frame(&mut pixels);
+    let musl_client_rastered =
+        gpui_musl && pixels.get(12..).is_some_and(|p| p.iter().any(|&b| b != 0));
     if gpui_btn {
         let _ = knox_ui::raster_button_to_shm(width, height, &mut pixels);
-    } else if gpui_calc {
+    } else if gpui_calc || (gpui_musl && !musl_client_rastered) {
         let _ = knox_ui::raster_calculator_to_shm(width, height, &mut pixels);
     }
 
@@ -89,7 +97,7 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     let title = shm_title_for_magic(&pixels);
     let title = if gpui_calc {
         "Calculator"
-    } else if gpui_btn {
+    } else if gpui_btn || gpui_musl {
         "Knox GPUI"
     } else {
         title
@@ -116,10 +124,14 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
         if gpui_btn {
             return true;
         }
+        if gpui_musl {
+            emit_musl_raster(existing, width, height, musl_client_rastered);
+            return true;
+        }
         return magic_ok_for(&pixels, &roundtrip, existing, sid, pid, title);
     }
 
-    let (win_w, win_h) = if gpui_calc || gpui_btn {
+    let (win_w, win_h) = if gpui_calc || gpui_btn || gpui_musl {
         (width.max(160), height.max(120) + 32)
     } else {
         (280, 200)
@@ -146,6 +158,10 @@ pub fn present_user_buffer(pid: u32, vaddr: u64) -> bool {
     if gpui_btn {
         return true;
     }
+    if gpui_musl {
+        emit_musl_raster(wid, width, height, musl_client_rastered);
+        return true;
+    }
 
     magic_ok_for(&pixels, &roundtrip, wid, sid, pid, title)
 }
@@ -160,6 +176,40 @@ fn emit_ring3_calc(wid: u32, width: u32, height: u32) {
         height,
         WAYLAND_SOCKET_PATH
     );
+}
+
+fn emit_musl_raster(wid: u32, width: u32, height: u32, client_rastered: bool) {
+    serial_println!(
+        "[WL] {} (window={} {}x{} client-rastered={})",
+        GATE_GPUI_MUSL_RASTER,
+        wid,
+        width,
+        height,
+        client_rastered
+    );
+}
+
+/// Inject a digit into the Ring 3 calculator and require SHM pixels to change.
+pub fn ring3_calc_key_self_test() -> bool {
+    let Some(wid) = crate::gui::calculator::shm_attached_window() else {
+        serial_println!("[WL] Gate GPUI calc key FAILED: no attached SHM calc");
+        return false;
+    };
+    let Some((before, _, _)) = window_shm_pixels(wid) else {
+        serial_println!("[WL] Gate GPUI calc key FAILED: no SHM pixels");
+        return false;
+    };
+    crate::gui::calculator::apply_key(wid, '7');
+    let Some((after, _, _)) = window_shm_pixels(wid) else {
+        serial_println!("[WL] Gate GPUI calc key FAILED: SHM gone");
+        return false;
+    };
+    if before == after {
+        serial_println!("[WL] Gate GPUI calc key FAILED: SHM unchanged");
+        return false;
+    }
+    serial_println!("[WL] {} (window={})", GATE_GPUI_RING3_CALC_KEY, wid);
+    true
 }
 
 /// Replace SHM pixels for an existing Ring 3 window (interactive calc).

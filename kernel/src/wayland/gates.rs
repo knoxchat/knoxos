@@ -34,12 +34,15 @@ pub const GATE_TERM_IO_MARKER: &str = "GATE_TERM pty interactive";
 pub const GATE_TERM_PAINT_MARKER: &str = "GATE_TERM shm paint";
 /// D15.2 / D15.3: window-sized Knox GPUI SHM (not Gate F 64×64).
 pub const GATE_GPUI_RING3_CALC: &str = "GATE_GPUI ring3 calc";
+pub const GATE_GPUI_RING3_CALC_KEY: &str = "GATE_GPUI ring3 calc key";
+pub const GATE_GPUI_MUSL_RASTER: &str = "GATE_GPUI musl raster";
 pub const GATE_GPUI_BUTTON_W: u32 = 280;
 pub const GATE_GPUI_BUTTON_H: u32 = 200;
 pub const GATE_GPUI_CALC_W: u32 = 320;
 pub const GATE_GPUI_CALC_H: u32 = 440;
 pub(super) const GATE_GPUI_BUTTON_MAGIC: [u8; 4] = [0x47, 0x50, 0x55, 0x49]; // GPUI
 pub(super) const GATE_GPUI_CALC_MAGIC: [u8; 4] = [0x47, 0x50, 0x55, 0x43]; // GPUC
+pub(super) const GATE_GPUI_MUSL_MAGIC: [u8; 4] = [0x47, 0x50, 0x55, 0x4D]; // GPUM
 
 pub(super) fn shm_title_for_magic(pixels: &[u8]) -> &'static str {
     let Some(head) = pixels.get(0..4) else {
@@ -67,7 +70,7 @@ pub(super) fn shm_title_for_magic(pixels: &[u8]) -> &'static str {
         "Terminal"
     } else if head == GATE_GPUI_CALC_MAGIC {
         "Calculator"
-    } else if head == GATE_GPUI_BUTTON_MAGIC {
+    } else if head == GATE_GPUI_BUTTON_MAGIC || head == GATE_GPUI_MUSL_MAGIC {
         "Knox GPUI"
     } else {
         "Client"
@@ -88,6 +91,7 @@ pub(super) fn is_known_shm_magic(p: &[u8]) -> bool {
         || p == GATE_TERM_MAGIC
         || p == GATE_GPUI_BUTTON_MAGIC
         || p == GATE_GPUI_CALC_MAGIC
+        || p == GATE_GPUI_MUSL_MAGIC
 }
 
 /// 5×7 glyphs for the first PTY frame so the Terminal client area is not a

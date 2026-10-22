@@ -45,6 +45,10 @@ The default root is still an in-memory VFS. A VirtIO-blk blob store (`KNOXPERSIS
 
 Wayland today is `/dev/wl0` ioctl plus an AF_UNIX socket at `/run/wayland-0` that carries a SHM vaddr. It is not a `wl_display` object-protocol server. Clients are separate address spaces; the compositor still lives in the kernel.
 
+## Repository layers
+
+The CPU rings above match the tree: **user space** and **system libs** in `userspace/`, the syscall **contract** in `abi/` plus handlers in `kernel/src/syscall/`, **kernel** core under `kernel/src/{arch,mm,sched,fs,net,ipc,security,…}`, **hardware** under `kernel/src/drivers/`. Kernel-hosted userland fakes live in `kernel/src/compat/` until they `execve`. Do not treat a folder rename as Ring 3.
+
 ## Further reading
 
 - [syscalls.md](syscalls.md) — implemented vs ENOSYS

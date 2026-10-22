@@ -63,10 +63,11 @@ See [status/next.md](status/next.md) for remaining work, [docs/architecture.md](
 
 ## Layout
 
+- `userspace/` — Ring 3 program sources (`apps/`) and system libs (`libs/knox-gpui`, `libs/knox-ui`, `libs/ld.so`, `libs/libc`)
+- `abi/` — syscall contract (`SyscallNumber`, `SyscallError`, `stat`/`sockaddr`); handlers stay in `kernel/src/syscall/`
 - `kernel/` — `no_std` kernel (`x86_64-unknown-none`; aarch64/riscv64 compile with shims)
+- `kernel/src/drivers/` — hardware (MMIO / IRQ / DMA)
 - `boot/` — disk-image builder (`bootloader` crate, BIOS + UEFI)
-- `crates/knox-gpui` — `no_std` GPUI core (scene, element, raster)
-- `crates/knox-ui` — `no_std` kit catalog + session chrome
 - `status/` — production-readiness score (source of truth); start at [status/next.md](status/next.md)
 - `docs/` — architecture, syscalls, drivers, GUI (live path)
 - `tests/run_integration.sh` — QEMU serial-marker boot check
@@ -76,7 +77,7 @@ See [status/next.md](status/next.md) for remaining work, [docs/architecture.md](
 The desktop toolkit was designed with thanks to two Apache-2.0 projects. They are **design references only**: not Cargo dependencies, not workspace members, and not vendored in this tree. Knox GPUI / Knox UI are new `no_std` MIT code.
 
 - **[GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)** by [Zed Industries](https://zed.dev) — Entity, Element, Scene, and keymap. The `gpui` crate is [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0). The Zed **application** (editor, workspace, command palette, and related crates) is [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.html); KnoxOS follows UX patterns from it and does not copy that source.
-- **[GPUI Kit](https://github.com/longbridge/gpui-kit)** by [Longbridge](https://github.com/longbridge) — the control catalog, token roles, and “native, quiet, precise” visual language reimplemented in `crates/knox-ui`. Software and code examples are [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0). Kit documentation prose and original illustrations are also [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); this repo does not copy those.
+- **[GPUI Kit](https://github.com/longbridge/gpui-kit)** by [Longbridge](https://github.com/longbridge) — the control catalog, token roles, and “native, quiet, precise” visual language reimplemented in `userspace/libs/knox-ui`. Software and code examples are [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0). Kit documentation prose and original illustrations are also [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); this repo does not copy those.
 - **[Lucide](https://lucide.dev)** — stroke path data for `knox_ui::Icon` ([ISC](https://github.com/lucide-icons/lucide/blob/main/LICENSE)).
 
 ## License

@@ -7,65 +7,7 @@ use spin::Mutex;
 use super::ipv4::Ipv4Address;
 use super::tcp::{TCP_SYN, TcpConnection, TcpState};
 
-/// Socket domain (address family)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum AddressFamily {
-    Unix = 1,     // AF_UNIX / AF_LOCAL
-    Inet = 2,     // AF_INET (IPv4)
-    Inet6 = 10,   // AF_INET6 (IPv6)
-    Netlink = 16, // AF_NETLINK
-}
-
-impl AddressFamily {
-    pub fn from_u32(v: u32) -> Option<Self> {
-        match v {
-            1 => Some(Self::Unix),
-            2 => Some(Self::Inet),
-            10 => Some(Self::Inet6),
-            16 => Some(Self::Netlink),
-            _ => None,
-        }
-    }
-}
-
-/// Socket type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum SocketType {
-    Stream = 1, // SOCK_STREAM (TCP)
-    Dgram = 2,  // SOCK_DGRAM (UDP)
-    Raw = 3,    // SOCK_RAW
-}
-
-impl SocketType {
-    pub fn from_u32(v: u32) -> Option<Self> {
-        match v {
-            1 => Some(Self::Stream),
-            2 => Some(Self::Dgram),
-            3 => Some(Self::Raw),
-            _ => None,
-        }
-    }
-}
-
-/// Socket address for IPv4 (struct sockaddr_in)
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct SockAddrIn {
-    pub sin_family: u16,
-    pub sin_port: u16, // Big-endian
-    pub sin_addr: u32, // Big-endian
-    pub sin_zero: [u8; 8],
-}
-
-/// Socket address for Unix domain (struct sockaddr_un)
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct SockAddrUn {
-    pub sun_family: u16,
-    pub sun_path: [u8; 108],
-}
+pub use knox_abi::{AddressFamily, SockAddrIn, SockAddrUn, SocketType};
 
 /// A network socket
 pub struct Socket {

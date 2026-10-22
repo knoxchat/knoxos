@@ -4,7 +4,7 @@
 
 **Grade: Live** · Knox GPUI is the live toolkit (`./run.sh`). Compositor stays in-kernel.
 
-The session chrome, catalog gallery, and in-process apps are Knox GPUI views (`crates/knox-gpui` + `crates/knox-ui`) rastered in software and blitted by the compositor. This is not a 99% hand-drawn painter and not an unused widget stack beside the desktop.
+The session chrome, catalog gallery, and in-process apps are Knox GPUI views (`userspace/libs/knox-gpui` + `userspace/libs/knox-ui`) rastered in software and blitted by the compositor. This is not a 99% hand-drawn painter and not an unused widget stack beside the desktop.
 
 ### Live
 
@@ -23,6 +23,9 @@ The session chrome, catalog gallery, and in-process apps are Knox GPUI views (`c
 - [x] High-contrast + reduced-motion tokens from Settings; panel clock and launcher labels follow `locale.rs`
 - [x] Keyboard cheat-sheet is a GPUI Dialog (`?` / Ctrl+/); lists D6.3 `cmd-k` / `command_palette`
 - [x] Ring 3 can present Knox GPUI rasters via `/run/wayland-0` at **window size** (`GATE_GPUI ring3 calc`). C ABI: `knox_ui_raster_button` / `knox_ui_raster_calculator`. Desktop Calculator prefers that client; in-kernel GPUI calc is the fallback
+- [x] Interactive Ring 3 calc re-rasters SHM on key (`GATE_GPUI ring3 calc key`)
+- [x] musl CRT client calls `KnoxUiRaster` and presents GPUM (`GATE_GPUI musl raster`)
+- [x] Ring 3 Wayland server owns `/run/wayland-0` (`GATE_WL server userspace`); compositor stays in-kernel
 - [x] Wayland SHM (`/dev/wl0`, `/run/wayland-0`, `wl_display` opcodes)
 - [x] Dead stacks removed: `knoxui/`, unused `widgets/`, `gui/wayland_server.rs`, Zed / Longbridge reference trees
 
@@ -34,7 +37,6 @@ The session chrome, catalog gallery, and in-process apps are Knox GPUI views (`c
 
 ### Perfect-OS next steps
 
-1. A musl-linked Ring 3 client that *calls* `knox_ui_raster_*` itself (today the kernel rasters into the SHM the client presents).
-2. Interactive Ring 3 calc (re-raster SHM on key), matching Terminal's PTY model.
+1. A musl Rust GUI runtime (today `KnoxUiRaster` is the C-ABI trampoline; no musl Rust target yet).
 
 ---

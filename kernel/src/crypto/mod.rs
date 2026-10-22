@@ -38,6 +38,7 @@ mod random;
 mod rsa;
 mod sha256;
 mod sha512;
+pub mod tls;
 
 pub use aead::{aes128_gcm_encrypt, poly1305};
 pub use aes::{

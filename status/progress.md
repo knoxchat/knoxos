@@ -35,7 +35,7 @@ AI/ML:              ██████████░░░░░░░░░░
 Binary Compat:      ████████████████████████░  99%  Wired         ← execve + fork + clone + TLS %fs + userspace ld.so (BM1) + VMM dlopen (BM2) + static musl CRT (BM3) + dyn musl (BM4) + 200+ Ring 3 syscalls
 i18n & Fonts:       ████████████████████████░  95%  Live          ← TTF/CJK/RTL + fallback + GSUB liga + GPOS kern + GPOS mark + `.mo` gettext + pinyin IME + color emoji + TTF hint
 Build System:       ████████████████████████░  95%  Live          ← G3 feature flags + flake.nix + workspace (kernel+boot)
-Testing:            ████████████████████████░  98%  Wired         ← 472 QEMU markers + host parser fuzz + RSA/ECDSA/TLS HKDF/X.509 KATs
+Testing:            ████████████████████████░  98%  Wired         ← 497 QEMU markers + host parser fuzz + RSA/ECDSA/TLS HKDF/X.509 KATs
 Documentation:      ██████████████████░░░░░░░  70%  Wired         ← BUILDING + CONTRIBUTING + docs/ + CHANGELOG + rustdoc
 CI/CD:              ████████████████░░░░░░░░░  65%  Wired         ← aarch64/riscv64 QEMU boot + Secure Boot + rustdoc + audit + nightly images
 ```

@@ -1,0 +1,9 @@
+[package]
+name = "knox-abi"
+version = "0.2.5"
+edition = "2024"
+rust-version = "1.99.1"
+license = "MIT"
+description = "KnoxOS syscall ABI (numbers, errors, stat/socket layouts). no_std, no kernel deps."
+authors = ["KnoxOS Contributors"]
+publish = false

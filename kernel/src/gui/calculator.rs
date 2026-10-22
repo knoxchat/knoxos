@@ -102,6 +102,34 @@ pub fn snapshot(wid: WindowId) -> Option<(String, String)> {
 
 pub(crate) fn apply_key(wid: WindowId, code: char) {
     process_input(wid, code);
+    reraster_shm(wid);
+}
+
+/// Ring 3 SHM calculator window, if one is attached.
+pub fn shm_attached_window() -> Option<WindowId> {
+    let ids: Vec<WindowId> = STATES.lock().iter().map(|s| s.window_id).collect();
+    ids.into_iter().find(|&id| {
+        crate::wayland::window_shm_pixels(id).is_some()
+            && crate::gui::window::WINDOW_MANAGER
+                .lock()
+                .windows
+                .iter()
+                .any(|w| w.id == id && w.content_type == WindowContentType::ShmEmpty)
+    })
+}
+
+fn reraster_shm(wid: WindowId) {
+    let Some((mut pixels, w, h)) = crate::wayland::window_shm_pixels(wid) else {
+        return;
+    };
+    let Some((display, history)) = snapshot(wid) else {
+        return;
+    };
+    if !knox_ui::raster_calculator_state_to_shm(w, h, &display, &history, &mut pixels) {
+        return;
+    }
+    crate::wayland::set_window_shm_pixels(wid, pixels, w, h);
+    super::request_redraw();
 }
 
 pub fn draw_content(fb: &mut FrameBuffer, wid: WindowId, area: Rect, _scroll_y: i32) {
@@ -234,7 +262,7 @@ pub fn handle_click(wid: WindowId, area: Rect, click_x: i32, click_y: i32) -> bo
     }
 
     let (_label, code) = BUTTON_ROWS[row as usize][col as usize];
-    process_input(wid, code);
+    apply_key(wid, code);
     super::sounds::click();
     true
 }

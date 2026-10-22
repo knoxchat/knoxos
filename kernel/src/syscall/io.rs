@@ -1,7 +1,8 @@
 use super::{SyscallError, SyscallResult, read_user_string};
 /// Syscall implementations — I/O multiplexing & advanced I/O
 /// epoll, poll, select, eventfd, inotify, timerfd, mkfifo, openpty,
-/// flock, sendfile, splice, readv/writev, copy_file_range,
+/// KnoxUiRaster, ShellExecute, flock, sendfile, splice, readv/writev,
+/// copy_file_range,
 /// scheduler, message queues, shared memory
 use crate::serial_println;
 
@@ -328,6 +329,57 @@ pub fn sys_openpty(master_fd_ptr: u64, slave_name_ptr: u64) -> SyscallResult {
     }
 
     Ok(pty_id as u64)
+}
+
+/// Ring 3 trampoline for `knox_ui_raster_{button,calculator}`.
+///
+/// `kind`: 0 = button, 1 = calculator. The raster still runs in-kernel because
+/// there is no musl Rust target; the client owns the call and the SHM bytes.
+#[cfg(feature = "gui")]
+pub fn sys_knox_ui_raster(
+    kind: u64,
+    dest: u64,
+    dest_len: u64,
+    width: u64,
+    height: u64,
+) -> SyscallResult {
+    if dest == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let w = (width as u32).clamp(1, 1920);
+    let h = (height as u32).clamp(1, 1080);
+    let need = knox_ui::shm_len(w, h);
+    if (dest_len as usize) < need {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let mut pixels = alloc::vec![0u8; need];
+    let ok = match kind {
+        0 => knox_ui::raster_button_to_shm(w, h, &mut pixels),
+        1 => knox_ui::raster_calculator_to_shm(w, h, &mut pixels),
+        _ => false,
+    };
+    if !ok {
+        return Err(SyscallError::IoError);
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    crate::vmm::write_user_memory(pid, dest, &pixels);
+    Ok(0)
+}
+
+/// Ring 3 `/bin/sh` parser entry; kernel `shell::execute` implements it.
+pub fn sys_shell_execute(cmd_ptr: u64, cmd_len: u64) -> SyscallResult {
+    if cmd_ptr == 0 || cmd_len > 4096 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut raw = alloc::vec![0u8; cmd_len as usize];
+    crate::vmm::read_user_memory(pid, cmd_ptr, &mut raw);
+    let cmd = core::str::from_utf8(&raw).map_err(|_| SyscallError::InvalidArgument)?;
+    let result = crate::shell::execute(cmd);
+    if !result.output.is_empty() {
+        let _ = crate::fd::sys_write(crate::fd::STDOUT_FD, result.output.as_bytes());
+    }
+    Ok(result.exit_code as u64)
 }
 
 // ── File locking ────────────────────────────────────────────────────

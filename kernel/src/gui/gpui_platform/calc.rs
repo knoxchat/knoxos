@@ -419,7 +419,13 @@ pub fn focused_wm() -> Option<WmId> {
         .windows
         .iter()
         .find(|w| w.id == id)
-        .map(|w| w.content_type == WindowContentType::Gpui(ViewKind::Calculator) && w.is_visible())
+        .map(|w| {
+            if !w.is_visible() {
+                return false;
+            }
+            w.content_type == WindowContentType::Gpui(ViewKind::Calculator)
+                || (w.content_type == WindowContentType::ShmEmpty && calculator::is_attached(id))
+        })
         .unwrap_or(false);
     if ok { Some(id) } else { None }
 }

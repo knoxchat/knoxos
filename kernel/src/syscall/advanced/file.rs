@@ -2401,34 +2401,51 @@ pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: i32, mask: u32, statxbuf: u64
         .unwrap_or(s.size)
         .max(s.size);
     if statxbuf != 0 {
-        let mut buf = [0u8; 256];
-        buf[0..4].copy_from_slice(&0x7FFu32.to_ne_bytes());
-        buf[4..8].copy_from_slice(&4096u32.to_ne_bytes());
-        buf[16..20].copy_from_slice(&(s.nlink as u32).to_ne_bytes());
-        buf[20..24].copy_from_slice(&s.uid.to_ne_bytes());
-        buf[24..28].copy_from_slice(&s.gid.to_ne_bytes());
         let mode: u16 = match s.file_type {
-            crate::vfs::FileType::Regular => 0o100000,
-            crate::vfs::FileType::Directory => 0o040000,
-            crate::vfs::FileType::CharDevice => 0o020000,
-            crate::vfs::FileType::BlockDevice => 0o060000,
-            crate::vfs::FileType::Pipe => 0o010000,
-            crate::vfs::FileType::Socket => 0o140000,
-            crate::vfs::FileType::SymLink => 0o120000,
-        } as u16
-            | s.permissions;
-        buf[28..30].copy_from_slice(&mode.to_ne_bytes());
-        buf[32..40].copy_from_slice(&s.ino.to_ne_bytes());
-        buf[40..48].copy_from_slice(&size.to_ne_bytes());
-        buf[48..56].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
-        buf[64..72].copy_from_slice(&s.atime.to_ne_bytes());
-        buf[96..104].copy_from_slice(&s.ctime.to_ne_bytes());
-        buf[112..120].copy_from_slice(&s.mtime.to_ne_bytes());
+            crate::vfs::FileType::Regular => knox_abi::S_IFREG as u16,
+            crate::vfs::FileType::Directory => knox_abi::S_IFDIR as u16,
+            crate::vfs::FileType::CharDevice => knox_abi::S_IFCHR as u16,
+            crate::vfs::FileType::BlockDevice => knox_abi::S_IFBLK as u16,
+            crate::vfs::FileType::Pipe => knox_abi::S_IFIFO as u16,
+            crate::vfs::FileType::Socket => knox_abi::S_IFSOCK as u16,
+            crate::vfs::FileType::SymLink => knox_abi::S_IFLNK as u16,
+        } | s.permissions;
+        let stx = knox_abi::Statx {
+            stx_mask: knox_abi::STATX_BASIC_STATS,
+            stx_blksize: 4096,
+            stx_nlink: s.nlink as u32,
+            stx_uid: s.uid,
+            stx_gid: s.gid,
+            stx_mode: mode,
+            stx_ino: s.ino,
+            stx_size: size,
+            stx_blocks: size.div_ceil(512),
+            stx_atime: knox_abi::StatxTimestamp {
+                tv_sec: s.atime,
+                ..Default::default()
+            },
+            stx_ctime: knox_abi::StatxTimestamp {
+                tv_sec: s.ctime,
+                ..Default::default()
+            },
+            stx_mtime: knox_abi::StatxTimestamp {
+                tv_sec: s.mtime,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // SAFETY: `Statx` is a POD Linux layout; the slice covers the whole record.
+        let buf = unsafe {
+            core::slice::from_raw_parts(
+                (&stx as *const knox_abi::Statx).cast::<u8>(),
+                core::mem::size_of::<knox_abi::Statx>(),
+            )
+        };
         // SAFETY: src and dst are valid for the copied byte count and do not overlap.
         unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr(), statxbuf as *mut u8, buf.len());
         }
-        crate::vmm::write_user_memory(pid, statxbuf, &buf);
+        crate::vmm::write_user_memory(pid, statxbuf, buf);
     }
     Ok(0)
 }

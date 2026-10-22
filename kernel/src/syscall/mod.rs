@@ -3,8 +3,7 @@
 /// Wired to real VFS, process, signal, fd, and IPC subsystems
 ///
 /// Split into submodules for maintainability:
-///   numbers  — Linux x86_64 syscall number enum and ABI mapping
-///   error    — SyscallError / SyscallResult
+///   knox-abi — SyscallNumber / SyscallError (the contract)
 ///   helpers  — user-pointer utilities
 ///   dispatch — main handle_syscall dispatcher
 ///   fs       — File I/O and filesystem operations
@@ -24,14 +23,12 @@
 mod advanced;
 mod ai;
 mod dispatch;
-mod error;
 mod fd;
 pub(crate) mod fs;
 mod helpers;
 mod io;
 mod memory;
 mod net;
-mod numbers;
 mod process;
 mod signal;
 mod system;
@@ -49,7 +46,9 @@ pub use advanced::{
     syncfs_self_test, unlinkat_self_test, utimensat_at_self_test,
 };
 pub use dispatch::handle_syscall;
-pub use error::{SyscallError, SyscallResult};
 pub(crate) use helpers::read_user_string;
-pub use numbers::SyscallNumber;
+pub use knox_abi::{
+    AddressFamily, SockAddrIn, SockAddrUn, SocketType, Stat, Statx, SyscallError, SyscallNumber,
+    SyscallResult,
+};
 pub use process::execveat_self_test;

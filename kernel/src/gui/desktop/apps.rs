@@ -5,7 +5,7 @@
 ///
 /// **D0.2 freeze:** do not add launcher names or `WindowContentType` paint UIs.
 /// This match is the last hand-drawn table. New surfaces are Knox GPUI views
-/// (`crates/knox-gpui` / `crates/knox-ui`), not a new `draw_content` arm.
+/// (`userspace/libs/knox-gpui` / `userspace/libs/knox-ui`), not a new `draw_content` arm.
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;

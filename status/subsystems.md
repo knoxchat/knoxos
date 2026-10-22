@@ -6,13 +6,22 @@
 
 | Area | Files | Lines | Role |
 |------|-------|-------|------|
-| Kernel top-level modules | 404 | ~247,000 | Core + many Unused/Stub subsystems |
-| GUI & desktop (`gui/`) | 161 | ~91,700 | Live software compositor + in-process apps |
-| Shell & builtins | 17 | ~13,200 | Live in-kernel shell |
-| Syscall interface | 14 | ~7,200 | Dispatch table; many no-ops |
+| Crate-root leftovers | 28 | ~15,600 | `lib`/`main`, boot splash, vdso, sysctl, clipboard |
+| Hardware (`drivers/`) | 132 | ~49,100 | Live PCI/VirtIO/USB + stub devices |
+| Filesystems (`fs/`) | 68 | ~29,400 | VFS, ext4, persist, disk/net FS |
+| Memory (`mm/`) | 26 | ~10,300 | VMM, mmap, heap |
+| Arch (`arch/`) | 34 | ~13,100 | GDT, IDT, SMP, serial |
+| Sched (`sched/`) | 42 | ~18,500 | Process, ELF, cgroups |
+| IPC (`ipc/`) | 23 | ~8,600 | Pipes, SHM, futex, PTY |
+| Security (`security/`) | 16 | ~9,300 | seccomp, LSM, landlock |
+| Net (`net/`) | 46 | ~14,300 | TCP/IP + folded leftovers |
+| Crypto (`crypto/`) | 23 | ~4,800 | Primitives + TLS |
+| Compat (`compat/`) | 234 | ~94,700 | Kernel-hosted userland fakes |
+| GUI & desktop (`gui/`) | 221 | ~87,700 | Live software compositor + in-process apps |
+| Syscall interface | 31 | ~10,200 | Dispatch table; many no-ops |
 | Terminal emulator | 10 | ~5,100 | Live in-kernel terminal |
 | Boot crate | — | ~90 | Image builder |
-| **Total `kernel/src`** | **609** | **~346,900** | |
+| **Total `kernel/src`** | **1035** | **~388,000** | |
 
 ~400 `pub mod` entries does **not** mean 400 working subsystems. Prefer deleting or gating Unused modules over adding Phase 34+.
 
@@ -39,7 +48,7 @@ Percentages are **production usefulness**, not lines of code.
 | 13 | [Binary compat](subsystems/13-binary-compat.md) | Wired | 99% | High | Static ELF + 200+ Ring 3 syscalls + `ld.so` (BM1) + VMM `dlopen` (BM2) + static musl CRT (BM3) + dynamically linked musl (BM4). Next: Ring 3 desktop apps. |
 | 14 | [i18n](subsystems/14-i18n.md) | Live | 95% | Low | TTF, CJK, RTL, fallback chain, GSUB Latin liga, GPOS kern, GPOS mark, color emoji, TTF hinting, `.mo` gettext, pinyin IME. |
 | 15 | [Build](subsystems/15-build.md) | Live | 80% | Medium | Make/QEMU work; feature flags G3; `flake.nix` present. |
-| 16 | [Testing](subsystems/16-testing.md) | Wired | 98% | **Critical** | 472 QEMU markers + host parser tests; `assert!(true)` gone. |
+| 16 | [Testing](subsystems/16-testing.md) | Wired | 98% | **Critical** | 497 QEMU markers + host parser tests; `assert!(true)` gone. |
 | 17 | [Docs](subsystems/17-docs.md) | Wired | 70% | **Critical** | README + LICENSE + BUILDING + CONTRIBUTING + `status/` + `docs/` + CHANGELOG + rustdoc artifact. |
 | 18 | [CI/CD](subsystems/18-ci.md) | Wired | 55% | High | GitHub Actions fmt/clippy/size/QEMU boot + aarch64/riscv64 compile + rustdoc + audit + nightly images. |
 

@@ -12,7 +12,7 @@
 ///
 /// Split into submodules for maintainability:
 ///   types    — INIT_PID and AuxvType
-///   elf      — static ELF64 packer and the Gate B2 hello image
+///   elf      — static ELF64 packer; Gate B2 hello blob (source in userspace/apps/hello)
 ///   launch   — filesystem search, hello iretq, start_init
 ///   programs — Ring 3 gate fixtures (process, I/O, fs, identity, net, display, ENOSYS)
 mod dynlink;
