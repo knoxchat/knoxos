@@ -147,6 +147,7 @@ impl Disableable for Slider {
 impl Element for Slider {
     fn request_layout(&mut self, origin: Point, _available: Size) -> Bounds {
         let h = match self.size {
+            ControlSize::XSmall => 14,
             ControlSize::Small => 16,
             ControlSize::Medium => 20,
             ControlSize::Large => 24,

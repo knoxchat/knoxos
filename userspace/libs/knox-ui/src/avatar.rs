@@ -137,7 +137,7 @@ impl IntoElement for Avatar {
             )
         };
         let font = match self.size {
-            ControlSize::Small => self.theme.typo.caption,
+            ControlSize::XSmall | ControlSize::Small => self.theme.typo.caption,
             ControlSize::Medium => self.theme.typo.body,
             ControlSize::Large => self.theme.typo.title,
         };

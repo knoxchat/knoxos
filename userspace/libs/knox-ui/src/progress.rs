@@ -78,7 +78,7 @@ impl IntoElement for Progress {
 
     fn into_element(self) -> Div {
         let h = match self.size {
-            ControlSize::Small => px(4),
+            ControlSize::XSmall | ControlSize::Small => px(4),
             ControlSize::Medium => px(6),
             ControlSize::Large => px(8),
         };
@@ -158,6 +158,7 @@ impl Sizable for ProgressCircle {
 impl Element for ProgressCircle {
     fn request_layout(&mut self, origin: Point, _available: Size) -> Bounds {
         let s = match self.size {
+            ControlSize::XSmall => 16,
             ControlSize::Small => 20,
             ControlSize::Medium => 28,
             ControlSize::Large => 36,

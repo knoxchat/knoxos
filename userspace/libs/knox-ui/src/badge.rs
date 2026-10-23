@@ -109,7 +109,7 @@ impl IntoElement for Badge {
         let (mark_h, font) = match self.size {
             ControlSize::Large => (px(20), self.theme.typo.body),
             ControlSize::Medium => (px(16), self.theme.typo.caption),
-            ControlSize::Small => (px(14), self.theme.typo.caption),
+            ControlSize::Small | ControlSize::XSmall => (px(14), self.theme.typo.caption),
         };
         let overlay = match self.mark {
             BadgeMark::Dot => div()

@@ -185,6 +185,7 @@ impl IntoElement for Tag {
     fn into_element(self) -> Div {
         let (bg, fg, border) = self.variant.face(self.outline, &self.theme);
         let (pad_x, pad_y, font, radius) = match self.size {
+            ControlSize::XSmall => (px(5), px(1), self.theme.typo.caption, self.theme.radius.sm),
             ControlSize::Small => (px(6), px(2), self.theme.typo.caption, self.theme.radius.sm),
             ControlSize::Large => (px(12), px(6), self.theme.typo.ui, self.theme.radius.md),
             ControlSize::Medium => (px(10), px(4), self.theme.typo.body, self.theme.radius.md),

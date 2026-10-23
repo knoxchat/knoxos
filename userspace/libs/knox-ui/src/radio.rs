@@ -93,9 +93,9 @@ impl IntoElement for Radio {
         let side = self.size.indicator();
         let dot = (side / 2).max(6);
         let (disc_bg, disc_border) = if self.disabled {
-            (c.muted.opacity(0.45), c.border.opacity(0.5))
+            (c.muted.opacity(0.35), c.border.opacity(0.5))
         } else if self.checked {
-            (c.primary, c.primary)
+            (knox_gpui::Hsla::TRANSPARENT, c.primary)
         } else {
             (c.input, c.border)
         };
@@ -124,7 +124,7 @@ impl IntoElement for Radio {
                     .bg(if self.disabled {
                         c.muted_foreground
                     } else {
-                        c.primary_foreground
+                        c.primary
                     }),
             );
         }

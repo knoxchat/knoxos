@@ -9,6 +9,7 @@ use alloc::sync::Arc;
 
 use knox_gpui::{Div, IntoElement, Styled, div, px, text};
 
+use crate::icon::{Icon, IconName};
 use crate::interact::{BoolHandler, bind_activate};
 use crate::size::{ControlSize, Disableable, Sizable};
 use crate::theme::Theme;
@@ -91,7 +92,6 @@ impl IntoElement for Checkbox {
         let c = self.theme.colors;
         let next = !self.checked;
         let side = self.size.indicator();
-        let mark = (side / 2).max(6);
         let (box_bg, box_border) = if self.disabled {
             (c.muted.opacity(0.45), c.border.opacity(0.5))
         } else if self.checked {
@@ -116,13 +116,17 @@ impl IntoElement for Checkbox {
             .items_center()
             .justify_center();
         if self.checked {
-            indicator = indicator.child(div().w(px(mark)).h(px(mark)).rounded(px(1)).bg(
-                if self.disabled {
-                    c.muted_foreground
-                } else {
-                    c.primary_foreground
-                },
-            ));
+            let mark = if self.disabled {
+                c.muted_foreground
+            } else {
+                c.primary_foreground
+            };
+            indicator = indicator.child(
+                Icon::new(IconName::Check)
+                    .themed(&self.theme)
+                    .color(mark)
+                    .pixel_size((side - 4).max(8)),
+            );
         }
 
         let mut el = div().flex().items_center().gap_2().child(indicator);

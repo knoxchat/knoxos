@@ -9,12 +9,14 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, FontId, IntoElement, Pixels, Styled, div, px};
+use knox_gpui::{Div, FontId, Hsla, IntoElement, Pixels, Styled, div, px};
 
-use crate::button::{Button, ButtonVariants};
-use crate::interact::IndexHandler;
+use crate::icon::{Icon, IconName};
+use crate::interact::{IndexHandler, bind_activate};
 use crate::label::Label;
-use crate::size::Selectable;
+use crate::scroll::ScrollArea;
+use crate::separator::Separator;
+use crate::size::Sizable;
 use crate::theme::Theme;
 
 /// Vertical nav (kit `Sidebar`).
@@ -24,6 +26,11 @@ pub struct Sidebar {
     selected: usize,
     width: Pixels,
     height: Option<Pixels>,
+    header_title: String,
+    header_hint: String,
+    search: Option<Div>,
+    scroll: i32,
+    on_scroll: Option<alloc::sync::Arc<dyn Fn(i32) + Send + Sync>>,
     on_select: Option<IndexHandler>,
 }
 
@@ -33,8 +40,13 @@ impl Sidebar {
             theme: Theme::default(),
             items: Vec::new(),
             selected: 0,
-            width: px(140),
+            width: px(240),
             height: None,
+            header_title: String::new(),
+            header_hint: String::new(),
+            search: None,
+            scroll: 0,
+            on_scroll: None,
             on_select: None,
         }
     }
@@ -68,6 +80,27 @@ impl Sidebar {
         self
     }
 
+    pub fn header(mut self, title: impl Into<String>, hint: impl Into<String>) -> Self {
+        self.header_title = title.into();
+        self.header_hint = hint.into();
+        self
+    }
+
+    pub fn search(mut self, field: impl IntoElement) -> Self {
+        self.search = Some(div().child(field));
+        self
+    }
+
+    pub fn offset(mut self, offset: i32) -> Self {
+        self.scroll = offset.max(0);
+        self
+    }
+
+    pub fn on_offset(mut self, f: impl Fn(i32) + Send + Sync + 'static) -> Self {
+        self.on_scroll = Some(alloc::sync::Arc::new(f));
+        self
+    }
+
     pub fn on_select(mut self, f: impl Fn(usize) + Send + Sync + 'static) -> Self {
         self.on_select = Some(Arc::new(f));
         self
@@ -84,35 +117,112 @@ impl IntoElement for Sidebar {
     type Element = Div;
 
     fn into_element(self) -> Div {
+        let c = self.theme.colors;
+        let total_h = self.height.unwrap_or(px(280));
         let mut col = div()
             .flex_col()
             .w(self.width)
-            .p(self.theme.spacing.xs)
-            .gap_1()
-            .bg(self.theme.colors.muted.opacity(0.35))
+            .h(total_h)
+            .p(self.theme.spacing.sm)
+            .gap_2()
+            .bg(c.surface)
             .border_1()
-            .border_color(self.theme.colors.border);
-        col = if let Some(h) = self.height {
-            col.h(h)
-        } else {
-            col.h(px(200))
-        };
-        for (i, label) in self.items.into_iter().enumerate() {
-            let pick = self.on_select.clone();
+            .border_color(c.border);
+        let mut chrome_h = self.theme.spacing.sm.0 * 2;
+        if !self.header_title.is_empty() {
+            chrome_h += 40;
             col = col.child(
-                Button::new(alloc::format!("sb-{i}"))
-                    .themed(&self.theme)
-                    .ghost()
-                    .label(label)
-                    .selected(i == self.selected)
-                    .on_click(move || {
-                        if let Some(p) = &pick {
-                            p(i);
-                        }
-                    }),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .w(px(32))
+                            .h(px(32))
+                            .rounded(self.theme.radius.lg)
+                            .bg(c.primary)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::LayoutGrid)
+                                    .themed(&self.theme)
+                                    .color(c.primary_foreground)
+                                    .small(),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_col()
+                            .gap(px(1))
+                            .child(
+                                Label::new(self.header_title)
+                                    .themed(&self.theme)
+                                    .font(FontId::UiBold)
+                                    .size(self.theme.typo.body),
+                            )
+                            .child(
+                                Label::new(self.header_hint)
+                                    .themed(&self.theme)
+                                    .muted(true)
+                                    .size(self.theme.typo.caption),
+                            ),
+                    ),
             );
         }
-        col
+        if let Some(search) = self.search {
+            chrome_h += 36;
+            col = col.child(
+                div()
+                    .bg(c.accent)
+                    .rounded(self.theme.radius.full)
+                    .pad_x(self.theme.spacing.xs)
+                    .child(search),
+            );
+        }
+        let item_w = px((self.width.0 - self.theme.spacing.sm.0 * 2).max(80));
+        let mut menu = div().flex_col().gap_1().w(item_w);
+        for (i, label) in self.items.into_iter().enumerate() {
+            let pick = self.on_select.clone();
+            let selected = i == self.selected;
+            let bg = if selected {
+                c.accent
+            } else {
+                Hsla::TRANSPARENT
+            };
+            let hover = c.accent.opacity(0.55);
+            let mut item = div()
+                .w(item_w)
+                .h(px(28))
+                .pad_x(px(8))
+                .flex()
+                .items_center()
+                .rounded(self.theme.radius.md)
+                .bg(bg)
+                .child(
+                    Label::new(label)
+                        .themed(&self.theme)
+                        .size(self.theme.typo.body),
+                );
+            if !selected {
+                item = item.hover(move |s| s.bg(hover));
+            }
+            if let Some(p) = pick {
+                item = bind_activate(item, alloc::sync::Arc::new(move || p(i)));
+            }
+            menu = menu.child(item);
+        }
+        let menu_h = (total_h.0 - chrome_h - 8).max(80);
+        let mut scroller = ScrollArea::new()
+            .themed(&self.theme)
+            .size(item_w, px(menu_h))
+            .offset(self.scroll)
+            .child(menu);
+        if let Some(on) = self.on_scroll {
+            scroller = scroller.on_offset(move |o| on(o));
+        }
+        col.child(scroller)
     }
 }
 
@@ -173,6 +283,8 @@ pub struct StatusBar {
     theme: Theme,
     left: String,
     right: String,
+    prefix: Option<Div>,
+    extra: Option<String>,
 }
 
 impl StatusBar {
@@ -181,6 +293,8 @@ impl StatusBar {
             theme: Theme::default(),
             left: String::new(),
             right: String::new(),
+            prefix: None,
+            extra: None,
         }
     }
 
@@ -198,6 +312,16 @@ impl StatusBar {
         self.right = text.into();
         self
     }
+
+    pub fn prefix(mut self, child: impl IntoElement) -> Self {
+        self.prefix = Some(div().child(child));
+        self
+    }
+
+    pub fn extra(mut self, text: impl Into<String>) -> Self {
+        self.extra = Some(text.into());
+        self
+    }
 }
 
 impl Default for StatusBar {
@@ -210,20 +334,41 @@ impl IntoElement for StatusBar {
     type Element = Div;
 
     fn into_element(self) -> Div {
+        let mut left = div().flex().items_center().gap_2();
+        if let Some(prefix) = self.prefix {
+            left = left.child(prefix);
+        }
+        if !self.left.is_empty() {
+            left = left.child(
+                Label::new(self.left)
+                    .themed(&self.theme)
+                    .muted(true)
+                    .size(self.theme.typo.caption),
+            );
+        }
+        if let Some(extra) = self.extra {
+            left = left
+                .child(
+                    div()
+                        .h(px(14))
+                        .child(Separator::vertical().themed(&self.theme)),
+                )
+                .child(
+                    Label::new(extra)
+                        .themed(&self.theme)
+                        .muted(true)
+                        .size(self.theme.typo.caption),
+                );
+        }
         div()
             .flex()
             .justify_between()
             .items_center()
             .grow()
             .h(px(28))
-            .p(self.theme.spacing.xs)
+            .pad_x(self.theme.spacing.sm)
             .bg(self.theme.colors.muted.opacity(0.4))
-            .child(
-                Label::new(self.left)
-                    .themed(&self.theme)
-                    .muted(true)
-                    .size(self.theme.typo.caption),
-            )
+            .child(left)
             .child(
                 Label::new(self.right)
                     .themed(&self.theme)
@@ -237,7 +382,11 @@ impl IntoElement for StatusBar {
 pub struct GroupBox {
     theme: Theme,
     title: String,
-    child: Option<Div>,
+    description: String,
+    children: Vec<Div>,
+    outline: bool,
+    fill: bool,
+    width: Option<Pixels>,
 }
 
 impl GroupBox {
@@ -245,7 +394,11 @@ impl GroupBox {
         Self {
             theme: Theme::default(),
             title: title.into(),
-            child: None,
+            description: String::new(),
+            children: Vec::new(),
+            outline: true,
+            fill: false,
+            width: None,
         }
     }
 
@@ -254,8 +407,30 @@ impl GroupBox {
         self
     }
 
+    pub fn description(mut self, text: impl Into<String>) -> Self {
+        self.description = text.into();
+        self
+    }
+
+    pub fn outline(mut self) -> Self {
+        self.outline = true;
+        self.fill = false;
+        self
+    }
+
+    pub fn fill(mut self) -> Self {
+        self.fill = true;
+        self.outline = false;
+        self
+    }
+
+    pub fn w(mut self, width: Pixels) -> Self {
+        self.width = Some(width);
+        self
+    }
+
     pub fn child(mut self, child: impl IntoElement) -> Self {
-        self.child = Some(div().child(child));
+        self.children.push(div().child(child));
         self
     }
 }
@@ -264,22 +439,48 @@ impl IntoElement for GroupBox {
     type Element = Div;
 
     fn into_element(self) -> Div {
-        let mut box_ = div()
-            .flex_col()
-            .gap_2()
-            .w(px(280))
-            .p(self.theme.spacing.sm)
-            .border_1()
-            .border_color(self.theme.colors.border)
-            .rounded(self.theme.radius.md)
-            .child(
-                Label::new(self.title)
+        let c = self.theme.colors;
+        let mut title_col = div().flex_col().gap(px(2)).grow().child(
+            Label::new(self.title)
+                .themed(&self.theme)
+                .font(FontId::UiBold)
+                .size(self.theme.typo.body),
+        );
+        if !self.description.is_empty() {
+            title_col = title_col.child(
+                Label::new(self.description)
                     .themed(&self.theme)
                     .muted(true)
                     .size(self.theme.typo.caption),
             );
-        if let Some(child) = self.child {
-            box_ = box_.child(child);
+        }
+
+        let mut content = div()
+            .flex()
+            .flex_wrap()
+            .justify_center()
+            .items_center()
+            .gap(self.theme.spacing.lg)
+            .p(self.theme.spacing.lg)
+            .rounded(self.theme.radius.lg);
+        if self.fill {
+            content = content.bg(c.muted.opacity(0.35));
+        }
+        if self.outline {
+            content = content.border_1().border_color(c.border);
+        }
+        for child in self.children {
+            content = content.child(child);
+        }
+
+        let mut box_ = div()
+            .flex_col()
+            .gap_2()
+            .mb(self.theme.spacing.lg)
+            .child(title_col)
+            .child(content);
+        if let Some(w) = self.width {
+            box_ = box_.w(w);
         }
         box_
     }

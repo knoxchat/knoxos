@@ -126,6 +126,16 @@ impl Theme {
         }
         self
     }
+
+    pub fn display_name(&self) -> &'static str {
+        if !self.mode.is_dark() {
+            "Arctic Light"
+        } else if self.colors.primary == rgb(230, 140, 65) {
+            "Sunset Warm"
+        } else {
+            "Aurora Dark"
+        }
+    }
 }
 
 /// `cx.theme()` — kit `ActiveTheme`.
@@ -169,6 +179,9 @@ fn aurora_dark_colors() -> ColorTokens {
         input: rgb(28, 26, 32),
         ring: rgb(232, 121, 100),
         selection: rgba(232, 121, 100, 50),
+        success: rgb(34, 160, 110),
+        warning: rgb(210, 150, 50),
+        info: rgb(70, 140, 210),
     }
 }
 
@@ -192,6 +205,9 @@ fn arctic_light_colors() -> ColorTokens {
         input: rgb(255, 255, 252),
         ring: rgb(200, 95, 75),
         selection: rgba(200, 95, 75, 35),
+        success: rgb(24, 140, 95),
+        warning: rgb(190, 130, 40),
+        info: rgb(50, 120, 190),
     }
 }
 
@@ -216,6 +232,9 @@ fn high_contrast_colors(mode: ThemeMode) -> ColorTokens {
             input: rgb(0, 0, 0),
             ring: rgb(255, 220, 0),
             selection: rgba(255, 220, 0, 80),
+            success: rgb(0, 255, 120),
+            warning: rgb(255, 220, 0),
+            info: rgb(80, 200, 255),
         },
         ThemeMode::Light => ColorTokens {
             background: rgb(255, 255, 255),
@@ -236,6 +255,9 @@ fn high_contrast_colors(mode: ThemeMode) -> ColorTokens {
             input: rgb(255, 255, 255),
             ring: rgb(0, 0, 180),
             selection: rgba(0, 0, 180, 60),
+            success: rgb(0, 120, 0),
+            warning: rgb(140, 90, 0),
+            info: rgb(0, 0, 180),
         },
     }
 }
@@ -260,6 +282,9 @@ fn sunset_warm_colors() -> ColorTokens {
         input: rgb(40, 30, 24),
         ring: rgb(230, 140, 65),
         selection: rgba(185, 125, 55, 80),
+        success: rgb(46, 150, 100),
+        warning: rgb(230, 160, 60),
+        info: rgb(80, 140, 200),
     }
 }
 

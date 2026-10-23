@@ -207,22 +207,13 @@ impl Element for Text {
                 line_x += self.layout_advance(ch);
                 continue;
             };
-            // Keep the whole bitmap inside this line box. A bad bearing used
-            // to throw `o`/`a`/`w` below overflow clip (`Two` → `T`).
-            let gh = glyph.size.height.0.max(1);
-            let line_top = pen_y - top_pad;
-            let line_bot = line_top + line_h;
-            let mut dest_y = pen_y + glyph.bearing.y.0;
-            if dest_y < line_top {
-                dest_y = line_top;
-            }
-            if dest_y + gh > line_bot {
-                dest_y = (line_bot - gh).max(line_top);
-            }
+            // Shared baseline: every glyph is `pen_y + bearing.y`. Fitting each
+            // bitmap into the line box independently made letters in a word sit
+            // on different horizontal lines (`Introduction`, `gallery`).
             let dest = Bounds::new(
                 Point {
                     x: px(bounds.x() + line_x + glyph.bearing.x.0),
-                    y: px(dest_y),
+                    y: px(pen_y + glyph.bearing.y.0),
                 },
                 glyph.size,
             );
@@ -288,13 +279,13 @@ impl PlatformTextSystem for HostTextSystem {
 
 #[cfg(test)]
 mod tests {
-    use super::{FontId, HostTextSystem, PlatformTextSystem, text};
+    use super::{FontId, GlyphRaster, HostTextSystem, PlatformTextSystem, text};
     use crate::atlas::SpriteAtlas;
     use crate::element::{Element, PaintEnv, paint_element_with_input};
-    use crate::geometry::{Hsla, Point, Size};
+    use crate::geometry::{Hsla, Point, Size, px};
     use crate::input::WindowInput;
     use crate::raster::RasterBuffer;
-    use crate::scene::Scene;
+    use crate::scene::{PaintOperation, Scene};
     /// D5.1 done-when: host test rasterizes `'A'` non-empty.
     #[test]
     fn rasterizes_a_non_empty() {
@@ -407,6 +398,69 @@ mod tests {
             two_b.width()
         );
         assert_eq!(two_b.height(), 22);
+    }
+
+    #[test]
+    fn glyphs_share_one_baseline() {
+        struct JitterSys;
+        impl PlatformTextSystem for JitterSys {
+            fn rasterize_glyph(
+                &self,
+                _font: FontId,
+                ch: char,
+                _size_px: u16,
+                atlas: &mut SpriteAtlas,
+            ) -> Option<GlyphRaster> {
+                // 16px line box is 22px with 2px top pad. A descender taller
+                // than the remaining box used to be shoved up on its own.
+                let (h, y_off, ink) = match ch {
+                    'g' => (18i32, 6i32, 200u8),
+                    'a' => (10, 8, 180),
+                    'l' => (16, 0, 220),
+                    _ => (12, 4, 160),
+                };
+                let w = 6i32;
+                let key = 0xD5B1_0000_0000u64 | ch as u64;
+                let tile =
+                    atlas.intern_alpha(key, w as u32, h as u32, alloc::vec![ink; (w * h) as usize]);
+                Some(GlyphRaster {
+                    tile,
+                    bearing: Point::xy(0, y_off),
+                    advance: px(7),
+                    size: Size::wh(w, h),
+                })
+            }
+        }
+
+        let mut atlas = SpriteAtlas::new();
+        let sys = JitterSys;
+        let mut env = PaintEnv {
+            atlas: &mut atlas,
+            text: Some(&sys),
+        };
+        let mut el = text("gal").size(16);
+        let mut scene = Scene::new();
+        let mut input = WindowInput::new();
+        paint_element_with_input(
+            &mut el,
+            Point::ZERO,
+            Size::wh(80, 32),
+            &mut scene,
+            &mut input,
+            &mut env,
+        );
+        let mut dest_y = alloc::vec::Vec::new();
+        for op in scene.paint_order() {
+            if let PaintOperation::MonochromeSprite(sprite) = op {
+                dest_y.push(sprite.bounds.y());
+            }
+        }
+        assert_eq!(dest_y.len(), 3, "g, a, l each paint one sprite");
+        let pen_g = dest_y[0] - 6;
+        let pen_a = dest_y[1] - 8;
+        let pen_l = dest_y[2];
+        assert_eq!(pen_g, pen_a, "descender must keep the word baseline");
+        assert_eq!(pen_a, pen_l, "ascender must keep the word baseline");
     }
 
     #[test]

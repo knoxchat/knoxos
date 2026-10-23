@@ -92,9 +92,9 @@ impl IntoElement for ScrollArea {
     type Element = Div;
 
     fn into_element(self) -> Div {
-        let mut inner = div().flex_col().items_start();
+        let mut inner = div().flex_col().w(self.width);
         if let Some(child) = self.child {
-            inner = inner.child(div().flex_col().child(child));
+            inner = inner.child(div().flex_col().w(self.width).child(child));
         }
         let offset = self.offset;
         let mut viewport = div()

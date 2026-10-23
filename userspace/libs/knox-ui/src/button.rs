@@ -14,18 +14,42 @@ use knox_gpui::{Corners, Div, Hsla, IntoElement, Pixels, Styled, div, px, text};
 use crate::icon::{Icon, IconName};
 use crate::interact::{Handler, IndexHandler, bind_activate};
 use crate::size::{ControlSize, Disableable, Selectable, Sizable};
+use crate::spinner::Spinner;
 use crate::theme::Theme;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ButtonCustomVariant {
+    pub color: Hsla,
+    pub foreground: Hsla,
+    pub hover: Hsla,
+    pub active: Hsla,
+}
+
+impl ButtonCustomVariant {
+    pub fn new(color: Hsla) -> Self {
+        Self {
+            color,
+            foreground: color,
+            hover: color.opacity(0.12),
+            active: color.opacity(0.22),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum ButtonVariant {
     #[default]
     Default,
     Primary,
     Secondary,
     Danger,
+    Warning,
+    Success,
+    Info,
     Ghost,
     Link,
     Text,
+    Custom(ButtonCustomVariant),
 }
 
 pub trait ButtonVariants: Sized {
@@ -43,6 +67,18 @@ pub trait ButtonVariants: Sized {
         self.with_variant(ButtonVariant::Danger)
     }
 
+    fn warning(self) -> Self {
+        self.with_variant(ButtonVariant::Warning)
+    }
+
+    fn success(self) -> Self {
+        self.with_variant(ButtonVariant::Success)
+    }
+
+    fn info(self) -> Self {
+        self.with_variant(ButtonVariant::Info)
+    }
+
     fn ghost(self) -> Self {
         self.with_variant(ButtonVariant::Ghost)
     }
@@ -53,6 +89,10 @@ pub trait ButtonVariants: Sized {
 
     fn text(self) -> Self {
         self.with_variant(ButtonVariant::Text)
+    }
+
+    fn custom(self, style: ButtonCustomVariant) -> Self {
+        self.with_variant(ButtonVariant::Custom(style))
     }
 }
 
@@ -74,6 +114,9 @@ pub struct Button {
     corners: Option<Corners>,
     fill: bool,
     icon: Option<IconName>,
+    align_start: bool,
+    omit_left_border: bool,
+    omit_top_border: bool,
     on_click: Option<Handler>,
 }
 
@@ -96,6 +139,9 @@ impl Button {
             corners: None,
             fill: false,
             icon: None,
+            align_start: false,
+            omit_left_border: false,
+            omit_top_border: false,
             on_click: None,
         }
     }
@@ -152,6 +198,11 @@ impl Button {
         self
     }
 
+    pub fn align_start(mut self) -> Self {
+        self.align_start = true;
+        self
+    }
+
     pub fn on_click(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
         self.on_click = Some(Arc::new(f));
         self
@@ -171,6 +222,16 @@ impl Button {
 
     pub(crate) fn with_corners(mut self, corners: Corners) -> Self {
         self.corners = Some(corners);
+        self
+    }
+
+    pub(crate) fn omit_left_border(mut self) -> Self {
+        self.omit_left_border = true;
+        self
+    }
+
+    pub(crate) fn omit_top_border(mut self) -> Self {
+        self.omit_top_border = true;
         self
     }
 
@@ -257,37 +318,48 @@ fn face_for(button: &Button) -> Face {
         };
     }
 
+    let filled = |bg: Hsla, fg: Hsla| Face {
+        bg,
+        fg,
+        border: bg,
+        hover: hover_of(bg, dark),
+        active: active_of(bg, dark),
+        has_border: false,
+    };
+    let outlined = |color: Hsla| Face {
+        bg: color.opacity(0.10),
+        fg: color,
+        border: color.opacity(0.55),
+        hover: color.opacity(0.20),
+        active: color.opacity(0.40),
+        has_border: true,
+    };
+
     let mut face = match (button.variant, button.outline) {
-        (ButtonVariant::Primary, false) => Face {
-            bg: c.primary,
-            fg: c.primary_foreground,
-            border: c.primary,
-            hover: hover_of(c.primary, dark),
-            active: active_of(c.primary, dark),
+        (ButtonVariant::Primary, false) => filled(c.primary, c.primary_foreground),
+        (ButtonVariant::Primary, true) => outlined(c.primary),
+        (ButtonVariant::Danger, false) => filled(c.destructive, c.destructive_foreground),
+        (ButtonVariant::Danger, true) => outlined(c.destructive),
+        (ButtonVariant::Warning, false) => filled(c.warning, c.primary_foreground),
+        (ButtonVariant::Warning, true) => outlined(c.warning),
+        (ButtonVariant::Success, false) => filled(c.success, Hsla::from_rgb(250, 246, 242)),
+        (ButtonVariant::Success, true) => outlined(c.success),
+        (ButtonVariant::Info, false) => filled(c.info, Hsla::from_rgb(250, 246, 242)),
+        (ButtonVariant::Info, true) => outlined(c.info),
+        (ButtonVariant::Custom(style), false) => Face {
+            bg: style.color,
+            fg: style.foreground,
+            border: style.color,
+            hover: style.hover,
+            active: style.active,
             has_border: true,
         },
-        (ButtonVariant::Primary, true) => Face {
-            bg: c.primary.opacity(0.12),
-            fg: c.primary,
-            border: c.primary,
-            hover: c.primary.opacity(0.22),
-            active: c.primary.opacity(0.35),
-            has_border: true,
-        },
-        (ButtonVariant::Danger, false) => Face {
-            bg: c.destructive,
-            fg: c.destructive_foreground,
-            border: c.destructive,
-            hover: hover_of(c.destructive, dark),
-            active: active_of(c.destructive, dark),
-            has_border: true,
-        },
-        (ButtonVariant::Danger, true) => Face {
-            bg: c.destructive.opacity(0.12),
-            fg: c.destructive,
-            border: c.destructive,
-            hover: c.destructive.opacity(0.22),
-            active: c.destructive.opacity(0.35),
+        (ButtonVariant::Custom(style), true) => Face {
+            bg: style.color.opacity(0.12),
+            fg: style.foreground,
+            border: style.color,
+            hover: style.hover,
+            active: style.active,
             has_border: true,
         },
         (ButtonVariant::Secondary, false) => Face {
@@ -298,7 +370,15 @@ fn face_for(button: &Button) -> Face {
             active: active_of(c.secondary, dark),
             has_border: true,
         },
-        (ButtonVariant::Ghost, _) => Face {
+        (ButtonVariant::Ghost, true) => Face {
+            bg: transparent,
+            fg: c.foreground,
+            border: c.border,
+            hover: c.accent,
+            active: c.accent.darken(0.06),
+            has_border: true,
+        },
+        (ButtonVariant::Ghost, false) => Face {
             bg: transparent,
             fg: c.foreground,
             border: transparent,
@@ -362,19 +442,29 @@ impl IntoElement for Button {
         ));
         let font = self.size.font();
         let caret = self.dropdown_caret;
-        let mut label = self.label.clone();
-        if self.loading && !label.is_empty() {
-            label.push('…');
-        }
+        let label = self.label.clone();
+        let loading = self.loading;
 
+        let icon_only = label.is_empty()
+            && (self.icon.is_some() || loading)
+            && !caret
+            && self.width.is_none()
+            && !self.fill;
         let mut el = div()
-            .pad_x(pad_x)
             .flex()
             .items_center()
-            .justify_center()
             .rounded_corners(corners)
             .bg(face.bg);
-        el = el.h(h);
+        el = if self.align_start {
+            el.justify_start()
+        } else {
+            el.justify_center()
+        };
+        if icon_only {
+            el = el.w(h).h(h);
+        } else {
+            el = el.pad_x(pad_x).h(h);
+        }
         if let Some(w) = self.width {
             el = el.w(w).overflow_hidden();
         } else if self.fill {
@@ -385,12 +475,15 @@ impl IntoElement for Button {
         }
         if face.has_border {
             el = el.border_1().border_color(face.border);
-        }
-        if self.loading && !self.disabled {
-            el = el.opacity(0.8);
+            if self.omit_left_border {
+                el = el.border_l_0();
+            }
+            if self.omit_top_border {
+                el = el.border_t_0();
+            }
         }
 
-        let interactive = !self.disabled && !self.loading;
+        let interactive = !self.disabled && !loading;
         if interactive {
             let hover = face.hover;
             let active = face.active;
@@ -401,10 +494,19 @@ impl IntoElement for Button {
                 .focus(move |s| s.border_color(ring));
         }
 
-        if (self.icon.is_some() || caret) && !label.is_empty() {
+        let show_icon = self.icon.is_some() || loading || caret;
+        if show_icon && !label.is_empty() {
             el = el.gap_1();
         }
-        if let Some(name) = self.icon {
+        if loading {
+            el = el.child(
+                Spinner::new()
+                    .themed(&self.theme)
+                    .color(face.fg)
+                    .with_size(self.size)
+                    .phase(0.18),
+            );
+        } else if let Some(name) = self.icon {
             el = el.child(
                 Icon::new(name)
                     .themed(&self.theme)
@@ -577,6 +679,13 @@ impl IntoElement for ButtonGroup {
                 Corners::ZERO
             };
             child = child.with_corners(corners);
+            if i > 0 {
+                child = if self.vertical {
+                    child.omit_top_border()
+                } else {
+                    child.omit_left_border()
+                };
+            }
             if let Some(g) = &group_click {
                 let g = g.clone();
                 let own = child.take_click();

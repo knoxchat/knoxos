@@ -61,6 +61,8 @@ pub struct Style {
     pub position: Position,
     pub overflow: Overflow,
     pub grow: u32,
+    /// Wrap flex children onto the next line/column when they overflow.
+    pub wrap: bool,
     pub width: Option<Pixels>,
     pub height: Option<Pixels>,
     pub min_width: Option<Pixels>,
@@ -92,6 +94,7 @@ impl Default for Style {
             position: Position::Relative,
             overflow: Overflow::Visible,
             grow: 0,
+            wrap: false,
             width: None,
             height: None,
             min_width: None,
@@ -307,6 +310,16 @@ pub trait Styled: Sized {
         self
     }
 
+    fn flex_wrap(mut self) -> Self {
+        self.style_mut().wrap = true;
+        self
+    }
+
+    fn justify_start(mut self) -> Self {
+        self.style_mut().justify = Justify::Start;
+        self
+    }
+
     fn justify_center(mut self) -> Self {
         self.style_mut().justify = Justify::Center;
         self
@@ -420,6 +433,21 @@ pub trait Styled: Sized {
 
     fn border_1(mut self) -> Self {
         self.style_mut().border_widths = Edges::all(px(1));
+        self
+    }
+
+    fn border_b_1(mut self) -> Self {
+        self.style_mut().border_widths.bottom = px(1);
+        self
+    }
+
+    fn border_l_0(mut self) -> Self {
+        self.style_mut().border_widths.left = Pixels::ZERO;
+        self
+    }
+
+    fn border_t_0(mut self) -> Self {
+        self.style_mut().border_widths.top = Pixels::ZERO;
         self
     }
 

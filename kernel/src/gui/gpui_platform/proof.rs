@@ -7,18 +7,14 @@ use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use knox_gpui::{
-    Bounds, Div, PaintEnv, Point, Quad, Scene, Shadow, Size, SpriteAtlas, Styled, WindowId,
-    WindowInput, div, paint_element_with_input, px,
+    Bounds, Div, PaintEnv, Point, Scene, Shadow, Size, SpriteAtlas, WindowId, WindowInput,
+    paint_element_with_input,
 };
 use knox_ui::{
     D8ButtonsAction, D8ButtonsSnapshot, D8DateAction, D8DateSnapshot, D8FeedbackAction,
     D8FeedbackSnapshot, D8FormsAction, D8FormsSnapshot, D8InputAction, D8InputSnapshot,
     D8OverlayAction, D8OverlaySnapshot, D8RestAction, D8RestSnapshot, D8SelectAction,
-    D8SelectSnapshot, FieldState, ScrollArea, Theme, TitleBar, apply_d8_rest, d8_buttons_gallery,
-    d8_chrome_dock_gallery, d8_data_gallery, d8_date_gallery, d8_display_gallery,
-    d8_feedback_gallery, d8_forms_gallery, d8_input_gallery, d8_kit_chrome, d8_kit_status,
-    d8_media_gallery, d8_menus_gallery, d8_overlay_gallery, d8_page_bar, d8_scroll_nav_gallery,
-    d8_select_gallery, d8_theme_gallery, d8_toast_host_gallery,
+    D8SelectSnapshot, FieldState, KitGalleryProps, Theme, apply_d8_rest, kit_gallery,
 };
 use spin::Mutex;
 
@@ -28,8 +24,8 @@ use crate::gui::framebuffer::Rect;
 pub const GATE_GPUI_SCENE_RASTER: &str = "GATE_GPUI scene raster";
 pub const GATE_GPUI_INTERACT: &str = "GATE_GPUI interact";
 
-pub const CARD_W: i32 = 720;
-pub const CARD_H: i32 = 720;
+pub const CARD_W: i32 = 1280;
+pub const CARD_H: i32 = 860;
 pub const PAD: i32 = 24;
 pub const GATE_GPUI_KIT_GALLERY: &str = "GATE_GPUI kit gallery";
 pub const GATE_GPUI_CHROME: &str = "GATE_GPUI chrome";
@@ -96,6 +92,7 @@ static D8O: Mutex<D8OverlaySnapshot> = Mutex::new(D8OverlaySnapshot {
 });
 static D8R: Mutex<D8RestSnapshot> = Mutex::new(D8RestSnapshot::INIT);
 static D8CMD: Mutex<FieldState> = Mutex::new(FieldState::empty());
+static D8SEARCH: Mutex<FieldState> = Mutex::new(FieldState::empty());
 static DRAG_GRAB: Mutex<Option<(i32, i32)>> = Mutex::new(None);
 static USER_ORIGIN: Mutex<Option<(i32, i32)>> = Mutex::new(None);
 
@@ -185,16 +182,15 @@ pub(super) fn app_theme(app: &knox_gpui::App) -> Theme {
         .unwrap_or_else(theme_from_kernel)
 }
 
-/// Store-local scene: rounded card + shadow + optional accent + controls.
+/// Store-local scene: rounded card + shadow + kit gallery tree.
 pub fn paint_proof_scene(
     input: &mut WindowInput,
     atlas: &mut SpriteAtlas,
-    accent_on: bool,
+    _accent_on: bool,
     theme: &Theme,
     phase: f32,
     reduced_motion: bool,
 ) -> Scene {
-    let radius = theme.radius.xl.get();
     let card = Bounds::from_xywh(PAD, PAD, CARD_W, CARD_H);
     let mut scene = Scene::new();
     let sh = theme.shadow.md;
@@ -219,13 +215,6 @@ pub fn paint_proof_scene(
         input,
         &mut env,
     );
-
-    if accent_on {
-        scene.push_quad(Quad::new(
-            Bounds::from_xywh(PAD, PAD + radius, 6, CARD_H - radius * 2),
-            theme.colors.primary,
-        ));
-    }
     scene
 }
 
@@ -376,95 +365,52 @@ pub fn focus_kit_gallery() {
 }
 
 pub(super) fn proof_tree(theme: &Theme, phase: f32, reduced_motion: bool) -> Div {
-    let card_bg = theme.colors.surface;
-    let pad = theme.spacing.lg;
-    let radius = theme.radius.xl;
     let snap = *D8.lock();
-    let on: Arc<dyn Fn(D8ButtonsAction) + Send + Sync> = Arc::new(apply_d8);
     let mut feedback = *D8F.lock();
     feedback.phase = phase;
     feedback.reduced_motion = reduced_motion;
-    let on_fb: Arc<dyn Fn(D8FeedbackAction) + Send + Sync> = Arc::new(apply_d8_feedback);
     let inputs = D8I.lock().clone();
-    let on_in: Arc<dyn Fn(D8InputAction) + Send + Sync> = Arc::new(apply_d8_input);
-    let paste: Arc<dyn Fn() -> Option<String> + Send + Sync> = Arc::new(paste_from_clipboard);
     let forms = D8M.lock().clone();
-    let on_forms: Arc<dyn Fn(D8FormsAction) + Send + Sync> = Arc::new(apply_d8_forms);
     let selects = D8S.lock().clone();
-    let on_sel: Arc<dyn Fn(D8SelectAction) + Send + Sync> = Arc::new(apply_d8_select);
     let dates = *D8D.lock();
-    let on_date: Arc<dyn Fn(D8DateAction) + Send + Sync> = Arc::new(apply_d8_date);
     let overlays = *D8O.lock();
-    let on_ov: Arc<dyn Fn(D8OverlayAction) + Send + Sync> = Arc::new(apply_d8_overlay);
     let rest = *D8R.lock();
-    let on_rest: Arc<dyn Fn(D8RestAction) + Send + Sync> = Arc::new(apply_rest);
     let cmd_query = D8CMD.lock().clone();
-    let on_cmd: Arc<dyn Fn(FieldState) + Send + Sync> = Arc::new(|s| {
-        *D8CMD.lock() = s;
-    });
+    let search = D8SEARCH.lock().clone();
 
-    let body = match rest.page {
-        0 => d8_buttons_gallery(theme, snap, on),
-        1 => d8_display_gallery(theme),
-        2 => d8_feedback_gallery(theme, feedback, on_fb),
-        3 => div()
-            .flex_col()
-            .gap_2()
-            .child(d8_input_gallery(theme, inputs, on_in, paste))
-            .child(d8_forms_gallery(theme, forms, on_forms))
-            .child(d8_select_gallery(theme, selects, on_sel))
-            .child(d8_date_gallery(theme, dates, on_date)),
-        4 => div()
-            .flex_col()
-            .gap_2()
-            .child(d8_overlay_gallery(theme, overlays, on_ov))
-            .child(d8_menus_gallery(theme, rest, on_rest.clone()))
-            .child(d8_toast_host_gallery(theme, rest, on_rest.clone())),
-        5 => div()
-            .flex_col()
-            .gap_2()
-            .child(d8_scroll_nav_gallery(theme, rest, on_rest.clone()))
-            .child(d8_chrome_dock_gallery(theme, rest, on_rest.clone())),
-        _ => div()
-            .flex_col()
-            .gap_2()
-            .child(d8_data_gallery(
-                theme,
-                rest,
-                on_rest.clone(),
-                cmd_query,
-                on_cmd,
-            ))
-            .child(d8_media_gallery(theme, rest, on_rest.clone()))
-            .child(d8_theme_gallery(theme, rest, on_rest.clone())),
-    };
-
-    div()
-        .flex_col()
-        .w(px(CARD_W))
-        .h(px(CARD_H))
-        .p(pad)
-        .gap_2()
-        .rounded(radius)
-        .overflow_hidden()
-        .bg(card_bg)
-        .child(
-            TitleBar::new("Kit Gallery")
-                .themed(theme)
-                .maximized(GALLERY_MAXIMIZED.load(Ordering::SeqCst))
-                .on_drag(|p| begin_title_drag(p))
-                .on_min(|| begin_gallery_minimize())
-                .on_max(|| toggle_gallery_maximized())
-                .on_close(|| hide_gallery()),
-        )
-        .child(d8_kit_chrome(theme))
-        .child(d8_page_bar(theme, rest.page, on_rest))
-        .child(
-            ScrollArea::new()
-                .themed(theme)
-                .size(px(CARD_W - pad.0 * 2), px(CARD_H - 174))
-                .offset(0)
-                .child(body),
-        )
-        .child(d8_kit_status(theme, rest.page))
+    kit_gallery(&KitGalleryProps {
+        theme,
+        rest,
+        buttons: snap,
+        feedback,
+        inputs,
+        forms,
+        selects,
+        dates,
+        overlays,
+        search,
+        cmd_query,
+        maximized: GALLERY_MAXIMIZED.load(Ordering::SeqCst),
+        card_w: CARD_W,
+        card_h: CARD_H,
+        on_rest: Arc::new(apply_rest),
+        on_buttons: Arc::new(apply_d8),
+        on_feedback: Arc::new(apply_d8_feedback),
+        on_input: Arc::new(apply_d8_input),
+        on_forms: Arc::new(apply_d8_forms),
+        on_select: Arc::new(apply_d8_select),
+        on_date: Arc::new(apply_d8_date),
+        on_overlay: Arc::new(apply_d8_overlay),
+        on_search: Arc::new(|s| {
+            *D8SEARCH.lock() = s;
+        }),
+        on_cmd: Arc::new(|s| {
+            *D8CMD.lock() = s;
+        }),
+        paste: Arc::new(paste_from_clipboard),
+        on_min: Arc::new(begin_gallery_minimize),
+        on_max: Arc::new(toggle_gallery_maximized),
+        on_close: Arc::new(hide_gallery),
+        on_drag: Arc::new(begin_title_drag),
+    })
 }

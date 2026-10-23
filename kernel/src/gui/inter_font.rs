@@ -171,31 +171,27 @@ impl FontSet {
         let key = glyph_key(face, size, ch);
         if !self.cache.contains_key(&key) {
             let idx = face.index();
-            let (metrics, mut coverage) = if size <= 20 {
-                // 2× then box-filter: unhinted Inter bowls (a/o/e/s) drop out
-                // of a 14–16px grid on dark chrome. Advance stays on the 1×
-                // metric so buttons do not grow.
-                let adv = self.faces[idx].metrics(ch, size as f32).advance_width;
+            // 1× metrics own the baseline. 2× coverage is ink only — flooring
+            // a 2× `ymin+height` dropped x-height letters (`Trash` r/a/s) a
+            // pixel below T/h.
+            let m1 = self.faces[idx].metrics(ch, size as f32);
+            let (raster, mut coverage) = if size <= 20 {
+                // Unhinted Inter bowls (a/o/e/s) drop out of a 14–16px grid
+                // on dark chrome. Advance stays on the 1× metric.
                 let (hi, cov) = self.faces[idx].rasterize(ch, size as f32 * 2.0);
-                let (mut m, cov) = downsample_2x(hi, cov);
-                m.advance_width = adv;
-                (m, cov)
+                downsample_2x(hi, cov)
             } else {
                 self.faces[idx].rasterize(ch, size as f32)
             };
             strengthen_coverage(&mut coverage, size);
-            // Top of bitmap relative to the baseline, in screen coords:
-            //   font-space top above baseline = ymin + height
-            //   screen y grows downward, so top = -(ymin + height)
-            let bearing_y = metrics.ymin + metrics.height as i32;
-            let top = -bearing_y;
+            let bearing_y = m1.ymin + m1.height as i32;
             let glyph = Glyph {
-                width: metrics.width,
-                height: metrics.height,
-                xmin: metrics.xmin,
-                top,
+                width: raster.width,
+                height: raster.height,
+                xmin: m1.xmin,
+                top: -bearing_y,
                 bearing_y: bearing_y as i16,
-                advance: metrics.advance_width,
+                advance: m1.advance_width,
                 coverage,
             };
             self.cache.insert(key, glyph);
@@ -204,8 +200,11 @@ impl FontSet {
     }
 }
 
-/// Average a 2× fontdue bitmap back to em size. Metrics are halved so
-/// `walk_text` / GPUI placement stay on the requested pixel grid.
+/// Average a 2× fontdue bitmap back to em size.
+///
+/// Pad to even font-space edges first so the 2×2 filter sits on the 1×
+/// pixel grid. An odd 2× top (`r`/`a`/`s` at 20px) used to land those
+/// letters a pixel below cap-height glyphs in the same word.
 fn downsample_2x(
     metrics: fontdue::Metrics,
     src: alloc::vec::Vec<u8>,
@@ -219,37 +218,70 @@ fn downsample_2x(
         m.ymin /= 2;
         return (m, src);
     }
-    let w = w2.div_ceil(2);
-    let h = h2.div_ceil(2);
+
+    let mut xmin = metrics.xmin;
+    let mut ymin = metrics.ymin;
+    let mut width = w2;
+    let mut height = h2;
+    let mut bitmap = src;
+
+    let pad_left = xmin.rem_euclid(2);
+    let pad_top = (ymin + height as i32).rem_euclid(2);
+    if pad_left != 0 || pad_top != 0 {
+        let nw = width + pad_left as usize;
+        let nh = height + pad_top as usize;
+        let mut padded = alloc::vec![0u8; nw * nh];
+        for y in 0..height {
+            let dst = (y + pad_top as usize) * nw + pad_left as usize;
+            let src_i = y * width;
+            padded[dst..dst + width].copy_from_slice(&bitmap[src_i..src_i + width]);
+        }
+        xmin -= pad_left;
+        width = nw;
+        height = nh;
+        bitmap = padded;
+    }
+
+    let pad_right = width % 2;
+    let pad_bottom = height % 2;
+    if pad_right != 0 || pad_bottom != 0 {
+        let nw = width + pad_right;
+        let nh = height + pad_bottom;
+        let mut padded = alloc::vec![0u8; nw * nh];
+        for y in 0..height {
+            let dst = y * nw;
+            let src_i = y * width;
+            padded[dst..dst + width].copy_from_slice(&bitmap[src_i..src_i + width]);
+        }
+        if pad_bottom != 0 {
+            ymin -= 1;
+        }
+        width = nw;
+        height = nh;
+        bitmap = padded;
+    }
+
+    let w = width / 2;
+    let h = height / 2;
     let mut out = alloc::vec![0u8; w * h];
     for y in 0..h {
         for x in 0..w {
             let mut sum = 0u32;
-            let mut n = 0u32;
             for dy in 0..2 {
                 for dx in 0..2 {
-                    let sx = x * 2 + dx;
-                    let sy = y * 2 + dy;
-                    if sx < w2 && sy < h2 {
-                        sum += src[sy * w2 + sx] as u32;
-                        n += 1;
-                    }
+                    sum += bitmap[(y * 2 + dy) * width + (x * 2 + dx)] as u32;
                 }
             }
-            out[y * w + x] = sum.checked_div(n).unwrap_or(0) as u8;
+            out[y * w + x] = (sum / 4) as u8;
         }
     }
     let mut m = metrics;
     m.width = w;
     m.height = h;
-    m.xmin = div_toward_neg(m.xmin, 2);
-    m.ymin = div_toward_neg(m.ymin, 2);
+    m.xmin = xmin / 2;
+    m.ymin = ymin / 2;
     m.advance_width *= 0.5;
     (m, out)
-}
-
-fn div_toward_neg(v: i32, d: i32) -> i32 {
-    if v >= 0 { v / d } else { (v - (d - 1)) / d }
 }
 
 /// Lift mid-coverage so 14–18px Inter bowls stay ink on dark surfaces.

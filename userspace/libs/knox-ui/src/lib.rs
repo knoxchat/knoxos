@@ -69,6 +69,7 @@ pub mod slider;
 pub mod speech;
 pub mod spinner;
 pub mod splash;
+pub mod stories;
 pub mod switch;
 pub mod switcher;
 pub mod table;
@@ -91,7 +92,9 @@ pub use alert::{Alert, AlertVariant};
 pub use avatar::{Avatar, AvatarGroup};
 pub use badge::Badge;
 pub use browser::BrowserChrome;
-pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants, DropdownButton};
+pub use button::{
+    Button, ButtonCustomVariant, ButtonGroup, ButtonVariant, ButtonVariants, DropdownButton,
+};
 pub use calculator::{Calculator, DISPLAY_H as CALC_DISPLAY_H, KEY_ROWS as CALC_KEY_ROWS};
 pub use calendar::{Calendar, Date, DatePicker, Time, TimeField, days_in_month, is_leap, weekday};
 pub use carousel::Carousel;
@@ -175,6 +178,10 @@ pub use slider::Slider;
 pub use speech::{Speech, SpeechState, Waveform};
 pub use spinner::Spinner;
 pub use splash::{SPLASH_CARD_H, SPLASH_CARD_W, Splash, brand_lockup, splash_status};
+pub use stories::{
+    GALLERY_HEADER_H, GALLERY_SIDEBAR_W, GALLERY_STATUS_H, GALLERY_TITLE_H, KIT_STORIES,
+    KitGalleryProps, KitStory, kit_gallery,
+};
 pub use switch::Switch;
 pub use switcher::{AltTab, Overview, SwitcherEntry};
 pub use table::{DataTable, TableColumn, TableHead, sort_rows};

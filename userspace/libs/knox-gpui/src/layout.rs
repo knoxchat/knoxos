@@ -8,7 +8,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::element::{AnyElement, Element};
-use crate::geometry::{Bounds, Pixels, Point, Size};
+use crate::geometry::{Bounds, Edges, Pixels, Point, Size};
 use crate::style::{Align, Display, FlexDirection, Justify, Position, Style};
 
 /// Layout fields a parent needs from a child without downcasting.
@@ -122,6 +122,22 @@ pub fn flex_layout(
     for &i in &flow {
         let b = children[i].request_layout(inner_origin, measure_avail);
         measured.push(b.size);
+    }
+
+    if style.wrap && n > 0 {
+        return layout_wrapped(
+            style,
+            children,
+            &flow,
+            &measured,
+            &abs,
+            origin,
+            inner_origin,
+            inner_avail,
+            avail_w,
+            avail_h,
+            pad,
+        );
     }
 
     let packed_main = Pixels(
@@ -251,6 +267,173 @@ pub fn flex_layout(
 
     let self_bounds = Bounds::new(origin, size);
     for i in abs {
+        layout_absolute(style, &mut children[i], self_bounds, inner_origin, inner);
+    }
+    self_bounds
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_wrapped(
+    style: &Style,
+    children: &mut [AnyElement],
+    flow: &[usize],
+    measured: &[Size],
+    abs: &[usize],
+    origin: Point,
+    inner_origin: Point,
+    inner_avail: Size,
+    avail_w: Pixels,
+    avail_h: Pixels,
+    pad: Edges,
+) -> Bounds {
+    let row = style.flex_direction == FlexDirection::Row;
+    let gap = style.gap.0;
+    let limit = if row {
+        inner_avail.width.0
+    } else {
+        inner_avail.height.0
+    };
+
+    let mut lines: Vec<Vec<usize>> = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
+    let mut used = 0;
+    for (k, size) in measured.iter().enumerate() {
+        let item = if row { size.width.0 } else { size.height.0 };
+        let need = if current.is_empty() {
+            item
+        } else {
+            used + gap + item
+        };
+        if !current.is_empty() && limit > 0 && need > limit {
+            lines.push(core::mem::take(&mut current));
+            used = 0;
+        }
+        if !current.is_empty() {
+            used += gap;
+        }
+        used += item;
+        current.push(k);
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    let mut line_mains = Vec::with_capacity(lines.len());
+    let mut line_crosses = Vec::with_capacity(lines.len());
+    for line in &lines {
+        let mut main = 0;
+        let mut cross = 0;
+        for (j, &k) in line.iter().enumerate() {
+            if j > 0 {
+                main += gap;
+            }
+            if row {
+                main += measured[k].width.0;
+                cross = cross.max(measured[k].height.0);
+            } else {
+                main += measured[k].height.0;
+                cross = cross.max(measured[k].width.0);
+            }
+        }
+        line_mains.push(main);
+        line_crosses.push(cross);
+    }
+
+    let content_main = line_mains.iter().copied().max().unwrap_or(0);
+    let content_cross =
+        line_crosses.iter().sum::<i32>() + gap * (lines.len().saturating_sub(1) as i32);
+    let (content_w, content_h) = if row {
+        (Pixels(content_main), Pixels(content_cross))
+    } else {
+        (Pixels(content_cross), Pixels(content_main))
+    };
+
+    let auto_w = content_w + pad.horizontal();
+    let auto_h = content_h + pad.vertical();
+    let mut width = style.width.unwrap_or(auto_w.max(pad.horizontal()));
+    let mut height = style.height.unwrap_or(auto_h.max(pad.vertical()));
+    if style.grow > 0 {
+        if style.width.is_none() {
+            width = width.max(avail_w);
+        }
+        if style.height.is_none() {
+            height = height.max(avail_h);
+        }
+    }
+    let size = style.clamp_size(Size { width, height });
+    let inner = Size {
+        width: nonneg(size.width - pad.horizontal()),
+        height: nonneg(size.height - pad.vertical()),
+    };
+    let inner_main = if row { inner.width.0 } else { inner.height.0 };
+    let scroll = style.scroll_offset;
+
+    let mut cross_cursor = 0;
+    for (line_i, line) in lines.iter().enumerate() {
+        let packed = line_mains[line_i];
+        let line_cross = line_crosses[line_i];
+        let leftover = (inner_main - packed).max(0);
+        let (mut main_pos, between) = match style.justify {
+            Justify::Start => (0, 0),
+            Justify::End => (leftover, 0),
+            Justify::Center => (leftover / 2, 0),
+            Justify::SpaceBetween if line.len() > 1 => (0, leftover / (line.len() as i32 - 1)),
+            Justify::SpaceBetween => (0, 0),
+        };
+
+        for (j, &k) in line.iter().enumerate() {
+            let child_size = measured[k];
+            let child_cross = if row {
+                child_size.height.0
+            } else {
+                child_size.width.0
+            };
+            let mut cross_pos = cross_cursor;
+            let mut alloc_cross = child_cross;
+            match style.align {
+                Align::Start => {}
+                Align::Center => cross_pos += (line_cross - child_cross) / 2,
+                Align::End => cross_pos += line_cross - child_cross,
+                Align::Stretch => alloc_cross = line_cross,
+            }
+
+            let (x, y, avail) = if row {
+                (
+                    inner_origin.x.0 + main_pos - scroll.x.0,
+                    inner_origin.y.0 + cross_pos - scroll.y.0,
+                    Size {
+                        width: child_size.width,
+                        height: Pixels(alloc_cross),
+                    },
+                )
+            } else {
+                (
+                    inner_origin.x.0 + cross_pos - scroll.x.0,
+                    inner_origin.y.0 + main_pos - scroll.y.0,
+                    Size {
+                        width: Pixels(alloc_cross),
+                        height: child_size.height,
+                    },
+                )
+            };
+            children[flow[k]].request_layout(Point::xy(x, y), avail);
+            main_pos += if row {
+                child_size.width.0
+            } else {
+                child_size.height.0
+            };
+            if j + 1 < line.len() {
+                main_pos += gap + between;
+            }
+        }
+        cross_cursor += line_cross;
+        if line_i + 1 < lines.len() {
+            cross_cursor += gap;
+        }
+    }
+
+    let self_bounds = Bounds::new(origin, size);
+    for &i in abs {
         layout_absolute(style, &mut children[i], self_bounds, inner_origin, inner);
     }
     self_bounds
@@ -407,6 +590,27 @@ mod tests {
         buf.draw(&scene);
         assert_eq!(buf.pixel(0, 0), Some(Hsla::BLUE.to_bgra()));
         assert_eq!(buf.pixel(7, 7), Some(Hsla::BLUE.to_bgra()));
+    }
+
+    #[test]
+    fn flex_wrap_breaks_to_second_row() {
+        let mut root = div()
+            .flex()
+            .flex_wrap()
+            .w(px(28))
+            .gap_2()
+            .child(div().w(px(10)).h(px(10)).bg(Hsla::RED))
+            .child(div().w(px(10)).h(px(10)).bg(Hsla::BLUE))
+            .child(div().w(px(10)).h(px(10)).bg(Hsla::GREEN));
+        let mut scene = Scene::new();
+        let bounds = paint_element(&mut root, Point::ZERO, Size::wh(28, 40), &mut scene);
+        assert_eq!(bounds, Bounds::from_xywh(0, 0, 28, 28));
+        let mut buf = RasterBuffer::new(28, 28);
+        buf.draw(&scene);
+        assert_eq!(buf.pixel(0, 0), Some(Hsla::RED.to_bgra()));
+        assert_eq!(buf.pixel(18, 0), Some(Hsla::BLUE.to_bgra()));
+        assert_eq!(buf.pixel(0, 18), Some(Hsla::GREEN.to_bgra()));
+        assert_eq!(buf.pixel(18, 18), Some(crate::Bgra::TRANSPARENT));
     }
 
     #[test]

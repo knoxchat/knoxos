@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 
 use knox_gpui::{Div, IntoElement, Styled, div, px, text};
 
+use crate::icon::{Icon, IconName};
 use crate::interact::{BoolHandler, bind_activate};
 use crate::size::{ControlSize, Disableable, Sizable};
 use crate::theme::Theme;
@@ -38,6 +39,7 @@ pub struct Toggle {
     id: String,
     theme: Theme,
     label: String,
+    icon: Option<IconName>,
     checked: bool,
     disabled: bool,
     size: ControlSize,
@@ -51,6 +53,7 @@ impl Toggle {
             id: id.into(),
             theme: Theme::default(),
             label: String::new(),
+            icon: None,
             checked: false,
             disabled: false,
             size: ControlSize::Medium,
@@ -66,6 +69,11 @@ impl Toggle {
 
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = label.into();
+        self
+    }
+
+    pub fn icon(mut self, name: IconName) -> Self {
+        self.icon = Some(name);
         self
     }
 
@@ -153,14 +161,20 @@ impl IntoElement for Toggle {
             )
         };
 
+        let h = px(self.size.height());
+        let icon_only = self.label.is_empty() && self.icon.is_some();
         let mut el = div()
-            .h(px(self.size.height()))
-            .pad_x(px(self.size.pad_x(false)))
             .flex()
             .items_center()
             .justify_center()
+            .gap_1()
             .rounded(radius)
             .bg(bg);
+        el = if icon_only {
+            el.w(h).h(h)
+        } else {
+            el.h(h).pad_x(px(self.size.pad_x(false)))
+        };
         if has_border {
             el = el.border_1().border_color(border);
         }
@@ -169,6 +183,14 @@ impl IntoElement for Toggle {
                 .hover(move |s| s.bg(hover))
                 .active(move |s| s.bg(active))
                 .focus(move |s| s.border_color(c.ring));
+        }
+        if let Some(name) = self.icon {
+            el = el.child(
+                Icon::new(name)
+                    .themed(&self.theme)
+                    .color(fg)
+                    .with_size(self.size),
+            );
         }
         if !self.label.is_empty() {
             el = el.child(text(self.label).color(fg).size(self.size.font()));

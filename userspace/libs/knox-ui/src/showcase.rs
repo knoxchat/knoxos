@@ -87,6 +87,12 @@ pub struct D8RestSnapshot {
     pub light: bool,
     pub large: bool,
     pub maxed: bool,
+    pub collapsed: bool,
+    pub story_size: u8,
+    pub opt: u8,
+    pub checks: u8,
+    pub switches: u8,
+    pub nav_scroll: i32,
 }
 
 impl D8RestSnapshot {
@@ -122,6 +128,12 @@ impl D8RestSnapshot {
         light: false,
         large: false,
         maxed: false,
+        collapsed: false,
+        story_size: 2,
+        opt: 0,
+        checks: 0b0000_0010,
+        switches: 0b0000_1101,
+        nav_scroll: 0,
     };
 }
 
@@ -163,11 +175,20 @@ pub enum D8RestAction {
     Light(bool),
     Large(bool),
     Maxed(bool),
+    Collapse(bool),
+    StorySize(u8),
+    ToggleOpt(u8),
+    ToggleCheck(u8),
+    ToggleSwitch(u8),
+    NavScroll(i32),
 }
 
 pub fn apply_d8_rest(snap: &mut D8RestSnapshot, action: D8RestAction) {
     match action {
-        D8RestAction::Page(v) => snap.page = v,
+        D8RestAction::Page(v) => {
+            snap.page = v;
+            snap.scroll = 0;
+        }
         D8RestAction::MenuOpen(v) => snap.menu_open = v,
         D8RestAction::CtxOpen(v) => snap.ctx_open = v,
         D8RestAction::DropOpen(v) => snap.drop_open = v,
@@ -210,6 +231,35 @@ pub fn apply_d8_rest(snap: &mut D8RestSnapshot, action: D8RestAction) {
         D8RestAction::Light(v) => snap.light = v,
         D8RestAction::Large(v) => snap.large = v,
         D8RestAction::Maxed(v) => snap.maxed = v,
+        D8RestAction::Collapse(v) => snap.collapsed = v,
+        D8RestAction::StorySize(v) => snap.story_size = v.min(3),
+        D8RestAction::ToggleOpt(bit) => snap.opt ^= 1 << bit.min(7),
+        D8RestAction::ToggleCheck(bit) => snap.checks ^= 1 << bit.min(7),
+        D8RestAction::ToggleSwitch(bit) => snap.switches ^= 1 << bit.min(7),
+        D8RestAction::NavScroll(v) => snap.nav_scroll = v.max(0),
+    }
+}
+
+impl D8RestSnapshot {
+    pub fn control_size(self) -> crate::size::ControlSize {
+        match self.story_size {
+            0 => crate::size::ControlSize::XSmall,
+            1 => crate::size::ControlSize::Small,
+            3 => crate::size::ControlSize::Large,
+            _ => crate::size::ControlSize::Medium,
+        }
+    }
+
+    pub fn opt_on(self, bit: u8) -> bool {
+        self.opt & (1 << bit) != 0
+    }
+
+    pub fn check_on(self, bit: u8) -> bool {
+        self.checks & (1 << bit) != 0
+    }
+
+    pub fn switch_on(self, bit: u8) -> bool {
+        self.switches & (1 << bit) != 0
     }
 }
 

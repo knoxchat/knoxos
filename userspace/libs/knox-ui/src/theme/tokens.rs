@@ -28,6 +28,9 @@ pub struct ColorTokens {
     pub ring: Hsla,
     /// Translucent wash behind selected text.
     pub selection: Hsla,
+    pub success: Hsla,
+    pub warning: Hsla,
+    pub info: Hsla,
 }
 
 /// Kit `RadiusTokens` scale (integer px).
