@@ -3,7 +3,7 @@ use super::framebuffer::Pixel;
 ///
 /// Provides a global theme system with named color tokens that all GUI
 /// components use for consistent styling. Ships with three built-in themes:
-///   - **Aurora Dark** (default) — warm slate with coral/rose gold accents
+///   - **Aurora Dark** (default) — warm slate with teal (`#159994`) accents
 ///   - **Arctic Light** — clean warm-white minimal design
 ///   - **Sunset Warm** — rich amber/terracotta tones
 ///
@@ -122,7 +122,7 @@ const NEBULA_DARK: ThemeColors = ThemeColors {
     text_disabled: Pixel::new(80, 74, 68, 120),
     text_inverse: Pixel::new(22, 20, 26, 255),
 
-    accent_primary: Pixel::new(232, 121, 100, 255),
+    accent_primary: Pixel::new(21, 153, 148, 255),
     accent_secondary: Pixel::new(180, 140, 200, 255),
     accent_success: Pixel::new(130, 190, 150, 255),
     accent_warning: Pixel::new(230, 180, 90, 255),
@@ -132,15 +132,15 @@ const NEBULA_DARK: ThemeColors = ThemeColors {
     border_subtle: Pixel::new(55, 50, 60, 100),
     border_default: Pixel::new(70, 65, 78, 140),
     border_strong: Pixel::new(100, 92, 110, 180),
-    border_focus: Pixel::new(232, 121, 100, 200),
+    border_focus: Pixel::new(21, 153, 148, 200),
 
     hover_bg: Pixel::new(55, 50, 62, 120),
-    active_bg: Pixel::new(80, 60, 70, 150),
-    selected_bg: Pixel::new(232, 121, 100, 50),
+    active_bg: Pixel::new(40, 70, 68, 150),
+    selected_bg: Pixel::new(21, 153, 148, 50),
 
     taskbar_bg: Pixel::new(26, 24, 30, 220),
     taskbar_text: Pixel::new(210, 200, 190, 240),
-    taskbar_active: Pixel::new(232, 121, 100, 255),
+    taskbar_active: Pixel::new(21, 153, 148, 255),
 
     titlebar_bg: Pixel::new(30, 28, 36, 240),
     titlebar_text: Pixel::new(220, 212, 204, 240),
@@ -154,7 +154,7 @@ const NEBULA_DARK: ThemeColors = ThemeColors {
 
     wallpaper_top: Pixel::new(22, 20, 26, 255),
     wallpaper_bottom: Pixel::new(14, 12, 16, 255),
-    wallpaper_accent1: Pixel::new(232, 121, 100, 60),
+    wallpaper_accent1: Pixel::new(21, 153, 148, 60),
     wallpaper_accent2: Pixel::new(180, 140, 200, 45),
 };
 
@@ -172,7 +172,7 @@ const ARCTIC_LIGHT: ThemeColors = ThemeColors {
     text_disabled: Pixel::new(190, 182, 174, 140),
     text_inverse: Pixel::new(250, 246, 242, 255),
 
-    accent_primary: Pixel::new(200, 95, 75, 255),
+    accent_primary: Pixel::new(21, 153, 148, 255),
     accent_secondary: Pixel::new(150, 110, 170, 255),
     accent_success: Pixel::new(90, 165, 110, 255),
     accent_warning: Pixel::new(200, 150, 40, 255),
@@ -182,15 +182,15 @@ const ARCTIC_LIGHT: ThemeColors = ThemeColors {
     border_subtle: Pixel::new(220, 212, 204, 120),
     border_default: Pixel::new(200, 192, 184, 160),
     border_strong: Pixel::new(175, 165, 155, 200),
-    border_focus: Pixel::new(200, 95, 75, 200),
+    border_focus: Pixel::new(21, 153, 148, 200),
 
     hover_bg: Pixel::new(238, 230, 222, 140),
     active_bg: Pixel::new(228, 218, 208, 180),
-    selected_bg: Pixel::new(200, 95, 75, 35),
+    selected_bg: Pixel::new(21, 153, 148, 35),
 
     taskbar_bg: Pixel::new(248, 242, 236, 235),
     taskbar_text: Pixel::new(50, 44, 38, 240),
-    taskbar_active: Pixel::new(200, 95, 75, 255),
+    taskbar_active: Pixel::new(21, 153, 148, 255),
 
     titlebar_bg: Pixel::new(250, 246, 242, 250),
     titlebar_text: Pixel::new(42, 36, 32, 240),
@@ -204,7 +204,7 @@ const ARCTIC_LIGHT: ThemeColors = ThemeColors {
 
     wallpaper_top: Pixel::new(240, 232, 224, 255),
     wallpaper_bottom: Pixel::new(248, 242, 236, 255),
-    wallpaper_accent1: Pixel::new(200, 95, 75, 35),
+    wallpaper_accent1: Pixel::new(21, 153, 148, 35),
     wallpaper_accent2: Pixel::new(150, 110, 170, 25),
 };
 
@@ -271,7 +271,7 @@ static ACCENT_INDEX: AtomicU8 = AtomicU8::new(0);
 
 /// Predefined accent colors
 pub const ACCENT_COLORS: [Pixel; 6] = [
-    Pixel::new(232, 121, 100, 255), // Coral (default)
+    Pixel::new(21, 153, 148, 255),  // Teal `#159994` (default)
     Pixel::new(130, 190, 150, 255), // Sage
     Pixel::new(200, 140, 160, 255), // Rose
     Pixel::new(210, 170, 100, 255), // Amber

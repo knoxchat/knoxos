@@ -648,6 +648,14 @@ pub fn sync_theme() {
     super::pointer::damage_proof();
 }
 
+pub(super) fn begin_gallery_enter() {
+    ENTER_START_MS.store(now_ms().max(1), Ordering::SeqCst);
+    LAST_Y_OFFSET.store(
+        theme_from_kernel().motion.distance_medium.get(),
+        Ordering::SeqCst,
+    );
+}
+
 fn now_ms() -> u64 {
     dispatcher::now_ticks().saturating_mul(10)
 }
@@ -682,11 +690,9 @@ fn ensure_proof_window(app: &mut knox_gpui::App, screen_w: u32, screen_h: u32) -
             win.set_chrome(ChromeKind::Csd);
         }
         PROOF_WINDOW.store(id.as_u64(), Ordering::SeqCst);
-        ENTER_START_MS.store(now_ms().max(1), Ordering::SeqCst);
-        LAST_Y_OFFSET.store(
-            theme_from_kernel().motion.distance_medium.get(),
-            Ordering::SeqCst,
-        );
+        if !gallery_hidden() {
+            begin_gallery_enter();
+        }
         id
     } else {
         let id = WindowId::from_u64(raw);

@@ -132,7 +132,10 @@ fn set_tab(index: usize) {
 }
 
 fn build_pages() -> Vec<SettingPage> {
-    let (sw, sh) = crate::gui::screen_size();
+    // Paint runs inside `draw_desktop` while FRAMEBUFFER is held. `screen_size()`
+    // takes that same spin lock and deadlocks the first Settings frame.
+    let (sw, sh) = crate::gui::cached_screen_size();
+    let (sw, sh) = (sw as usize, sh as usize);
     let mut display = SettingPage::new("Display").group({
         let mut g = SettingGroup::new("Resolution");
         for &(rw, rh, label) in crate::gui::RESOLUTIONS {
@@ -380,7 +383,8 @@ fn on_item(page: usize, group: usize, item: usize) {
     match (page, group, item) {
         (0, 0, i) => {
             if let Some(&(rw, rh, _)) = crate::gui::RESOLUTIONS.get(i) {
-                let (cw, ch) = crate::gui::screen_size();
+                let (cw, ch) = crate::gui::cached_screen_size();
+                let (cw, ch) = (cw as usize, ch as usize);
                 if rw != cw || rh != ch {
                     crate::gui::change_resolution(rw, rh);
                 }

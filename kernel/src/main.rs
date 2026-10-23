@@ -1295,6 +1295,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // D12.1: do not paint the desktop until login::is_logged_in().
     if gui::login::is_logged_in() {
         serial_println!("[KnoxOS] Drawing desktop environment...");
+        gui::desktop::open_session_defaults();
         gui::desktop::draw_desktop();
         gui::notifications::system(
             "Welcome to KnoxOS",

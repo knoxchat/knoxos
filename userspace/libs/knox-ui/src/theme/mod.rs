@@ -2,7 +2,7 @@
 //! Knox UI theme: semantic tokens, Aurora / Arctic palettes, `ActiveTheme`.
 //!
 //! Palettes are Rust consts (no kit JSON watcher). `cx.theme().colors.primary`
-//! is the coral accent on Aurora Dark.
+//! is the teal accent (`#159994`) on Aurora Dark.
 
 use knox_gpui::{App, Hsla};
 
@@ -52,7 +52,7 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Aurora Dark — warm slate, coral accent (default).
+    /// Aurora Dark — warm slate, teal `#159994` accent (default).
     pub fn aurora_dark() -> Self {
         Self {
             mode: ThemeMode::Dark,
@@ -65,7 +65,7 @@ impl Theme {
         }
     }
 
-    /// Arctic Light — warm paper, darker coral accent.
+    /// Arctic Light — warm paper, teal `#159994` accent.
     pub fn arctic_light() -> Self {
         Self {
             mode: ThemeMode::Light,
@@ -165,8 +165,8 @@ fn aurora_dark_colors() -> ColorTokens {
         foreground: rgb(240, 232, 224),
         surface: rgb(44, 40, 50),
         surface_foreground: rgb(240, 232, 224),
-        primary: rgb(232, 121, 100),
-        primary_foreground: rgb(22, 20, 26),
+        primary: rgb(21, 153, 148),
+        primary_foreground: rgb(240, 232, 224),
         secondary: rgb(36, 33, 42),
         secondary_foreground: rgb(240, 232, 224),
         muted: rgb(55, 50, 62),
@@ -177,8 +177,8 @@ fn aurora_dark_colors() -> ColorTokens {
         destructive_foreground: rgb(240, 232, 224),
         border: rgb(70, 65, 78),
         input: rgb(28, 26, 32),
-        ring: rgb(232, 121, 100),
-        selection: rgba(232, 121, 100, 50),
+        ring: rgb(21, 153, 148),
+        selection: rgba(21, 153, 148, 50),
         success: rgb(34, 160, 110),
         warning: rgb(210, 150, 50),
         info: rgb(70, 140, 210),
@@ -191,8 +191,8 @@ fn arctic_light_colors() -> ColorTokens {
         foreground: rgb(42, 36, 32),
         surface: rgb(255, 252, 248),
         surface_foreground: rgb(42, 36, 32),
-        primary: rgb(200, 95, 75),
-        primary_foreground: rgb(250, 246, 242),
+        primary: rgb(21, 153, 148),
+        primary_foreground: rgb(255, 255, 255),
         secondary: rgb(236, 228, 220),
         secondary_foreground: rgb(42, 36, 32),
         muted: rgb(244, 238, 232),
@@ -203,8 +203,8 @@ fn arctic_light_colors() -> ColorTokens {
         destructive_foreground: rgb(250, 246, 242),
         border: rgb(200, 192, 184),
         input: rgb(255, 255, 252),
-        ring: rgb(200, 95, 75),
-        selection: rgba(200, 95, 75, 35),
+        ring: rgb(21, 153, 148),
+        selection: rgba(21, 153, 148, 35),
         success: rgb(24, 140, 95),
         warning: rgb(190, 130, 40),
         info: rgb(50, 120, 190),
@@ -293,14 +293,14 @@ mod tests {
     use super::{ActiveTheme, Theme, ThemeMode};
     use knox_gpui::{App, Hsla, px};
 
-    /// D7.1 done-when: `cx.theme().colors.primary` is the coral accent.
+    /// D7.1 done-when: `cx.theme().colors.primary` is the teal accent.
     #[test]
-    fn aurora_primary_is_coral_accent() {
+    fn aurora_primary_is_teal_accent() {
         let mut cx = App::new();
         Theme::install(&mut cx, Theme::aurora_dark());
-        let coral = Hsla::from_rgb(232, 121, 100).to_bgra();
-        assert_eq!(cx.theme().colors.primary.to_bgra(), coral);
-        assert_eq!(cx.theme().colors.ring.to_bgra(), coral);
+        let teal = Hsla::from_rgb(21, 153, 148).to_bgra();
+        assert_eq!(cx.theme().colors.primary.to_bgra(), teal);
+        assert_eq!(cx.theme().colors.ring.to_bgra(), teal);
         assert_eq!(cx.theme().mode, ThemeMode::Dark);
     }
 
@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(cx.theme().mode, ThemeMode::Light);
         assert_eq!(
             cx.theme().colors.primary.to_bgra(),
-            Hsla::from_rgb(200, 95, 75).to_bgra()
+            Hsla::from_rgb(21, 153, 148).to_bgra()
         );
         assert!(
             cx.theme().colors.background.l > cx.theme().colors.foreground.l,
@@ -325,7 +325,7 @@ mod tests {
         Theme::change(&mut cx, ThemeMode::Dark);
         assert_eq!(
             cx.theme().colors.primary.to_bgra(),
-            Hsla::from_rgb(232, 121, 100).to_bgra()
+            Hsla::from_rgb(21, 153, 148).to_bgra()
         );
     }
 
@@ -366,7 +366,7 @@ mod tests {
         let t = Theme::aurora_dark().with_high_contrast(false);
         assert_eq!(
             t.colors.primary.to_bgra(),
-            Hsla::from_rgb(232, 121, 100).to_bgra()
+            Hsla::from_rgb(21, 153, 148).to_bgra()
         );
     }
 }

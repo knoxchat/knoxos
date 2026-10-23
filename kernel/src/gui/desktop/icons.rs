@@ -38,7 +38,7 @@ pub(crate) fn draw_desktop_icons(fb: &mut FrameBuffer) {
             );
             fb.draw_rounded_rect(
                 Rect::new(icon.x, icon.y, ICON_WIDTH, ICON_HEIGHT),
-                Pixel::new(200, 140, 120, 50),
+                colors::with_alpha(colors::ACCENT_BRIGHT, 50),
                 6,
                 1,
             );
@@ -75,12 +75,12 @@ pub(crate) fn draw_desktop_icons(fb: &mut FrameBuffer) {
             // Floating card with glow
             fb.fill_rounded_rect_aa(
                 Rect::new(dx, dy, ICON_WIDTH, ICON_HEIGHT),
-                Pixel::new(200, 130, 110, 45),
+                colors::with_alpha(colors::ACCENT_PRIMARY, 45),
                 6,
             );
             fb.draw_rounded_rect(
                 Rect::new(dx, dy, ICON_WIDTH, ICON_HEIGHT),
-                Pixel::new(232, 160, 140, 100),
+                colors::with_alpha(colors::ACCENT_BRIGHT, 100),
                 6,
                 1,
             );
@@ -126,8 +126,7 @@ pub(crate) fn draw_rubber_band(fb: &mut FrameBuffer) {
     if let Some(rb) = desktop.rubber_band {
         let rect = rb.to_rect();
         // Semi-transparent fill
-        fb.fill_rounded_rect_aa(rect, Pixel::new(232, 121, 100, 25), 2);
-        // Warm border
-        fb.draw_rounded_rect(rect, Pixel::new(232, 140, 120, 120), 2, 1);
+        fb.fill_rounded_rect_aa(rect, colors::ICON_BG_SELECTED, 2);
+        fb.draw_rounded_rect(rect, colors::with_alpha(colors::ACCENT_BRIGHT, 120), 2, 1);
     }
 }

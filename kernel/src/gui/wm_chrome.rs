@@ -161,11 +161,11 @@ impl Window {
                 self.rect.x + 2,
                 self.rect.y + 1,
                 self.rect.width.saturating_sub(4),
-                Pixel::new(200, 150, 130, 22),
+                colors::with_alpha(colors::ACCENT_PRIMARY, 22),
             );
             fb.draw_rounded_rect(
                 inner_glow_rect,
-                Pixel::new(200, 140, 120, 12),
+                colors::with_alpha(colors::ACCENT_BRIGHT, 12),
                 r.saturating_sub(1),
                 1,
             );
@@ -177,9 +177,14 @@ impl Window {
                 self.rect.x + r as i32,
                 self.rect.y,
                 self.rect.width - r * 2,
-                Pixel::new(232, 121, 100, 70),
+                colors::with_alpha(colors::ACCENT_PRIMARY, 70),
             );
-            fb.draw_rounded_rect(self.rect, Pixel::new(180, 120, 100, 40), r, 1);
+            fb.draw_rounded_rect(
+                self.rect,
+                colors::with_alpha(colors::ACCENT_PRIMARY, 40),
+                r,
+                1,
+            );
         } else {
             fb.draw_rounded_rect(self.rect, border_color, r, 1);
         }
@@ -224,12 +229,12 @@ impl Window {
                 self.rect.x + 3,
                 self.rect.y + 2,
                 self.rect.width.saturating_sub(6),
-                Pixel::new(200, 150, 130, 20),
+                colors::with_alpha(colors::ACCENT_PRIMARY, 20),
             );
         }
 
         let sep_color = if self.focused {
-            Pixel::new(232, 140, 120, 22)
+            colors::with_alpha(colors::ACCENT_BRIGHT, 22)
         } else {
             Pixel::new(255, 255, 255, 8)
         };
@@ -430,7 +435,7 @@ impl Window {
         // ── Resize grip indicator ──
         if self.resizable && self.state == WindowState::Normal {
             let grip_color = if self.focused {
-                Pixel::new(200, 150, 130, 50)
+                colors::with_alpha(colors::ACCENT_PRIMARY, 50)
             } else {
                 Pixel::new(140, 130, 120, 30)
             };

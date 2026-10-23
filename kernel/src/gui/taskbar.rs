@@ -327,7 +327,12 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
 
     // Multi-layer warm border (creates depth)
     // Outer border with warm accent
-    fb.draw_rounded_rect(dock_rect, Pixel::new(200, 150, 130, 50), DOCK_RADIUS, 1);
+    fb.draw_rounded_rect(
+        dock_rect,
+        colors::with_alpha(colors::ACCENT_PRIMARY, 50),
+        DOCK_RADIUS,
+        1,
+    );
 
     // Inner highlight for 3D bevel effect
     let inner_rect = Rect::new(dock_x + 1, dock_y + 1, dock_w - 2, DOCK_BAR_HEIGHT - 2);
@@ -366,7 +371,7 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
         let menu_open = super::startmenu::is_visible();
 
         if menu_open || hovered {
-            fb.fill_rounded_rect_aa(btn_rect, Pixel::new(232, 121, 100, 50), 8);
+            fb.fill_rounded_rect_aa(btn_rect, colors::with_alpha(colors::ACCENT_PRIMARY, 50), 8);
         }
 
         // App grid icon (9 dots in 3×3 grid)
@@ -374,9 +379,9 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
         let dot_r = 2u32;
         let dot_spacing = 7i32;
         let dot_color = if hovered {
-            Pixel::new(232, 140, 120, 255)
+            colors::ACCENT_BRIGHT
         } else {
-            Pixel::new(200, 160, 140, 200)
+            Pixel::new(140, 168, 165, 200)
         };
         for row in -1..=1i32 {
             for col in -1..=1i32 {
@@ -409,8 +414,12 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
             let is_hovered = dot_rect.contains(hover_mx, hover_my);
 
             if is_active {
-                // Active workspace: warm coral pill
-                fb.fill_rounded_rect_aa(dot_rect, Pixel::new(232, 121, 100, 180), 4);
+                // Active workspace: teal pill
+                fb.fill_rounded_rect_aa(
+                    dot_rect,
+                    colors::with_alpha(colors::ACCENT_PRIMARY, 180),
+                    4,
+                );
                 // Glow effect
                 let glow_rect = Rect::new(
                     dot_x - 1,
@@ -418,9 +427,18 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
                     workspace_dot_size as u32 + 2,
                     workspace_dot_size as u32 + 2,
                 );
-                fb.draw_rounded_rect(glow_rect, Pixel::new(232, 121, 100, 50), 5, 1);
+                fb.draw_rounded_rect(
+                    glow_rect,
+                    colors::with_alpha(colors::ACCENT_PRIMARY, 50),
+                    5,
+                    1,
+                );
             } else if is_hovered {
-                fb.fill_rounded_rect_aa(dot_rect, Pixel::new(180, 140, 130, 120), 4);
+                fb.fill_rounded_rect_aa(
+                    dot_rect,
+                    colors::with_alpha(colors::ACCENT_PRIMARY, 80),
+                    4,
+                );
             } else {
                 // Inactive: dim pill
                 fb.fill_rounded_rect_aa(dot_rect, Pixel::new(60, 55, 50, 100), 4);
@@ -464,9 +482,9 @@ pub fn draw_taskbar(fb: &mut FrameBuffer) {
 
         // Background glow on hover or active
         if entry.active {
-            fb.fill_rounded_rect_aa(item_rect, Pixel::new(232, 121, 100, 65), 8);
+            fb.fill_rounded_rect_aa(item_rect, colors::with_alpha(colors::ACCENT_PRIMARY, 65), 8);
         } else if hovered {
-            fb.fill_rounded_rect_aa(item_rect, Pixel::new(232, 121, 100, 50), 8);
+            fb.fill_rounded_rect_aa(item_rect, colors::with_alpha(colors::ACCENT_PRIMARY, 50), 8);
         }
 
         // Draw app icon (20×20 centered in 36×36 cell)

@@ -9,6 +9,7 @@
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gui::framebuffer::Pixel;
 use crate::gui::taskbar;
@@ -46,6 +47,16 @@ fn freeze_hand_drawn_launcher(canonical: &str) {
         FROZEN_HAND_DRAWN_LAUNCHERS.contains(&canonical),
         "D0.2 freeze: {canonical:?} is not a frozen hand-drawn app; new surfaces must be Knox GPUI views"
     );
+}
+
+/// Open Settings once when a session first reaches the desktop.
+/// Kit Gallery stays in the app list; it is not a boot window.
+pub fn open_session_defaults() {
+    static DONE: AtomicBool = AtomicBool::new(false);
+    if DONE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    open_application("Settings", IconType::Settings);
 }
 
 /// Open an application by creating a new in-kernel window.

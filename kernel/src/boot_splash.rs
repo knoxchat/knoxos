@@ -104,7 +104,7 @@ fn paint_card(fb: &mut FrameBuffer, percent: u32) {
                 width: fill_w,
                 height: 8,
             },
-            Pixel::rgb(232, 121, 100),
+            Pixel::rgb(21, 153, 148),
         );
     }
     y += 24;

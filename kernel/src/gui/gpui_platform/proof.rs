@@ -32,7 +32,7 @@ pub const GATE_GPUI_CHROME: &str = "GATE_GPUI chrome";
 
 pub(super) static PROOF_WINDOW: AtomicU64 = AtomicU64::new(0);
 pub(super) static ACCENT_ON: AtomicBool = AtomicBool::new(true);
-static GALLERY_HIDDEN: AtomicBool = AtomicBool::new(false);
+static GALLERY_HIDDEN: AtomicBool = AtomicBool::new(true);
 static GALLERY_MAXIMIZED: AtomicBool = AtomicBool::new(false);
 static GALLERY_MINIMIZING: AtomicBool = AtomicBool::new(false);
 static D8: Mutex<D8ButtonsSnapshot> = Mutex::new(D8ButtonsSnapshot {
@@ -361,7 +361,9 @@ pub fn focus_kit_gallery() {
     GALLERY_HIDDEN.store(false, Ordering::SeqCst);
     GALLERY_MINIMIZING.store(false, Ordering::SeqCst);
     D8R.lock().page = 0;
+    super::pump::begin_gallery_enter();
     crate::serial_println!("[gpui] {}", GATE_GPUI_KIT_GALLERY);
+    crate::gui::request_redraw();
 }
 
 pub(super) fn proof_tree(theme: &Theme, phase: f32, reduced_motion: bool) -> Div {

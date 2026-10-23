@@ -200,9 +200,9 @@ impl StyleRefinement {
     }
 }
 
-/// Default focus-ring color (Aurora coral `ring` token).
+/// Default focus-ring color (Aurora teal `ring` token, `#159994`).
 pub fn ring_color() -> Hsla {
-    Hsla::from_rgb(232, 121, 100)
+    Hsla::from_rgb(21, 153, 148)
 }
 
 /// Pointer / focus bits used when resolving [`StyleRefinement`]s.

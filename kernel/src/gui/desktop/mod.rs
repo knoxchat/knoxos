@@ -11,7 +11,9 @@ mod types;
 mod wallpaper;
 mod zoom;
 
-pub use apps::{open_application, open_browser_at, open_editor_at, open_explorer_at};
+pub use apps::{
+    open_application, open_browser_at, open_editor_at, open_explorer_at, open_session_defaults,
+};
 pub use context_menu::{
     close_context_menu, execute_action as execute_context_action, handle_context_menu_click,
     show_context_menu,

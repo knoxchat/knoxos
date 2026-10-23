@@ -296,6 +296,7 @@ pub fn handle_enter() {
 
             // Set the logged-in user context
             LOGGED_IN.store(true, Ordering::Relaxed);
+            super::desktop::open_session_defaults();
             super::sounds::login();
             super::request_redraw();
         }

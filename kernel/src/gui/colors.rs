@@ -1,7 +1,7 @@
 /// Color Theme — "Aurora" Sophisticated Design Language for KnoxOS
 /// Warm slate palette with organic depth, soft translucency, and
-/// rose gold / coral accent colors. Designed for a refined,
-/// human-centered desktop experience with natural warmth.
+/// teal accent (`#159994`). Designed for a refined, human-centered
+/// desktop experience.
 use super::framebuffer::Pixel;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -9,8 +9,9 @@ use super::framebuffer::Pixel;
 // Used across all KnoxUI widgets for consistent theming.
 // ═══════════════════════════════════════════════════════════════════════
 
-// Accent / Brand
-pub const ACCENT_PRIMARY: Pixel = Pixel::new(232, 121, 100, 255); // Warm coral
+// Accent / Brand — `#159994` teal and a lighter hover sibling
+pub const ACCENT_PRIMARY: Pixel = Pixel::new(21, 153, 148, 255);
+pub const ACCENT_BRIGHT: Pixel = Pixel::new(42, 168, 164, 255);
 pub const ACCENT_SECONDARY: Pixel = Pixel::new(180, 140, 200, 255); // Soft lavender
 
 // Text hierarchy
@@ -38,17 +39,17 @@ pub const WALLPAPER_BASE: Pixel = Pixel::new(22, 20, 26, 255); // Deep warm char
 pub const WALLPAPER_DARK: Pixel = Pixel::new(12, 11, 14, 255); // Near-black warm
 pub const WALLPAPER_MID: Pixel = Pixel::new(32, 28, 36, 255); // Warm slate
 pub const WALLPAPER_LIGHT: Pixel = Pixel::new(44, 38, 48, 255); // Muted plum
-pub const WALLPAPER_ACCENT: Pixel = Pixel::new(232, 121, 100, 255); // Coral
+pub const WALLPAPER_ACCENT: Pixel = Pixel::new(21, 153, 148, 255); // Teal
 
 // Organic aurora accent colors
-pub const ORB_CORAL: Pixel = Pixel::new(232, 121, 100, 255); // Warm coral
+pub const ORB_CORAL: Pixel = Pixel::new(21, 153, 148, 255); // Brand teal
 pub const ORB_LAVENDER: Pixel = Pixel::new(160, 130, 200, 255); // Soft lavender
 pub const ORB_PEACH: Pixel = Pixel::new(240, 170, 130, 255); // Peach
 pub const ORB_SAGE: Pixel = Pixel::new(130, 180, 150, 255); // Sage green
 
-// Active app indicator dots (warm coral dots below icons)
-pub const DOCK_INDICATOR_ACTIVE: Pixel = Pixel::new(232, 121, 100, 255); // Coral
-pub const DOCK_INDICATOR_GLOW: Pixel = Pixel::new(232, 121, 100, 50); // Glow halo
+// Active app indicator dots (teal dots below icons)
+pub const DOCK_INDICATOR_ACTIVE: Pixel = Pixel::new(21, 153, 148, 255);
+pub const DOCK_INDICATOR_GLOW: Pixel = Pixel::new(21, 153, 148, 50);
 
 // ═══════════════════════════════════════════════════════════════════════
 // WINDOW CHROME — Warm Translucent Material
@@ -75,19 +76,19 @@ pub const SHADOW_CONTACT: Pixel = Pixel::new(0, 0, 0, 255); // Sharp contact sha
 // ═══════════════════════════════════════════════════════════════════════
 pub const ICON_TEXT: Pixel = Pixel::new(235, 228, 220, 255); // Warm white
 pub const ICON_TEXT_SHADOW: Pixel = Pixel::new(0, 0, 0, 140);
-pub const ICON_BG_SELECTED: Pixel = Pixel::new(232, 121, 100, 25); // Coral selection
-pub const ICON_BG_FOCUSED: Pixel = Pixel::new(232, 121, 100, 40); // Coral focus
-pub const ICON_BORDER_SELECTED: Pixel = Pixel::new(232, 121, 100, 55); // Coral border
-pub const ICON_BORDER_FOCUSED: Pixel = Pixel::new(232, 121, 100, 85); // Coral bright
+pub const ICON_BG_SELECTED: Pixel = Pixel::new(21, 153, 148, 25);
+pub const ICON_BG_FOCUSED: Pixel = Pixel::new(21, 153, 148, 40);
+pub const ICON_BORDER_SELECTED: Pixel = Pixel::new(21, 153, 148, 55);
+pub const ICON_BORDER_FOCUSED: Pixel = Pixel::new(21, 153, 148, 85);
 
 // ═══════════════════════════════════════════════════════════════════════
 // START MENU / COMMAND CENTER
 // ═══════════════════════════════════════════════════════════════════════
 pub const START_MENU_BG: Pixel = Pixel::new(26, 24, 22, 230); // Warm deep surface
-pub const START_MENU_HOVER: Pixel = Pixel::new(232, 121, 100, 35); // Coral hover
+pub const START_MENU_HOVER: Pixel = Pixel::new(21, 153, 148, 35);
 pub const START_MENU_SIDEBAR_BG: Pixel = Pixel::new(20, 18, 16, 235);
 pub const START_MENU_SHADOW: Pixel = Pixel::new(0, 0, 0, 100);
-pub const START_MENU_ACTIVE_BORDER: Pixel = Pixel::new(232, 121, 100, 180); // Coral
+pub const START_MENU_ACTIVE_BORDER: Pixel = Pixel::new(21, 153, 148, 180);
 
 // ═══════════════════════════════════════════════════════════════════════
 // PANEL COLORS
@@ -101,14 +102,14 @@ pub const PANEL_BORDER: Pixel = Pixel::new(120, 100, 80, 35);
 pub const BLACK: Pixel = Pixel::new(0, 0, 0, 255);
 pub const WHITE: Pixel = Pixel::new(255, 255, 255, 255);
 pub const TRANSPARENT: Pixel = Pixel::new(0, 0, 0, 0);
-pub const HIGHLIGHT: Pixel = Pixel::new(232, 121, 100, 240); // Coral highlight
-pub const SELECTION: Pixel = Pixel::new(232, 140, 120, 200); // Coral selection
-pub const TEXT_SELECTION_BG: Pixel = Pixel::new(232, 121, 100, 160);
+pub const HIGHLIGHT: Pixel = Pixel::new(21, 153, 148, 240);
+pub const SELECTION: Pixel = Pixel::new(42, 168, 164, 200);
+pub const TEXT_SELECTION_BG: Pixel = Pixel::new(21, 153, 148, 160);
 
-// Button colors (warm palette)
-pub const BUTTON_PRIMARY: Pixel = Pixel::new(232, 121, 100, 255); // Coral
-pub const BUTTON_PRIMARY_HOVER: Pixel = Pixel::new(240, 140, 120, 255);
-pub const BUTTON_PRIMARY_ACTIVE: Pixel = Pixel::new(210, 105, 85, 255);
+// Button colors
+pub const BUTTON_PRIMARY: Pixel = Pixel::new(21, 153, 148, 255);
+pub const BUTTON_PRIMARY_HOVER: Pixel = Pixel::new(42, 173, 168, 255);
+pub const BUTTON_PRIMARY_ACTIVE: Pixel = Pixel::new(16, 122, 118, 255);
 pub const BUTTON_SUCCESS: Pixel = Pixel::new(100, 200, 130, 255); // Sage green
 pub const BUTTON_SUCCESS_HOVER: Pixel = Pixel::new(120, 215, 148, 255);
 pub const BUTTON_DANGER: Pixel = Pixel::new(235, 87, 87, 255); // Soft red
@@ -119,7 +120,7 @@ pub const BUTTON_WARNING_HOVER: Pixel = Pixel::new(248, 200, 90, 255);
 // ═══════════════════════════════════════════════════════════════════════
 // AI ASSISTANT — Warm Gradient Palette
 // ═══════════════════════════════════════════════════════════════════════
-pub const AI_BALANCED_1: Pixel = Pixel::new(232, 155, 130, 255); // Light coral
+pub const AI_BALANCED_1: Pixel = Pixel::new(48, 180, 174, 255); // Light teal
 pub const AI_BALANCED_2: Pixel = Pixel::new(180, 140, 200, 255); // Lavender
 pub const AI_BALANCED_3: Pixel = Pixel::new(200, 120, 160, 255); // Rose
 
@@ -135,16 +136,16 @@ pub const PROGRESS_BG: Pixel = Pixel::new(32, 28, 26, 180);
 pub const SCROLLBAR_TRACK: Pixel = Pixel::new(26, 24, 22, 200);
 pub const SCROLLBAR_THUMB: Pixel = Pixel::new(85, 75, 68, 140);
 pub const SCROLLBAR_THUMB_HOVER: Pixel = Pixel::new(120, 105, 92, 170);
-pub const SCROLLBAR_THUMB_ACTIVE: Pixel = Pixel::new(232, 121, 100, 180);
+pub const SCROLLBAR_THUMB_ACTIVE: Pixel = Pixel::new(21, 153, 148, 180);
 
 // ═══════════════════════════════════════════════════════════════════════
 // TERMINAL — Warm Dusk Theme
 // ═══════════════════════════════════════════════════════════════════════
 pub const TERMINAL_BG: Pixel = Pixel::new(18, 16, 14, 255); // Deep warm black
 pub const TERMINAL_FG: Pixel = Pixel::new(210, 200, 190, 255); // Warm cream
-pub const TERMINAL_CURSOR: Pixel = Pixel::new(232, 121, 100, 255); // Coral cursor
-pub const TERMINAL_SELECTION: Pixel = Pixel::new(232, 121, 100, 60);
-pub const TERMINAL_PROMPT_USER: Pixel = Pixel::new(232, 155, 130, 255); // Light coral
+pub const TERMINAL_CURSOR: Pixel = Pixel::new(21, 153, 148, 255);
+pub const TERMINAL_SELECTION: Pixel = Pixel::new(21, 153, 148, 60);
+pub const TERMINAL_PROMPT_USER: Pixel = Pixel::new(48, 180, 174, 255);
 pub const TERMINAL_PROMPT_HOST: Pixel = Pixel::new(200, 190, 180, 255);
 pub const TERMINAL_PROMPT_PATH: Pixel = Pixel::new(160, 140, 200, 255); // Lavender
 pub const TERMINAL_PROMPT_SIGIL: Pixel = Pixel::new(130, 190, 150, 255); // Sage

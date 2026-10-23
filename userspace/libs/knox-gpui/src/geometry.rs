@@ -1122,11 +1122,11 @@ mod tests {
     }
 
     #[test]
-    fn aurora_coral_from_rgb_to_bgra() {
-        // Theme accent (kernel `theme.rs` Aurora Dark `accent_primary`).
-        let coral = Hsla::from_rgb(232, 121, 100).to_bgra();
-        assert_eq!(coral, Bgra::rgb(232, 121, 100));
-        assert_eq!(coral.to_bytes(), [100, 121, 232, 255]);
+    fn aurora_teal_from_rgb_to_bgra() {
+        // Theme accent (kernel `theme.rs` Aurora Dark `accent_primary`, `#159994`).
+        let teal = Hsla::from_rgb(21, 153, 148).to_bgra();
+        assert_eq!(teal, Bgra::rgb(21, 153, 148));
+        assert_eq!(teal.to_bytes(), [148, 153, 21, 255]);
     }
 
     #[test]

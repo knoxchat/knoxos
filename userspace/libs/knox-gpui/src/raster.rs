@@ -1007,7 +1007,7 @@ mod tests {
         scene.push_quad(Quad::new(card, Hsla::from_rgb(44, 40, 50)).rounded(px(6)));
         scene.push_quad(Quad::new(
             Bounds::from_xywh(pad, pad + 6, 4, 12),
-            Hsla::from_rgb(232, 121, 100),
+            Hsla::from_rgb(21, 153, 148),
         ));
 
         let mut buf = RasterBuffer::new(64, 48);
@@ -1031,7 +1031,7 @@ mod tests {
         // Accent on the flat left edge.
         assert_eq!(
             buf.pixel(pad, pad + 8),
-            Some(Hsla::from_rgb(232, 121, 100).to_bgra())
+            Some(Hsla::from_rgb(21, 153, 148).to_bgra())
         );
 
         // Shadow halo below the card (offset y=3, blur=6).

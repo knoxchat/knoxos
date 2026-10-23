@@ -267,19 +267,19 @@ mod tests {
     #[test]
     fn splash_progress_paints_primary() {
         let buf = paint(40.0);
-        let mut coral = 0u32;
+        let mut teal = 0u32;
         for y in 0..SPLASH_CARD_H {
             for x in 0..SPLASH_CARD_W {
                 if let Some(p) = buf.pixel(x, y) {
-                    if p.a > 180 && p.r > 180 && p.g > 70 && p.g < 170 && p.b < 150 {
-                        coral += 1;
+                    if p.a > 180 && p.g > 120 && p.b > 110 && p.r < 80 && p.g > p.r {
+                        teal += 1;
                     }
                 }
             }
         }
         assert!(
-            coral > 40,
-            "progress / mark accent must paint coral, got {coral}"
+            teal > 40,
+            "progress / mark accent must paint teal, got {teal}"
         );
     }
 

@@ -101,7 +101,7 @@ impl Image {
         self.pixels(w, h, pixels)
     }
 
-    /// Coral→slate gradient used by the D8.2 gallery.
+    /// Teal→slate gradient used by the D8.2 gallery.
     pub fn demo_gradient(width: i32, height: i32) -> Self {
         let w = width.max(1) as u32;
         let h = height.max(1) as u32;
@@ -109,9 +109,9 @@ impl Image {
         for y in 0..h {
             for x in 0..w {
                 let t = x as f32 / w.max(1) as f32;
-                let r = (232.0 * (1.0 - t) + 70.0 * t) as u8;
-                let g = (121.0 * (1.0 - t) + 65.0 * t) as u8;
-                let b = (100.0 * (1.0 - t) + 78.0 * t) as u8;
+                let r = (21.0 * (1.0 - t) + 70.0 * t) as u8;
+                let g = (153.0 * (1.0 - t) + 65.0 * t) as u8;
+                let b = (148.0 * (1.0 - t) + 78.0 * t) as u8;
                 let i = ((y * w + x) * 4) as usize;
                 pixels[i] = b;
                 pixels[i + 1] = g;
@@ -282,7 +282,7 @@ mod tests {
         buf.draw_with_atlas(&scene, Some(&atlas));
         let left = buf.pixel(0, 1).unwrap();
         let right = buf.pixel(7, 1).unwrap();
-        assert!(left.r > right.r, "coral should sit on the left");
+        assert!(left.g > right.g, "teal should sit on the left");
         assert_eq!(left.a, 255);
         let _ = px(1);
     }

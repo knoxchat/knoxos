@@ -24,7 +24,7 @@ impl ColorPicker {
     pub fn new() -> Self {
         Self {
             theme: Theme::default(),
-            color: Hsla::from_rgb(232, 121, 100),
+            color: Hsla::from_rgb(21, 153, 148),
             on_change: None,
         }
     }

@@ -862,7 +862,7 @@ impl Default for D8FormsSnapshot {
             number_text: FieldState::from("4"),
             otp: String::new(),
             slider: 40.0,
-            color: knox_gpui::Hsla::from_rgb(232, 121, 100),
+            color: knox_gpui::Hsla::from_rgb(21, 153, 148),
             name: FieldState::empty(),
         }
     }

@@ -1038,12 +1038,12 @@ fn draw_tab_bar(fb: &mut FrameBuffer, panel_x: i32, tab_y: i32, panel_w: u32, me
         if is_active {
             fb.fill_rounded_rect_aa(
                 Rect::new(tx, ty, tw, tab_h),
-                Pixel::new(232, 121, 100, 45),
+                colors::with_alpha(colors::ACCENT_PRIMARY, 45),
                 8,
             );
             fb.draw_rounded_rect(
                 Rect::new(tx, ty, tw, tab_h),
-                Pixel::new(232, 140, 120, 60),
+                colors::with_alpha(colors::ACCENT_BRIGHT, 60),
                 8,
                 1,
             );
@@ -1054,7 +1054,7 @@ fn draw_tab_bar(fb: &mut FrameBuffer, panel_x: i32, tab_y: i32, panel_w: u32, me
         let text_y = ty + (tab_h as i32 - 12) / 2;
 
         let icon_color = if is_active {
-            Pixel::new(232, 140, 120, 255)
+            colors::ACCENT_BRIGHT
         } else {
             Pixel::new(140, 120, 110, 160)
         };
@@ -1119,7 +1119,7 @@ fn draw_search_bar(
     );
 
     let border_color = if menu.search_active && menu.active_tab == CommandCenterTab::Apps {
-        Pixel::new(232, 121, 100, 60)
+        colors::with_alpha(colors::ACCENT_PRIMARY, 60)
     } else if menu.active_tab == CommandCenterTab::AI {
         Pixel::new(180, 140, 200, 50)
     } else {
@@ -1283,10 +1283,10 @@ fn draw_apps_content(
 
         let is_hovered = menu.hovered_index == Some(vi);
         if is_hovered {
-            fb.fill_rounded_rect_aa(item_rect, Pixel::new(232, 121, 100, 35), 10);
+            fb.fill_rounded_rect_aa(item_rect, colors::START_MENU_HOVER, 10);
             fb.fill_rounded_rect_aa(
                 Rect::new(panel_x + ITEM_INSET, item_y + 8, 3, MENU_ITEM_HEIGHT - 16),
-                Pixel::new(232, 140, 120, 200),
+                colors::with_alpha(colors::ACCENT_BRIGHT, 200),
                 1,
             );
         }
@@ -1334,7 +1334,7 @@ fn draw_apps_content(
             let badge_x = panel_x + panel_w as i32 - ITEM_INSET - badge_w as i32 - 8;
             let badge_y = item_y + (MENU_ITEM_HEIGHT as i32 - 16) / 2;
             let badge_color = match item.category {
-                MenuCategory::Pinned => Pixel::new(232, 121, 100, 45),
+                MenuCategory::Pinned => colors::with_alpha(colors::ACCENT_PRIMARY, 45),
                 MenuCategory::Game => Pixel::new(230, 150, 60, 45),
                 MenuCategory::AI => Pixel::new(180, 140, 200, 45),
                 MenuCategory::Media => Pixel::new(130, 180, 150, 42),
@@ -1553,7 +1553,12 @@ fn draw_ai_content(
             for dot in 0..3 {
                 let dx = panel_x + PAD_H + 22 + dot * 10;
                 let alpha = 120u8 + ((dot as u8 * 40) % 135);
-                fb.fill_circle_aa(dx, thinking_y + 8, 3, Pixel::new(232, 140, 120, alpha));
+                fb.fill_circle_aa(
+                    dx,
+                    thinking_y + 8,
+                    3,
+                    colors::with_alpha(colors::ACCENT_BRIGHT, alpha),
+                );
             }
         }
     }
@@ -1641,7 +1646,7 @@ fn draw_ai_content(
     let send_size = AI_INPUT_H - 8;
     fb.fill_rounded_rect_aa(
         Rect::new(send_x, input_y + 4, send_size, send_size),
-        Pixel::new(200, 130, 110, 180),
+        colors::with_alpha(colors::ACCENT_PRIMARY, 180),
         8,
     );
     let arrow_cx = send_x + send_size as i32 / 2;
@@ -1897,7 +1902,7 @@ fn draw_agent_task(fb: &mut FrameBuffer, x: i32, y: i32, w: u32, task: &AgentTas
 
     let status_color = match task.status {
         TaskStatus::Queued => Pixel::new(140, 132, 126, 200),
-        TaskStatus::Running => Pixel::new(232, 140, 120, 240),
+        TaskStatus::Running => colors::with_alpha(colors::ACCENT_BRIGHT, 240),
         TaskStatus::Complete => Pixel::new(130, 190, 150, 230),
         TaskStatus::Failed => Pixel::new(220, 85, 85, 230),
         TaskStatus::Paused => Pixel::new(230, 180, 70, 200),
@@ -1905,7 +1910,12 @@ fn draw_agent_task(fb: &mut FrameBuffer, x: i32, y: i32, w: u32, task: &AgentTas
     fb.fill_circle_aa(x + 16, y + 14, 5, status_color);
 
     if task.status == TaskStatus::Running {
-        fb.draw_circle_aa(x + 16, y + 14, 7, Pixel::new(232, 140, 120, 70));
+        fb.draw_circle_aa(
+            x + 16,
+            y + 14,
+            7,
+            colors::with_alpha(colors::ACCENT_BRIGHT, 70),
+        );
     }
 
     font_engine::draw_ui_text(
@@ -1939,7 +1949,7 @@ fn draw_agent_task(fb: &mut FrameBuffer, x: i32, y: i32, w: u32, task: &AgentTas
     let fill_w = ((bar_w as u64 * task.progress as u64) / 100) as u32;
     if fill_w > 0 {
         let fill_color = match task.status {
-            TaskStatus::Running => Pixel::new(232, 140, 120, 200),
+            TaskStatus::Running => colors::with_alpha(colors::ACCENT_BRIGHT, 200),
             TaskStatus::Complete => Pixel::new(130, 190, 150, 200),
             TaskStatus::Failed => Pixel::new(220, 85, 85, 200),
             _ => Pixel::new(140, 132, 126, 160),

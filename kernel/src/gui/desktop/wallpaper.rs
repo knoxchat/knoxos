@@ -39,7 +39,7 @@ pub(crate) fn draw_wallpaper(fb: &mut FrameBuffer) {
     // ORGANIC BLOBS — Soft color washes with warm tones
     // ══════════════════════════════════════════════════════════
 
-    // Blob 1: Large coral glow (center-right)
+    // Blob 1: Large teal glow (center-right)
     {
         let cx = (w * 7 / 10) as i32;
         let cy = (h * 3 / 10) as i32;
@@ -55,7 +55,7 @@ pub(crate) fn draw_wallpaper(fb: &mut FrameBuffer) {
                     let t = 1.0 - (dist_sq / r_sq);
                     let alpha = (t * t * t * 28.0) as u8;
                     if alpha > 0 {
-                        fb.blend_pixel(px as usize, py as usize, Pixel::new(232, 121, 100, alpha));
+                        fb.blend_pixel(px as usize, py as usize, Pixel::new(21, 153, 148, alpha));
                     }
                 }
             }
@@ -106,7 +106,7 @@ pub(crate) fn draw_wallpaper(fb: &mut FrameBuffer) {
                 let t = 1.0 - dist_sq;
                 let alpha = (t * t * 10.0) as u8;
                 if alpha > 0 {
-                    fb.blend_pixel(px as usize, py as usize, Pixel::new(200, 130, 100, alpha));
+                    fb.blend_pixel(px as usize, py as usize, Pixel::new(21, 153, 148, alpha));
                 }
             }
         }
