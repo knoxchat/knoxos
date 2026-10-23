@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Integration **521/521**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Integration **555/555**.
 
 ---
 
@@ -56,6 +56,14 @@ A dynamically linked musl binary runs (BM4). VirtIO-GPU scanout + hardware curso
 ## 4. Still production (not the later list)
 
 Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md](remaining.md) from this section are **done**, including this batch:
+
+- FUSE DESTROY (`GATE_FUSE destroy`); FUSE IOCTL (`GATE_FUSE ioctl`); D-Bus Debug.Stats.GetStats (`GATE_DBUS stats`); D-Bus GetAllMatchRules (`GATE_DBUS matchrules`); XHCI SET_SEL (`GATE_USB xhci setsel`); XHCI SET_ISOCH_DELAY (`GATE_USB xhci isochdelay`); NFS OPEN_CONFIRM (`GATE_NFS openconfirm`); NFS OPEN_DOWNGRADE (`GATE_NFS downgrade`)
+
+- FUSE SETLKW (`GATE_FUSE setlkw`); FUSE BMAP (`GATE_FUSE bmap`); D-Bus Properties.GetAll (`GATE_DBUS getall`); D-Bus Properties.Set (`GATE_DBUS setprop`); XHCI GET_DESCRIPTOR(Other Speed Configuration) (`GATE_USB xhci oscfg`); XHCI SYNCH_FRAME (`GATE_USB xhci synch`); NFS LOCKT (`GATE_NFS lockt`); NFS RELEASE_LOCKOWNER (`GATE_NFS lockowner`)
+
+- FUSE GETLK (`GATE_FUSE getlk`); FUSE SETLK (`GATE_FUSE setlk`); D-Bus Introspect (`GATE_DBUS introspect`); D-Bus Properties.Get (`GATE_DBUS props`); XHCI GET_DESCRIPTOR(Device Qualifier) (`GATE_USB xhci qual`); XHCI GET_DESCRIPTOR(BOS) (`GATE_USB xhci bos`); NFS LOCK (`GATE_NFS lock`); NFS LOCKU (`GATE_NFS unlock`)
+
+- FUSE OPENDIR (`GATE_FUSE opendir`); FUSE RELEASEDIR (`GATE_FUSE releasedir`); D-Bus Peer Ping (`GATE_DBUS ping`); D-Bus Peer GetMachineId (`GATE_DBUS machineid`); XHCI Reset Device (`GATE_USB xhci resetdev`); XHCI Transfer No-Op (`GATE_USB xhci trnoop`); NFS CLOSE (`GATE_NFS close`); NFS RENEW (`GATE_NFS renew`)
 
 - FUSE FLUSH (`GATE_FUSE flush`); FUSE FSYNCDIR (`GATE_FUSE fsyncdir`); D-Bus ReloadConfig (`GATE_DBUS reload`); D-Bus BecomeMonitor (`GATE_DBUS monitor`); XHCI Reset Endpoint (`GATE_USB xhci resetep`); XHCI Set TR Dequeue Pointer (`GATE_USB xhci settr`); NFS NVERIFY (`GATE_NFS nverify`); NFS SETCLIENTID_CONFIRM (`GATE_NFS confirm`)
 

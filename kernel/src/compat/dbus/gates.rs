@@ -10,7 +10,7 @@ use super::connection::{connect, disconnect};
 use super::protocol::{DbusValue, Message, MessageType};
 use super::routing::{receive_message, send_message};
 use super::state::{
-    BusType, DBUS_NAME_FLAG_DO_NOT_QUEUE, DBUS_REQUEST_NAME_REPLY_IN_QUEUE,
+    BUS_FEATURES, BusType, DBUS_NAME_FLAG_DO_NOT_QUEUE, DBUS_REQUEST_NAME_REPLY_IN_QUEUE,
     DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, DBUS_START_REPLY_ALREADY_RUNNING,
     DBUS_START_REPLY_SUCCESS, GATE_ACTIVATABLE_NAME, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE,
     GATE_SELINUX_CONTEXT, MACHINE_ID,
@@ -1392,6 +1392,483 @@ pub fn monitor_self_test() -> bool {
             "[dbus] GATE_DBUS FAILED: BecomeMonitor replied={} matched={}",
             replied,
             matched
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_PING_MARKER: &str = "GATE_DBUS ping";
+
+/// `org.freedesktop.DBus.Peer.Ping` must return a method reply.
+pub fn ping_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB1F, 1000);
+    let ping = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Peer",
+        "Ping",
+    );
+    let serial = send_message(BusType::System, conn, ping);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && msg.body.is_empty()
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok {
+        serial_println!("[dbus] {} (Peer.Ping method return)", GATE_DBUS_PING_MARKER);
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: Peer.Ping");
+        false
+    }
+}
+
+pub const GATE_DBUS_MACHINEID_MARKER: &str = "GATE_DBUS machineid";
+
+/// `org.freedesktop.DBus.Peer.GetMachineId` must return the 32-hex machine UUID.
+pub fn machineid_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB20, 1000);
+    let get = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Peer",
+        "GetMachineId",
+    );
+    let serial = send_message(BusType::System, conn, get);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::String(id)) if id == MACHINE_ID && id.len() == 32
+                )
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok {
+        serial_println!(
+            "[dbus] {} (Peer.GetMachineId {})",
+            GATE_DBUS_MACHINEID_MARKER,
+            MACHINE_ID
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: Peer.GetMachineId");
+        false
+    }
+}
+
+pub const GATE_DBUS_INTROSPECT_MARKER: &str = "GATE_DBUS introspect";
+
+/// `org.freedesktop.DBus.Introspectable.Introspect` must return XML naming the bus interfaces.
+pub fn introspect_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB21, 1000);
+    let intro = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Introspectable",
+        "Introspect",
+    );
+    let serial = send_message(BusType::System, conn, intro);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::String(xml))
+                        if xml.contains("org.freedesktop.DBus.Introspectable")
+                            && xml.contains("org.freedesktop.DBus.Peer")
+                )
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok {
+        serial_println!(
+            "[dbus] {} (Introspectable.Introspect XML)",
+            GATE_DBUS_INTROSPECT_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: Introspect");
+        false
+    }
+}
+
+pub const GATE_DBUS_PROPS_MARKER: &str = "GATE_DBUS props";
+
+/// `Properties.Get(org.freedesktop.DBus, Features)` must return the advertised features.
+pub fn props_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB22, 1000);
+    let mut get = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Properties",
+        "Get",
+    );
+    get.body = vec![
+        DbusValue::String(String::from("org.freedesktop.DBus")),
+        DbusValue::String(String::from("Features")),
+    ];
+    get.signature = Some(String::from("ss"));
+    let serial = send_message(BusType::System, conn, get);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && match msg.body.first() {
+                    Some(DbusValue::Variant(inner)) => match inner.as_ref() {
+                        DbusValue::Array(items) => BUS_FEATURES.iter().all(|want| {
+                            items
+                                .iter()
+                                .any(|v| matches!(v, DbusValue::String(s) if s == *want))
+                        }),
+                        _ => false,
+                    },
+                    _ => false,
+                }
+        })
+        .unwrap_or(false);
+    let mut unknown = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Properties",
+        "Get",
+    );
+    unknown.body = vec![
+        DbusValue::String(String::from("org.freedesktop.DBus")),
+        DbusValue::String(String::from("NoSuchProperty")),
+    ];
+    unknown.signature = Some(String::from("ss"));
+    let bad_serial = send_message(BusType::System, conn, unknown);
+    let rejected = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Error
+                && msg.reply_serial == Some(bad_serial)
+                && msg.error_name.as_deref() == Some("org.freedesktop.DBus.Error.UnknownProperty")
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok && rejected {
+        serial_println!(
+            "[dbus] {} (Properties.Get Features then UnknownProperty)",
+            GATE_DBUS_PROPS_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: Properties.Get ok={} rejected={}",
+            ok,
+            rejected
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_GETALL_MARKER: &str = "GATE_DBUS getall";
+
+fn features_in_prop_dict(body: &[DbusValue]) -> bool {
+    let Some(DbusValue::Array(entries)) = body.first() else {
+        return false;
+    };
+    for entry in entries {
+        let DbusValue::DictEntry(key, value) = entry else {
+            continue;
+        };
+        if !matches!(key.as_ref(), DbusValue::String(s) if s == "Features") {
+            continue;
+        }
+        let DbusValue::Variant(inner) = value.as_ref() else {
+            continue;
+        };
+        let DbusValue::Array(items) = inner.as_ref() else {
+            continue;
+        };
+        return BUS_FEATURES.iter().all(|want| {
+            items
+                .iter()
+                .any(|v| matches!(v, DbusValue::String(s) if s == *want))
+        });
+    }
+    false
+}
+
+/// `Properties.GetAll(org.freedesktop.DBus)` must include Features; unknown interface fails.
+pub fn getall_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB23, 1000);
+    let mut getall = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Properties",
+        "GetAll",
+    );
+    getall.body = vec![DbusValue::String(String::from("org.freedesktop.DBus"))];
+    getall.signature = Some(String::from("s"));
+    let serial = send_message(BusType::System, conn, getall);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && features_in_prop_dict(&msg.body)
+        })
+        .unwrap_or(false);
+    let mut unknown = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Properties",
+        "GetAll",
+    );
+    unknown.body = vec![DbusValue::String(String::from("org.knoxos.NoSuch"))];
+    unknown.signature = Some(String::from("s"));
+    let bad_serial = send_message(BusType::System, conn, unknown);
+    let rejected = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Error
+                && msg.reply_serial == Some(bad_serial)
+                && msg.error_name.as_deref() == Some("org.freedesktop.DBus.Error.UnknownInterface")
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok && rejected {
+        serial_println!(
+            "[dbus] {} (Properties.GetAll Features then UnknownInterface)",
+            GATE_DBUS_GETALL_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: Properties.GetAll ok={} rejected={}",
+            ok,
+            rejected
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_SETPROP_MARKER: &str = "GATE_DBUS setprop";
+
+/// `Properties.Set(Features)` is PropertyReadOnly; an unknown name is UnknownProperty.
+pub fn setprop_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB24, 1000);
+    let mut set = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Properties",
+        "Set",
+    );
+    set.body = vec![
+        DbusValue::String(String::from("org.freedesktop.DBus")),
+        DbusValue::String(String::from("Features")),
+        DbusValue::Variant(Box::new(DbusValue::Array(Vec::new()))),
+    ];
+    set.signature = Some(String::from("ssv"));
+    let serial = send_message(BusType::System, conn, set);
+    let readonly = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Error
+                && msg.reply_serial == Some(serial)
+                && msg.error_name.as_deref() == Some("org.freedesktop.DBus.Error.PropertyReadOnly")
+        })
+        .unwrap_or(false);
+    let mut unknown = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Properties",
+        "Set",
+    );
+    unknown.body = vec![
+        DbusValue::String(String::from("org.freedesktop.DBus")),
+        DbusValue::String(String::from("NoSuchProperty")),
+        DbusValue::Variant(Box::new(DbusValue::String(String::from("x")))),
+    ];
+    unknown.signature = Some(String::from("ssv"));
+    let bad_serial = send_message(BusType::System, conn, unknown);
+    let rejected = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Error
+                && msg.reply_serial == Some(bad_serial)
+                && msg.error_name.as_deref() == Some("org.freedesktop.DBus.Error.UnknownProperty")
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if readonly && rejected {
+        serial_println!(
+            "[dbus] {} (Properties.Set Features PropertyReadOnly then UnknownProperty)",
+            GATE_DBUS_SETPROP_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: Properties.Set readonly={} rejected={}",
+            readonly,
+            rejected
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_STATS_MARKER: &str = "GATE_DBUS stats";
+
+fn stats_connections(body: &[DbusValue]) -> Option<u32> {
+    let DbusValue::Array(entries) = body.first()? else {
+        return None;
+    };
+    for entry in entries {
+        let DbusValue::DictEntry(key, value) = entry else {
+            continue;
+        };
+        if !matches!(key.as_ref(), DbusValue::String(s) if s == "Connections") {
+            continue;
+        }
+        let DbusValue::Variant(inner) = value.as_ref() else {
+            continue;
+        };
+        if let DbusValue::Uint32(n) = inner.as_ref() {
+            return Some(*n);
+        }
+    }
+    None
+}
+
+/// `Debug.Stats.GetStats` must include a non-zero Connections count.
+pub fn stats_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB25, 1000);
+    let stats = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Debug.Stats",
+        "GetStats",
+    );
+    let serial = send_message(BusType::System, conn, stats);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && stats_connections(&msg.body).unwrap_or(0) >= 1
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok {
+        serial_println!(
+            "[dbus] {} (Debug.Stats.GetStats Connections)",
+            GATE_DBUS_STATS_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: GetStats");
+        false
+    }
+}
+
+pub const GATE_DBUS_MATCHRULES_MARKER: &str = "GATE_DBUS matchrules";
+
+fn matchrules_has(body: &[DbusValue], unique: &str, needle: &str) -> bool {
+    let Some(DbusValue::Array(entries)) = body.first() else {
+        return false;
+    };
+    for entry in entries {
+        let DbusValue::DictEntry(key, value) = entry else {
+            continue;
+        };
+        if !matches!(key.as_ref(), DbusValue::String(s) if s == unique) {
+            continue;
+        }
+        let DbusValue::Array(rules) = value.as_ref() else {
+            continue;
+        };
+        return rules
+            .iter()
+            .any(|v| matches!(v, DbusValue::String(s) if s.contains(needle)));
+    }
+    false
+}
+
+/// `GetAllMatchRules` lists a unique name after AddMatch; missing before AddMatch.
+pub fn matchrules_self_test() -> bool {
+    const RULE: &str = "type='signal',interface='org.knoxos.GateStats',member='Ping'";
+    let conn = connect(BusType::System, 0xDB26, 1000);
+    let hello = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "Hello",
+    );
+    let _ = send_message(BusType::System, conn, hello);
+    let unique = match receive_message(BusType::System, conn) {
+        Some(msg) => match msg.body.first() {
+            Some(DbusValue::String(s)) => s.clone(),
+            _ => {
+                serial_println!("[dbus] GATE_DBUS FAILED: GetAllMatchRules hello body");
+                disconnect(BusType::System, conn);
+                return false;
+            }
+        },
+        None => {
+            serial_println!("[dbus] GATE_DBUS FAILED: GetAllMatchRules hello");
+            disconnect(BusType::System, conn);
+            return false;
+        }
+    };
+    let empty = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Debug.Stats",
+        "GetAllMatchRules",
+    );
+    let empty_serial = send_message(BusType::System, conn, empty);
+    let absent = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(empty_serial)
+                && !matchrules_has(&msg.body, &unique, "org.knoxos.GateStats")
+        })
+        .unwrap_or(false);
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let add_serial = send_message(BusType::System, conn, add);
+    let added = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(add_serial)
+        })
+        .unwrap_or(false);
+    let listed = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Debug.Stats",
+        "GetAllMatchRules",
+    );
+    let list_serial = send_message(BusType::System, conn, listed);
+    let present = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(list_serial)
+                && matchrules_has(&msg.body, &unique, "org.knoxos.GateStats")
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if absent && added && present {
+        serial_println!(
+            "[dbus] {} (GetAllMatchRules after AddMatch)",
+            GATE_DBUS_MATCHRULES_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: GetAllMatchRules absent={} added={} present={}",
+            absent,
+            added,
+            present
         );
         false
     }

@@ -4,18 +4,21 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::loopback::{
-    serve_loopback, serve_loopback_access, serve_loopback_create, serve_loopback_flush,
-    serve_loopback_fsync, serve_loopback_fsyncdir, serve_loopback_getattr, serve_loopback_getxattr,
+    serve_loopback, serve_loopback_access, serve_loopback_bmap, serve_loopback_create,
+    serve_loopback_destroy, serve_loopback_flush, serve_loopback_fsync, serve_loopback_fsyncdir,
+    serve_loopback_getattr, serve_loopback_getlk, serve_loopback_getxattr, serve_loopback_ioctl,
     serve_loopback_link, serve_loopback_listxattr, serve_loopback_mkdir, serve_loopback_mknod,
-    serve_loopback_open, serve_loopback_read, serve_loopback_readdir, serve_loopback_readlink,
-    serve_loopback_release, serve_loopback_removexattr, serve_loopback_rename,
-    serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setxattr, serve_loopback_statfs,
+    serve_loopback_open, serve_loopback_opendir, serve_loopback_read, serve_loopback_readdir,
+    serve_loopback_readlink, serve_loopback_release, serve_loopback_releasedir,
+    serve_loopback_removexattr, serve_loopback_rename, serve_loopback_rmdir,
+    serve_loopback_setattr, serve_loopback_setlk, serve_loopback_setxattr, serve_loopback_statfs,
     serve_loopback_symlink, serve_loopback_unlink, serve_loopback_write,
 };
 use super::mount::{send_request, take_response};
 use super::protocol::{
-    FuseAttr, FuseEntry, FuseOpcode, FuseStatfs, parse_fuse_dirents, parse_fuse_entry,
-    parse_fuse_open, parse_fuse_statfs,
+    FuseAttr, FuseEntry, FuseFileLock, FuseOpcode, FuseStatfs, encode_lk, parse_fuse_bmap,
+    parse_fuse_dirents, parse_fuse_entry, parse_fuse_ioctl, parse_fuse_lk, parse_fuse_open,
+    parse_fuse_statfs,
 };
 
 /// Handle a VFS lookup through FUSE
@@ -426,4 +429,84 @@ pub fn fuse_fsyncdir(mount_point: &str, nodeid: u64) -> Result<(), &'static str>
     serve_loopback_fsyncdir(mount_point, unique, nodeid);
     take_response(mount_point, unique).ok_or("would block")?;
     Ok(())
+}
+/// Handle a VFS opendir through FUSE. Reply is fh u64 + flags u32; a file or unknown nodeid fails.
+pub fn fuse_opendir(mount_point: &str, nodeid: u64) -> Result<(u64, u32), &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Opendir, nodeid, Vec::new())?;
+    serve_loopback_opendir(mount_point, unique, nodeid);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    parse_fuse_open(&resp).ok_or("short opendir")
+}
+/// Handle a VFS releasedir through FUSE. Request body is the fh (u64 LE).
+pub fn fuse_releasedir(mount_point: &str, nodeid: u64, fh: u64) -> Result<(), &'static str> {
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::Releasedir,
+        nodeid,
+        fh.to_le_bytes().to_vec(),
+    )?;
+    serve_loopback_releasedir(mount_point, unique, nodeid, fh);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS GETLK through FUSE. Unknown nodeid fails.
+pub fn fuse_getlk(
+    mount_point: &str,
+    nodeid: u64,
+    want: FuseFileLock,
+) -> Result<FuseFileLock, &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Getlk, nodeid, encode_lk(&want))?;
+    serve_loopback_getlk(mount_point, unique, nodeid, &encode_lk(&want));
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    parse_fuse_lk(&resp).ok_or("short getlk")
+}
+/// Handle a VFS SETLK through FUSE. Conflicts and unknown nodeid fail.
+pub fn fuse_setlk(mount_point: &str, nodeid: u64, lk: FuseFileLock) -> Result<(), &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Setlk, nodeid, encode_lk(&lk))?;
+    serve_loopback_setlk(mount_point, unique, nodeid, &encode_lk(&lk));
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS SETLKW through FUSE. Same lock table as SETLK; unknown nodeid fails.
+pub fn fuse_setlkw(mount_point: &str, nodeid: u64, lk: FuseFileLock) -> Result<(), &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Setlkw, nodeid, encode_lk(&lk))?;
+    serve_loopback_setlk(mount_point, unique, nodeid, &encode_lk(&lk));
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS BMAP through FUSE. Known files map logical block 0 to nodeid; unknown nodeid fails.
+pub fn fuse_bmap(
+    mount_point: &str,
+    nodeid: u64,
+    block: u64,
+    blocksize: u32,
+) -> Result<u64, &'static str> {
+    let mut data = Vec::with_capacity(12);
+    data.extend_from_slice(&block.to_le_bytes());
+    data.extend_from_slice(&blocksize.to_le_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Bmap, nodeid, data.clone())?;
+    serve_loopback_bmap(mount_point, unique, nodeid, &data);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    parse_fuse_bmap(&resp).ok_or("short bmap")
+}
+/// Handle a VFS DESTROY through FUSE. Known mounts succeed; unknown mounts fail.
+pub fn fuse_destroy(mount_point: &str) -> Result<(), &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Destroy, 0, Vec::new())?;
+    serve_loopback_destroy(mount_point, unique);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS IOCTL through FUSE. Known files echo `cmd` as result; unknown nodeid fails.
+pub fn fuse_ioctl(mount_point: &str, nodeid: u64, cmd: u32) -> Result<i32, &'static str> {
+    let mut data = Vec::with_capacity(32);
+    data.extend_from_slice(&0u64.to_le_bytes());
+    data.extend_from_slice(&0u32.to_le_bytes());
+    data.extend_from_slice(&cmd.to_le_bytes());
+    data.extend_from_slice(&0u64.to_le_bytes());
+    data.extend_from_slice(&0u32.to_le_bytes());
+    data.extend_from_slice(&0u32.to_le_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Ioctl, nodeid, data.clone())?;
+    serve_loopback_ioctl(mount_point, unique, nodeid, &data);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    parse_fuse_ioctl(&resp).ok_or("short ioctl")
 }

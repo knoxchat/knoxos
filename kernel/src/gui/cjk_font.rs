@@ -543,9 +543,10 @@ fn fallback_self_test() -> bool {
     let latin = crate::gui::truetype::resolve_font_for_codepoint(b'A' as u32);
     let cjk = crate::gui::truetype::resolve_font_for_codepoint(0x4E00);
     let emoji = crate::gui::truetype::resolve_font_for_codepoint(0x1F600);
-    if latin == "Hack" && cjk == "CJK-Bitmap" && emoji == "Emoji-Color" {
+    // Inter is priority 0 for Latin; CJK-Bitmap and Emoji-Color cover the other scripts.
+    if latin == "Inter" && cjk == "CJK-Bitmap" && emoji == "Emoji-Color" {
         serial_println!(
-            "[fonts] {} (Hack / CJK-Bitmap / Emoji-Color)",
+            "[fonts] {} (Inter / CJK-Bitmap / Emoji-Color)",
             GATE_FONT_MARKER
         );
         true

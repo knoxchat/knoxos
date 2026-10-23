@@ -246,5 +246,37 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 235. **XHCI Set TR Dequeue Pointer** — Stopped extra pipe Command Completion cc=1 (`GATE_USB xhci settr`).
 236. **NFS NVERIFY** — mismatch OK; match SAME; missing FH NOFILEHANDLE (`GATE_NFS nverify`).
 237. **NFS SETCLIENTID_CONFIRM** — issued client_id OK; wrong id STALE_CLIENTID (`GATE_NFS confirm`).
+238. **FUSE OPENDIR** — directory returns fh=nodeid; file or unknown fails (`GATE_FUSE opendir`).
+239. **FUSE RELEASEDIR** — OPENDIR then RELEASEDIR; file, unknown, or mismatched fh fails (`GATE_FUSE releasedir`).
+240. **D-Bus Peer Ping** — empty method return (`GATE_DBUS ping`).
+241. **D-Bus Peer GetMachineId** — 32-hex machine UUID (`GATE_DBUS machineid`).
+242. **XHCI Reset Device** — already-addressed slot Command Completion cc=1 (`GATE_USB xhci resetdev`).
+243. **XHCI Transfer No-Op** — bulk OUT (DCI 2) No-Op TRB Transfer Event (`GATE_USB xhci trnoop`).
+244. **NFS CLOSE** — issued OPEN state_id OK; wrong id BAD_STATEID; missing FH NOFILEHANDLE (`GATE_NFS close`).
+245. **NFS RENEW** — confirmed client_id OK; wrong id STALE_CLIENTID (`GATE_NFS renew`).
+246. **FUSE GETLK** — known file with no lock is F_UNLCK; unknown nodeid fails (`GATE_FUSE getlk`).
+247. **FUSE SETLK** — F_WRLCK is visible to GETLK from another pid; F_UNLCK drops it (`GATE_FUSE setlk`).
+248. **D-Bus Introspect** — XML names Introspectable and Peer (`GATE_DBUS introspect`).
+249. **D-Bus Properties.Get** — Features then UnknownProperty (`GATE_DBUS props`).
+250. **XHCI Device Qualifier** — GET_DESCRIPTOR(Device Qualifier) Transfer Event (`GATE_USB xhci qual`).
+251. **XHCI BOS** — GET_DESCRIPTOR(BOS) Transfer Event (`GATE_USB xhci bos`).
+252. **NFS LOCK** — free range OK; overlap DENIED; missing FH NOFILEHANDLE (`GATE_NFS lock`).
+253. **NFS LOCKU** — held range OK; missing range DENIED; missing FH NOFILEHANDLE (`GATE_NFS unlock`).
+254. **FUSE SETLKW** — F_WRLCK is visible to GETLK from another pid; F_UNLCK drops it (`GATE_FUSE setlkw`).
+255. **FUSE BMAP** — logical block 0 maps to nodeid; unknown nodeid fails (`GATE_FUSE bmap`).
+256. **D-Bus Properties.GetAll** — Features then UnknownInterface (`GATE_DBUS getall`).
+257. **D-Bus Properties.Set** — Features PropertyReadOnly then UnknownProperty (`GATE_DBUS setprop`).
+258. **XHCI Other Speed Configuration** — GET_DESCRIPTOR(Other Speed Configuration) Transfer Event (`GATE_USB xhci oscfg`).
+259. **XHCI SYNCH_FRAME** — SYNCH_FRAME Transfer Event (`GATE_USB xhci synch`).
+260. **NFS LOCKT** — free range OK; overlap DENIED; missing FH NOFILEHANDLE (`GATE_NFS lockt`).
+261. **NFS RELEASE_LOCKOWNER** — drops that owner's locks; missing FH NOFILEHANDLE (`GATE_NFS lockowner`).
+262. **FUSE DESTROY** — known mount succeeds; unknown mount fails (`GATE_FUSE destroy`).
+263. **FUSE IOCTL** — known file echoes cmd; unknown nodeid fails (`GATE_FUSE ioctl`).
+264. **D-Bus Debug.Stats.GetStats** — Connections count (`GATE_DBUS stats`).
+265. **D-Bus GetAllMatchRules** — unique name after AddMatch (`GATE_DBUS matchrules`).
+266. **XHCI SET_SEL** — SET_SEL Transfer Event (`GATE_USB xhci setsel`).
+267. **XHCI SET_ISOCH_DELAY** — SET_ISOCH_DELAY Transfer Event (`GATE_USB xhci isochdelay`).
+268. **NFS OPEN_CONFIRM** — issued OPEN OK; wrong id BAD_STATEID; missing FH NOFILEHANDLE (`GATE_NFS openconfirm`).
+269. **NFS OPEN_DOWNGRADE** — subset OK; superset INVAL; missing FH NOFILEHANDLE (`GATE_NFS downgrade`).
 
-Integration: `./tests/run_integration.sh` **521/521** on QEMU (2026-10-22).
+Integration: `./tests/run_integration.sh` **555/555** on QEMU (2026-10-23).

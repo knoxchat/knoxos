@@ -54,6 +54,9 @@ pub enum UsbRequestType {
     SetConfiguration = 9,
     GetInterface = 10,
     SetInterface = 11,
+    SynchFrame = 12,
+    SetSel = 48,
+    SetIsochDelay = 49,
 }
 
 /// USB descriptor types
@@ -71,6 +74,8 @@ pub enum UsbDescriptorType {
     OTG = 9,
     Debug = 10,
     InterfaceAssociation = 11,
+    /// Binary Device Object Store (USB 3.x).
+    Bos = 15,
     HID = 0x21,
     HIDReport = 0x22,
     HIDPhysical = 0x23,

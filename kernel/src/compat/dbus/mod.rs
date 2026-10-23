@@ -45,16 +45,20 @@ pub mod upower;
 pub use connection::{connect, disconnect, release_name, request_name};
 pub use gates::{
     GATE_DBUS_ACTIVATE_MARKER, GATE_DBUS_ADT_MARKER, GATE_DBUS_APPARMOR_MARKER,
-    GATE_DBUS_CREDS_MARKER, GATE_DBUS_ENV_MARKER, GATE_DBUS_HAS_OWNER_MARKER, GATE_DBUS_ID_MARKER,
-    GATE_DBUS_LIST_MARKER, GATE_DBUS_MATCH_MARKER, GATE_DBUS_METHOD_MARKER,
-    GATE_DBUS_MONITOR_MARKER, GATE_DBUS_NAME_MARKER, GATE_DBUS_OWNER_MARKER, GATE_DBUS_PID_MARKER,
-    GATE_DBUS_QUEUE_MARKER, GATE_DBUS_RELEASE_MARKER, GATE_DBUS_RELOAD_MARKER,
-    GATE_DBUS_REMOVE_MARKER, GATE_DBUS_SELINUX_MARKER, GATE_DBUS_START_MARKER,
-    GATE_DBUS_UID_MARKER, activate_self_test, add_match_self_test, adt_self_test,
-    apparmor_self_test, creds_self_test, env_self_test, get_id_self_test, has_owner_self_test,
-    list_self_test, method_self_test, monitor_self_test, name_self_test, owner_self_test,
-    pid_self_test, queue_self_test, release_self_test, reload_self_test, remove_match_self_test,
-    selinux_self_test, start_self_test, uid_self_test,
+    GATE_DBUS_CREDS_MARKER, GATE_DBUS_ENV_MARKER, GATE_DBUS_GETALL_MARKER,
+    GATE_DBUS_HAS_OWNER_MARKER, GATE_DBUS_ID_MARKER, GATE_DBUS_INTROSPECT_MARKER,
+    GATE_DBUS_LIST_MARKER, GATE_DBUS_MACHINEID_MARKER, GATE_DBUS_MATCH_MARKER,
+    GATE_DBUS_MATCHRULES_MARKER, GATE_DBUS_METHOD_MARKER, GATE_DBUS_MONITOR_MARKER,
+    GATE_DBUS_NAME_MARKER, GATE_DBUS_OWNER_MARKER, GATE_DBUS_PID_MARKER, GATE_DBUS_PING_MARKER,
+    GATE_DBUS_PROPS_MARKER, GATE_DBUS_QUEUE_MARKER, GATE_DBUS_RELEASE_MARKER,
+    GATE_DBUS_RELOAD_MARKER, GATE_DBUS_REMOVE_MARKER, GATE_DBUS_SELINUX_MARKER,
+    GATE_DBUS_SETPROP_MARKER, GATE_DBUS_START_MARKER, GATE_DBUS_STATS_MARKER, GATE_DBUS_UID_MARKER,
+    activate_self_test, add_match_self_test, adt_self_test, apparmor_self_test, creds_self_test,
+    env_self_test, get_id_self_test, getall_self_test, has_owner_self_test, introspect_self_test,
+    list_self_test, machineid_self_test, matchrules_self_test, method_self_test, monitor_self_test,
+    name_self_test, owner_self_test, pid_self_test, ping_self_test, props_self_test,
+    queue_self_test, release_self_test, reload_self_test, remove_match_self_test,
+    selinux_self_test, setprop_self_test, start_self_test, stats_self_test, uid_self_test,
 };
 pub use protocol::{
     ALLOW_INTERACTIVE_AUTH, DBUS_TYPE_ARRAY, DBUS_TYPE_BOOLEAN, DBUS_TYPE_BYTE,
@@ -66,7 +70,7 @@ pub use protocol::{
 };
 pub use routing::{add_match, receive_message, remove_match, send_message};
 pub use state::{
-    BusType, Connection, ConnectionId, DBUS_NAME_FLAG_ALLOW_REPLACEMENT,
+    BUS_FEATURES, BusType, Connection, ConnectionId, DBUS_NAME_FLAG_ALLOW_REPLACEMENT,
     DBUS_NAME_FLAG_DO_NOT_QUEUE, DBUS_NAME_FLAG_REPLACE_EXISTING,
     DBUS_RELEASE_NAME_REPLY_NON_EXISTENT, DBUS_RELEASE_NAME_REPLY_NOT_OWNER,
     DBUS_RELEASE_NAME_REPLY_RELEASED, DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER,
@@ -180,4 +184,12 @@ pub fn init() {
     let _ = env_self_test();
     let _ = reload_self_test();
     let _ = monitor_self_test();
+    let _ = ping_self_test();
+    let _ = machineid_self_test();
+    let _ = introspect_self_test();
+    let _ = props_self_test();
+    let _ = getall_self_test();
+    let _ = setprop_self_test();
+    let _ = stats_self_test();
+    let _ = matchrules_self_test();
 }

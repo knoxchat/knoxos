@@ -396,6 +396,94 @@ fn test_xhci_set_tr_dequeue() {
 }
 
 #[test_case]
+fn test_xhci_transfer_noop() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::trnoop_self_test(),
+        "XHCI Transfer No-Op TRB must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_bos_descriptor() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::bos_self_test(),
+        "XHCI GET_DESCRIPTOR(BOS) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_device_qualifier() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::qual_self_test(),
+        "XHCI GET_DESCRIPTOR(Device Qualifier) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_other_speed_config() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::oscfg_self_test(),
+        "XHCI GET_DESCRIPTOR(Other Speed Configuration) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_synch_frame() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::synch_self_test(),
+        "XHCI SYNCH_FRAME must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_set_sel() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::setsel_self_test(),
+        "XHCI SET_SEL must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_set_isoch_delay() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::isochdelay_self_test(),
+        "XHCI SET_ISOCH_DELAY must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_reset_device() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::resetdev_self_test(),
+        "XHCI Reset Device must complete with cc=1"
+    );
+}
+
+#[test_case]
 fn test_fuse_write_roundtrip() {
     assert!(
         crate::fuse::write_self_test(),
@@ -576,6 +664,70 @@ fn test_fuse_fsyncdir() {
     assert!(
         crate::fuse::fsyncdir_self_test(),
         "FUSE FSYNCDIR of a directory must succeed; a file or unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_opendir_fh() {
+    assert!(
+        crate::fuse::opendir_self_test(),
+        "FUSE OPENDIR must return fh=nodeid; a file or unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_releasedir_after_opendir() {
+    assert!(
+        crate::fuse::releasedir_self_test(),
+        "FUSE RELEASEDIR after OPENDIR must succeed; a file, unknown nodeid, or mismatched fh must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_getlk_unlck() {
+    assert!(
+        crate::fuse::getlk_self_test(),
+        "FUSE GETLK of a known file with no lock must be F_UNLCK; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_setlk_then_getlk() {
+    assert!(
+        crate::fuse::setlk_self_test(),
+        "FUSE SETLK F_WRLCK must be visible to GETLK from another pid; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_setlkw_then_getlk() {
+    assert!(
+        crate::fuse::setlkw_self_test(),
+        "FUSE SETLKW F_WRLCK must be visible to GETLK from another pid; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_bmap_block() {
+    assert!(
+        crate::fuse::bmap_self_test(),
+        "FUSE BMAP of a known file must map logical block 0 to nodeid; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_destroy_mount() {
+    assert!(
+        crate::fuse::destroy_self_test(),
+        "FUSE DESTROY of a known mount must succeed; unknown mount must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_ioctl_cmd() {
+    assert!(
+        crate::fuse::ioctl_self_test(),
+        "FUSE IOCTL of a known file must echo cmd; unknown nodeid must fail"
     );
 }
 
@@ -826,6 +978,78 @@ fn test_nfs_setclientid_confirm() {
     assert!(
         crate::nfs::confirm_self_test(),
         "NFS4 SETCLIENTID_CONFIRM must accept the issued client_id and reject a wrong id as STALE_CLIENTID"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_close() {
+    assert!(
+        crate::nfs::close_self_test(),
+        "NFS4 CLOSE must accept the issued OPEN state_id, reject a wrong id as BAD_STATEID, and missing FH as NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_renew() {
+    assert!(
+        crate::nfs::renew_self_test(),
+        "NFS4 RENEW must accept a confirmed client_id and reject a wrong id as STALE_CLIENTID"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_lock() {
+    assert!(
+        crate::nfs::lock_self_test(),
+        "NFS4 LOCK must accept a free range, deny overlap, and missing FH as NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_unlock() {
+    assert!(
+        crate::nfs::unlock_self_test(),
+        "NFS4 LOCKU must drop a held range, deny a missing range, and missing FH as NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_lockt() {
+    assert!(
+        crate::nfs::lockt_self_test(),
+        "NFS4 LOCKT must accept a free range, deny overlap, and missing FH as NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_release_lockowner() {
+    assert!(
+        crate::nfs::lockowner_self_test(),
+        "NFS4 RELEASE_LOCKOWNER must drop that owner's locks; missing FH is NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_open_confirm() {
+    assert!(
+        crate::nfs::openconfirm_self_test(),
+        "NFS4 OPEN_CONFIRM must accept the issued OPEN, deny a wrong id, and missing FH as NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_open_downgrade() {
+    assert!(
+        crate::nfs::downgrade_self_test(),
+        "NFS4 OPEN_DOWNGRADE must accept a subset, reject a superset, and missing FH as NOFILEHANDLE"
     );
 }
 

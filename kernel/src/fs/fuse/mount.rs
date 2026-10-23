@@ -44,6 +44,8 @@ pub(super) struct LoopbackFs {
     pub(super) nodes: BTreeMap<String, (u64, u32)>,
     /// nodeid → (xattr name → value)
     pub(super) xattrs: BTreeMap<u64, BTreeMap<String, Vec<u8>>>,
+    /// nodeid → POSIX locks held on that inode
+    pub(super) locks: BTreeMap<u64, Vec<super::protocol::FuseFileLock>>,
     pub(super) next_ino: u64,
 }
 
@@ -85,6 +87,7 @@ pub fn mount(mount_point: &str, daemon_pid: u32) -> Result<(), &'static str> {
             links: BTreeMap::new(),
             nodes: BTreeMap::new(),
             xattrs: BTreeMap::new(),
+            locks: BTreeMap::new(),
             next_ino: 2,
         },
     );

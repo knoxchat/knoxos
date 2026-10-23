@@ -1347,15 +1347,26 @@ pub fn resolve_font_for_codepoint(codepoint: u32) -> String {
     let is_emoji = super::unicode::is_emoji(codepoint);
 
     for entry in chain.iter() {
-        if is_cjk && entry.covers_cjk {
-            return entry.name.clone();
+        if is_cjk {
+            if entry.covers_cjk {
+                return entry.name.clone();
+            }
+            continue;
         }
-        if is_emoji && entry.covers_emoji {
-            return entry.name.clone();
+        if is_emoji {
+            if entry.covers_emoji {
+                return entry.name.clone();
+            }
+            continue;
         }
-        if !is_cjk && !is_emoji {
-            return entry.name.clone();
+        // Latin / symbols: skip CJK-only and emoji-only faces.
+        if entry.covers_cjk && !entry.covers_symbols {
+            continue;
         }
+        if entry.covers_emoji && !entry.covers_symbols {
+            continue;
+        }
+        return entry.name.clone();
     }
     // Ultimate fallback
     String::from("Inter")

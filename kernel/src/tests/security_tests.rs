@@ -742,6 +742,70 @@ fn test_dbus_become_monitor() {
 }
 
 #[test_case]
+fn test_dbus_peer_ping() {
+    assert!(
+        crate::dbus::ping_self_test(),
+        "Peer.Ping must return a method reply"
+    );
+}
+
+#[test_case]
+fn test_dbus_peer_get_machine_id() {
+    assert!(
+        crate::dbus::machineid_self_test(),
+        "Peer.GetMachineId must return the 32-hex machine UUID"
+    );
+}
+
+#[test_case]
+fn test_dbus_introspect() {
+    assert!(
+        crate::dbus::introspect_self_test(),
+        "Introspectable.Introspect must return XML naming the bus interfaces"
+    );
+}
+
+#[test_case]
+fn test_dbus_properties_get() {
+    assert!(
+        crate::dbus::props_self_test(),
+        "Properties.Get Features must return the advertised features; unknown is UnknownProperty"
+    );
+}
+
+#[test_case]
+fn test_dbus_properties_getall() {
+    assert!(
+        crate::dbus::getall_self_test(),
+        "Properties.GetAll must include Features; unknown interface is UnknownInterface"
+    );
+}
+
+#[test_case]
+fn test_dbus_properties_set() {
+    assert!(
+        crate::dbus::setprop_self_test(),
+        "Properties.Set Features must be PropertyReadOnly; unknown is UnknownProperty"
+    );
+}
+
+#[test_case]
+fn test_dbus_debug_stats() {
+    assert!(
+        crate::dbus::stats_self_test(),
+        "Debug.Stats.GetStats must include a non-zero Connections count"
+    );
+}
+
+#[test_case]
+fn test_dbus_get_all_match_rules() {
+    assert!(
+        crate::dbus::matchrules_self_test(),
+        "GetAllMatchRules must list a unique name after AddMatch"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

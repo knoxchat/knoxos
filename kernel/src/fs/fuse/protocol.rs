@@ -37,9 +37,12 @@ pub enum FuseOpcode {
     Fsyncdir = 30,
     Getlk = 31,
     Setlk = 32,
+    Setlkw = 33,
     Access = 34,
     Create = 35,
+    Bmap = 37,
     Destroy = 38,
+    Ioctl = 39,
 }
 
 /// POSIX `R_OK` — FUSE ACCESS request/grant bit.
@@ -212,4 +215,82 @@ pub fn parse_fuse_open(data: &[u8]) -> Option<(u64, u32)> {
         u64::from_le_bytes(data[0..8].try_into().ok()?),
         u32::from_le_bytes(data[8..12].try_into().ok()?),
     ))
+}
+
+/// POSIX `F_RDLCK`.
+pub const F_RDLCK: u32 = 0;
+/// POSIX `F_WRLCK`.
+pub const F_WRLCK: u32 = 1;
+/// POSIX `F_UNLCK`.
+pub const F_UNLCK: u32 = 2;
+
+/// FUSE GETLK/SETLK file lock: start, end, type, pid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FuseFileLock {
+    pub start: u64,
+    pub end: u64,
+    pub typ: u32,
+    pub pid: u32,
+}
+
+pub(super) fn encode_lk(lk: &FuseFileLock) -> Vec<u8> {
+    let mut out = Vec::with_capacity(24);
+    out.extend_from_slice(&lk.start.to_le_bytes());
+    out.extend_from_slice(&lk.end.to_le_bytes());
+    out.extend_from_slice(&lk.typ.to_le_bytes());
+    out.extend_from_slice(&lk.pid.to_le_bytes());
+    out
+}
+
+/// Packed FUSE lock: start u64, end u64, type u32, pid u32.
+pub fn parse_fuse_lk(data: &[u8]) -> Option<FuseFileLock> {
+    if data.len() < 24 {
+        return None;
+    }
+    Some(FuseFileLock {
+        start: u64::from_le_bytes(data[0..8].try_into().ok()?),
+        end: u64::from_le_bytes(data[8..16].try_into().ok()?),
+        typ: u32::from_le_bytes(data[16..20].try_into().ok()?),
+        pid: u32::from_le_bytes(data[20..24].try_into().ok()?),
+    })
+}
+
+pub(super) fn locks_overlap(a: &FuseFileLock, b: &FuseFileLock) -> bool {
+    a.start < b.end && b.start < a.end
+}
+
+pub(super) fn lock_conflicts(held: &FuseFileLock, want: &FuseFileLock) -> bool {
+    if held.pid == want.pid || !locks_overlap(held, want) {
+        return false;
+    }
+    held.typ == F_WRLCK || want.typ == F_WRLCK
+}
+
+pub(super) fn encode_bmap(block: u64) -> Vec<u8> {
+    block.to_le_bytes().to_vec()
+}
+
+/// Packed FUSE BMAP reply: physical block u64.
+pub fn parse_fuse_bmap(data: &[u8]) -> Option<u64> {
+    if data.len() < 8 {
+        return None;
+    }
+    Some(u64::from_le_bytes(data[0..8].try_into().ok()?))
+}
+
+pub(super) fn encode_ioctl(result: i32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(16);
+    out.extend_from_slice(&result.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out
+}
+
+/// Packed FUSE IOCTL reply: result i32 plus flags/iov counts.
+pub fn parse_fuse_ioctl(data: &[u8]) -> Option<i32> {
+    if data.len() < 4 {
+        return None;
+    }
+    Some(i32::from_le_bytes(data[0..4].try_into().ok()?))
 }

@@ -76,6 +76,22 @@ static STOP_LIVE: AtomicBool = AtomicBool::new(false);
 static RESETEP_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when Set TR Dequeue Pointer returned Command Completion cc=1.
 static SETTR_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Reset Device returned Command Completion cc=1.
+static RESETDEV_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when a Transfer No-Op TRB got a Transfer Event.
+static TRNOOP_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(Device Qualifier) got a Transfer Event.
+static QUAL_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(BOS) got a Transfer Event.
+static BOS_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(Other Speed Configuration) got a Transfer Event.
+static OSCFG_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when SYNCH_FRAME got a Transfer Event.
+static SYNCH_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when SET_SEL got a Transfer Event.
+static SETSEL_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when SET_ISOCH_DELAY got a Transfer Event.
+static ISOCHDELAY_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -103,6 +119,14 @@ pub const GATE_XHCI_EVAL_MARKER: &str = "GATE_USB xhci eval";
 pub const GATE_XHCI_STOP_MARKER: &str = "GATE_USB xhci stop";
 pub const GATE_XHCI_RESETEP_MARKER: &str = "GATE_USB xhci resetep";
 pub const GATE_XHCI_SETTR_MARKER: &str = "GATE_USB xhci settr";
+pub const GATE_XHCI_RESETDEV_MARKER: &str = "GATE_USB xhci resetdev";
+pub const GATE_XHCI_TRNOOP_MARKER: &str = "GATE_USB xhci trnoop";
+pub const GATE_XHCI_QUAL_MARKER: &str = "GATE_USB xhci qual";
+pub const GATE_XHCI_BOS_MARKER: &str = "GATE_USB xhci bos";
+pub const GATE_XHCI_OSCFG_MARKER: &str = "GATE_USB xhci oscfg";
+pub const GATE_XHCI_SYNCH_MARKER: &str = "GATE_USB xhci synch";
+pub const GATE_XHCI_SETSEL_MARKER: &str = "GATE_USB xhci setsel";
+pub const GATE_XHCI_ISOCHDELAY_MARKER: &str = "GATE_USB xhci isochdelay";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -2869,5 +2893,510 @@ pub fn settr_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_SETTR_MARKER);
+    true
+}
+
+/// Reset Device Command. Requires Command Completion cc=1 (no timeout fallback).
+pub fn reset_device(slot_id: u8) -> bool {
+    serial_println!("[XHCI] Reset Device for slot {}", slot_id);
+    let mut trb = Trb::new();
+    trb.set_type(TrbType::ResetDevice);
+    trb.control |= (slot_id as u32) << 24;
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue Reset Device");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            RESETDEV_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] Reset Device succeeded for slot {}", slot_id);
+            return true;
+        }
+        serial_println!("[XHCI] Reset Device failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Reset Device: timeout");
+    false
+}
+
+/// Transfer No-Op TRB on `dci`. Requires a Transfer Event for this slot/DCI.
+pub fn transfer_noop(slot_id: u8, dci: u8) -> bool {
+    serial_println!("[XHCI] Transfer No-Op for slot {} dci {}", slot_id, dci);
+    // Drain leftover HID completions so they do not steal this TD's event.
+    poll_events();
+    let mut trb = Trb::new();
+    trb.set_type(TrbType::NoOp);
+    trb.control |= 1 << 5; // IOC
+    if !submit_transfer(slot_id, dci, &[trb]) {
+        serial_println!("[XHCI] Failed to submit Transfer No-Op");
+        return false;
+    }
+    for _ in 0..8 {
+        let Some(event) = wait_command_completion() else {
+            break;
+        };
+        let cc = event.completion_code();
+        let ev_slot = (event.control >> 24) as u8;
+        let ev_dci = ((event.control >> 16) & 0x1F) as u8;
+        if event.trb_type() != TrbType::TransferEvent as u8 || ev_slot != slot_id || ev_dci != dci {
+            serial_println!(
+                "[XHCI] Transfer No-Op skipped leftover type={} slot={} dci={} cc={}",
+                event.trb_type(),
+                ev_slot,
+                ev_dci,
+                cc
+            );
+            continue;
+        }
+        // 1 Success: No-Op does not touch the wire. 13/4/6 still mean a live event.
+        if cc == 1 || cc == 13 || cc == 4 || cc == 6 {
+            TRNOOP_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] Transfer No-Op complete cc={}", cc);
+            return true;
+        }
+        serial_println!("[XHCI] Transfer No-Op completion code: {}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Transfer No-Op: timeout");
+    false
+}
+
+fn last_slot() -> Option<u8> {
+    let xhci = XHCI.lock();
+    xhci.devices
+        .iter()
+        .rev()
+        .find(|d| d.slot_id != 0)
+        .map(|d| d.slot_id)
+}
+
+/// Halted → Reset Endpoint; Running → Stop Endpoint; then Set TR Dequeue so a
+/// doorbell can restart the ring. Reset Endpoint on a Stopped EP is cc≠1.
+fn restart_ep(slot_id: u8, dci: u8) {
+    if !reset_endpoint(slot_id, dci) {
+        let _ = stop_endpoint(slot_id, dci);
+    }
+    let _ = set_tr_dequeue(slot_id, dci);
+}
+
+/// Prove Reset Device on an already-addressed slot got cc=1.
+/// Unused QEMU ports fail Address Device (cc=5), so this uses last_slot first.
+pub fn resetdev_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci resetdev skipped (no controller)");
+        return true;
+    }
+    if !RESETDEV_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = last_slot() {
+            if !reset_device(slot_id) {
+                if let Some(hid) = hid_slot() {
+                    if hid != slot_id {
+                        let _ = reset_device(hid);
+                    }
+                }
+            }
+        }
+        if !RESETDEV_LIVE.load(Ordering::Relaxed) {
+            if let Some(slot_id) = extra_addressed_slot() {
+                let _ = reset_device(slot_id);
+                let _ = disable_slot(slot_id);
+            }
+        }
+    }
+    if !RESETDEV_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Reset Device had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_RESETDEV_MARKER);
+    true
+}
+
+/// Prove a Transfer No-Op TRB on the bulk OUT ring (DCI 2) got a Transfer Event.
+/// DCI 2 may be Halted after bulk OUT cc=4/6; restart it before the No-Op.
+pub fn trnoop_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci trnoop skipped (no controller)");
+        return true;
+    }
+    if !TRNOOP_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            restart_ep(slot_id, 2);
+            if !transfer_noop(slot_id, 2) {
+                restart_ep(slot_id, 5);
+                if !transfer_noop(slot_id, 5) {
+                    recover_control_ep(slot_id);
+                    let _ = transfer_noop(slot_id, 1);
+                }
+            }
+        }
+    }
+    if !TRNOOP_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Transfer No-Op had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_TRNOOP_MARKER);
+    true
+}
+
+/// GET_DESCRIPTOR of `dtype` — Setup+Data+Status. Requires a Transfer Event.
+fn control_get_descriptor(
+    slot_id: u8,
+    dtype: UsbDescriptorType,
+    xfer_len: u32,
+    live: &AtomicBool,
+    what: &str,
+) -> Option<usize> {
+    serial_println!("[XHCI] GET_DESCRIPTOR({}) for slot {}", what, slot_id);
+    // Short Packet on a chained control TD can leave EP0 mid-TD (cc=19
+    // Context State Error on the next Setup). Stop+Set TR Dequeue first.
+    restart_ep(slot_id, 1);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+    let wvalue = (dtype as u16) << 8;
+
+    let mut setup = Trb::new();
+    setup.param_lo = 0x80 | (UsbRequestType::GetDescriptor as u32) << 8 | (wvalue as u32) << 16;
+    setup.param_hi = xfer_len << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = xfer_len;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit GET_DESCRIPTOR({})", what);
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: the control TD completed
+        // (not a timeout fallback). USB2 HID may stall BOS; USB3 may stall Qualifier.
+        if cc == 1 || cc == 13 || cc == 6 {
+            live.store(true, Ordering::Relaxed);
+            // SAFETY: GET_DESCRIPTOR DMA page is owned by this transfer.
+            let (blen, got_type) = unsafe {
+                let p = dma_virt(data_buf) as *const u8;
+                (*p, *p.add(1))
+            };
+            serial_println!(
+                "[XHCI] GET_DESCRIPTOR({}) complete cc={} len={} type={}",
+                what,
+                cc,
+                blen,
+                got_type
+            );
+            return Some(blen as usize);
+        }
+        serial_println!("[XHCI] GET_DESCRIPTOR({}) completion code: {}", what, cc);
+        return None;
+    }
+
+    serial_println!("[XHCI] GET_DESCRIPTOR({}): timeout", what);
+    None
+}
+
+/// GET_DESCRIPTOR(Device Qualifier). Requires a Transfer Event.
+pub fn get_device_qualifier(slot_id: u8) -> Option<usize> {
+    control_get_descriptor(
+        slot_id,
+        UsbDescriptorType::DeviceQualifier,
+        10,
+        &QUAL_LIVE,
+        "Device Qualifier",
+    )
+}
+
+/// GET_DESCRIPTOR(BOS). Requires a Transfer Event.
+pub fn get_bos_descriptor(slot_id: u8) -> Option<usize> {
+    control_get_descriptor(slot_id, UsbDescriptorType::Bos, 5, &BOS_LIVE, "BOS")
+}
+
+fn descriptor_probe(live: &AtomicBool, get: fn(u8) -> Option<usize>) {
+    if live.load(Ordering::Relaxed) {
+        return;
+    }
+    if let Some(slot_id) = hid_slot() {
+        let _ = get(slot_id);
+    }
+}
+
+/// Prove GET_DESCRIPTOR(Device Qualifier) got a Transfer Event.
+pub fn qual_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci qual skipped (no controller)");
+        return true;
+    }
+    descriptor_probe(&QUAL_LIVE, get_device_qualifier);
+    if !QUAL_LIVE.load(Ordering::Relaxed) {
+        serial_println!(
+            "[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(Device Qualifier) had no Transfer Event"
+        );
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_QUAL_MARKER);
+    true
+}
+
+/// Prove GET_DESCRIPTOR(BOS) got a Transfer Event.
+pub fn bos_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci bos skipped (no controller)");
+        return true;
+    }
+    descriptor_probe(&BOS_LIVE, get_bos_descriptor);
+    if !BOS_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(BOS) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_BOS_MARKER);
+    true
+}
+
+/// GET_DESCRIPTOR(Other Speed Configuration). Requires a Transfer Event.
+pub fn get_other_speed_config(slot_id: u8) -> Option<usize> {
+    control_get_descriptor(
+        slot_id,
+        UsbDescriptorType::OtherSpeedConfig,
+        9,
+        &OSCFG_LIVE,
+        "Other Speed Configuration",
+    )
+}
+
+/// SYNCH_FRAME(endpoint) — Setup+Data+Status. Requires a Transfer Event.
+pub fn synch_frame(slot_id: u8, endpoint: u8) -> Option<u16> {
+    serial_println!(
+        "[XHCI] SYNCH_FRAME(ep={:#04x}) for slot {}",
+        endpoint,
+        slot_id
+    );
+    restart_ep(slot_id, 1);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x82 (IN, standard, endpoint), bRequest=12, wValue=0
+    setup.param_lo = 0x82 | (UsbRequestType::SynchFrame as u32) << 8;
+    setup.param_hi = endpoint as u32 | (2 << 16);
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = 2;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= 1 << 2; // ISP
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit SYNCH_FRAME transfer");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: the control TD completed.
+        if cc == 1 || cc == 13 || cc == 6 {
+            SYNCH_LIVE.store(true, Ordering::Relaxed);
+            // SAFETY: SYNCH_FRAME DMA page is owned by this transfer.
+            let word = unsafe { core::ptr::read(dma_virt(data_buf) as *const u16) };
+            serial_println!("[XHCI] SYNCH_FRAME complete cc={} frame={:#06x}", cc, word);
+            return Some(word);
+        }
+        serial_println!("[XHCI] SYNCH_FRAME completion code: {}", cc);
+        return None;
+    }
+
+    serial_println!("[XHCI] SYNCH_FRAME timeout");
+    None
+}
+
+/// Prove GET_DESCRIPTOR(Other Speed Configuration) got a Transfer Event.
+pub fn oscfg_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci oscfg skipped (no controller)");
+        return true;
+    }
+    descriptor_probe(&OSCFG_LIVE, get_other_speed_config);
+    if !OSCFG_LIVE.load(Ordering::Relaxed) {
+        serial_println!(
+            "[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(Other Speed Configuration) had no Transfer Event"
+        );
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_OSCFG_MARKER);
+    true
+}
+
+/// Prove SYNCH_FRAME got a Transfer Event.
+pub fn synch_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci synch skipped (no controller)");
+        return true;
+    }
+    if !SYNCH_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = synch_frame(slot_id, 0x81);
+        }
+    }
+    if !SYNCH_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SYNCH_FRAME had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_SYNCH_MARKER);
+    true
+}
+
+/// SET_SEL — Setup+Data+Status (6-byte OUT). Requires a Transfer Event.
+pub fn set_sel(slot_id: u8, sel: &[u8; 6]) -> bool {
+    serial_println!("[XHCI] SET_SEL for slot {}", slot_id);
+    recover_control_ep(slot_id);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+    // SAFETY: bounce page is a DMA frame we own; HC reads OUT data.
+    unsafe {
+        core::ptr::copy_nonoverlapping(sel.as_ptr(), dma_virt(data_buf) as *mut u8, 6);
+    }
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x00 (device OUT), bRequest=48 (SET_SEL), wLength=6
+    setup.param_lo = (UsbRequestType::SetSel as u32) << 8;
+    setup.param_hi = 6u32 << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 2 << 16; // TRT = OUT Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data_trb = Trb::new();
+    data_trb.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data_trb.param_hi = (data_buf >> 32) as u32;
+    data_trb.status = 6;
+    data_trb.set_type(TrbType::DataStage);
+    data_trb.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for OUT-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data_trb, status]) {
+        serial_println!("[XHCI] Failed to submit SET_SEL transfer");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: USB2 HID STALLs SET_SEL.
+        if cc == 1 || cc == 13 || cc == 6 {
+            SETSEL_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] SET_SEL complete cc={}", cc);
+            return true;
+        }
+        serial_println!("[XHCI] SET_SEL completion code: {}", cc);
+    } else {
+        serial_println!("[XHCI] SET_SEL timeout");
+    }
+    false
+}
+
+/// SET_ISOCH_DELAY — Setup+Status (no data). Requires a Transfer Event.
+pub fn set_isoch_delay(slot_id: u8, delay: u16) -> bool {
+    serial_println!("[XHCI] SET_ISOCH_DELAY({}) for slot {}", delay, slot_id);
+    restart_ep(slot_id, 1);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x00, bRequest=49, wValue=delay
+    setup.param_lo = (UsbRequestType::SetIsochDelay as u32) << 8 | (delay as u32) << 16;
+    setup.param_hi = 0;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for no-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, status]) {
+        serial_println!("[XHCI] Failed to submit SET_ISOCH_DELAY transfer");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: USB2 HID STALLs SET_ISOCH_DELAY.
+        if cc == 1 || cc == 13 || cc == 6 {
+            ISOCHDELAY_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] SET_ISOCH_DELAY complete cc={}", cc);
+            return true;
+        }
+        serial_println!("[XHCI] SET_ISOCH_DELAY completion code: {}", cc);
+        return false;
+    }
+
+    serial_println!("[XHCI] SET_ISOCH_DELAY timeout");
+    false
+}
+
+/// Prove SET_SEL got a Transfer Event.
+pub fn setsel_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci setsel skipped (no controller)");
+        return true;
+    }
+    if !SETSEL_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = set_sel(slot_id, &[0, 0, 0, 0, 0, 0]);
+        }
+    }
+    if !SETSEL_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SET_SEL had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_SETSEL_MARKER);
+    true
+}
+
+/// Prove SET_ISOCH_DELAY got a Transfer Event.
+pub fn isochdelay_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci isochdelay skipped (no controller)");
+        return true;
+    }
+    if !ISOCHDELAY_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = set_isoch_delay(slot_id, 0);
+        }
+    }
+    if !ISOCHDELAY_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SET_ISOCH_DELAY had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_ISOCHDELAY_MARKER);
     true
 }

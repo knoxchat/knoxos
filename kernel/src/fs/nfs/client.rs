@@ -10,8 +10,8 @@ use super::compound::{NfsCompoundOp, NfsCompoundResult};
 use super::types::{
     NFS_PORT, NFS4_ACCESS_DELETE, NFS4_ACCESS_EXECUTE, NFS4_ACCESS_EXTEND, NFS4_ACCESS_LOOKUP,
     NFS4_ACCESS_MODIFY, NFS4_ACCESS_READ, NFS4_SHARE_ACCESS_READ, NFS4_SHARE_ACCESS_WRITE,
-    NFS4_SHARE_DENY_NONE, NfsAttrs, NfsDirEntry, NfsFileHandle, NfsFileType, NfsLock, NfsStat,
-    NfsStateId,
+    NFS4_SHARE_DENY_NONE, NfsAttrs, NfsDirEntry, NfsFileHandle, NfsFileType, NfsLock, NfsLockType,
+    NfsStat, NfsStateId,
 };
 use super::util::{rdtsc, simple_hash};
 
@@ -22,6 +22,17 @@ const NFS4_ACCESS_ALL: u32 = NFS4_ACCESS_READ
     | NFS4_ACCESS_DELETE
     | NFS4_ACCESS_EXECUTE;
 const NFS4_ACCESS_FILE: u32 = NFS4_ACCESS_READ | NFS4_ACCESS_MODIFY | NFS4_ACCESS_EXTEND;
+
+fn nfs_lock_write(t: NfsLockType) -> bool {
+    matches!(t, NfsLockType::WriteLt | NfsLockType::WriteW)
+}
+
+fn nfs_lock_conflicts(held: &NfsLock, want: &NfsLock) -> bool {
+    let a_end = held.offset.saturating_add(held.length);
+    let b_end = want.offset.saturating_add(want.length);
+    let overlap = held.offset < b_end && want.offset < a_end;
+    overlap && (nfs_lock_write(held.lock_type) || nfs_lock_write(want.lock_type))
+}
 
 fn apply_write(file: &mut Vec<u8>, offset: u64, data: &[u8]) {
     let start = offset as usize;
@@ -88,10 +99,10 @@ pub struct NfsClient {
     root_fh: NfsFileHandle,
     current_fh: Option<NfsFileHandle>,
     saved_fh: Option<NfsFileHandle>,
-    open_files: BTreeMap<NfsFileHandle, NfsStateId>,
+    open_files: BTreeMap<NfsFileHandle, (NfsStateId, u32)>,
     attr_cache: BTreeMap<String, CachedEntry>,
     dir_cache: BTreeMap<String, Vec<NfsDirEntry>>,
-    locks: Vec<NfsLock>,
+    locks: Vec<(NfsFileHandle, NfsLock)>,
     connected: bool,
     pub(super) export_files: BTreeMap<String, Vec<u8>>,
     export_links: BTreeMap<String, String>,
@@ -293,7 +304,8 @@ impl NfsClient {
                 let hash = simple_hash(&fh_data);
                 let fh = NfsFileHandle::new(hash.to_le_bytes().to_vec());
                 let state_id = NfsStateId::new(1);
-                self.open_files.insert(fh.clone(), state_id);
+                self.open_files
+                    .insert(fh.clone(), (state_id, *share_access));
                 self.fh_names.insert(fh.clone(), name.clone());
                 if *create {
                     self.export_files.entry(name.clone()).or_default();
@@ -302,10 +314,16 @@ impl NfsClient {
                 NfsCompoundResult::OpenResult { state_id, fh }
             }
             NfsCompoundOp::Close(state_id) => {
-                if let Some(fh) = &self.current_fh {
-                    self.open_files.remove(fh);
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                match self.open_files.get(&fh) {
+                    Some((open_sid, _)) if open_sid == state_id => {
+                        self.open_files.remove(&fh);
+                        NfsCompoundResult::Status(NfsStat::Ok)
+                    }
+                    _ => NfsCompoundResult::Status(NfsStat::BadStateId),
                 }
-                NfsCompoundResult::Status(NfsStat::Ok)
             }
             NfsCompoundOp::Read {
                 state_id,
@@ -545,20 +563,46 @@ impl NfsClient {
                 }
             }
             NfsCompoundOp::Lock(lock) => {
-                self.locks.push(lock.clone());
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                if self
+                    .locks
+                    .iter()
+                    .any(|(held_fh, held)| *held_fh == fh && nfs_lock_conflicts(held, lock))
+                {
+                    return NfsCompoundResult::Status(NfsStat::Denied);
+                }
+                self.locks.push((fh, lock.clone()));
                 NfsCompoundResult::LockResult {
                     state_id: NfsStateId::new(1),
                 }
             }
             NfsCompoundOp::Unlock(lock) => {
-                self.locks
-                    .retain(|l| l.offset != lock.offset || l.length != lock.length);
-                NfsCompoundResult::Status(NfsStat::Ok)
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let before = self.locks.len();
+                self.locks.retain(|(held_fh, held)| {
+                    *held_fh != fh
+                        || held.offset != lock.offset
+                        || held.length != lock.length
+                        || held.owner != lock.owner
+                });
+                if self.locks.len() == before {
+                    NfsCompoundResult::Status(NfsStat::Denied)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                }
             }
             NfsCompoundOp::LockTest(lock) => {
-                let conflict = self.locks.iter().any(|l| {
-                    l.offset < lock.offset + lock.length && lock.offset < l.offset + l.length
-                });
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let conflict = self
+                    .locks
+                    .iter()
+                    .any(|(held_fh, held)| *held_fh == fh && nfs_lock_conflicts(held, lock));
                 if conflict {
                     NfsCompoundResult::Status(NfsStat::Denied)
                 } else {
@@ -610,7 +654,13 @@ impl NfsClient {
                     NfsCompoundResult::Status(NfsStat::Ok)
                 }
             }
-            NfsCompoundOp::Renew(client_id) => NfsCompoundResult::Status(NfsStat::Ok),
+            NfsCompoundOp::Renew(client_id) => {
+                if self.client_id_confirmed && self.client_id != 0 && *client_id == self.client_id {
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::StaleClientId)
+                }
+            }
             NfsCompoundOp::SetClientId { client_name } => {
                 self.client_id = simple_hash(client_name.as_bytes());
                 self.client_id_confirmed = false;
@@ -625,6 +675,49 @@ impl NfsClient {
                     NfsCompoundResult::Status(NfsStat::Ok)
                 } else {
                     NfsCompoundResult::Status(NfsStat::StaleClientId)
+                }
+            }
+            NfsCompoundOp::ReleaseLockOwner { owner } => {
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                self.locks
+                    .retain(|(held_fh, held)| *held_fh != fh || held.owner != *owner);
+                NfsCompoundResult::Status(NfsStat::Ok)
+            }
+            NfsCompoundOp::OpenConfirm { state_id } => {
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                match self.open_files.get(&fh) {
+                    Some((open_sid, _)) if open_sid == state_id => NfsCompoundResult::OpenResult {
+                        state_id: *open_sid,
+                        fh,
+                    },
+                    _ => NfsCompoundResult::Status(NfsStat::BadStateId),
+                }
+            }
+            NfsCompoundOp::OpenDowngrade {
+                state_id,
+                share_access,
+                share_deny,
+            } => {
+                let _ = share_deny;
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                match self.open_files.get_mut(&fh) {
+                    Some((open_sid, share)) if *open_sid == *state_id => {
+                        if share_access & *share != *share_access {
+                            return NfsCompoundResult::Status(NfsStat::Inval);
+                        }
+                        *share = *share_access;
+                        NfsCompoundResult::OpenResult {
+                            state_id: *open_sid,
+                            fh,
+                        }
+                    }
+                    _ => NfsCompoundResult::Status(NfsStat::BadStateId),
                 }
             }
         }

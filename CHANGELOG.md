@@ -7,6 +7,39 @@
 - **UI type** — 14–18px Inter keeps bowls (`a`/`o`/`w`) on the baseline: 2× raster + coverage lift, ceil advances, line boxes that fit the bitmap, layout that does not underestimate buttons/tabs.
 - **Kit Gallery** — host chrome is real knox-ui (Avatar, Label, Tag, Kbd keycaps, Badge, TabBar, StatusBar). Stories are paged (Controls / Display / Feedback / Forms / Overlays / Layout / Catalog) instead of the leftover Live/Catalog dump. Dropdown carets and table sort marks use Chevron icons.
 - **Modern GPU stack** — `./run.sh` uses `-vga virtio` as the primary display. DRM/KMS binds the live VirtIO-GPU scanout (`GATE_GPU modern stack`). Cursorq is proven (`GATE_GPU pointer plane`); QEMU cocoa does not composite that overlay, so the QEMU window pointer is the software arrow in the scanout plus the host cursor (`show-cursor=on`). USB tablet reports are not dropped when VirtIO-input is also bound.
+- **FUSE DESTROY** — DESTROY of a known mount succeeds; unknown mount fails (`GATE_FUSE destroy`).
+- **FUSE IOCTL** — IOCTL of a known file echoes `cmd`; unknown nodeid fails (`GATE_FUSE ioctl`).
+- **D-Bus Debug.Stats.GetStats** — `Connections` count (`GATE_DBUS stats`).
+- **D-Bus GetAllMatchRules** — unique name after AddMatch (`GATE_DBUS matchrules`).
+- **XHCI SET_SEL** — SET_SEL Transfer Event (`GATE_USB xhci setsel`).
+- **XHCI SET_ISOCH_DELAY** — SET_ISOCH_DELAY Transfer Event (`GATE_USB xhci isochdelay`).
+- **NFS OPEN_CONFIRM** — issued OPEN state_id is OK; wrong id is BAD_STATEID; missing FH is NOFILEHANDLE (`GATE_NFS openconfirm`).
+- **NFS OPEN_DOWNGRADE** — subset is OK; superset is INVAL; missing FH is NOFILEHANDLE (`GATE_NFS downgrade`).
+- **FUSE SETLKW** — SETLKW F_WRLCK is visible to GETLK from another pid; F_UNLCK drops it (`GATE_FUSE setlkw`).
+- **FUSE BMAP** — logical block 0 maps to nodeid; unknown nodeid fails (`GATE_FUSE bmap`).
+- **D-Bus Properties.GetAll** — `Features` then `UnknownInterface` (`GATE_DBUS getall`).
+- **D-Bus Properties.Set** — `Features` is PropertyReadOnly; unknown is UnknownProperty (`GATE_DBUS setprop`).
+- **XHCI Other Speed Configuration** — GET_DESCRIPTOR(Other Speed Configuration) Transfer Event (`GATE_USB xhci oscfg`).
+- **XHCI SYNCH_FRAME** — SYNCH_FRAME Transfer Event (`GATE_USB xhci synch`).
+- **NFS LOCKT** — free range is OK; overlap is DENIED; missing FH is NOFILEHANDLE (`GATE_NFS lockt`).
+- **NFS RELEASE_LOCKOWNER** — drops that owner's locks; missing FH is NOFILEHANDLE (`GATE_NFS lockowner`).
+- **FUSE GETLK** — GETLK of a known file with no lock is F_UNLCK; unknown nodeid fails (`GATE_FUSE getlk`).
+- **FUSE SETLK** — SETLK F_WRLCK is visible to GETLK from another pid; F_UNLCK drops it (`GATE_FUSE setlk`).
+- **D-Bus Introspect** — `Introspectable.Introspect` returns XML naming the bus interfaces (`GATE_DBUS introspect`).
+- **D-Bus Properties.Get** — `Features` then `UnknownProperty` (`GATE_DBUS props`).
+- **XHCI Device Qualifier** — GET_DESCRIPTOR(Device Qualifier) Transfer Event (`GATE_USB xhci qual`).
+- **XHCI BOS** — GET_DESCRIPTOR(BOS) Transfer Event (`GATE_USB xhci bos`).
+- **NFS LOCK** — free range is OK; overlap is DENIED; missing FH is NOFILEHANDLE (`GATE_NFS lock`).
+- **NFS LOCKU** — held range is OK; missing range is DENIED; missing FH is NOFILEHANDLE (`GATE_NFS unlock`).
+- **Font fallback** — compositor chain is Inter / CJK-Bitmap / Emoji-Color (`GATE_FONT fallback`).
+- **FUSE OPENDIR** — OPENDIR of a directory returns fh=nodeid; a file or unknown nodeid fails (`GATE_FUSE opendir`).
+- **FUSE RELEASEDIR** — RELEASEDIR after OPENDIR succeeds; a file, unknown nodeid, or mismatched fh fails (`GATE_FUSE releasedir`).
+- **D-Bus Peer Ping** — empty method return (`GATE_DBUS ping`).
+- **D-Bus Peer GetMachineId** — 32-hex machine UUID (`GATE_DBUS machineid`).
+- **XHCI Reset Device** — already-addressed slot Command Completion cc=1 (`GATE_USB xhci resetdev`).
+- **XHCI Transfer No-Op** — bulk OUT (DCI 2) No-Op TRB Transfer Event (`GATE_USB xhci trnoop`).
+- **NFS CLOSE** — issued OPEN state_id is OK; wrong id is BAD_STATEID; missing FH is NOFILEHANDLE (`GATE_NFS close`).
+- **NFS RENEW** — confirmed client_id is OK; wrong id is STALE_CLIENTID (`GATE_NFS renew`).
 - **FUSE FLUSH** — FLUSH after WRITE succeeds; unknown nodeid fails (`GATE_FUSE flush`).
 - **FUSE FSYNCDIR** — FSYNCDIR of a directory succeeds; a file or unknown nodeid fails (`GATE_FUSE fsyncdir`).
 - **D-Bus ReloadConfig** — empty method return (`GATE_DBUS reload`).

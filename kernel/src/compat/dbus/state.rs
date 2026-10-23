@@ -93,6 +93,9 @@ pub(super) struct ServiceInfo {
 /// Stable 32-hex machine UUID returned by `org.freedesktop.DBus.GetId`.
 pub const MACHINE_ID: &str = "0123456789abcdef0123456789abcdef";
 
+/// `org.freedesktop.DBus.Features` advertised by Properties.Get.
+pub const BUS_FEATURES: &[&str] = &["AppArmor", "SELinux"];
+
 /// Well-known name advertised by `ListActivatableNames`.
 pub const GATE_ACTIVATABLE_NAME: &str = "org.knoxos.GateActivatable";
 

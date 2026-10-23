@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec;
@@ -9,9 +10,9 @@ use crate::serial_println;
 use super::connection::{release_name_on_bus, request_name_on_bus};
 use super::protocol::{DbusValue, Message, MessageType};
 use super::state::{
-    BusState, BusType, Connection, ConnectionId, DBUS_START_REPLY_ALREADY_RUNNING,
+    BUS_FEATURES, BusState, BusType, Connection, ConnectionId, DBUS_START_REPLY_ALREADY_RUNNING,
     DBUS_START_REPLY_SUCCESS, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE, GATE_SELINUX_CONTEXT,
-    MatchRule, get_bus,
+    MACHINE_ID, MatchRule, get_bus,
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -512,7 +513,220 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
             }
         }
+    } else if interface == "org.freedesktop.DBus.Peer" {
+        match member {
+            "Ping" => {
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue
+                        .push(Message::method_return(msg.header.serial));
+                }
+            }
+            "GetMachineId" => {
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::String(String::from(MACHINE_ID))];
+                reply.signature = Some(String::from("s"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
+            _ => {
+                serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
+            }
+        }
+    } else if interface == "org.freedesktop.DBus.Introspectable" {
+        match member {
+            "Introspect" => {
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::String(String::from(BUS_INTROSPECT_XML))];
+                reply.signature = Some(String::from("s"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
+            _ => {
+                serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
+            }
+        }
+    } else if interface == "org.freedesktop.DBus.Properties" {
+        match member {
+            "Get" => {
+                let iface = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let name = match msg.body.get(1) {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                if iface == "org.freedesktop.DBus" && name == "Features" {
+                    let items: Vec<DbusValue> = BUS_FEATURES
+                        .iter()
+                        .map(|f| DbusValue::String(String::from(*f)))
+                        .collect();
+                    let mut reply = Message::method_return(msg.header.serial);
+                    reply.body = vec![DbusValue::Variant(Box::new(DbusValue::Array(items)))];
+                    reply.signature = Some(String::from("v"));
+                    if let Some(c) = bus.connections.get_mut(&from) {
+                        c.message_queue.push(reply);
+                    }
+                } else if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(Message::error(
+                        msg.header.serial,
+                        "org.freedesktop.DBus.Error.UnknownProperty",
+                        name,
+                    ));
+                }
+            }
+            "GetAll" => {
+                let iface = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                if iface == "org.freedesktop.DBus" {
+                    let items: Vec<DbusValue> = BUS_FEATURES
+                        .iter()
+                        .map(|f| DbusValue::String(String::from(*f)))
+                        .collect();
+                    let entries = vec![DbusValue::DictEntry(
+                        Box::new(DbusValue::String(String::from("Features"))),
+                        Box::new(DbusValue::Variant(Box::new(DbusValue::Array(items)))),
+                    )];
+                    let mut reply = Message::method_return(msg.header.serial);
+                    reply.body = vec![DbusValue::Array(entries)];
+                    reply.signature = Some(String::from("a{sv}"));
+                    if let Some(c) = bus.connections.get_mut(&from) {
+                        c.message_queue.push(reply);
+                    }
+                } else if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(Message::error(
+                        msg.header.serial,
+                        "org.freedesktop.DBus.Error.UnknownInterface",
+                        iface,
+                    ));
+                }
+            }
+            "Set" => {
+                let iface = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let name = match msg.body.get(1) {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let err = if iface == "org.freedesktop.DBus" && name == "Features" {
+                    ("org.freedesktop.DBus.Error.PropertyReadOnly", name)
+                } else {
+                    ("org.freedesktop.DBus.Error.UnknownProperty", name)
+                };
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue
+                        .push(Message::error(msg.header.serial, err.0, err.1));
+                }
+            }
+            _ => {
+                serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
+            }
+        }
+    } else if interface == "org.freedesktop.DBus.Debug.Stats" {
+        match member {
+            "GetStats" => {
+                let connections = bus.connections.len() as u32;
+                let match_rules: u32 = bus
+                    .connections
+                    .values()
+                    .map(|c| c.match_rules.len() as u32)
+                    .sum();
+                let entries = vec![
+                    DbusValue::DictEntry(
+                        Box::new(DbusValue::String(String::from("Connections"))),
+                        Box::new(DbusValue::Variant(Box::new(DbusValue::Uint32(connections)))),
+                    ),
+                    DbusValue::DictEntry(
+                        Box::new(DbusValue::String(String::from("MatchRules"))),
+                        Box::new(DbusValue::Variant(Box::new(DbusValue::Uint32(match_rules)))),
+                    ),
+                ];
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::Array(entries)];
+                reply.signature = Some(String::from("a{sv}"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
+            "GetAllMatchRules" => {
+                let mut entries = Vec::new();
+                for conn in bus.connections.values() {
+                    if conn.match_rules.is_empty() {
+                        continue;
+                    }
+                    let rules: Vec<DbusValue> = conn
+                        .match_rules
+                        .iter()
+                        .map(|r| DbusValue::String(match_rule_to_string(r)))
+                        .collect();
+                    entries.push(DbusValue::DictEntry(
+                        Box::new(DbusValue::String(conn.unique_name.clone())),
+                        Box::new(DbusValue::Array(rules)),
+                    ));
+                }
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::Array(entries)];
+                reply.signature = Some(String::from("a{sas}"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
+            _ => {
+                serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
+            }
+        }
     }
+}
+
+const BUS_INTROSPECT_XML: &str = concat!(
+    "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\" ",
+    "\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">",
+    "<node>",
+    "<interface name=\"org.freedesktop.DBus\">",
+    "<method name=\"Hello\"><arg direction=\"out\" type=\"s\"/></method>",
+    "</interface>",
+    "<interface name=\"org.freedesktop.DBus.Introspectable\">",
+    "<method name=\"Introspect\"><arg direction=\"out\" type=\"s\"/></method>",
+    "</interface>",
+    "<interface name=\"org.freedesktop.DBus.Peer\">",
+    "<method name=\"Ping\"/>",
+    "<method name=\"GetMachineId\"><arg direction=\"out\" type=\"s\"/></method>",
+    "</interface>",
+    "<interface name=\"org.freedesktop.DBus.Properties\">",
+    "<method name=\"Get\"><arg direction=\"in\" type=\"s\"/><arg direction=\"in\" type=\"s\"/>",
+    "<arg direction=\"out\" type=\"v\"/></method>",
+    "</interface>",
+    "</node>",
+);
+
+fn match_rule_to_string(rule: &MatchRule) -> String {
+    let mut parts = Vec::new();
+    if let Some(t) = rule.rule_type {
+        let s = match t {
+            MessageType::Signal => "signal",
+            MessageType::MethodCall => "method_call",
+            MessageType::MethodReturn => "method_return",
+            MessageType::Error => "error",
+            MessageType::Invalid => "invalid",
+        };
+        parts.push(format!("type='{}'", s));
+    }
+    if let Some(ref iface) = rule.interface {
+        parts.push(format!("interface='{}'", iface));
+    }
+    if let Some(ref member) = rule.member {
+        parts.push(format!("member='{}'", member));
+    }
+    if let Some(ref path) = rule.path {
+        parts.push(format!("path='{}'", path));
+    }
+    parts.join(",")
 }
 
 /// Parse a D-Bus match rule string

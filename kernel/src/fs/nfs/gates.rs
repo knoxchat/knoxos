@@ -7,8 +7,9 @@ use super::client::{NfsClient, NfsMountOptions};
 use super::compound::{NfsCompoundOp, NfsCompoundResult};
 use super::types::{
     NFS4_ACCESS_DELETE, NFS4_ACCESS_EXECUTE, NFS4_ACCESS_EXTEND, NFS4_ACCESS_LOOKUP,
-    NFS4_ACCESS_MODIFY, NFS4_ACCESS_READ, NFS4_SHARE_ACCESS_WRITE, NFS4_SHARE_DENY_NONE, NfsAttrs,
-    NfsFileHandle, NfsFileType, NfsStat, NfsStateId,
+    NFS4_ACCESS_MODIFY, NFS4_ACCESS_READ, NFS4_SHARE_ACCESS_BOTH, NFS4_SHARE_ACCESS_READ,
+    NFS4_SHARE_ACCESS_WRITE, NFS4_SHARE_DENY_NONE, NfsAttrs, NfsFileHandle, NfsFileType, NfsLock,
+    NfsLockType, NfsStat, NfsStateId,
 };
 
 pub const GATE_NFS_MARKER: &str = "GATE_NFS compound";
@@ -1073,6 +1074,605 @@ pub fn confirm_self_test() -> bool {
             serial_println!(
                 "[NFS] GATE_NFS confirm FAILED confirmed={} stale={:?}",
                 confirmed,
+                other
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_CLOSE_MARKER: &str = "GATE_NFS close";
+
+/// CLOSE of the issued OPEN state_id is NFS4_OK; a wrong id is BAD_STATEID; missing FH is NOFILEHANDLE.
+pub fn close_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let opened = client.compound(
+        "close-open",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-cl.txt"),
+                create: true,
+            },
+        ],
+    );
+    let state_id = match opened.get(1) {
+        Some(NfsCompoundResult::OpenResult { state_id, .. }) => *state_id,
+        other => {
+            serial_println!("[NFS] GATE_NFS close FAILED: open {:?}", other);
+            return false;
+        }
+    };
+    let ok = client.compound("close", &[NfsCompoundOp::Close(state_id)]);
+    let closed = matches!(ok.first(), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let bad = client.compound(
+        "close-bad",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Lookup(String::from("gate-cl.txt")),
+            NfsCompoundOp::Close(NfsStateId::anonymous()),
+        ],
+    );
+    let bad_ok = matches!(
+        bad.get(2),
+        Some(NfsCompoundResult::Status(NfsStat::BadStateId))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "close-missing",
+        &[NfsCompoundOp::Close(NfsStateId::anonymous())],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle)) if closed && bad_ok => {
+            serial_println!(
+                "[NFS] {} (CLOSE then BAD_STATEID then NOFILEHANDLE)",
+                GATE_NFS_CLOSE_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS close FAILED closed={} bad={} missing={:?}",
+                closed,
+                bad_ok,
+                other
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_RENEW_MARKER: &str = "GATE_NFS renew";
+
+/// RENEW of a confirmed client_id is NFS4_OK; a wrong id is STALE_CLIENTID.
+pub fn renew_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let issued = client.compound(
+        "renew-setclientid",
+        &[NfsCompoundOp::SetClientId {
+            client_name: String::from("knoxos-renew"),
+        }],
+    );
+    let client_id = match issued.first() {
+        Some(NfsCompoundResult::ClientId { client_id, .. }) => *client_id,
+        other => {
+            serial_println!("[NFS] GATE_NFS renew FAILED: setclientid {:?}", other);
+            return false;
+        }
+    };
+    let confirmed = client.compound(
+        "renew-confirm",
+        &[NfsCompoundOp::SetClientIdConfirm { client_id }],
+    );
+    let confirm_ok = matches!(
+        confirmed.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Ok))
+    ) && client.client_id_confirmed;
+    let ok = client.compound("renew", &[NfsCompoundOp::Renew(client_id)]);
+    let renewed = matches!(ok.first(), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let stale = client.compound("renew-stale", &[NfsCompoundOp::Renew(0xdead)]);
+    match stale.first() {
+        Some(NfsCompoundResult::Status(NfsStat::StaleClientId)) if confirm_ok && renewed => {
+            serial_println!(
+                "[NFS] {} (RENEW then STALE_CLIENTID)",
+                GATE_NFS_RENEW_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS renew FAILED confirm={} renewed={} stale={:?}",
+                confirm_ok,
+                renewed,
+                other
+            );
+            false
+        }
+    }
+}
+
+fn gate_lock(offset: u64, length: u64, owner: &str) -> NfsLock {
+    NfsLock {
+        lock_type: NfsLockType::WriteLt,
+        offset,
+        length,
+        owner: String::from(owner),
+        state_id: NfsStateId::anonymous(),
+    }
+}
+
+pub const GATE_NFS_LOCK_MARKER: &str = "GATE_NFS lock";
+
+/// LOCK of a byte range is NFS4_OK; overlap is DENIED; missing FH is NOFILEHANDLE.
+pub fn lock_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let opened = client.compound(
+        "lock-open",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-lk.txt"),
+                create: true,
+            },
+        ],
+    );
+    if !matches!(opened.get(1), Some(NfsCompoundResult::OpenResult { .. })) {
+        serial_println!("[NFS] GATE_NFS lock FAILED: open {:?}", opened.get(1));
+        return false;
+    }
+    let ok = client.compound("lock", &[NfsCompoundOp::Lock(gate_lock(0, 100, "knox"))]);
+    let locked = matches!(ok.first(), Some(NfsCompoundResult::LockResult { .. }));
+    let denied = client.compound(
+        "lock-overlap",
+        &[NfsCompoundOp::Lock(gate_lock(50, 100, "other"))],
+    );
+    let denied_ok = matches!(
+        denied.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Denied))
+    );
+    let probed = client.compound(
+        "lockt",
+        &[NfsCompoundOp::LockTest(gate_lock(50, 10, "probe"))],
+    );
+    let probed_ok = matches!(
+        probed.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Denied))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "lock-missing",
+        &[NfsCompoundOp::Lock(gate_lock(0, 8, "knox"))],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle))
+            if locked && denied_ok && probed_ok =>
+        {
+            serial_println!(
+                "[NFS] {} (LOCK then DENIED then NOFILEHANDLE)",
+                GATE_NFS_LOCK_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS lock FAILED locked={} denied={} lockt={} missing={:?}",
+                locked,
+                denied_ok,
+                probed_ok,
+                other
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_UNLOCK_MARKER: &str = "GATE_NFS unlock";
+
+/// LOCKU of a held range is NFS4_OK; a missing range is DENIED; missing FH is NOFILEHANDLE.
+pub fn unlock_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let opened = client.compound(
+        "unlock-open",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-ul.txt"),
+                create: true,
+            },
+        ],
+    );
+    if !matches!(opened.get(1), Some(NfsCompoundResult::OpenResult { .. })) {
+        serial_println!("[NFS] GATE_NFS unlock FAILED: open {:?}", opened.get(1));
+        return false;
+    }
+    let lk = gate_lock(0, 100, "knox");
+    let locked = client.compound("unlock-lock", &[NfsCompoundOp::Lock(lk.clone())]);
+    let lock_ok = matches!(locked.first(), Some(NfsCompoundResult::LockResult { .. }));
+    let unlocked = client.compound("unlock", &[NfsCompoundOp::Unlock(lk.clone())]);
+    let unlocked_ok = matches!(
+        unlocked.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Ok))
+    );
+    let missing_range = client.compound("unlock-gone", &[NfsCompoundOp::Unlock(lk)]);
+    let gone_ok = matches!(
+        missing_range.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Denied))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "unlock-missing",
+        &[NfsCompoundOp::Unlock(gate_lock(0, 8, "knox"))],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle))
+            if lock_ok && unlocked_ok && gone_ok =>
+        {
+            serial_println!(
+                "[NFS] {} (LOCKU then DENIED then NOFILEHANDLE)",
+                GATE_NFS_UNLOCK_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS unlock FAILED lock={} unlock={} gone={} missing={:?}",
+                lock_ok,
+                unlocked_ok,
+                gone_ok,
+                other
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_LOCKT_MARKER: &str = "GATE_NFS lockt";
+
+/// LOCKT of a free range is NFS4_OK; overlap is DENIED; missing FH is NOFILEHANDLE.
+pub fn lockt_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let opened = client.compound(
+        "lockt-open",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-lt.txt"),
+                create: true,
+            },
+        ],
+    );
+    if !matches!(opened.get(1), Some(NfsCompoundResult::OpenResult { .. })) {
+        serial_println!("[NFS] GATE_NFS lockt FAILED: open {:?}", opened.get(1));
+        return false;
+    }
+    let free = client.compound(
+        "lockt-free",
+        &[NfsCompoundOp::LockTest(gate_lock(0, 100, "probe"))],
+    );
+    let free_ok = matches!(free.first(), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let locked = client.compound(
+        "lockt-lock",
+        &[NfsCompoundOp::Lock(gate_lock(0, 100, "knox"))],
+    );
+    let lock_ok = matches!(locked.first(), Some(NfsCompoundResult::LockResult { .. }));
+    let denied = client.compound(
+        "lockt-overlap",
+        &[NfsCompoundOp::LockTest(gate_lock(50, 10, "probe"))],
+    );
+    let denied_ok = matches!(
+        denied.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Denied))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "lockt-missing",
+        &[NfsCompoundOp::LockTest(gate_lock(0, 8, "probe"))],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle))
+            if free_ok && lock_ok && denied_ok =>
+        {
+            serial_println!(
+                "[NFS] {} (LOCKT then DENIED then NOFILEHANDLE)",
+                GATE_NFS_LOCKT_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS lockt FAILED free={} lock={} denied={} missing={:?}",
+                free_ok,
+                lock_ok,
+                denied_ok,
+                other
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_LOCKOWNER_MARKER: &str = "GATE_NFS lockowner";
+
+/// RELEASE_LOCKOWNER drops that owner's locks; missing FH is NOFILEHANDLE.
+pub fn lockowner_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let opened = client.compound(
+        "lockowner-open",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-lo.txt"),
+                create: true,
+            },
+        ],
+    );
+    if !matches!(opened.get(1), Some(NfsCompoundResult::OpenResult { .. })) {
+        serial_println!("[NFS] GATE_NFS lockowner FAILED: open {:?}", opened.get(1));
+        return false;
+    }
+    let locked = client.compound(
+        "lockowner-lock",
+        &[NfsCompoundOp::Lock(gate_lock(0, 100, "knox"))],
+    );
+    let lock_ok = matches!(locked.first(), Some(NfsCompoundResult::LockResult { .. }));
+    let released = client.compound(
+        "lockowner",
+        &[NfsCompoundOp::ReleaseLockOwner {
+            owner: String::from("knox"),
+        }],
+    );
+    let released_ok = matches!(
+        released.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Ok))
+    );
+    let probed = client.compound(
+        "lockowner-lockt",
+        &[NfsCompoundOp::LockTest(gate_lock(0, 100, "probe"))],
+    );
+    let probed_ok = matches!(probed.first(), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "lockowner-missing",
+        &[NfsCompoundOp::ReleaseLockOwner {
+            owner: String::from("knox"),
+        }],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle))
+            if lock_ok && released_ok && probed_ok =>
+        {
+            serial_println!(
+                "[NFS] {} (RELEASE_LOCKOWNER then LOCKT OK then NOFILEHANDLE)",
+                GATE_NFS_LOCKOWNER_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS lockowner FAILED lock={} release={} lockt={} missing={:?}",
+                lock_ok,
+                released_ok,
+                probed_ok,
+                other
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_OPENCONFIRM_MARKER: &str = "GATE_NFS openconfirm";
+
+/// OPEN_CONFIRM of the issued OPEN state_id is OK; a wrong id is BAD_STATEID; missing FH is NOFILEHANDLE.
+pub fn openconfirm_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let opened = client.compound(
+        "openconfirm-open",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-oc.txt"),
+                create: true,
+            },
+        ],
+    );
+    let state_id = match opened.get(1) {
+        Some(NfsCompoundResult::OpenResult { state_id, .. }) => *state_id,
+        other => {
+            serial_println!("[NFS] GATE_NFS openconfirm FAILED: open {:?}", other);
+            return false;
+        }
+    };
+    let ok = client.compound("openconfirm", &[NfsCompoundOp::OpenConfirm { state_id }]);
+    let confirmed = matches!(ok.first(), Some(NfsCompoundResult::OpenResult { .. }));
+    let bad = client.compound(
+        "openconfirm-bad",
+        &[NfsCompoundOp::OpenConfirm {
+            state_id: NfsStateId::anonymous(),
+        }],
+    );
+    let bad_ok = matches!(
+        bad.first(),
+        Some(NfsCompoundResult::Status(NfsStat::BadStateId))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "openconfirm-missing",
+        &[NfsCompoundOp::OpenConfirm {
+            state_id: NfsStateId::anonymous(),
+        }],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle)) if confirmed && bad_ok => {
+            serial_println!(
+                "[NFS] {} (OPEN_CONFIRM then BAD_STATEID then NOFILEHANDLE)",
+                GATE_NFS_OPENCONFIRM_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS openconfirm FAILED confirmed={} bad={} missing={:?}",
+                confirmed,
+                bad_ok,
+                other
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_DOWNGRADE_MARKER: &str = "GATE_NFS downgrade";
+
+/// OPEN_DOWNGRADE to a subset is OK; a superset is INVAL; a wrong id is BAD_STATEID; missing FH is NOFILEHANDLE.
+pub fn downgrade_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let opened = client.compound(
+        "downgrade-open",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_BOTH,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-od.txt"),
+                create: true,
+            },
+        ],
+    );
+    let state_id = match opened.get(1) {
+        Some(NfsCompoundResult::OpenResult { state_id, .. }) => *state_id,
+        other => {
+            serial_println!("[NFS] GATE_NFS downgrade FAILED: open {:?}", other);
+            return false;
+        }
+    };
+    let down = client.compound(
+        "downgrade",
+        &[NfsCompoundOp::OpenDowngrade {
+            state_id,
+            share_access: NFS4_SHARE_ACCESS_READ,
+            share_deny: NFS4_SHARE_DENY_NONE,
+        }],
+    );
+    let down_ok = matches!(down.first(), Some(NfsCompoundResult::OpenResult { .. }));
+    let wider = client.compound(
+        "downgrade-wider",
+        &[NfsCompoundOp::OpenDowngrade {
+            state_id,
+            share_access: NFS4_SHARE_ACCESS_BOTH,
+            share_deny: NFS4_SHARE_DENY_NONE,
+        }],
+    );
+    let wider_ok = matches!(
+        wider.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Inval))
+    );
+    let bad = client.compound(
+        "downgrade-bad",
+        &[NfsCompoundOp::OpenDowngrade {
+            state_id: NfsStateId::anonymous(),
+            share_access: NFS4_SHARE_ACCESS_READ,
+            share_deny: NFS4_SHARE_DENY_NONE,
+        }],
+    );
+    let bad_ok = matches!(
+        bad.first(),
+        Some(NfsCompoundResult::Status(NfsStat::BadStateId))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "downgrade-missing",
+        &[NfsCompoundOp::OpenDowngrade {
+            state_id: NfsStateId::anonymous(),
+            share_access: NFS4_SHARE_ACCESS_READ,
+            share_deny: NFS4_SHARE_DENY_NONE,
+        }],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle)) if down_ok && wider_ok && bad_ok => {
+            serial_println!(
+                "[NFS] {} (OPEN_DOWNGRADE then INVAL then BAD_STATEID then NOFILEHANDLE)",
+                GATE_NFS_DOWNGRADE_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS downgrade FAILED down={} wider={} bad={} missing={:?}",
+                down_ok,
+                wider_ok,
+                bad_ok,
                 other
             );
             false

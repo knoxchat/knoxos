@@ -5,7 +5,8 @@ use alloc::vec::Vec;
 
 use super::mount::{LOOPBACK, write_response};
 use super::protocol::{
-    FuseOpcode, FuseStatfs, encode_dirent, encode_entry, encode_open, encode_statfs,
+    F_UNLCK, FuseFileLock, FuseOpcode, FuseStatfs, encode_bmap, encode_dirent, encode_entry,
+    encode_ioctl, encode_lk, encode_open, encode_statfs, lock_conflicts, parse_fuse_lk,
 };
 
 pub(super) fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]) {
@@ -460,4 +461,122 @@ pub(super) fn serve_loopback_fsyncdir(mount_point: &str, unique: u64, nodeid: u6
     }
     drop(lbs);
     let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_opendir(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_is_dir(lb, nodeid) {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, encode_open(nodeid, 0));
+}
+pub(super) fn serve_loopback_releasedir(mount_point: &str, unique: u64, nodeid: u64, fh: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_is_dir(lb, nodeid) || fh != nodeid {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_getlk(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    let Some(want) = parse_fuse_lk(req) else {
+        return;
+    };
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    let reply = lb
+        .locks
+        .get(&nodeid)
+        .and_then(|held| held.iter().find(|h| lock_conflicts(h, &want)).copied())
+        .unwrap_or(FuseFileLock {
+            start: want.start,
+            end: want.end,
+            typ: F_UNLCK,
+            pid: 0,
+        });
+    drop(lbs);
+    let _ = write_response(mount_point, unique, encode_lk(&reply));
+}
+pub(super) fn serve_loopback_setlk(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    let Some(want) = parse_fuse_lk(req) else {
+        return;
+    };
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    let held = lb.locks.entry(nodeid).or_default();
+    if want.typ == F_UNLCK {
+        held.retain(|h| h.pid != want.pid || !super::protocol::locks_overlap(h, &want));
+        drop(lbs);
+        let _ = write_response(mount_point, unique, Vec::new());
+        return;
+    }
+    if held.iter().any(|h| lock_conflicts(h, &want)) {
+        return;
+    }
+    held.retain(|h| h.pid != want.pid || !super::protocol::locks_overlap(h, &want));
+    held.push(want);
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_bmap(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    if req.len() < 12 {
+        return;
+    }
+    let logical = u64::from_le_bytes(req[0..8].try_into().unwrap_or([0; 8]));
+    let bsize = u32::from_le_bytes(req[8..12].try_into().unwrap_or([0; 4]));
+    if bsize == 0 {
+        return;
+    }
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !lb.files.values().any(|(ino, _)| *ino == nodeid) {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(
+        mount_point,
+        unique,
+        encode_bmap(nodeid.saturating_add(logical)),
+    );
+}
+pub(super) fn serve_loopback_destroy(mount_point: &str, unique: u64) {
+    let lbs = LOOPBACK.lock();
+    if lbs.get(mount_point).is_none() {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_ioctl(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    if req.len() < 16 {
+        return;
+    }
+    let cmd = u32::from_le_bytes(req[12..16].try_into().unwrap_or([0; 4]));
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, encode_ioctl(cmd as i32));
 }

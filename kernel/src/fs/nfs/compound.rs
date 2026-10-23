@@ -81,6 +81,17 @@ pub enum NfsCompoundOp {
     SetClientIdConfirm {
         client_id: u64,
     },
+    ReleaseLockOwner {
+        owner: String,
+    },
+    OpenConfirm {
+        state_id: NfsStateId,
+    },
+    OpenDowngrade {
+        state_id: NfsStateId,
+        share_access: u32,
+        share_deny: u32,
+    },
 }
 
 /// Result of a compound operation
