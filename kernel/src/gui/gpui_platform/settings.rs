@@ -256,7 +256,7 @@ fn build_pages() -> Vec<SettingPage> {
     ];
     let mut system = SettingPage::new("System").group(
         SettingGroup::new("About this PC")
-            .item(SettingItem::new("OS").value("KnoxOS v0.2.5"))
+            .item(SettingItem::new("OS").value("KnoxOS v0.2.6"))
             .item(SettingItem::new("Kernel").value("Microkernel (Rust)")),
     );
     let mut kb = SettingGroup::new("Keyboard");
@@ -331,7 +331,7 @@ fn build_pages() -> Vec<SettingPage> {
 
     let about = SettingPage::new("About").group(
         SettingGroup::new("KnoxOS")
-            .item(SettingItem::new("Version").value("0.2.5"))
+            .item(SettingItem::new("Version").value("0.2.6"))
             .item(SettingItem::new("Toolkit").value("Knox GPUI")),
     );
 

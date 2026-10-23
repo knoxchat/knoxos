@@ -98,7 +98,7 @@ impl Splash {
             width: px(SPLASH_CARD_W),
             height: px(SPLASH_CARD_H),
             progress: 0.0,
-            version: String::from("v0.2.5"),
+            version: String::from("v0.2.6"),
             status: String::from(splash_status(0)),
         }
     }

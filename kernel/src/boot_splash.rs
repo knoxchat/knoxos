@@ -77,7 +77,7 @@ fn paint_card(fb: &mut FrameBuffer, percent: u32) {
     draw_centered(
         fb,
         y,
-        "v0.2.5",
+        "v0.2.6",
         FontId::Ui,
         font_engine::CAPTION_SIZE,
         0,
@@ -175,7 +175,7 @@ pub enum BootMenuEntry {
 impl BootMenuEntry {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::NormalBoot => "KnoxOS v0.2.5",
+            Self::NormalBoot => "KnoxOS v0.2.6",
             Self::RecoveryShell => "KnoxOS Recovery Shell",
             Self::SafeGraphics => "KnoxOS (Safe Graphics)",
             Self::VerboseBoot => "KnoxOS (Verbose)",

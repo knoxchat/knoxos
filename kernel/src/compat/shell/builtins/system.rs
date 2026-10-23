@@ -39,7 +39,7 @@ pub fn uname(args: &[String]) -> ShellResult {
         parts.push("knoxos");
     }
     if show_all || show_release {
-        parts.push("0.2.5-knoxos");
+        parts.push("0.2.6-knoxos");
     }
     if show_all || show_version {
         parts.push("#1 SMP PREEMPT_DYNAMIC");

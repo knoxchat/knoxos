@@ -1,7 +1,7 @@
 # KnoxOS Production Readiness Status
 
-> **Last Updated**: 2026-10-21
-> **Version**: 0.2.5
+> **Last Updated**: 2026-10-23
+> **Version**: 0.2.6
 > **Honesty rule**: a module that compiles is not a feature. Only **Live** work counts toward production.
 
 The full status tree lives in [`status/`](status/README.md). This file is the stable root path CI and old links still check.

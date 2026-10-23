@@ -47,7 +47,7 @@ pub(super) fn draw_about_tab(fb: &mut FrameBuffer, x: i32, y: i32, w: i32) -> i3
         x,
         logo_y + logo_size + 34,
         w as u32,
-        "Version 0.2.5",
+        "Version 0.2.6",
         13,
         Pixel::rgb(140, 140, 140),
     );

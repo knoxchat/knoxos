@@ -175,7 +175,7 @@ pub fn init() {
     klog(
         LogLevel::Info,
         "kern",
-        "KnoxOS version 0.2.5 (rustc nightly)",
+        "KnoxOS version 0.2.6 (rustc nightly)",
     );
     klog(LogLevel::Info, "kern", "Command line: console=ttyS0");
     serial_println!("[KnoxOS] Kernel ring buffer (dmesg) initialized");

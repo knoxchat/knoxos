@@ -105,7 +105,7 @@ entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 /// Kernel entry point - called by bootloader
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("╔══════════════════════════════════════════════════════╗");
-    serial_println!("║  KnoxOS - AI Operating System v0.2.5                 ║");
+    serial_println!("║  KnoxOS - AI Operating System v0.2.6                 ║");
     serial_println!("║  Linux-compatible | Rust-powered | SI-native         ║");
     serial_println!("╚══════════════════════════════════════════════════════╝");
     serial_println!("[KnoxOS] Booting KnoxOS...");

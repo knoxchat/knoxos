@@ -577,7 +577,7 @@ fn draw_performance_tab(fb: &mut FrameBuffer, x: i32, y: i32, w: i32, _h: i32) {
         fb,
         x + 16,
         cy,
-        &format!("KnoxOS v0.2.5  ({})", ARCH_NAME),
+        &format!("KnoxOS v0.2.6  ({})", ARCH_NAME),
         detail_color,
         1,
     );
@@ -847,7 +847,7 @@ pub fn performance_info() -> PerfInfo {
             ),
             (
                 String::from("Kernel"),
-                format!("KnoxOS v0.2.5 ({ARCH_NAME})")
+                format!("KnoxOS v0.2.6 ({ARCH_NAME})")
             ),
             (String::from("Ticks"), format!("{ticks}")),
         ],

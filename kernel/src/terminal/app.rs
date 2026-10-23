@@ -124,7 +124,7 @@ impl TerminalApp {
 
         let welcome = "\
             \x1b[1;34m╔══════════════════════════════════════════════════════╗\x1b[0m\n\
-             \x1b[1;34m║\x1b[0m  \x1b[1;36mKnoxOS Terminal\x1b[0m v0.2.5                              \x1b[1;34m║\x1b[0m\n\
+             \x1b[1;34m║\x1b[0m  \x1b[1;36mKnoxOS Terminal\x1b[0m v0.2.6                              \x1b[1;34m║\x1b[0m\n\
              \x1b[1;34m║\x1b[0m                                                      \x1b[1;34m║\x1b[0m\n\
              \x1b[1;34m║\x1b[0m  \x1b[33m•\x1b[0m Smart autosuggestions from history (\x1b[2mRight→\x1b[0m accept) \x1b[1;34m║\x1b[0m\n\
              \x1b[1;34m║\x1b[0m  \x1b[33m•\x1b[0m Syntax highlighting (\x1b[32mvalid\x1b[0m/\x1b[31minvalid\x1b[0m commands)     \x1b[1;34m║\x1b[0m\n\

@@ -13,7 +13,7 @@ use super::widgets::{
 pub(super) fn draw_system_tab(fb: &mut FrameBuffer, x: i32, y: i32, w: i32, focus_idx: i32) -> i32 {
     draw_section_header(fb, x, y + 12, w, "System");
 
-    draw_info_row(fb, x, y + 42, "OS", "KnoxOS v0.2.5");
+    draw_info_row(fb, x, y + 42, "OS", "KnoxOS v0.2.6");
     draw_info_row(fb, x, y + 60, "Architecture", ARCH_NAME);
     draw_info_row(fb, x, y + 78, "Kernel", "Microkernel (Rust)");
 
