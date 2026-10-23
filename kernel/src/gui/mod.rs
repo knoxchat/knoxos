@@ -335,7 +335,7 @@ pub fn damage_window(id: window::WindowId) {
     }
 }
 
-/// Damage the taskbar strip (clock, dock hover, tray).
+/// Damage the taskbar strip (dock hover, tray).
 pub fn request_taskbar_redraw() {
     if gpui_platform::panel_is_live() {
         gpui_platform::panel_damage();

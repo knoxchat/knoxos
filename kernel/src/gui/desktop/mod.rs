@@ -523,9 +523,8 @@ pub fn on_timer_tick(ticks: u64) {
         super::gpui_platform::notify_damage();
     }
 
-    // Clock lives in the desktop widget card + taskbar strip — not the whole FB.
+    // Clock lives in the desktop widget card — not the dock or the whole FB.
     if old_clock != new_clock {
-        super::request_taskbar_redraw();
         super::request_desktop_widget_redraw();
     }
 }

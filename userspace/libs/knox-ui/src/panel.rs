@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Session panel / dock (D9.1) with live system-tray children (D9.5).
 //! Knox GPUI view, not `taskbar.rs` / `system_tray.rs` paint.
+//! Time lives on the desktop clock widget, not in this dock.
 //!
 //! the Longbridge kit is a design reference only (Apache-2.0). This file is new
 //! `no_std` code.
@@ -131,17 +132,14 @@ pub struct Panel {
     width: Pixels,
     height: Pixels,
     entries: Vec<PanelEntry>,
-    clock: String,
     start_open: bool,
     tray: TrayStatus,
     volume_open: bool,
     brightness_open: bool,
     qs_open: bool,
-    calendar_open: bool,
     notify_open: bool,
     on_start: Option<Handler>,
     on_app: Option<IndexHandler>,
-    on_clock: Option<Handler>,
     on_network: Option<Handler>,
     on_volume: Option<Handler>,
     on_brightness: Option<Handler>,
@@ -158,17 +156,14 @@ impl Panel {
             width: px(560),
             height: px(DOCK_BAR_H),
             entries: Vec::new(),
-            clock: String::from("12:00"),
             start_open: false,
             tray: TrayStatus::default(),
             volume_open: false,
             brightness_open: false,
             qs_open: false,
-            calendar_open: false,
             notify_open: false,
             on_start: None,
             on_app: None,
-            on_clock: None,
             on_network: None,
             on_volume: None,
             on_brightness: None,
@@ -195,11 +190,6 @@ impl Panel {
         self
     }
 
-    pub fn clock(mut self, clock: impl Into<String>) -> Self {
-        self.clock = clock.into();
-        self
-    }
-
     pub fn start_open(mut self, open: bool) -> Self {
         self.start_open = open;
         self
@@ -220,11 +210,6 @@ impl Panel {
         self
     }
 
-    pub fn on_clock(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
-        self.on_clock = Some(Arc::new(f));
-        self
-    }
-
     pub fn on_network(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
         self.on_network = Some(Arc::new(f));
         self
@@ -242,11 +227,6 @@ impl Panel {
 
     pub fn qs_open(mut self, open: bool) -> Self {
         self.qs_open = open;
-        self
-    }
-
-    pub fn calendar_open(mut self, open: bool) -> Self {
-        self.calendar_open = open;
         self
     }
 
@@ -346,15 +326,6 @@ impl IntoElement for Panel {
         if let Some(s) = self.on_start {
             start = start.on_click(move || s());
         }
-        let mut clock = Button::new("panel-clock")
-            .themed(&self.theme)
-            .ghost()
-            .label(self.clock)
-            .selected(self.calendar_open)
-            .small();
-        if let Some(c) = self.on_clock {
-            clock = clock.on_click(move || c());
-        }
         let mut dock = Dock::new()
             .themed(&self.theme)
             .size(self.width, self.height)
@@ -441,7 +412,6 @@ impl IntoElement for Panel {
             .add_trailing(battery)
             .add_trailing(bluetooth)
             .add_trailing(notify)
-            .add_trailing(clock)
             .into_element()
     }
 }
@@ -585,7 +555,6 @@ mod tests {
         let mut el = Panel::new()
             .themed(&Theme::aurora_dark())
             .entries([PanelEntry::new("Term", crate::icon::IconName::SquareTerminal).active(true)])
-            .clock("9:30")
             .on_start(move || flag.store(true, Ordering::SeqCst))
             .into_element();
         let mut input = WindowInput::new();
@@ -596,13 +565,11 @@ mod tests {
     }
 
     #[test]
-    fn network_volume_clock_live() {
+    fn network_volume_live() {
         let net = Arc::new(AtomicBool::new(false));
         let vol = Arc::new(AtomicBool::new(false));
-        let clk = Arc::new(AtomicBool::new(false));
         let n = net.clone();
         let v = vol.clone();
-        let c = clk.clone();
         let mut el = Panel::new()
             .themed(&Theme::aurora_dark())
             .tray(TrayStatus {
@@ -616,26 +583,17 @@ mod tests {
                 bluetooth: true,
                 unread: 0,
             })
-            .clock("9:41 AM")
             .on_network(move || n.store(true, Ordering::SeqCst))
             .on_volume(move || v.store(true, Ordering::SeqCst))
-            .on_clock(move || c.store(true, Ordering::SeqCst))
             .into_element();
         let mut input = WindowInput::new();
         prepare_element(&mut el, Point::ZERO, Size::wh(640, 52), &mut input);
         let stops = tab_stops(&input);
-        assert!(
-            stops.len() >= 4,
-            "start + tray chips + clock, got {}",
-            stops.len()
-        );
+        assert!(stops.len() >= 3, "start + tray chips, got {}", stops.len());
         dispatch_mouse_down_button(&mut el, &mut input, stops[1], MouseButton::Left);
         assert!(net.load(Ordering::SeqCst), "network chip");
         dispatch_mouse_down_button(&mut el, &mut input, stops[2], MouseButton::Left);
         assert!(vol.load(Ordering::SeqCst), "volume chip");
-        let clock = *stops.last().unwrap();
-        click_at(&mut el, &mut input, clock);
-        assert!(clk.load(Ordering::SeqCst), "clock chip");
     }
 
     #[test]

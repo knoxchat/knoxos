@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! D9.1 session panel as a Knox GPUI view. Replaces `taskbar.rs` paint.
-//! D9.5 live tray icons (network / volume / clock) as panel children.
+//! D9.5 live tray icons (network / volume / …) as panel children.
+//! Time is shown on the desktop clock widget, not the dock.
 //! Marker `GATE_GPUI panel` / `GATE_GPUI tray`.
 
 use alloc::vec::Vec;
@@ -77,10 +78,9 @@ fn tray_status() -> TrayStatus {
 }
 
 fn panel_tree(theme: &Theme) -> knox_gpui::Div {
-    let (entries, clock) = {
+    let entries = {
         let tb = taskbar::TASKBAR.lock();
-        let entries: Vec<PanelEntry> = tb
-            .entries
+        tb.entries
             .iter()
             .take(12)
             .map(|e| {
@@ -90,8 +90,7 @@ fn panel_tree(theme: &Theme) -> knox_gpui::Div {
                 )
                 .active(e.active)
             })
-            .collect();
-        (entries, tb.clock_text.clone())
+            .collect::<Vec<PanelEntry>>()
     };
     let start_open = crate::gui::startmenu::is_visible();
     let osd = super::osd::kind();
@@ -103,13 +102,11 @@ fn panel_tree(theme: &Theme) -> knox_gpui::Div {
         .themed(theme)
         .size(px(dest.width as i32), px(dest.height as i32))
         .entries(entries)
-        .clock(clock)
         .start_open(start_open)
         .tray(tray_status())
         .volume_open(osd == Some(FlyoutKind::Volume))
         .brightness_open(osd == Some(FlyoutKind::Brightness))
         .qs_open(osd == Some(FlyoutKind::QuickSettings))
-        .calendar_open(osd == Some(FlyoutKind::Calendar))
         .notify_open(crate::gui::notifications::is_panel_open())
         .on_start(|| {
             crate::gui::popups::close_all_popups();
@@ -120,10 +117,6 @@ fn panel_tree(theme: &Theme) -> knox_gpui::Div {
         .on_app(|i| {
             super::tray::close();
             taskbar::activate_dock_index(i);
-        })
-        .on_clock(|| {
-            super::tray::close();
-            super::osd::toggle(FlyoutKind::Calendar);
         })
         .on_network(|| {
             super::tray::close();
