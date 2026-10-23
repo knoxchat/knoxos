@@ -137,6 +137,11 @@ fn hide_gallery() {
     crate::gui::request_redraw();
 }
 
+/// Hide the Kit Gallery overlay (start-menu / Escape).
+pub fn hide_kit_gallery() {
+    hide_gallery();
+}
+
 fn begin_gallery_minimize() {
     if crate::gui::accessibility::is_reduced_motion() {
         hide_gallery();

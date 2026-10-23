@@ -93,6 +93,13 @@ struct VirtioInputEvent {
     value: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct VirtqUsedElem {
+    id: u32,
+    len: u32,
+}
+
 struct VirtioInputDev {
     io_base: u16,
     modern: bool,
@@ -100,6 +107,7 @@ struct VirtioInputDev {
     notify: u64,
     notify_mult: u32,
     notify_off: u16,
+    isr: u64,
     queue_size: u16,
     vq_phys: u64,
     desc_base: *mut VirtqDesc,
@@ -171,6 +179,7 @@ struct VirtioCaps {
     common: u64,
     notify: u64,
     notify_mult: u32,
+    isr: u64,
 }
 
 fn parse_virtio_caps(bus: u8, dev: u8, func: u8) -> Option<VirtioCaps> {
@@ -182,6 +191,7 @@ fn parse_virtio_caps(bus: u8, dev: u8, func: u8) -> Option<VirtioCaps> {
     let mut common = 0u64;
     let mut notify = 0u64;
     let mut notify_mult = 0u32;
+    let mut isr = 0u64;
     let mut hops = 0u8;
     while cap != 0 && cap != 0xFF && hops < 48 {
         hops += 1;
@@ -198,9 +208,7 @@ fn parse_virtio_caps(bus: u8, dev: u8, func: u8) -> Option<VirtioCaps> {
                         notify = virt;
                         notify_mult = pci::pci_config_read32(bus, dev, func, cap.wrapping_add(16));
                     }
-                    VIRTIO_PCI_CAP_ISR => {
-                        let _ = virt;
-                    }
+                    VIRTIO_PCI_CAP_ISR => isr = virt,
                     _ => {}
                 }
             }
@@ -213,7 +221,8 @@ fn parse_virtio_caps(bus: u8, dev: u8, func: u8) -> Option<VirtioCaps> {
         Some(VirtioCaps {
             common,
             notify,
-            notify_mult: if notify_mult == 0 { 1 } else { notify_mult },
+            notify_mult,
+            isr,
         })
     }
 }
@@ -252,6 +261,7 @@ impl VirtioInputDev {
             notify: 0,
             notify_mult: 1,
             notify_off: 0,
+            isr: 0,
             queue_size: 0,
             vq_phys: 0,
             desc_base: core::ptr::null_mut(),
@@ -276,11 +286,25 @@ impl VirtioInputDev {
         // SAFETY: used ring is a mapped virtqueue page we own.
         unsafe { (self.used_base as *const u16).add(1) }
     }
-    fn used_ring_id(&self, i: u16) -> u32 {
+    fn used_elem(&self, i: u16) -> VirtqUsedElem {
         // SAFETY: used-ring elements follow the used header.
         unsafe {
-            let base = (self.used_base as *const u16).add(2) as *const u32;
-            core::ptr::read_volatile(base.add(i as usize * 2))
+            let base = (self.used_base as *const u16).add(2) as *const VirtqUsedElem;
+            core::ptr::read_volatile(base.add(i as usize))
+        }
+    }
+
+    fn ack_isr(&self) {
+        if self.modern {
+            if self.isr != 0 {
+                let _ = mmio_r8(self.isr);
+            }
+        } else if self.io_base != 0 {
+            // SAFETY: legacy ISR read acknowledges the interrupt.
+            unsafe {
+                let mut isr: Port<u8> = Port::new(self.io_base + 19);
+                let _ = isr.read();
+            }
         }
     }
 
@@ -417,6 +441,7 @@ impl VirtioInputDev {
         self.common = caps.common;
         self.notify = caps.notify;
         self.notify_mult = caps.notify_mult;
+        self.isr = caps.isr;
 
         mmio_w8(caps.common + CFG_DEVICE_STATUS, 0);
         mmio_w8(caps.common + CFG_DEVICE_STATUS, VIRTIO_STATUS_ACKNOWLEDGE);
@@ -480,6 +505,7 @@ impl VirtioInputDev {
         );
         self.notify_off = mmio_r16(caps.common + CFG_QUEUE_NOTIFY_OFF);
         mmio_w16(caps.common + CFG_QUEUE_ENABLE, 1);
+        enable_status_queue(caps.common);
         mmio_w8(
             caps.common + CFG_DEVICE_STATUS,
             VIRTIO_STATUS_ACKNOWLEDGE
@@ -492,37 +518,88 @@ impl VirtioInputDev {
         true
     }
 
-    fn poll_events(&mut self) {
+    fn drain_events(&mut self, out: &mut Vec<VirtioInputEvent>) {
         if !self.ready {
             return;
         }
+        self.ack_isr();
         let qsz = self.queue_size;
+        if qsz == 0 {
+            return;
+        }
+        let mut consumed = false;
+        let mut n = 0u16;
         loop {
+            if n >= qsz.saturating_mul(2) {
+                break;
+            }
+            n = n.saturating_add(1);
             // SAFETY: used idx is the device-owned producer index.
             let device_used_idx = unsafe { core::ptr::read_volatile(self.used_idx_ptr()) };
+            fence(Ordering::Acquire);
             if device_used_idx == self.used_idx {
                 break;
             }
             let ring_idx = self.used_idx % qsz;
-            let desc_id = self.used_ring_id(ring_idx);
+            let desc_id = self.used_elem(ring_idx).id;
             if let Some(evt) = self.read_event(desc_id as usize) {
-                dispatch_input_event(evt);
-                let avail_slot = self.avail_idx % qsz;
-                // SAFETY: re-arm the descriptor in the avail ring.
-                unsafe {
-                    core::ptr::write_volatile(self.avail_ring_entry(avail_slot), desc_id as u16);
-                    self.avail_idx = self.avail_idx.wrapping_add(1);
-                    fence(Ordering::Release);
-                    core::ptr::write_volatile(self.avail_idx_ptr(), self.avail_idx);
-                }
-                self.kick();
+                out.push(evt);
+            }
+            let avail_slot = self.avail_idx % qsz;
+            // SAFETY: re-arm the descriptor in the avail ring even if the
+            // event was unreadable so the queue cannot stall.
+            unsafe {
+                core::ptr::write_volatile(self.avail_ring_entry(avail_slot), desc_id as u16);
+                self.avail_idx = self.avail_idx.wrapping_add(1);
+                fence(Ordering::Release);
+                core::ptr::write_volatile(self.avail_idx_ptr(), self.avail_idx);
             }
             self.used_idx = self.used_idx.wrapping_add(1);
+            consumed = true;
+        }
+        if consumed {
+            self.kick();
         }
     }
 }
 
 static VIRTIO_INPUT_ACTIVE: AtomicBool = AtomicBool::new(false);
+static HW_POINTER_LIVE: AtomicBool = AtomicBool::new(false);
+
+/// Enable virtio-input statusq (queue 1) so DRIVER_OK covers every advertised
+/// queue. The guest never produces LED/status reports on QEMU.
+fn enable_status_queue(common: u64) {
+    mmio_w16(common + CFG_QUEUE_SELECT, 1);
+    let qs = mmio_r16(common + CFG_QUEUE_SIZE);
+    let qsz = power_of_two_queue(qs);
+    if qsz == 0 {
+        return;
+    }
+    mmio_w16(common + CFG_QUEUE_SIZE, qsz);
+    let qsz_us = qsz as usize;
+    let desc_size = qsz_us * 16;
+    let avail_size = 6 + 2 * qsz_us;
+    let used_offset = align_up(desc_size + avail_size, 4096);
+    let used_size = 6 + 8 * qsz_us;
+    let pages = (used_offset + used_size).div_ceil(4096);
+    let Some(vq_phys) = crate::vmm::allocate_contiguous_frames(pages) else {
+        serial_println!("[VIRTIO-INPUT] statusq alloc failed");
+        return;
+    };
+    // SAFETY: freshly allocated DMA pages exclusive to this unused status queue.
+    unsafe {
+        core::ptr::write_bytes(
+            crate::vmm::phys_to_virt(vq_phys) as *mut u8,
+            0,
+            pages * 4096,
+        );
+    }
+    mmio_w16(common + CFG_QUEUE_MSIX, 0xFFFF);
+    mmio_w64(common + CFG_QUEUE_DESC, vq_phys);
+    mmio_w64(common + CFG_QUEUE_DRIVER, vq_phys + desc_size as u64);
+    mmio_w64(common + CFG_QUEUE_DEVICE, vq_phys + used_offset as u64);
+    mmio_w16(common + CFG_QUEUE_ENABLE, 1);
+}
 
 lazy_static::lazy_static! {
     static ref INPUT_DEVICES: Mutex<Vec<VirtioInputDev>> = Mutex::new(Vec::new());
@@ -537,18 +614,22 @@ static BTN_STATE: AtomicU32 = AtomicU32::new(0);
 static ABS_CURSOR_X: AtomicI32 = AtomicI32::new(-1);
 static ABS_CURSOR_Y: AtomicI32 = AtomicI32::new(-1);
 static HAS_ABS_EVENT: AtomicBool = AtomicBool::new(false);
+static POINTER_DIRTY: AtomicBool = AtomicBool::new(false);
 
 const BTN_LEFT_BIT: u32 = 1;
 const BTN_RIGHT_BIT: u32 = 2;
 const BTN_MIDDLE_BIT: u32 = 4;
 
 fn apply_button(code: u16, pressed: bool) -> bool {
+    // BTN_TOOL_FINGER / BTN_TOOL_PEN are proximity, not a click. Mapping them
+    // to BTN_LEFT made the first QEMU tablet motion look like a press and
+    // ran `proof_tree` on the bootloader stack.
     let bit = match code {
-        BTN_LEFT | BTN_TOUCH | BTN_TOOL_FINGER | BTN_TOOL_PEN => BTN_LEFT_BIT,
+        BTN_LEFT | BTN_TOUCH => BTN_LEFT_BIT,
         BTN_RIGHT => BTN_RIGHT_BIT,
         BTN_MIDDLE => BTN_MIDDLE_BIT,
-        0x110..=0x117 => 1u32 << (code - 0x110),
-        0x140..=0x14f => BTN_LEFT_BIT,
+        0x113..=0x117 => 1u32 << (code - 0x110),
+        // BTN_TOOL_FINGER / BTN_TOOL_PEN are proximity, not a press.
         _ => return false,
     };
     if pressed {
@@ -602,32 +683,34 @@ fn dispatch_input_event(evt: VirtioInputEvent) {
             ABS_X => {
                 ABS_CURSOR_X.store(evt.value as i32, Ordering::Relaxed);
                 HAS_ABS_EVENT.store(true, Ordering::Relaxed);
+                POINTER_DIRTY.store(true, Ordering::Relaxed);
             }
             ABS_Y => {
                 ABS_CURSOR_Y.store(evt.value as i32, Ordering::Relaxed);
                 HAS_ABS_EVENT.store(true, Ordering::Relaxed);
+                POINTER_DIRTY.store(true, Ordering::Relaxed);
             }
             _ => {}
         },
         EV_REL => match evt.code {
             REL_X => {
                 REL_DX.fetch_add(evt.value as i32, Ordering::Relaxed);
+                POINTER_DIRTY.store(true, Ordering::Relaxed);
             }
             REL_Y => {
                 REL_DY.fetch_add(evt.value as i32, Ordering::Relaxed);
+                POINTER_DIRTY.store(true, Ordering::Relaxed);
             }
             REL_WHEEL_CODE => {
                 ACCUM_WHEEL.fetch_add(evt.value as i32, Ordering::Relaxed);
+                POINTER_DIRTY.store(true, Ordering::Relaxed);
             }
             _ => {}
         },
         EV_KEY => {
             let pressed = evt.value != 0;
             if apply_button(evt.code, pressed) {
-                // Click without a move: QEMU often sends only KEY+SYN, or
-                // BTN_TOUCH instead of BTN_LEFT. Commit immediately so the
-                // compositor sees the press edge at the last tablet position.
-                commit_pointer();
+                POINTER_DIRTY.store(true, Ordering::Relaxed);
             } else if evt.code < 0x80 {
                 let sc = evt.code as u8;
                 if pressed {
@@ -639,20 +722,35 @@ fn dispatch_input_event(evt: VirtioInputEvent) {
         }
         EV_SYN => {
             if HAS_ABS_EVENT.load(Ordering::Relaxed)
-                || ABS_CURSOR_X.load(Ordering::Relaxed) >= 0
-                || ABS_CURSOR_Y.load(Ordering::Relaxed) >= 0
+                || REL_DX.load(Ordering::Relaxed) != 0
+                || REL_DY.load(Ordering::Relaxed) != 0
+                || ACCUM_WHEEL.load(Ordering::Relaxed) != 0
             {
-                HAS_ABS_EVENT.store(false, Ordering::Relaxed);
-                commit_pointer();
-            } else {
-                let dx = REL_DX.swap(0, Ordering::Relaxed);
-                let dy = REL_DY.swap(0, Ordering::Relaxed);
-                let wheel = ACCUM_WHEEL.swap(0, Ordering::Relaxed);
-                let btns = BTN_STATE.load(Ordering::Relaxed);
-                inject_ps2_packet(dx, dy, btns as u8, wheel.clamp(-127, 127) as i8);
+                POINTER_DIRTY.store(true, Ordering::Relaxed);
             }
         }
         _ => {}
+    }
+}
+
+fn flush_pointer() {
+    if !POINTER_DIRTY.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    if HAS_ABS_EVENT.swap(false, Ordering::Relaxed) || ABS_CURSOR_X.load(Ordering::Relaxed) >= 0 {
+        commit_pointer();
+        REL_DX.store(0, Ordering::Relaxed);
+        REL_DY.store(0, Ordering::Relaxed);
+        return;
+    }
+    let dx = REL_DX.swap(0, Ordering::Relaxed);
+    let dy = REL_DY.swap(0, Ordering::Relaxed);
+    let wheel = ACCUM_WHEEL.swap(0, Ordering::Relaxed);
+    if dx != 0 || dy != 0 || wheel != 0 {
+        let btns = BTN_STATE.load(Ordering::Relaxed);
+        inject_ps2_packet(dx, dy, btns as u8, wheel.clamp(-127, 127) as i8);
+    } else {
+        commit_pointer();
     }
 }
 
@@ -695,6 +793,7 @@ fn tablet_event_self_test() -> bool {
         code: 0,
         value: 0,
     });
+    flush_pointer();
     let (nx, ny) = {
         let mouse = crate::gui::input::MOUSE.lock();
         (mouse.x, mouse.y)
@@ -744,7 +843,18 @@ pub fn init() {
 
         enable_pci_bus_master(dev.bus, dev.device, dev.function);
         let mut input_dev = VirtioInputDev::empty();
-        let ok = if dev.bar0 & 1 != 0 {
+        // Prefer modern virtio-pci (same path as VirtIO-GPU). Transitional
+        // devices also expose an I/O BAR0; using that legacy map first was
+        // dropping tablet events on QEMU cocoa.
+        let ok = if input_dev.init_modern(dev.bus, dev.device, dev.function) {
+            serial_println!(
+                "[VIRTIO-INPUT] modern MMIO at {:02x}:{:02x}.{}",
+                dev.bus,
+                dev.device,
+                dev.function
+            );
+            true
+        } else if dev.bar0 & 1 != 0 {
             let io_base = (dev.bar0 & 0xFFFC) as u16;
             serial_println!(
                 "[VIRTIO-INPUT] legacy I/O BAR at {:02x}:{:02x}.{} io_base={:#x}",
@@ -756,12 +866,12 @@ pub fn init() {
             input_dev.init_legacy(io_base)
         } else {
             serial_println!(
-                "[VIRTIO-INPUT] modern MMIO at {:02x}:{:02x}.{}",
+                "[VIRTIO-INPUT] bind failed at {:02x}:{:02x}.{}",
                 dev.bus,
                 dev.device,
                 dev.function
             );
-            input_dev.init_modern(dev.bus, dev.device, dev.function)
+            false
         };
         if ok {
             input_dev.kick();
@@ -771,7 +881,6 @@ pub fn init() {
     }
 
     if count > 0 {
-        crate::gui::input::MOUSE.lock().intellimouse = true;
         VIRTIO_INPUT_ACTIVE.store(true, Ordering::SeqCst);
         serial_println!("[VIRTIO-INPUT] {} input device(s) active", count);
     } else {
@@ -784,12 +893,34 @@ pub fn poll() {
     if !VIRTIO_INPUT_ACTIVE.load(Ordering::Relaxed) {
         return;
     }
-    let mut devs = INPUT_DEVICES.lock();
-    for dev in devs.iter_mut() {
-        dev.poll_events();
+    let mut pending = Vec::new();
+    {
+        let mut devs = INPUT_DEVICES.lock();
+        for dev in devs.iter_mut() {
+            dev.drain_events(&mut pending);
+        }
     }
+    if pending.is_empty() {
+        return;
+    }
+    for evt in pending {
+        if (evt.event_type == EV_ABS || evt.event_type == EV_REL)
+            && HW_POINTER_LIVE
+                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+        {
+            serial_println!("[VIRTIO-INPUT] live pointer events");
+        }
+        dispatch_input_event(evt);
+    }
+    flush_pointer();
 }
 
 pub fn is_active() -> bool {
     VIRTIO_INPUT_ACTIVE.load(Ordering::Relaxed)
+}
+
+/// True after a real virtqueue pointer event (not the software KAT).
+pub fn pointer_live() -> bool {
+    HW_POINTER_LIVE.load(Ordering::Relaxed)
 }

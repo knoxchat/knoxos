@@ -1384,6 +1384,10 @@ async fn gui_redraw_loop() {
         virtio_input::poll();
         usb_hid::poll_devices();
         gui::input::drain_mouse_queue();
+        gui::input::flush_hover();
+        if gui::notifications::tick() {
+            gui::gpui_platform::notify_damage();
+        }
 
         let term_dirty = terminal::is_dirty();
         if term_dirty {
@@ -1429,6 +1433,12 @@ async fn gui_redraw_loop() {
             } else {
                 gui::update_cursor_only();
             }
+        }
+
+        // Catch tablet samples that arrived during a slow composite.
+        virtio_input::poll();
+        if gui::take_cursor_redraw() && gui::login::is_logged_in() {
+            gui::update_cursor_only();
         }
 
         gui::drag_and_drop::on_end_frame();

@@ -152,10 +152,10 @@ pub struct Notification {
 }
 
 const TOAST_MAX_VISIBLE: usize = 5;
-/// Auto-dismiss after ~5 seconds (90 ticks at 18.2Hz)
-const DEFAULT_DURATION: u64 = 90;
+/// Auto-dismiss after ~5 seconds (APIC timer is 100Hz).
+const DEFAULT_DURATION: u64 = 500;
 /// Critical notifications stay for ~15 seconds
-const CRITICAL_DURATION: u64 = 270;
+const CRITICAL_DURATION: u64 = 1500;
 /// Maximum number of notifications kept in history
 const HISTORY_MAX: usize = 200;
 
@@ -406,9 +406,11 @@ impl NotificationCenter {
         self.notifications.iter().any(|n| !n.dismissed)
     }
 
-    /// Tick animation and auto-dismiss logic
-    pub fn tick(&mut self) {
+    /// Tick animation and auto-dismiss logic. Returns true when a toast
+    /// appeared, moved, or disappeared this tick.
+    pub fn tick(&mut self) -> bool {
         let current_tick = crate::interrupts::get_ticks();
+        let mut changed = false;
 
         for n in self.notifications.iter_mut() {
             if n.dismissed {
@@ -418,15 +420,18 @@ impl NotificationCenter {
             // Slide-in animation
             if !n.sliding_out && n.anim_progress < 255 {
                 n.anim_progress = n.anim_progress.saturating_add(30);
+                changed = true;
             }
 
             // Slide-out animation
             if n.sliding_out {
                 if n.anim_progress == 0 {
                     n.dismissed = true;
+                    changed = true;
                     continue;
                 }
                 n.anim_progress = n.anim_progress.saturating_sub(30);
+                changed = true;
                 if n.anim_progress == 0 {
                     n.dismissed = true;
                 }
@@ -436,6 +441,7 @@ impl NotificationCenter {
             // Auto-dismiss after duration
             if n.duration_ticks > 0 && current_tick - n.created_tick > n.duration_ticks {
                 n.sliding_out = true;
+                changed = true;
             }
         }
 
@@ -443,11 +449,23 @@ impl NotificationCenter {
         while self.notifications.len() > HISTORY_MAX {
             if let Some(pos) = self.notifications.iter().position(|n| n.dismissed) {
                 self.notifications.remove(pos);
+                changed = true;
             } else {
                 break;
             }
         }
+        changed
     }
+}
+
+/// Advance toast slide/auto-dismiss. Returns true when the toast layer needs paint.
+pub fn tick() -> bool {
+    NOTIFICATIONS.lock().tick()
+}
+
+/// Dismiss every on-screen toast (Escape). History is kept.
+pub fn dismiss_toasts() {
+    NOTIFICATIONS.lock().clear_all();
 }
 
 /// Toggle notification panel visibility

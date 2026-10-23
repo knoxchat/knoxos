@@ -1,5 +1,6 @@
 /// Mouse device state, PS/2 packet queue, and event dispatch
 use conquer_once::spin::OnceCell;
+use core::sync::atomic::{AtomicI32, Ordering};
 use crossbeam_queue::ArrayQueue;
 use spin::Mutex;
 
@@ -344,13 +345,7 @@ fn process_mouse_byte(byte: u8) {
             // highlights (context menu items, start menu, popups), use a full redraw.
             // For everything else (taskbar, title bars, resize edges, desktop), use
             // the fast cursor-only path — the cursor type was already updated above.
-            if crate::gui::gpui_platform::pointer_moved(x, y) {
-                crate::gui::gpui_platform::damage_proof();
-            } else if needs_overlay_hover_redraw(x, y, screen_w, screen_h) {
-                crate::gui::request_redraw();
-            } else {
-                crate::gui::request_cursor_redraw();
-            }
+            apply_hover_redraw(x, y, screen_w, screen_h);
         }
     }
 }
@@ -402,117 +397,116 @@ pub fn set_absolute_mouse(x: i32, y: i32, left: bool, right: bool, middle: bool,
     let cy = mouse.y;
     let moved = cx != old_x || cy != old_y;
 
-    // Handle scroll wheel
-    if scroll != 0 {
-        let effective_scroll = if natural_scrolling { -scroll } else { scroll };
-        mouse.scroll_delta = effective_scroll;
-        drop(mouse);
-        super::frame::note_scroll(effective_scroll as i32);
-        handle_scroll(cx, cy, effective_scroll, screen_w as u32, screen_h as u32);
-        let wm = window::WINDOW_MANAGER.lock();
-        if let Some(wid) = wm.window_at(cx, cy) {
-            if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
-                push_window_damage(win.rect);
-            } else {
-                drop(wm);
-                crate::gui::request_redraw();
-            }
-        } else {
-            drop(wm);
-            crate::gui::request_redraw();
+    let click = mouse.left_button && !prev_left;
+    let mut dbl = false;
+    if click {
+        let ticks = crate::interrupts::get_ticks();
+        dbl = (ticks - mouse.last_click_tick) < 40
+            && (cx - mouse.last_click_x).abs() < 8
+            && (cy - mouse.last_click_y).abs() < 8;
+        mouse.last_click_x = cx;
+        mouse.last_click_y = cy;
+        mouse.last_click_tick = ticks;
+    }
+    let right_click = mouse.right_button && !prev_right;
+    let middle_click = mouse.middle_button && !prev_middle && middle_paste;
+    let up = !mouse.left_button && prev_left;
+    let drag = mouse.left_button && prev_left;
+    drop(mouse);
+
+    let heavy = scroll != 0 || click || right_click || middle_click || up || drag;
+    if !heavy {
+        if moved {
+            crate::gui::request_cursor_redraw();
+            crate::gui::update_cursor_only();
         }
         return;
     }
 
-    // Handle left click (button down)
-    if mouse.left_button && !prev_left {
-        let ticks = crate::interrupts::get_ticks();
-        let is_double_click = (ticks - mouse.last_click_tick) < 40
-            && (cx - mouse.last_click_x).abs() < 8
-            && (cy - mouse.last_click_y).abs() < 8;
-
-        mouse.last_click_x = cx;
-        mouse.last_click_y = cy;
-        mouse.last_click_tick = ticks;
-
-        drop(mouse);
-
-        desktop::close_context_menu();
-
-        if is_double_click {
-            super::frame::note_double_click();
-            let on_button = is_on_window_button(cx, cy);
-            if on_button {
-                handle_click(cx, cy, screen_w as u32, screen_h as u32);
+    // Clicks/drags hit-test GPUI on the compositor stack (boot stack DFs).
+    desktop::run_on_compose_stack(move || {
+        if scroll != 0 {
+            let effective_scroll = if natural_scrolling { -scroll } else { scroll };
+            super::frame::note_scroll(effective_scroll as i32);
+            handle_scroll(cx, cy, effective_scroll, screen_w as u32, screen_h as u32);
+            let wm = window::WINDOW_MANAGER.lock();
+            if let Some(wid) = wm.window_at(cx, cy) {
+                if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
+                    push_window_damage(win.rect);
+                } else {
+                    drop(wm);
+                    crate::gui::request_redraw();
+                }
             } else {
-                handle_double_click(cx, cy, screen_w as u32, screen_h as u32);
+                drop(wm);
+                crate::gui::request_redraw();
             }
-        } else {
-            handle_click(cx, cy, screen_w as u32, screen_h as u32);
-        }
-        finish_pointer_redraw(cx, cy);
-    } else if mouse.right_button && !prev_right {
-        // Right-click
-        drop(mouse);
-        handle_right_click(cx, cy, screen_w as u32, screen_h as u32);
-        finish_pointer_redraw(cx, cy);
-    } else if mouse.middle_button && !prev_middle && middle_paste {
-        // Middle-click paste
-        drop(mouse);
-        handle_middle_click_paste(cx, cy);
-        finish_pointer_redraw(cx, cy);
-    } else if !mouse.left_button && prev_left {
-        // Mouse up — stop dragging, apply snap zones
-        drop(mouse);
-        handle_mouse_up(cx, cy);
-        finish_pointer_redraw(cx, cy);
-    } else if mouse.left_button {
-        // Mouse drag
-        drop(mouse);
-        handle_drag(cx, cy);
-    } else if moved {
-        drop(mouse);
-        if session_pointer_only(cx, cy) {
             return;
         }
-        // Update cursor type (resize cursors, hand, etc.)
-        crate::gui::desktop::update_cursor_for_position(cx, cy);
-
-        if crate::gui::expose::is_visible() && !crate::gui::gpui_platform::switcher_is_live() {
-            crate::gui::expose::handle_mouse_move(cx, cy);
-        }
-
-        // Focus-follows-mouse
-        if focus_mode() == FocusMode::FocusFollowsMouse {
-            let taskbar_y = screen_h - crate::gui::scale::taskbar_height() as i32;
-            if cy < taskbar_y
-                && !startmenu::is_visible()
-                && !crate::gui::popups::any_popup_open()
-                && !crate::gui::expose::is_visible()
-                && !crate::gui::alt_tab::is_visible()
-            {
-                let mut wm = window::WINDOW_MANAGER.lock();
-                if let Some(hover_id) = wm.window_at(cx, cy) {
-                    if wm.focused_window != Some(hover_id) {
-                        wm.focus_window(hover_id);
-                        drop(wm);
-                        crate::gui::request_redraw();
-                    }
+        if click {
+            desktop::close_context_menu();
+            if dbl {
+                super::frame::note_double_click();
+                let on_button = is_on_window_button(cx, cy);
+                if on_button {
+                    handle_click(cx, cy, screen_w as u32, screen_h as u32);
+                } else {
+                    handle_double_click(cx, cy, screen_w as u32, screen_h as u32);
                 }
+            } else {
+                handle_click(cx, cy, screen_w as u32, screen_h as u32);
             }
+            finish_pointer_redraw(cx, cy);
+        } else if right_click {
+            handle_right_click(cx, cy, screen_w as u32, screen_h as u32);
+            finish_pointer_redraw(cx, cy);
+        } else if middle_click {
+            handle_middle_click_paste(cx, cy);
+            finish_pointer_redraw(cx, cy);
+        } else if up {
+            handle_mouse_up(cx, cy);
+            finish_pointer_redraw(cx, cy);
+        } else if drag {
+            handle_drag(cx, cy);
         }
+    });
+}
 
-        crate::gui::hot_corners::update(cx, cy, screen_w, screen_h);
-        if crate::gui::gpui_platform::pointer_moved(cx, cy) {
-            crate::gui::gpui_platform::damage_proof();
-        } else if needs_overlay_hover_redraw(cx, cy, screen_w, screen_h) {
-            crate::gui::request_redraw();
-        } else {
-            crate::gui::request_cursor_redraw();
-        }
-    } else {
-        drop(mouse);
+static LAST_HOVER_X: AtomicI32 = AtomicI32::new(i32::MIN);
+static LAST_HOVER_Y: AtomicI32 = AtomicI32::new(i32::MIN);
+
+/// Once per compositor frame: cursor-type / overlay hover. Not on the motion
+/// hot path — that only blits the software arrow.
+pub fn flush_hover() {
+    let (x, y, screen_w, screen_h) = {
+        let mouse = MOUSE.lock();
+        let (sw, sh) = crate::gui::cached_screen_size();
+        (mouse.x, mouse.y, sw, sh)
+    };
+    if LAST_HOVER_X.load(Ordering::Relaxed) == x && LAST_HOVER_Y.load(Ordering::Relaxed) == y {
+        return;
     }
+    LAST_HOVER_X.store(x, Ordering::Relaxed);
+    LAST_HOVER_Y.store(y, Ordering::Relaxed);
+    desktop::run_on_compose_stack(move || {
+        if session_pointer_only(x, y) {
+            return;
+        }
+        crate::gui::desktop::update_cursor_for_position(x, y);
+        if crate::gui::expose::is_visible() && !crate::gui::gpui_platform::switcher_is_live() {
+            crate::gui::expose::handle_mouse_move(x, y);
+        }
+        crate::gui::hot_corners::update(x, y, screen_w, screen_h);
+        apply_hover_redraw(x, y, screen_w, screen_h);
+    });
+}
+
+/// Overlay modules may mark themselves dirty on hover-mask changes. Do not
+/// promote that to a full-screen redraw — it stalls the software cursor.
+fn apply_hover_redraw(x: i32, y: i32, screen_w: i32, screen_h: i32) {
+    let _ = crate::gui::gpui_platform::pointer_moved(x, y);
+    let _ = needs_overlay_hover_redraw(x, y, screen_w, screen_h);
+    crate::gui::request_cursor_redraw();
 }
 
 fn session_pointer_only(x: i32, y: i32) -> bool {

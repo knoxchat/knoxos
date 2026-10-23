@@ -411,11 +411,16 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
     #[cfg(not(target_arch = "x86_64"))]
     use crate::arch_compat::instructions::port::Port;
 
+    let mut status_port = Port::<u8>::new(0x64);
     let mut port = Port::new(0x60);
     // SAFETY: I/O port access is exclusive to this driver path; the port number is a fixed architecture or BAR-derived address.
-    let data: u8 = unsafe { port.read() };
+    let (status, data): (u8, u8) = unsafe { (status_port.read(), port.read()) };
 
-    crate::gui::input::add_mouse_byte(data);
+    // Bit 5 = aux (mouse) data. Ignore keyboard bytes that land on IRQ12,
+    // and do not mix PS/2 packets with a live VirtIO tablet.
+    if status & 0x20 != 0 && !crate::virtio_input::is_active() {
+        crate::gui::input::add_mouse_byte(data);
+    }
 
     if crate::smp::is_apic_mode() {
         crate::smp::eoi();

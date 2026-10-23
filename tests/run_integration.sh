@@ -108,7 +108,7 @@ QEMU_CMD=(qemu-system-x86_64
     -vga virtio
     -global virtio-vga.xres=1920
     -global virtio-vga.yres=1080
-    -device virtio-tablet-pci
+    -device virtio-tablet-pci,disable-legacy=on
     -device virtio-keyboard-pci
     -device qemu-xhci,id=xhci
     -device usb-kbd,bus=xhci.0

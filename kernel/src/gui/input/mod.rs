@@ -15,7 +15,7 @@ pub use config::{
 };
 pub use frame::{end_frame, snapshot as frame_input, update_pointer};
 pub use mouse::{
-    MOUSE, MouseState, add_mouse_byte, drain_mouse_queue, init_mouse_queue, process_mouse_events,
-    set_absolute_mouse,
+    MOUSE, MouseState, add_mouse_byte, drain_mouse_queue, flush_hover, init_mouse_queue,
+    process_mouse_events, set_absolute_mouse,
 };
 pub use ps2::init_mouse;

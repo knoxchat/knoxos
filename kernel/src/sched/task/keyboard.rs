@@ -845,6 +845,19 @@ pub async fn process_keypresses() {
 
                         // Escape: Cancel drag/resize operations, close menus
                         if is_press && key_event.code == KeyCode::Escape {
+                            if crate::gui::notifications::has_visible_toasts() {
+                                crate::gui::notifications::dismiss_toasts();
+                                crate::gui::gpui_platform::notify_damage();
+                                crate::gui::request_redraw();
+                                let _ = keyboard.process_keyevent(key_event);
+                                continue;
+                            }
+                            if !crate::gui::gpui_platform::gallery_hidden() {
+                                crate::gui::gpui_platform::hide_kit_gallery();
+                                crate::gui::request_redraw();
+                                let _ = keyboard.process_keyevent(key_event);
+                                continue;
+                            }
                             // Close Alt-Tab / Exposé first
                             if crate::gui::alt_tab::is_visible() {
                                 crate::gui::alt_tab::dismiss();

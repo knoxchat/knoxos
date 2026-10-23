@@ -2,6 +2,10 @@
 
 /// Initialize PS/2 mouse (x86_64 only — uses port I/O)
 pub fn init_mouse() {
+    if crate::virtio_input::is_active() {
+        crate::serial_println!("[KnoxOS] PS/2 aux skipped — VirtIO tablet is the pointing device");
+        return;
+    }
     #[cfg(target_arch = "x86_64")]
     {
         #[cfg(target_arch = "x86_64")]

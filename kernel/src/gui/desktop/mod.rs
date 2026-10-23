@@ -37,6 +37,7 @@ pub use types::{
 };
 pub use wallpaper::invalidate_wallpaper_cache;
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
@@ -60,6 +61,7 @@ use zoom::apply_zoom_lens;
 const COMPOSE_STACK_BYTES: usize = 512 * 1024;
 static COMPOSE_STACK: Mutex<Option<Vec<u8>>> = Mutex::new(None);
 static COMPOSE_DAMAGE: Mutex<Vec<Rect>> = Mutex::new(Vec::new());
+static COMPOSE_JOB: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
 static COMPOSE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static COMPOSE_STACK_GATE: AtomicBool = AtomicBool::new(false);
 
@@ -92,7 +94,29 @@ pub fn draw_desktop_damaged(damage: &[Rect]) {
         call_on_compose_stack();
     }
     #[cfg(not(target_arch = "x86_64"))]
-    compose_trampoline();
+    compose_stack_entry();
+    COMPOSE_ACTIVE.store(false, Ordering::SeqCst);
+}
+
+/// Run GPUI hit-testing / layout on the compositor heap stack.
+///
+/// Pointer dispatch (`set_absolute_mouse` → `proof_tree`) is as deep as the
+/// first desktop paint. Doing it on the bootloader stack double-faults:
+/// RSP walks into the physical-memory window (`0x18000000…`) with no guard.
+pub fn run_on_compose_stack<F: FnOnce() + Send + 'static>(f: F) {
+    if COMPOSE_ACTIVE.load(Ordering::SeqCst) {
+        f();
+        return;
+    }
+    *COMPOSE_JOB.lock() = Some(Box::new(f));
+    COMPOSE_ACTIVE.store(true, Ordering::SeqCst);
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: same contract as `draw_desktop_damaged`; job runs and returns.
+    unsafe {
+        call_on_compose_stack();
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    compose_stack_entry();
     COMPOSE_ACTIVE.store(false, Ordering::SeqCst);
 }
 
@@ -102,6 +126,15 @@ fn compose_stack_top() -> u64 {
     let top = stack.as_ptr() as u64 + stack.len() as u64;
     drop(g);
     top & !0xF
+}
+
+extern "C" fn compose_stack_entry() {
+    let job = COMPOSE_JOB.lock().take();
+    if let Some(job) = job {
+        job();
+        return;
+    }
+    compose_trampoline();
 }
 
 extern "C" fn compose_trampoline() {
@@ -124,6 +157,7 @@ unsafe fn call_on_compose_stack() {
     // SAFETY: r12 holds the compose top and rbx the old RSP (both callee-saved
     // across the C call). `{top}` is copied into r12 *before* rbx is reused so
     // LLVM cannot allocate `{top}` to rbx and turn the switch into a no-op.
+    // `compose_stack_entry` returns to this asm before RSP is restored.
     unsafe {
         core::arch::asm!(
             "push rbx",
@@ -136,7 +170,7 @@ unsafe fn call_on_compose_stack() {
             "pop r12",
             "pop rbx",
             top = in(reg) top,
-            entry = sym compose_trampoline,
+            entry = sym compose_stack_entry,
             clobber_abi("C"),
             options(nostack),
         );

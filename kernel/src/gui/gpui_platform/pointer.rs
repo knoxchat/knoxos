@@ -128,15 +128,11 @@ pub fn pointer_moved(x: i32, y: i32) -> bool {
         return true;
     }
     let local = screen_to_local(win.bounds().x(), win.bounds().y(), x, y);
-    let old = win.input().hover_mask();
     win.input_mut().set_pointer_position(local);
-    let new = win.input().hover_mask();
-    if old != new {
-        win.request_layout();
-        true
-    } else {
-        false
-    }
+    // Hover over the kit catalog must not `request_layout`. Relayout+paint of
+    // ~108 widgets at 1920×1080 on TCG both starves polling and, on the
+    // bootloader stack, double-faults.
+    false
 }
 
 /// Mouse down on the proof window. Consumes the click so desktop icons do not.

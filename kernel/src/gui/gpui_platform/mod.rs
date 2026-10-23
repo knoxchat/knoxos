@@ -95,7 +95,7 @@ pub use pointer::{
 };
 pub use proof::{
     GATE_GPUI_CHROME, GATE_GPUI_INTERACT, GATE_GPUI_KIT_GALLERY, GATE_GPUI_SCENE_RASTER,
-    focus_kit_gallery, proof_dest_rect,
+    focus_kit_gallery, gallery_hidden, hide_kit_gallery, proof_dest_rect,
 };
 pub use pump::{GATE_GPUI_MOTION, GATE_GPUI_PUMP, pump, sync_theme};
 pub use session::{

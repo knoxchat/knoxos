@@ -343,7 +343,7 @@ run_qemu_bios() {
     echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
     echo -e "  ${CYAN}Resolution:${NC} ${QEMU_DISPLAY_WIDTH}x${QEMU_DISPLAY_HEIGHT}"
     echo -e "  ${CYAN}Timezone:${NC} $HOST_TZ"
-    echo -e "  ${CYAN}Input:${NC}   virtio-tablet + virtio-mouse + USB tablet (click the window first)"
+    echo -e "  ${CYAN}Input:${NC}   virtio-tablet (absolute) + USB tablet fallback — click the window to focus"
     echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
     echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
     echo -e "  ${CYAN}Storage:${NC}  $PERSISTENT_DISK ($PERSISTENT_DISK_SIZE persistent)"
@@ -365,8 +365,7 @@ run_qemu_bios() {
         -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
-        -device virtio-tablet-pci \
-        -device virtio-mouse-pci \
+        -device virtio-tablet-pci,disable-legacy=on \
         -device virtio-keyboard-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
@@ -419,7 +418,7 @@ run_qemu_uefi() {
     echo -e "  ${CYAN}Display:${NC}  $QEMU_DISPLAY"
     echo -e "  ${CYAN}Resolution:${NC} ${QEMU_DISPLAY_WIDTH}x${QEMU_DISPLAY_HEIGHT}"
     echo -e "  ${CYAN}Timezone:${NC} $HOST_TZ"
-    echo -e "  ${CYAN}Input:${NC}   virtio-tablet + virtio-mouse + USB tablet (click the window first)"
+    echo -e "  ${CYAN}Input:${NC}   virtio-tablet (absolute) + USB tablet fallback — click the window to focus"
     echo -e "  ${CYAN}OVMF:${NC}    $ovmf"
     echo -e "  ${CYAN}Memory:${NC}   $QEMU_MEMORY"
     echo -e "  ${CYAN}CPUs:${NC}     $QEMU_CPUS"
@@ -440,8 +439,7 @@ run_qemu_uefi() {
         -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
-        -device virtio-tablet-pci \
-        -device virtio-mouse-pci \
+        -device virtio-tablet-pci,disable-legacy=on \
         -device virtio-keyboard-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
@@ -489,8 +487,7 @@ run_qemu_debug() {
         -device nvme,serial=knoxos,drive=nvme0 \
         -netdev user,id=net1,guestfwd=tcp:10.0.2.100:80-cmd:"$D4_HTTP" \
         -device virtio-net-pci,netdev=net1,disable-modern=on \
-        -device virtio-tablet-pci \
-        -device virtio-mouse-pci \
+        -device virtio-tablet-pci,disable-legacy=on \
         -device virtio-keyboard-pci \
         -serial stdio \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \

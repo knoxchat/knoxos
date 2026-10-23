@@ -128,7 +128,9 @@ pub fn pump(fb: &mut FrameBuffer, screen_w: u32, screen_h: u32, damage: Rect, is
         if id == panel_id {
             let dest = super::panel::panel_dest_rect(screen_w, screen_h);
             win.set_origin(Point::xy(dest.x, dest.y));
-            win.request_layout();
+            if is_full || damage.intersects(&dest) {
+                win.request_layout();
+            }
         }
         if id == desktop_id {
             let dest = super::desktop::icons_dest_rect(screen_w, screen_h);
@@ -138,7 +140,9 @@ pub fn pump(fb: &mut FrameBuffer, screen_w: u32, screen_h: u32, damage: Rect, is
                 dest.width as i32,
                 dest.height as i32,
             ));
-            win.request_layout();
+            if is_full || damage.intersects(&dest) {
+                win.request_layout();
+            }
         }
         if id == rubber_id {
             let dest = super::desktop::rubber_dest_rect(screen_w, screen_h);
@@ -332,7 +336,14 @@ pub fn pump(fb: &mut FrameBuffer, screen_w: u32, screen_h: u32, damage: Rect, is
                 win.request_layout();
             }
         }
-        if !win.is_dirty() && (id != proof_id || (enter_done && reduced)) {
+        if id == proof_id && gallery_hidden() && !gallery_minimizing() {
+            continue;
+        }
+        // Kit Gallery is a static catalog after the enter animation. Painting
+        // it every frame (~108 knox-ui components at 1920×1080 on TCG) starved
+        // pointer polling so the QEMU window could not move or click.
+        let animating_gallery = id == proof_id && (!enter_done || gallery_minimizing());
+        if !win.is_dirty() && !animating_gallery {
             continue;
         }
         let scene = if id == proof_id {
@@ -538,7 +549,7 @@ pub fn pump(fb: &mut FrameBuffer, screen_w: u32, screen_h: u32, damage: Rect, is
             win.store().height() as u32,
             win.store().as_bytes(),
         );
-        if id == proof_id && (!enter_done || !reduced) {
+        if id == proof_id && (!enter_done || gallery_minimizing()) {
             win.request_layout();
         }
         painted = true;
@@ -611,17 +622,13 @@ pub fn pump(fb: &mut FrameBuffer, screen_w: u32, screen_h: u32, damage: Rect, is
     }
     emit_once(&RASTER_GATE, GATE_GPUI_SCENE_RASTER);
 
-    if !enter_done {
+    if !enter_done || gallery_minimizing() {
         let rest = proof_dest_rect(screen_w, screen_h);
         let prev = LAST_Y_OFFSET.swap(y_offset, Ordering::SeqCst);
         let a = Rect::new(rest.x, rest.y + prev, rest.width, rest.height);
         let b = Rect::new(rest.x, rest.y + y_offset, rest.width, rest.height);
         drop(slot);
         crate::gui::request_window_redraw(crate::gui::rect_union(a, b));
-    } else if !reduced {
-        let dest = proof_dest_rect(screen_w, screen_h);
-        drop(slot);
-        crate::gui::request_window_redraw(dest);
     }
 }
 
