@@ -6,7 +6,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, IntoElement, Styled, div, px, text};
+use knox_gpui::{Div, FontId, IntoElement, Styled, div, px, text};
 
 use crate::alert::Alert;
 use crate::avatar::{Avatar, AvatarGroup};
@@ -134,11 +134,31 @@ pub fn d8_buttons_construct_all(theme: &Theme) -> Vec<Div> {
 }
 
 pub(crate) fn heading(theme: &Theme, title: &'static str) -> Div {
-    div().mt(theme.spacing.xs).child(
-        text(title)
-            .color(theme.colors.muted_foreground)
-            .size(theme.typo.caption),
-    )
+    div()
+        .flex_col()
+        .gap(theme.spacing.xs)
+        .mt(theme.spacing.sm)
+        .child(
+            Label::new(title)
+                .themed(theme)
+                .font(FontId::UiBold)
+                .size(theme.typo.ui),
+        )
+        .child(Separator::horizontal().themed(theme))
+}
+
+fn story(theme: &Theme, name: &'static str, hint: &'static str, body: impl IntoElement) -> Div {
+    div()
+        .flex_col()
+        .gap(theme.spacing.xs)
+        .child(
+            Label::new(name)
+                .themed(theme)
+                .secondary(hint)
+                .font(FontId::UiBold)
+                .size(theme.typo.body),
+        )
+        .child(body)
 }
 
 /// D8.1 gallery rows: buttons, toggles, and binary inputs.
@@ -199,6 +219,34 @@ pub fn d8_buttons_gallery(
                         .primary()
                         .outline()
                         .label("Outline"),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    Button::new("g-search")
+                        .themed(theme)
+                        .ghost()
+                        .icon(IconName::Search)
+                        .label("Search"),
+                )
+                .child(
+                    Button::new("g-plus")
+                        .themed(theme)
+                        .primary()
+                        .icon(IconName::Plus)
+                        .compact(),
+                )
+                .child(
+                    Button::new("g-save")
+                        .themed(theme)
+                        .secondary()
+                        .icon(IconName::Save)
+                        .label("Save")
+                        .loading(true),
                 ),
         );
 
@@ -378,7 +426,8 @@ pub fn d8_display_gallery(theme: &Theme) -> Div {
                 .secondary("docs")
                 .highlights("doc"),
         )
-        .child(Label::new("Secret").themed(theme).masked(true));
+        .child(Label::new("Secret").themed(theme).muted(true))
+        .child(Label::new("Hidden").themed(theme).masked(true));
 
     let keys = div()
         .flex()
@@ -386,9 +435,15 @@ pub fn d8_display_gallery(theme: &Theme) -> Div {
         .items_center()
         .child(Kbd::parse("cmd-k").unwrap().themed(theme))
         .child(Kbd::parse("ctrl-shift-s").unwrap().themed(theme).outline())
+        .child(Kbd::parse("esc").unwrap().themed(theme));
+
+    let rules = div()
+        .flex()
+        .gap_2()
+        .items_center()
         .child(
             div()
-                .w(px(120))
+                .w(px(160))
                 .child(Separator::horizontal().themed(theme).label("or")),
         )
         .child(
@@ -410,18 +465,40 @@ pub fn d8_display_gallery(theme: &Theme) -> Div {
         .child(
             Badge::new()
                 .themed(theme)
-                .dot()
+                .count(128)
+                .max(99)
                 .child(Icon::new(IconName::Inbox).themed(theme)),
         )
+        .child(
+            Badge::new()
+                .themed(theme)
+                .dot()
+                .child(Icon::new(IconName::User).themed(theme)),
+        )
+        .child(
+            Badge::new()
+                .themed(theme)
+                .icon(IconName::Check)
+                .child(Avatar::new().themed(theme).name("Ada Lovelace").small()),
+        );
+
+    let tags = div()
+        .flex()
+        .gap_2()
+        .items_center()
         .child(Tag::primary().themed(theme).label("New"))
         .child(Tag::success().themed(theme).label("Live"))
-        .child(Tag::danger().themed(theme).outline().label("Warn"));
+        .child(Tag::warning().themed(theme).label("Warn"))
+        .child(Tag::info().themed(theme).label("Info"))
+        .child(Tag::danger().themed(theme).outline().label("Danger"))
+        .child(Tag::secondary().themed(theme).label("Meta"));
 
     let people = div()
         .flex()
         .gap_2()
         .items_center()
         .child(Avatar::new().themed(theme).name("Ada Lovelace"))
+        .child(Avatar::new().themed(theme).name("Alan Turing").large())
         .child(Avatar::new().themed(theme).small())
         .child(
             AvatarGroup::new()
@@ -444,6 +521,7 @@ pub fn d8_display_gallery(theme: &Theme) -> Div {
                 .color(theme.colors.primary),
         )
         .child(Icon::new(IconName::Folder).themed(theme))
+        .child(Icon::new(IconName::Settings).themed(theme))
         .child(
             Image::demo_gradient(48, 28)
                 .themed(theme)
@@ -454,11 +532,28 @@ pub fn d8_display_gallery(theme: &Theme) -> Div {
         .flex_col()
         .gap(theme.spacing.md)
         .child(heading(theme, "Display"))
-        .child(labels)
-        .child(keys)
-        .child(chips)
-        .child(people)
-        .child(media)
+        .child(story(
+            theme,
+            "Label",
+            "secondary · highlight · muted · mask",
+            labels,
+        ))
+        .child(story(theme, "Kbd", "one keycap per modifier", keys))
+        .child(story(theme, "Separator", "labeled · dashed", rules))
+        .child(story(
+            theme,
+            "Badge",
+            "count · overflow · dot · icon",
+            chips,
+        ))
+        .child(story(theme, "Tag", "semantic chips", tags))
+        .child(story(
+            theme,
+            "Avatar",
+            "initials · sizes · overflow group",
+            people,
+        ))
+        .child(story(theme, "Icon / Image", "lucide · gradient", media))
 }
 
 /// Snapshot of D8.3 interactive state.
@@ -1272,8 +1367,9 @@ pub fn d8_overlay_gallery(
                 .title("Dialog")
                 .open(snap.dialog)
                 .child(
-                    text("Esc dismisses")
-                        .color(theme.colors.muted_foreground)
+                    Label::new("Esc dismisses")
+                        .themed(theme)
+                        .muted(true)
                         .size(theme.typo.caption),
                 )
                 .on_dismiss({
@@ -1302,8 +1398,9 @@ pub fn d8_overlay_gallery(
                 .title("Sheet")
                 .open(snap.sheet)
                 .child(
-                    text("Side panel")
-                        .color(theme.colors.muted_foreground)
+                    Label::new("Side panel")
+                        .themed(theme)
+                        .muted(true)
                         .size(theme.typo.caption),
                 )
                 .on_dismiss({
@@ -1315,11 +1412,7 @@ pub fn d8_overlay_gallery(
             Popover::new()
                 .themed(theme)
                 .open(snap.popover)
-                .child(
-                    text("Popover")
-                        .color(theme.colors.foreground)
-                        .size(theme.typo.caption),
-                )
+                .child(Label::new("Popover").themed(theme).size(theme.typo.caption))
                 .on_dismiss({
                     let click = fire.clone();
                     move || click(D8OverlayAction::Popover(false))
@@ -1327,8 +1420,8 @@ pub fn d8_overlay_gallery(
         )
         .child(
             HoverCard::new().themed(theme).open(snap.hover).child(
-                text("Hover card")
-                    .color(theme.colors.foreground)
+                Label::new("Hover card")
+                    .themed(theme)
                     .size(theme.typo.caption),
             ),
         )
@@ -1428,14 +1521,14 @@ mod tests {
         paint_element_with_input(
             &mut root,
             Point::ZERO,
-            Size::wh(640, 220),
+            Size::wh(640, 480),
             &mut scene,
             &mut input,
             &mut env,
         );
-        let mut buf = RasterBuffer::new(640, 220);
+        let mut buf = RasterBuffer::new(640, 480);
         buf.draw_with_atlas(&scene, Some(&atlas));
-        let ink = (0..220)
+        let ink = (0..480)
             .flat_map(|y| (0..640).map(move |x| (x, y)))
             .filter(|&(x, y)| buf.pixel(x, y).map(|p| p.a > 0).unwrap_or(false))
             .count();

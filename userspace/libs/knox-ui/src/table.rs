@@ -4,14 +4,16 @@
 //! the Longbridge kit is a design reference only (Apache-2.0). This file is new
 //! `no_std` code: sort, resize column, virtual rows.
 
-use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, IntoElement, Pixels, Styled, div, px, text};
+use knox_gpui::{Div, IntoElement, Pixels, Styled, div, px};
 
+use crate::icon::{Icon, IconName};
+use crate::label::Label;
 use crate::scroll::{VirtualList, visible_range};
+use crate::size::Sizable;
 use crate::theme::Theme;
 
 /// One column descriptor.
@@ -95,24 +97,33 @@ impl IntoElement for TableHead {
             .bg(self.theme.colors.muted.opacity(0.4))
             .h(px(24));
         for (i, col) in self.columns.into_iter().enumerate() {
-            let mark = if self.sort_col == Some(i) {
-                if self.sort_asc { " ^" } else { " v" }
-            } else {
-                ""
-            };
             let sort = self.on_sort.clone();
             let resize = self.on_resize.clone();
             let width = col.width;
+            let mut title = div().flex().items_center().gap_1().child(
+                Label::new(col.title)
+                    .themed(&self.theme)
+                    .size(self.theme.typo.caption),
+            );
+            if self.sort_col == Some(i) {
+                let glyph = if self.sort_asc {
+                    IconName::ChevronUp
+                } else {
+                    IconName::ChevronDown
+                };
+                title = title.child(
+                    Icon::new(glyph)
+                        .themed(&self.theme)
+                        .color(self.theme.colors.muted_foreground)
+                        .small(),
+                );
+            }
             row = row.child(
                 div()
                     .flex()
                     .w(px(width))
                     .h(px(24))
-                    .child(
-                        text(format!("{}{mark}", col.title))
-                            .color(self.theme.colors.foreground)
-                            .size(12),
-                    )
+                    .child(title)
                     .on_click(move |_| {
                         if let Some(s) = &sort {
                             s(i);

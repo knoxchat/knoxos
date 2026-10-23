@@ -9,11 +9,12 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, IntoElement, Key, KeyDownEvent, Pixels, Styled, div, px, text};
+use knox_gpui::{Div, IntoElement, Key, KeyDownEvent, Pixels, Styled, div, px};
 
 use crate::button::{Button, ButtonVariants};
 use crate::input::{FieldState, Input};
 use crate::interact::{Handler, IndexHandler};
+use crate::label::Label;
 use crate::size::{ControlSize, Disableable, Selectable, Sizable};
 use crate::theme::Theme;
 
@@ -153,7 +154,8 @@ impl IntoElement for Select {
             .themed(&self.theme)
             .secondary()
             .with_size(self.size)
-            .label(format!("{label} v"))
+            .label(label)
+            .dropdown_caret(true)
             .min_w(self.width)
             .disabled(self.disabled)
             .selected(self.open);
@@ -302,9 +304,10 @@ impl IntoElement for SearchableList {
             .p(self.theme.spacing.xs);
         if shown.is_empty() {
             list = list.child(
-                text("No matches")
-                    .color(self.theme.colors.muted_foreground)
-                    .size(12),
+                Label::new("No matches")
+                    .themed(&self.theme)
+                    .muted(true)
+                    .size(self.theme.typo.caption),
             );
         } else {
             for (row, &i) in shown.iter().enumerate() {
@@ -496,9 +499,10 @@ impl IntoElement for Combobox {
                 .p(self.theme.spacing.xs);
             if shown.is_empty() {
                 menu = menu.child(
-                    text("No matches")
-                        .color(self.theme.colors.muted_foreground)
-                        .size(12),
+                    Label::new("No matches")
+                        .themed(&self.theme)
+                        .muted(true)
+                        .size(self.theme.typo.caption),
                 );
             } else {
                 for (row, &i) in shown.iter().enumerate() {

@@ -24,6 +24,10 @@ tests/riscv64-serial.log
 # Release / Secure Boot artifacts (private keys must not be committed)
 dist/
 
+# Python bytecode (host scripts under userspace/apps/tools)
+__pycache__/
+*.py[cod]
+
 # Editor / OS
 .DS_Store
 Thumbs.db

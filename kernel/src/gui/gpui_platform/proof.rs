@@ -11,13 +11,14 @@ use knox_gpui::{
     WindowInput, div, paint_element_with_input, px,
 };
 use knox_ui::{
-    Button, ButtonVariants, D8ButtonsAction, D8ButtonsSnapshot, D8DateAction, D8DateSnapshot,
-    D8FeedbackAction, D8FeedbackSnapshot, D8FormsAction, D8FormsSnapshot, D8InputAction,
-    D8InputSnapshot, D8OverlayAction, D8OverlaySnapshot, D8RestAction, D8RestSnapshot,
-    D8SelectAction, D8SelectSnapshot, FieldState, ScrollArea, Selectable, Theme, TitleBar,
-    apply_d8_rest, d8_buttons_gallery, d8_date_gallery, d8_display_gallery, d8_feedback_gallery,
-    d8_forms_gallery, d8_input_gallery, d8_overlay_gallery, d8_page_bar, d8_rest_gallery,
-    d8_select_gallery,
+    D8ButtonsAction, D8ButtonsSnapshot, D8DateAction, D8DateSnapshot, D8FeedbackAction,
+    D8FeedbackSnapshot, D8FormsAction, D8FormsSnapshot, D8InputAction, D8InputSnapshot,
+    D8OverlayAction, D8OverlaySnapshot, D8RestAction, D8RestSnapshot, D8SelectAction,
+    D8SelectSnapshot, FieldState, ScrollArea, Theme, TitleBar, apply_d8_rest, d8_buttons_gallery,
+    d8_chrome_dock_gallery, d8_data_gallery, d8_date_gallery, d8_display_gallery,
+    d8_feedback_gallery, d8_forms_gallery, d8_input_gallery, d8_kit_chrome, d8_kit_status,
+    d8_media_gallery, d8_menus_gallery, d8_overlay_gallery, d8_page_bar, d8_scroll_nav_gallery,
+    d8_select_gallery, d8_theme_gallery, d8_toast_host_gallery,
 };
 use spin::Mutex;
 
@@ -35,7 +36,6 @@ pub const GATE_GPUI_CHROME: &str = "GATE_GPUI chrome";
 
 pub(super) static PROOF_WINDOW: AtomicU64 = AtomicU64::new(0);
 pub(super) static ACCENT_ON: AtomicBool = AtomicBool::new(true);
-pub(super) static CATALOG: AtomicBool = AtomicBool::new(false);
 static GALLERY_HIDDEN: AtomicBool = AtomicBool::new(false);
 static GALLERY_MAXIMIZED: AtomicBool = AtomicBool::new(false);
 static GALLERY_MINIMIZING: AtomicBool = AtomicBool::new(false);
@@ -364,7 +364,9 @@ pub fn gallery_origin(screen_w: u32, screen_h: u32) -> (i32, i32) {
 
 pub fn focus_kit_gallery() {
     *USER_ORIGIN.lock() = None;
-    CATALOG.store(true, Ordering::SeqCst);
+    GALLERY_HIDDEN.store(false, Ordering::SeqCst);
+    GALLERY_MINIMIZING.store(false, Ordering::SeqCst);
+    D8R.lock().page = 0;
     crate::serial_println!("[gpui] {}", GATE_GPUI_KIT_GALLERY);
 }
 
@@ -396,47 +398,41 @@ pub(super) fn proof_tree(theme: &Theme, phase: f32, reduced_motion: bool) -> Div
         *D8CMD.lock() = s;
     });
 
-    let live = div()
-        .flex_col()
-        .gap_2()
-        .child(
-            div()
-                .flex()
-                .gap_2()
-                .child(
-                    Button::new("toggle")
-                        .themed(theme)
-                        .label("Toggle")
-                        .min_w(px(96))
-                        .on_click(|| {
-                            ACCENT_ON.fetch_xor(true, Ordering::SeqCst);
-                        }),
-                )
-                .child(
-                    Button::new("ok")
-                        .themed(theme)
-                        .secondary()
-                        .label("OK")
-                        .min_w(px(64)),
-                ),
-        )
-        .child(d8_buttons_gallery(theme, snap, on))
-        .child(d8_display_gallery(theme))
-        .child(d8_feedback_gallery(theme, feedback, on_fb))
-        .child(d8_input_gallery(theme, inputs, on_in, paste))
-        .child(d8_forms_gallery(theme, forms, on_forms))
-        .child(d8_select_gallery(theme, selects, on_sel))
-        .child(d8_date_gallery(theme, dates, on_date))
-        .child(d8_overlay_gallery(theme, overlays, on_ov));
-
-    let catalog = div()
-        .flex_col()
-        .gap_2()
-        .child(d8_page_bar(theme, rest.page, on_rest.clone()))
-        .child(d8_rest_gallery(theme, rest, on_rest, cmd_query, on_cmd));
-
-    let show_catalog = CATALOG.load(Ordering::SeqCst);
-    let body = if show_catalog { catalog } else { live };
+    let body = match rest.page {
+        0 => d8_buttons_gallery(theme, snap, on),
+        1 => d8_display_gallery(theme),
+        2 => d8_feedback_gallery(theme, feedback, on_fb),
+        3 => div()
+            .flex_col()
+            .gap_2()
+            .child(d8_input_gallery(theme, inputs, on_in, paste))
+            .child(d8_forms_gallery(theme, forms, on_forms))
+            .child(d8_select_gallery(theme, selects, on_sel))
+            .child(d8_date_gallery(theme, dates, on_date)),
+        4 => div()
+            .flex_col()
+            .gap_2()
+            .child(d8_overlay_gallery(theme, overlays, on_ov))
+            .child(d8_menus_gallery(theme, rest, on_rest.clone()))
+            .child(d8_toast_host_gallery(theme, rest, on_rest.clone())),
+        5 => div()
+            .flex_col()
+            .gap_2()
+            .child(d8_scroll_nav_gallery(theme, rest, on_rest.clone()))
+            .child(d8_chrome_dock_gallery(theme, rest, on_rest.clone())),
+        _ => div()
+            .flex_col()
+            .gap_2()
+            .child(d8_data_gallery(
+                theme,
+                rest,
+                on_rest.clone(),
+                cmd_query,
+                on_cmd,
+            ))
+            .child(d8_media_gallery(theme, rest, on_rest.clone()))
+            .child(d8_theme_gallery(theme, rest, on_rest.clone())),
+    };
 
     div()
         .flex_col()
@@ -456,32 +452,14 @@ pub(super) fn proof_tree(theme: &Theme, phase: f32, reduced_motion: bool) -> Div
                 .on_max(|| toggle_gallery_maximized())
                 .on_close(|| hide_gallery()),
         )
-        .child(
-            div()
-                .flex()
-                .gap_2()
-                .child(
-                    Button::new("tab-live")
-                        .themed(theme)
-                        .ghost()
-                        .label("Live")
-                        .selected(!show_catalog)
-                        .on_click(|| CATALOG.store(false, Ordering::SeqCst)),
-                )
-                .child(
-                    Button::new("tab-kit")
-                        .themed(theme)
-                        .ghost()
-                        .label("Catalog")
-                        .selected(show_catalog)
-                        .on_click(|| CATALOG.store(true, Ordering::SeqCst)),
-                ),
-        )
+        .child(d8_kit_chrome(theme))
+        .child(d8_page_bar(theme, rest.page, on_rest))
         .child(
             ScrollArea::new()
                 .themed(theme)
-                .size(px(CARD_W - pad.0 * 2), px(CARD_H - 100))
+                .size(px(CARD_W - pad.0 * 2), px(CARD_H - 174))
                 .offset(0)
                 .child(body),
         )
+        .child(d8_kit_status(theme, rest.page))
 }

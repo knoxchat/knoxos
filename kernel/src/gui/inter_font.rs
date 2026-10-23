@@ -171,7 +171,19 @@ impl FontSet {
         let key = glyph_key(face, size, ch);
         if !self.cache.contains_key(&key) {
             let idx = face.index();
-            let (metrics, coverage) = self.faces[idx].rasterize(ch, size as f32);
+            let (metrics, mut coverage) = if size <= 20 {
+                // 2× then box-filter: unhinted Inter bowls (a/o/e/s) drop out
+                // of a 14–16px grid on dark chrome. Advance stays on the 1×
+                // metric so buttons do not grow.
+                let adv = self.faces[idx].metrics(ch, size as f32).advance_width;
+                let (hi, cov) = self.faces[idx].rasterize(ch, size as f32 * 2.0);
+                let (mut m, cov) = downsample_2x(hi, cov);
+                m.advance_width = adv;
+                (m, cov)
+            } else {
+                self.faces[idx].rasterize(ch, size as f32)
+            };
+            strengthen_coverage(&mut coverage, size);
             // Top of bitmap relative to the baseline, in screen coords:
             //   font-space top above baseline = ymin + height
             //   screen y grows downward, so top = -(ymin + height)
@@ -189,6 +201,70 @@ impl FontSet {
             self.cache.insert(key, glyph);
         }
         self.cache.get(&key).unwrap()
+    }
+}
+
+/// Average a 2× fontdue bitmap back to em size. Metrics are halved so
+/// `walk_text` / GPUI placement stay on the requested pixel grid.
+fn downsample_2x(
+    metrics: fontdue::Metrics,
+    src: alloc::vec::Vec<u8>,
+) -> (fontdue::Metrics, alloc::vec::Vec<u8>) {
+    let w2 = metrics.width;
+    let h2 = metrics.height;
+    if w2 == 0 || h2 == 0 {
+        let mut m = metrics;
+        m.advance_width *= 0.5;
+        m.xmin /= 2;
+        m.ymin /= 2;
+        return (m, src);
+    }
+    let w = w2.div_ceil(2);
+    let h = h2.div_ceil(2);
+    let mut out = alloc::vec![0u8; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = 0u32;
+            let mut n = 0u32;
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let sx = x * 2 + dx;
+                    let sy = y * 2 + dy;
+                    if sx < w2 && sy < h2 {
+                        sum += src[sy * w2 + sx] as u32;
+                        n += 1;
+                    }
+                }
+            }
+            out[y * w + x] = sum.checked_div(n).unwrap_or(0) as u8;
+        }
+    }
+    let mut m = metrics;
+    m.width = w;
+    m.height = h;
+    m.xmin = div_toward_neg(m.xmin, 2);
+    m.ymin = div_toward_neg(m.ymin, 2);
+    m.advance_width *= 0.5;
+    (m, out)
+}
+
+fn div_toward_neg(v: i32, d: i32) -> i32 {
+    if v >= 0 { v / d } else { (v - (d - 1)) / d }
+}
+
+/// Lift mid-coverage so 14–18px Inter bowls stay ink on dark surfaces.
+fn strengthen_coverage(coverage: &mut [u8], size: u16) {
+    if size > 24 {
+        return;
+    }
+    for p in coverage {
+        if *p == 0 || *p == 255 {
+            continue;
+        }
+        let c = *p as i32;
+        let sharp = (c + (c - 128) * 80 / 256).clamp(0, 255) as u32;
+        let boost = 72 * (255 - sharp) / 255;
+        *p = (sharp + boost).min(255) as u8;
     }
 }
 

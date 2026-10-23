@@ -8,7 +8,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, FontId, IntoElement, Styled, div, px, text};
+use knox_gpui::{Div, FontId, IntoElement, Styled, div, glyph_layout_advance, px, text};
 
 use crate::button::{Button, ButtonVariants};
 use crate::interact::IndexHandler;
@@ -26,9 +26,9 @@ pub fn wrap_words(s: &str, max_px: i32, size_px: u16) -> String {
     for word in s.split_whitespace() {
         let ww = word
             .chars()
-            .map(|ch| layout_advance(ch, size_px))
+            .map(|ch| glyph_layout_advance(ch, size_px))
             .sum::<i32>();
-        let space = layout_advance(' ', size_px);
+        let space = glyph_layout_advance(' ', size_px);
         if !first && line_w + space + ww > max_px && max_px > 0 {
             out.push('\n');
             line_w = 0;
@@ -41,18 +41,6 @@ pub fn wrap_words(s: &str, max_px: i32, size_px: u16) -> String {
         first = false;
     }
     out
-}
-
-fn layout_advance(ch: char, size_px: u16) -> i32 {
-    let em = size_px as i32;
-    let sixteenths = match ch {
-        ' ' => 5,
-        'i' | 'j' | 'l' | 'I' | '.' | ',' | ':' | ';' | '!' | '\'' | '|' => 4,
-        'f' | 't' | 'r' | 'J' => 6,
-        'm' | 'M' | 'w' | 'W' => 14,
-        _ => 9,
-    };
-    ((em * sixteenths) / 16).max(2)
 }
 
 /// One ephemeral notice.
@@ -223,7 +211,7 @@ mod tests {
     use super::{NotificationList, TOAST_TEXT_W, Toast, ToastData, tick_toasts, wrap_words};
     use crate::theme::Theme;
     use alloc::vec;
-    use knox_gpui::IntoElement;
+    use knox_gpui::{IntoElement, glyph_layout_advance};
 
     #[test]
     fn timed_dismiss_drops_expired() {
@@ -247,7 +235,7 @@ mod tests {
         );
         let body = wrap_words("Desktop environment loaded successfully", TOAST_TEXT_W, 15);
         for line in body.split('\n') {
-            let w: i32 = line.chars().map(|ch| super::layout_advance(ch, 15)).sum();
+            let w: i32 = line.chars().map(|ch| glyph_layout_advance(ch, 15)).sum();
             assert!(
                 w <= TOAST_TEXT_W,
                 "wrapped line {line:?} is {w}px, max {TOAST_TEXT_W}"

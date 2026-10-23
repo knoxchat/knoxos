@@ -577,7 +577,13 @@ mod tests {
         let p = input
             .hitboxes()
             .iter()
-            .find(|hb| hb.tab_stop && hb.bounds.y() > 80 && hb.bounds.width() <= 48)
+            .filter(|hb| {
+                hb.tab_stop
+                    && hb.bounds.width() <= 36
+                    && hb.bounds.height() <= 36
+                    && hb.bounds.y() > 36
+            })
+            .max_by_key(|hb| hb.bounds.y())
             .map(|hb| Point::xy(hb.bounds.x() + 8, hb.bounds.y() + 8))
             .expect("calendar day");
         click_at(&mut el, &mut input, p);

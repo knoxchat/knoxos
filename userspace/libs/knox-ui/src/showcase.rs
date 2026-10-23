@@ -5,8 +5,10 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, FluentBuilder, Hsla, IntoElement, Styled, div, px, text};
+use knox_gpui::{Div, FluentBuilder, FontId, Hsla, IntoElement, Styled, div, px, text};
 
+use crate::avatar::{Avatar, AvatarGroup};
+use crate::badge::Badge;
 use crate::button::{Button, ButtonVariants};
 use crate::carousel::Carousel;
 use crate::chart::{Chart, ChartKind, Sample};
@@ -23,7 +25,10 @@ use crate::gallery::{
     d8_overlay_catalog_types, d8_overlay_construct_all, d8_select_catalog_types,
     d8_select_construct_all, heading,
 };
+use crate::icon::{Icon, IconName};
 use crate::input::FieldState;
+use crate::kbd::Kbd;
+use crate::label::Label;
 use crate::list::{List, Tree, TreeNode};
 use crate::menu::{AppMenuBar, ContextMenu, DropdownMenu, MenuItem, NativeMenu, PopupMenu};
 use crate::message::{
@@ -40,10 +45,12 @@ use crate::settings::{SettingGroup, SettingItem, SettingPage, SettingsWidget};
 use crate::size::{Selectable, Sizable};
 use crate::speech::{Speech, SpeechState};
 use crate::table::{DataTable, TableColumn, TableHead};
+use crate::tag::Tag;
 use crate::textview::TextView;
 use crate::theme::Theme;
 use crate::titlebar::{TitleBar, WindowBorder};
 use crate::toast::{NotificationList, Toast, ToastData};
+use crate::tooltip::Tooltip;
 use crate::webview::WebView;
 
 /// Copy snapshot for D8.9–D8.29 live stories.
@@ -636,14 +643,76 @@ pub fn d8_all_construct_all(theme: &Theme) -> Vec<Div> {
     out
 }
 
-const PAGES: [&str; 7] = [
-    "Basics", "Forms", "Menus", "Layout", "Data", "Media", "Theme",
+pub const KIT_PAGES: [&str; 7] = [
+    "Controls", "Display", "Feedback", "Forms", "Overlays", "Layout", "Catalog",
 ];
+
+/// Identity row: Avatar, Label, Tag, Kbd, Badge — the kit used as chrome.
+pub fn d8_kit_chrome(theme: &Theme) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_2()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(Avatar::new().themed(theme).name("Knox UI"))
+                .child(
+                    Label::new("Knox UI")
+                        .themed(theme)
+                        .secondary("component kit")
+                        .font(FontId::UiBold)
+                        .size(theme.typo.ui),
+                )
+                .child(Tag::info().themed(theme).label("GPUI")),
+        )
+        .child(
+            AvatarGroup::new()
+                .themed(theme)
+                .limit(2)
+                .child(Avatar::new().name("Ada Lovelace"))
+                .child(Avatar::new().name("Alan Turing"))
+                .child(Avatar::new().name("Grace Hopper")),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    Tooltip::new("Command palette")
+                        .themed(theme)
+                        .key_binding(Kbd::parse("cmd-k").unwrap().themed(theme))
+                        .child(Kbd::parse("cmd-k").unwrap().themed(theme)),
+                )
+                .child(
+                    Badge::new()
+                        .themed(theme)
+                        .count(3)
+                        .child(Icon::new(IconName::Bell).themed(theme)),
+                ),
+        )
+}
+
+/// Status strip for the current kit page.
+pub fn d8_kit_status(theme: &Theme, page: u8) -> StatusBar {
+    let name = KIT_PAGES.get(page as usize).copied().unwrap_or("Kit");
+    StatusBar::new()
+        .themed(theme)
+        .left(alloc::format!(
+            "{} components",
+            d8_all_catalog_types().len()
+        ))
+        .right(name)
+}
 
 pub fn d8_page_bar(theme: &Theme, page: u8, on: Arc<dyn Fn(D8RestAction) + Send + Sync>) -> Div {
     TabBar::new("d8-pages")
         .themed(theme)
-        .labels(PAGES)
+        .labels(KIT_PAGES)
         .selected(page as usize)
         .on_select(move |i| on(D8RestAction::Page(i as u8)))
         .into_element()
@@ -657,17 +726,33 @@ pub fn d8_rest_gallery(
     on_cmd_query: Arc<dyn Fn(FieldState) + Send + Sync>,
 ) -> Div {
     match snap.page {
-        0 => d8_menus_gallery(theme, snap, on),
-        1 => d8_toast_host_gallery(theme, snap, on),
-        2 => d8_scroll_nav_gallery(theme, snap, on),
-        3 => d8_chrome_dock_gallery(theme, snap, on),
-        4 => d8_data_gallery(theme, snap, on, cmd_query, on_cmd_query),
-        5 => d8_media_gallery(theme, snap, on),
-        _ => d8_theme_gallery(theme, snap, on),
+        4 => div()
+            .flex_col()
+            .gap_2()
+            .child(d8_menus_gallery(theme, snap, on.clone()))
+            .child(d8_toast_host_gallery(theme, snap, on)),
+        5 => div()
+            .flex_col()
+            .gap_2()
+            .child(d8_scroll_nav_gallery(theme, snap, on.clone()))
+            .child(d8_chrome_dock_gallery(theme, snap, on)),
+        6 => div()
+            .flex_col()
+            .gap_2()
+            .child(d8_data_gallery(
+                theme,
+                snap,
+                on.clone(),
+                cmd_query,
+                on_cmd_query,
+            ))
+            .child(d8_media_gallery(theme, snap, on.clone()))
+            .child(d8_theme_gallery(theme, snap, on)),
+        _ => d8_menus_gallery(theme, snap, on),
     }
 }
 
-fn d8_menus_gallery(
+pub fn d8_menus_gallery(
     theme: &Theme,
     snap: D8RestSnapshot,
     on: Arc<dyn Fn(D8RestAction) + Send + Sync>,
@@ -695,11 +780,7 @@ fn d8_menus_gallery(
         .child(
             ContextMenu::new("g-ctx")
                 .themed(theme)
-                .trigger(
-                    text("Right-click me")
-                        .color(theme.colors.foreground)
-                        .size(12),
-                )
+                .trigger(Label::new("Right-click me").themed(theme))
                 .items(menu_items())
                 .open(snap.ctx_open)
                 .on_open({
@@ -740,7 +821,7 @@ fn d8_menus_gallery(
         )
 }
 
-fn d8_toast_host_gallery(
+pub fn d8_toast_host_gallery(
     theme: &Theme,
     snap: D8RestSnapshot,
     on: Arc<dyn Fn(D8RestAction) + Send + Sync>,
@@ -753,11 +834,7 @@ fn d8_toast_host_gallery(
                 .themed(theme)
                 .title("Hosted")
                 .open(true)
-                .child(
-                    text("Dim still clicks")
-                        .color(theme.colors.foreground)
-                        .size(12),
-                )
+                .child(Label::new("Dim still clicks").themed(theme))
                 .on_dismiss({
                     let c = fire.clone();
                     move || c(D8RestAction::Overlay(false))
@@ -792,7 +869,7 @@ fn d8_toast_host_gallery(
     host.into_element()
 }
 
-fn d8_scroll_nav_gallery(
+pub fn d8_scroll_nav_gallery(
     theme: &Theme,
     snap: D8RestSnapshot,
     on: Arc<dyn Fn(D8RestAction) + Send + Sync>,
@@ -816,7 +893,7 @@ fn d8_scroll_nav_gallery(
                         .themed(theme)
                         .size(px(160), px(64))
                         .offset(snap.scroll)
-                        .child(div().h(px(200)).child(text("Tall").size(12)))
+                        .child(div().h(px(200)).child(Label::new("Tall").themed(theme)))
                         .on_offset({
                             let c = fire.clone();
                             move |o| c(D8RestAction::Scroll(o))
@@ -855,15 +932,15 @@ fn d8_scroll_nav_gallery(
                     let c = fire.clone();
                     move |i| c(D8RestAction::Tab(i as u8))
                 })
-                .page(text("Page one").size(12))
-                .page(text("Page two").size(12)),
+                .page(Label::new("Page one").themed(theme))
+                .page(Label::new("Page two").themed(theme)),
         )
         .child(
             Accordion::new()
                 .themed(theme)
                 .open(Some(snap.accordion as usize))
-                .item("Alpha", text("A"))
-                .item("Beta", text("B"))
+                .item("Alpha", Label::new("A").themed(theme))
+                .item("Beta", Label::new("B").themed(theme))
                 .on_open({
                     let c = fire.clone();
                     move |i| c(D8RestAction::Accordion(i as u8))
@@ -903,7 +980,7 @@ fn d8_scroll_nav_gallery(
         }))
 }
 
-fn d8_chrome_dock_gallery(
+pub fn d8_chrome_dock_gallery(
     theme: &Theme,
     snap: D8RestSnapshot,
     on: Arc<dyn Fn(D8RestAction) + Send + Sync>,
@@ -945,8 +1022,8 @@ fn d8_chrome_dock_gallery(
                 .themed(theme)
                 .size(px(320), px(80))
                 .ratio(snap.split)
-                .first(text("Left").size(12))
-                .second(text("Right").size(12))
+                .first(Label::new("Left").themed(theme))
+                .second(Label::new("Right").themed(theme))
                 .on_ratio({
                     let c = fire.clone();
                     move |r| c(D8RestAction::Split(r))
@@ -971,7 +1048,7 @@ fn d8_chrome_dock_gallery(
         )
 }
 
-fn d8_data_gallery(
+pub fn d8_data_gallery(
     theme: &Theme,
     snap: D8RestSnapshot,
     on: Arc<dyn Fn(D8RestAction) + Send + Sync>,
@@ -1073,7 +1150,7 @@ fn d8_data_gallery(
         )
 }
 
-fn d8_media_gallery(
+pub fn d8_media_gallery(
     theme: &Theme,
     snap: D8RestSnapshot,
     on: Arc<dyn Fn(D8RestAction) + Send + Sync>,
@@ -1218,9 +1295,10 @@ pub fn d8_theme_gallery(
                 .when(snap.large, |b| b.large()),
         )
         .child(
-            text("Radius / density follow tokens")
-                .color(shown.colors.muted_foreground)
-                .size(12),
+            Label::new("Radius / density follow tokens")
+                .themed(&shown)
+                .muted(true)
+                .size(shown.typo.caption),
         )
 }
 
@@ -1245,5 +1323,9 @@ mod tests {
             FieldState::empty(),
             Arc::new(|_| {}),
         );
+        let _ = super::d8_kit_chrome(&theme);
+        let _ = super::d8_kit_status(&theme, 1);
+        assert_eq!(super::KIT_PAGES.len(), 7);
+        assert_eq!(super::KIT_PAGES[1], "Display");
     }
 }

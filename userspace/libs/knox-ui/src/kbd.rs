@@ -53,47 +53,28 @@ impl Kbd {
         self.stroke
     }
 
-    /// KnoxOS binding string: `Ctrl+Alt+Shift+Super+K`.
-    pub fn format(key: &Keystroke) -> String {
-        let mut parts: Vec<&str> = Vec::new();
+    /// Individual keycap labels: `Ctrl`, `Shift`, `S`.
+    pub fn parts(key: &Keystroke) -> Vec<String> {
+        let mut parts = Vec::new();
         if key.modifiers.control {
-            parts.push("Ctrl");
+            parts.push(String::from("Ctrl"));
         }
         if key.modifiers.alt {
-            parts.push("Alt");
+            parts.push(String::from("Alt"));
         }
         if key.modifiers.shift {
-            parts.push("Shift");
+            parts.push(String::from("Shift"));
         }
         if key.modifiers.platform {
-            parts.push("Super");
+            parts.push(String::from("Super"));
         }
+        parts.push(key_label(key.key));
+        parts
+    }
 
-        let key_label = match key.key {
-            Key::Char(c) => {
-                let mut s = String::new();
-                s.push(c.to_ascii_uppercase());
-                s
-            }
-            Key::Tab => String::from("Tab"),
-            Key::Enter => String::from("Enter"),
-            Key::Escape => String::from("Esc"),
-            Key::Backspace => String::from("Backspace"),
-            Key::Delete => String::from("Delete"),
-            Key::Left => String::from("Left"),
-            Key::Right => String::from("Right"),
-            Key::Up => String::from("Up"),
-            Key::Down => String::from("Down"),
-            Key::Home => String::from("Home"),
-            Key::End => String::from("End"),
-            Key::PageUp => String::from("Page Up"),
-            Key::PageDown => String::from("Page Down"),
-            Key::Space => String::from("Space"),
-        };
-
-        if parts.is_empty() {
-            return key_label;
-        }
+    /// KnoxOS binding string: `Ctrl+Alt+Shift+Super+K`.
+    pub fn format(key: &Keystroke) -> String {
+        let parts = Self::parts(key);
         let mut out = String::new();
         for (i, part) in parts.iter().enumerate() {
             if i > 0 {
@@ -101,10 +82,62 @@ impl Kbd {
             }
             out.push_str(part);
         }
-        out.push('+');
-        out.push_str(&key_label);
         out
     }
+}
+
+fn key_label(key: Key) -> String {
+    match key {
+        Key::Char(c) => {
+            let mut s = String::new();
+            s.push(c.to_ascii_uppercase());
+            s
+        }
+        Key::Tab => String::from("Tab"),
+        Key::Enter => String::from("Enter"),
+        Key::Escape => String::from("Esc"),
+        Key::Backspace => String::from("Backspace"),
+        Key::Delete => String::from("Delete"),
+        Key::Left => String::from("Left"),
+        Key::Right => String::from("Right"),
+        Key::Up => String::from("Up"),
+        Key::Down => String::from("Down"),
+        Key::Home => String::from("Home"),
+        Key::End => String::from("End"),
+        Key::PageUp => String::from("Page Up"),
+        Key::PageDown => String::from("Page Down"),
+        Key::Space => String::from("Space"),
+    }
+}
+
+fn keycap(theme: &Theme, label: String, outline: bool) -> Div {
+    let c = theme.colors;
+    let (bg, fg, border) = if outline {
+        (c.background, c.muted_foreground, c.border)
+    } else {
+        (c.muted, c.muted_foreground, c.border)
+    };
+    let mut el = div()
+        .h(px(22))
+        .min_w(px(22))
+        .pad_x(px(6))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(theme.radius.sm)
+        .bg(bg)
+        .border_1()
+        .border_color(border)
+        .child(
+            text(label)
+                .color(fg)
+                .font(FontId::Mono)
+                .size(theme.typo.caption),
+        );
+    if !outline {
+        el = el.border_color(bg);
+    }
+    el
 }
 
 impl From<Keystroke> for Kbd {
@@ -117,35 +150,19 @@ impl IntoElement for Kbd {
     type Element = Div;
 
     fn into_element(self) -> Div {
-        let label = Self::format(&self.stroke);
+        let parts = Self::parts(&self.stroke);
         if !self.appearance {
-            return div().child(text(label).font(FontId::Mono).size(self.theme.typo.body));
-        }
-        let c = self.theme.colors;
-        let (bg, fg, border) = if self.outline {
-            (c.background, c.muted_foreground, c.border)
-        } else {
-            (c.muted, c.muted_foreground, c.muted)
-        };
-        let mut el = div()
-            .h(px(24))
-            .min_w(px(24))
-            .pad_x(px(6))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(self.theme.radius.sm)
-            .bg(bg)
-            .child(
-                text(label)
-                    .color(fg)
+            return div().child(
+                text(Self::format(&self.stroke))
                     .font(FontId::Mono)
-                    .size(self.theme.typo.body),
+                    .size(self.theme.typo.caption),
             );
-        if self.outline {
-            el = el.border_1().border_color(border);
         }
-        el
+        let mut row = div().flex().items_center().gap_1();
+        for part in parts {
+            row = row.child(keycap(&self.theme, part, self.outline));
+        }
+        row
     }
 }
 
@@ -170,6 +187,14 @@ mod tests {
         assert_eq!(
             Kbd::format(&Keystroke::parse("alt-enter").unwrap()),
             "Alt+Enter"
+        );
+        assert_eq!(
+            Kbd::parts(&Keystroke::parse("ctrl-shift-s").unwrap()),
+            alloc::vec![
+                alloc::string::String::from("Ctrl"),
+                alloc::string::String::from("Shift"),
+                alloc::string::String::from("S")
+            ]
         );
     }
 }

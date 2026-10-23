@@ -105,26 +105,36 @@ impl Text {
         self.computed
     }
 
-    /// Inter advances in 16ths of an em.
-    /// Layout may overestimate; paint uses the real fontdue advance.
     fn layout_advance(&self, ch: char) -> i32 {
-        let em = self.size_px as i32;
-        let sixteenths = match ch {
-            ' ' => 5,
-            'i' | 'j' | 'l' | 'I' | '.' | ',' | ':' | ';' | '!' | '\'' | '|' => 4,
-            'f' | 't' | 'r' | 'J' => 6,
-            'm' | 'M' | 'w' | 'W' => 14,
-            _ => 9,
-        };
-        ((em * sixteenths) / 16).max(2)
+        glyph_layout_advance(ch, self.size_px)
     }
 
-    /// Extra descender / tittle room so Inter Medium stems survive overflow clip.
-    /// Large wordmarks keep the requested em so splash lockups do not grow.
+    /// Inter line box: ascent + descent + tittle pad. Large wordmarks keep
+    /// the requested em so splash lockups do not grow.
     fn line_height(&self) -> i32 {
         let em = self.size_px as i32;
-        if em <= 24 { em + (em / 4).max(4) } else { em }
+        if em <= 24 { em + (em / 3).max(6) } else { em }
     }
+
+    fn top_pad(&self) -> i32 {
+        if self.size_px <= 24 { 2 } else { 0 }
+    }
+}
+
+/// Inter Medium advances in 16ths of an em, ceiled.
+///
+/// Must not underestimate: buttons and tabs size from this, and
+/// `overflow_hidden` clips any paint that runs past the box.
+pub fn glyph_layout_advance(ch: char, size_px: u16) -> i32 {
+    let em = size_px as i32;
+    let sixteenths = match ch {
+        ' ' => 5,
+        'i' | 'j' | 'l' | 'I' | '.' | ',' | ':' | ';' | '!' | '\'' | '|' => 5,
+        'f' | 't' | 'r' | 'J' => 7,
+        'm' | 'M' | 'w' | 'W' => 16,
+        _ => 11,
+    };
+    ((em * sixteenths + 15) / 16).max(3)
 }
 
 impl Element for Text {
@@ -148,9 +158,9 @@ impl Element for Text {
             line_w += self.layout_advance(ch);
         }
         x = x.max(line_w);
-        // Left slack for negative LSB, right slack for RSB / stem pad.
+        // Left slack for negative LSB, right slack for RSB / 2× raster pad.
         if x > 0 {
-            x += 4;
+            x += 8;
         }
         self.computed = Bounds::new(
             origin,
@@ -182,7 +192,8 @@ impl Element for Text {
             return;
         };
         let line_h = self.line_height();
-        let mut pen_y = bounds.y();
+        let top_pad = self.top_pad();
+        let mut pen_y = bounds.y() + top_pad;
         // 1px left inset matches request_layout slack so a negative LSB cannot
         // sit outside overflow clip.
         let mut line_x = 1i32;
@@ -196,10 +207,22 @@ impl Element for Text {
                 line_x += self.layout_advance(ch);
                 continue;
             };
+            // Keep the whole bitmap inside this line box. A bad bearing used
+            // to throw `o`/`a`/`w` below overflow clip (`Two` → `T`).
+            let gh = glyph.size.height.0.max(1);
+            let line_top = pen_y - top_pad;
+            let line_bot = line_top + line_h;
+            let mut dest_y = pen_y + glyph.bearing.y.0;
+            if dest_y < line_top {
+                dest_y = line_top;
+            }
+            if dest_y + gh > line_bot {
+                dest_y = (line_bot - gh).max(line_top);
+            }
             let dest = Bounds::new(
                 Point {
                     x: px(bounds.x() + line_x + glyph.bearing.x.0),
-                    y: px((pen_y + glyph.bearing.y.0).max(pen_y)),
+                    y: px(dest_y),
                 },
                 glyph.size,
             );
@@ -354,7 +377,7 @@ mod tests {
         let bounds = el.request_layout(Point::ZERO, Size::wh(36, 32));
         assert_eq!(
             bounds.height(),
-            17,
+            19,
             "button/desktop labels wrap only on newline"
         );
         assert!(
@@ -368,7 +391,7 @@ mod tests {
         );
         let mut wrapped = text("One\nTwo").size(13);
         let two = wrapped.request_layout(Point::ZERO, Size::wh(200, 40));
-        assert_eq!(two.height(), 34);
+        assert_eq!(two.height(), 38);
         let mut files = text("Files").size(13);
         let files_b = files.request_layout(Point::ZERO, Size::wh(200, 40));
         assert!(
@@ -376,6 +399,14 @@ mod tests {
             "Files must not clip the last letter, got {}",
             files_b.width()
         );
+        let mut two = text("Two").size(16);
+        let two_b = two.request_layout(Point::ZERO, Size::wh(200, 40));
+        assert!(
+            two_b.width() >= 36,
+            "Two needs room for T+w+o, got {}",
+            two_b.width()
+        );
+        assert_eq!(two_b.height(), 22);
     }
 
     #[test]

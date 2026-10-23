@@ -8,9 +8,10 @@ use alloc::string::String;
 
 use knox_gpui::{
     Bounds, Div, Element, Hsla, IntoElement, LayoutHints, PaintEnv, Point, Quad, Scene, Size,
-    Styled, WindowInput, div, px, text,
+    Styled, WindowInput, div, px,
 };
 
+use crate::label::Label;
 use crate::theme::Theme;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -170,9 +171,10 @@ impl IntoElement for Separator {
                 .gap_1()
                 .child(rule(1))
                 .child(
-                    text(label)
-                        .color(self.theme.colors.muted_foreground)
-                        .size(12),
+                    Label::new(label)
+                        .themed(&self.theme)
+                        .muted(true)
+                        .size(self.theme.typo.caption),
                 )
                 .child(rule(1)),
             (true, Some(label)) => div()
@@ -182,9 +184,10 @@ impl IntoElement for Separator {
                 .w(px(16))
                 .child(rule(1))
                 .child(
-                    text(label)
-                        .color(self.theme.colors.muted_foreground)
-                        .size(12),
+                    Label::new(label)
+                        .themed(&self.theme)
+                        .muted(true)
+                        .size(self.theme.typo.caption),
                 )
                 .child(rule(1)),
         }

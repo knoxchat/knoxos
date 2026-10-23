@@ -9,10 +9,11 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, IntoElement, Pixels, Styled, div, px, text};
+use knox_gpui::{Div, FontId, IntoElement, Pixels, Styled, div, px};
 
 use crate::button::{Button, ButtonVariants};
 use crate::interact::IndexHandler;
+use crate::label::Label;
 use crate::size::Selectable;
 use crate::theme::Theme;
 
@@ -154,7 +155,7 @@ impl IntoElement for Toolbar {
             .flex()
             .items_center()
             .gap_2()
-            .w(px(400))
+            .grow()
             .h(px(32))
             .p(self.theme.spacing.xs)
             .bg(self.theme.colors.surface)
@@ -213,19 +214,21 @@ impl IntoElement for StatusBar {
             .flex()
             .justify_between()
             .items_center()
-            .w(px(400))
-            .h(px(22))
+            .grow()
+            .h(px(28))
             .p(self.theme.spacing.xs)
             .bg(self.theme.colors.muted.opacity(0.4))
             .child(
-                text(self.left)
-                    .color(self.theme.colors.muted_foreground)
-                    .size(12),
+                Label::new(self.left)
+                    .themed(&self.theme)
+                    .muted(true)
+                    .size(self.theme.typo.caption),
             )
             .child(
-                text(self.right)
-                    .color(self.theme.colors.muted_foreground)
-                    .size(12),
+                Label::new(self.right)
+                    .themed(&self.theme)
+                    .muted(true)
+                    .size(self.theme.typo.caption),
             )
     }
 }
@@ -270,9 +273,10 @@ impl IntoElement for GroupBox {
             .border_color(self.theme.colors.border)
             .rounded(self.theme.radius.md)
             .child(
-                text(self.title)
-                    .color(self.theme.colors.muted_foreground)
-                    .size(12),
+                Label::new(self.title)
+                    .themed(&self.theme)
+                    .muted(true)
+                    .size(self.theme.typo.caption),
             );
         if let Some(child) = self.child {
             box_ = box_.child(child);
@@ -322,8 +326,19 @@ impl IntoElement for DescriptionList {
                 div()
                     .flex()
                     .justify_between()
-                    .child(text(k).color(self.theme.colors.muted_foreground).size(12))
-                    .child(text(v).color(self.theme.colors.foreground).size(12)),
+                    .gap_2()
+                    .child(
+                        Label::new(k)
+                            .themed(&self.theme)
+                            .muted(true)
+                            .size(self.theme.typo.caption),
+                    )
+                    .child(
+                        Label::new(v)
+                            .themed(&self.theme)
+                            .font(FontId::UiBold)
+                            .size(self.theme.typo.caption),
+                    ),
             );
         }
         col

@@ -4,14 +4,16 @@
 //! the Longbridge kit is a design reference only (Apache-2.0). This file is new
 //! `no_std` code.
 
-use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, IntoElement, Key, Styled, div, px, text};
+use knox_gpui::{Div, IntoElement, Key, Styled, div, px};
 
+use crate::icon::{Icon, IconName};
 use crate::interact::IndexHandler;
+use crate::label::Label;
+use crate::size::Sizable;
 use crate::theme::Theme;
 
 /// Flat selectable list (kit `List`).
@@ -83,7 +85,11 @@ impl IntoElement for List {
                     .h(px(22))
                     .p(self.theme.spacing.xs)
                     .bg(bg)
-                    .child(text(label).color(self.theme.colors.foreground).size(12))
+                    .child(
+                        Label::new(label)
+                            .themed(&self.theme)
+                            .size(self.theme.typo.caption),
+                    )
                     .on_click(move |_| {
                         if let Some(p) = &pick {
                             p(i);
@@ -274,38 +280,44 @@ fn paint_nodes(
         } else {
             knox_gpui::Hsla::TRANSPARENT
         };
-        let caret = if node.children.is_empty() {
-            "  "
-        } else if node.expanded {
-            "v "
-        } else {
-            "> "
-        };
         let pick = on_select.clone();
         let tog = on_toggle.clone();
         let expandable = !node.children.is_empty();
-        out.add_child(
-            div()
-                .flex()
-                .h(px(20))
-                .ml(px(depth * 12))
-                .bg(bg)
-                .child(
-                    text(format!("{caret}{}", node.label))
-                        .color(theme.colors.foreground)
-                        .size(12),
-                )
-                .on_click(move |_| {
-                    if expandable {
-                        if let Some(t) = &tog {
-                            t(i);
-                        }
-                    }
-                    if let Some(p) = &pick {
-                        p(i);
-                    }
-                }),
+        let mut row = div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .h(px(20))
+            .ml(px(depth * 12))
+            .bg(bg);
+        if expandable {
+            let caret = if node.expanded {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            };
+            row = row.child(
+                Icon::new(caret)
+                    .themed(theme)
+                    .color(theme.colors.muted_foreground)
+                    .small(),
+            );
+        }
+        row = row.child(
+            Label::new(node.label.clone())
+                .themed(theme)
+                .size(theme.typo.caption),
         );
+        out.add_child(row.on_click(move |_| {
+            if expandable {
+                if let Some(t) = &tog {
+                    t(i);
+                }
+            }
+            if let Some(p) = &pick {
+                p(i);
+            }
+        }));
         if node.expanded {
             paint_nodes(
                 theme,

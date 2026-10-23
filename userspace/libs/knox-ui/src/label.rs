@@ -51,6 +51,7 @@ pub struct Label {
     label: String,
     secondary: Option<String>,
     masked: bool,
+    muted: bool,
     highlights_text: Option<HighlightsMatch>,
     font: FontId,
     size_px: u16,
@@ -63,6 +64,7 @@ impl Label {
             label: label.into(),
             secondary: None,
             masked: false,
+            muted: false,
             highlights_text: None,
             font: FontId::Ui,
             size_px: crate::theme::TypeTokens::UI,
@@ -81,6 +83,11 @@ impl Label {
 
     pub fn masked(mut self, masked: bool) -> Self {
         self.masked = masked;
+        self
+    }
+
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = muted;
         self
     }
 
@@ -175,7 +182,11 @@ impl IntoElement for Label {
     fn into_element(self) -> Div {
         let full = self.full_text();
         let chars = full.chars().count();
-        let fg = self.theme.colors.foreground;
+        let fg = if self.muted {
+            self.theme.colors.muted_foreground
+        } else {
+            self.theme.colors.foreground
+        };
         let muted = self.theme.colors.muted_foreground;
         let accent = self.theme.colors.primary;
         let font = self.font;
@@ -183,12 +194,18 @@ impl IntoElement for Label {
 
         if self.masked {
             let bullets: String = core::iter::repeat_n(MASKED, chars).collect();
-            return div().child(text(bullets).color(fg).font(font).size(size));
+            return div()
+                .flex()
+                .items_center()
+                .child(text(bullets).color(fg).font(font).size(size));
         }
 
         let ranges = self.highlight_ranges(full.len());
         if ranges.is_empty() {
-            return div().child(text(full).color(fg).font(font).size(size));
+            return div()
+                .flex()
+                .items_center()
+                .child(text(full).color(fg).font(font).size(size));
         }
 
         let mut marks: Vec<(usize, usize, Hsla)> = Vec::new();

@@ -7,11 +7,12 @@
 use alloc::string::String;
 use alloc::sync::Arc;
 
-use knox_gpui::{Div, FontId, IntoElement, Pixels, Point, Styled, div, px, text};
+use knox_gpui::{Div, FontId, IntoElement, Pixels, Point, Styled, div, px};
 
 use crate::button::{Button, ButtonVariants};
 use crate::icon::{Icon, IconName};
 use crate::interact::Handler;
+use crate::label::Label;
 use crate::size::Sizable;
 use crate::theme::Theme;
 
@@ -96,8 +97,8 @@ impl IntoElement for TitleBar {
                     .color(self.theme.colors.foreground),
             )
             .child(
-                text(self.title)
-                    .color(self.theme.colors.foreground)
+                Label::new(self.title)
+                    .themed(&self.theme)
                     .font(FontId::UiBold)
                     .size(self.theme.typo.title),
             );

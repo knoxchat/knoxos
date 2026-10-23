@@ -329,7 +329,8 @@ fn rasterize_glyph(font_id: FontId, ch: char, size_px: u16) -> Option<GlyphKey> 
         glyph.advance = (size_px as f32 / 4.0).max(3.0);
         glyph.coverage = vec![220u8; w * h];
     }
-    let advance = libm::roundf(glyph.advance).max(1.0) as u16;
+    // Ceil so a 9.2px Inter advance cannot land the next stem on this bowl.
+    let advance = libm::ceilf(glyph.advance).max(1.0) as u16;
 
     let cached = CachedGlyph {
         width: glyph.width as u16,

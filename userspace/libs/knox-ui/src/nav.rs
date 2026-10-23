@@ -10,11 +10,13 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, IntoElement, Key, Styled, div, text};
+use knox_gpui::{Div, FontId, IntoElement, Key, Styled, div};
 
 use crate::button::{Button, ButtonVariants};
+use crate::icon::{Icon, IconName};
 use crate::interact::{Handler, IndexHandler};
-use crate::size::Selectable;
+use crate::label::Label;
+use crate::size::{Selectable, Sizable};
 use crate::theme::Theme;
 
 /// Tab strip (kit `TabBar`).
@@ -77,6 +79,7 @@ impl IntoElement for TabBar {
                 Button::new(format!("{}-{i}", self.id))
                     .themed(&self.theme)
                     .ghost()
+                    .compact()
                     .label(label)
                     .selected(i == selected)
                     .on_click(move || {
@@ -218,11 +221,16 @@ impl IntoElement for Collapsible {
     type Element = Div;
 
     fn into_element(self) -> Div {
-        let caret = if self.open { "v " } else { "> " };
+        let caret = if self.open {
+            IconName::ChevronDown
+        } else {
+            IconName::ChevronRight
+        };
         let mut head = Button::new("coll-h")
             .themed(&self.theme)
             .ghost()
-            .label(format!("{caret}{}", self.title));
+            .icon(caret)
+            .label(self.title);
         if let Some(t) = self.on_toggle {
             head = head.on_click(move || t());
         }
@@ -359,7 +367,12 @@ impl IntoElement for Breadcrumb {
         let last = self.parts.len().saturating_sub(1);
         for (i, part) in self.parts.into_iter().enumerate() {
             if i > 0 {
-                row = row.child(text("/").color(self.theme.colors.muted_foreground).size(12));
+                row = row.child(
+                    Icon::new(IconName::ChevronRight)
+                        .themed(&self.theme)
+                        .color(self.theme.colors.muted_foreground)
+                        .small(),
+                );
             }
             let pick = self.on_select.clone();
             row = row.child(
@@ -426,7 +439,8 @@ impl IntoElement for Pagination {
             Button::new("pg-prev")
                 .themed(&self.theme)
                 .ghost()
-                .label("<")
+                .icon(IconName::ChevronLeft)
+                .compact()
                 .on_click(move || {
                     if let Some(p) = &f {
                         p(prev);
@@ -454,7 +468,8 @@ impl IntoElement for Pagination {
             Button::new("pg-next")
                 .themed(&self.theme)
                 .ghost()
-                .label(">")
+                .icon(IconName::ChevronRight)
+                .compact()
                 .on_click(move || {
                     if let Some(p) = &f {
                         p(next);
@@ -596,16 +611,18 @@ impl IntoElement for NavStack {
             let mut back = Button::new("nav-back")
                 .themed(&self.theme)
                 .ghost()
-                .label("<");
+                .icon(IconName::ChevronLeft)
+                .compact();
             if let Some(b) = self.on_back {
                 back = back.on_click(move || b());
             }
             head = head.child(back);
         }
         head = head.child(
-            text(String::from(self.state.current()))
-                .color(self.theme.colors.foreground)
-                .size(14),
+            Label::new(String::from(self.state.current()))
+                .themed(&self.theme)
+                .font(FontId::UiBold)
+                .size(self.theme.typo.body),
         );
         div().flex_col().child(head)
     }

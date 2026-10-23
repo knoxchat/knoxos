@@ -57,7 +57,10 @@ pub use style::{
     Align, Display, ElementState, FlexDirection, FluentBuilder, Justify, Overflow, Position, Style,
     StyleRefinement, Styled, ring_color,
 };
-pub use text::{FontId, GlyphId, GlyphRaster, HostTextSystem, PlatformTextSystem, Text, text};
+pub use text::{
+    FontId, GlyphId, GlyphRaster, HostTextSystem, PlatformTextSystem, Text, glyph_layout_advance,
+    text,
+};
 pub use window::{ChromeKind, Window, WindowId};
 
 /// Crate version; referenced by the kernel so the path dep stays live (D0.1).

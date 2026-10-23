@@ -164,8 +164,10 @@ pub use settings::{SettingGroup, SettingItem, SettingPage, SettingsWidget};
 pub use shimmer::Shimmer;
 pub use shortcuts::{D6_ACTIONS, ShortcutRow, ShortcutsOverlay};
 pub use showcase::{
-    D8RestAction, D8RestSnapshot, apply_d8_rest, d8_all_catalog_types, d8_all_construct_all,
-    d8_page_bar, d8_rest_gallery, d8_theme_gallery,
+    D8RestAction, D8RestSnapshot, KIT_PAGES, apply_d8_rest, d8_all_catalog_types,
+    d8_all_construct_all, d8_chrome_dock_gallery, d8_data_gallery, d8_kit_chrome, d8_kit_status,
+    d8_media_gallery, d8_menus_gallery, d8_page_bar, d8_rest_gallery, d8_scroll_nav_gallery,
+    d8_theme_gallery, d8_toast_host_gallery,
 };
 pub use size::{ControlSize, Disableable, Selectable, Sizable};
 pub use skeleton::Skeleton;

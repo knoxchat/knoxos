@@ -275,9 +275,16 @@ fn switch_checkbox_toggle_and_radio_group() {
         })
         .into_element();
     let mut input = WindowInput::new();
-    knox_gpui::prepare_element(&mut el, Point::ZERO, Size::wh(160, 24), &mut input);
-    dispatch_mouse_down(&mut el, &mut input, Point::xy(48, 8));
-    dispatch_mouse_up(&mut el, &mut input, Point::xy(48, 8));
+    knox_gpui::prepare_element(&mut el, Point::ZERO, Size::wh(200, 32), &mut input);
+    let p = input
+        .hitboxes()
+        .iter()
+        .filter(|hb| hb.tab_stop)
+        .max_by_key(|hb| hb.bounds.x())
+        .map(|hb| Point::xy(hb.bounds.x() + 8, hb.bounds.y() + hb.bounds.height() / 2))
+        .expect("radio B");
+    dispatch_mouse_down(&mut el, &mut input, p);
+    dispatch_mouse_up(&mut el, &mut input, p);
     assert_eq!(rd.load(Ordering::SeqCst), 1);
 }
 

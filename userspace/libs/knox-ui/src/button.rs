@@ -361,12 +361,8 @@ impl IntoElement for Button {
                 || self.variant == ButtonVariant::Text,
         ));
         let font = self.size.font();
+        let caret = self.dropdown_caret;
         let mut label = self.label.clone();
-        if self.dropdown_caret && !label.is_empty() {
-            label.push_str(" v");
-        } else if self.dropdown_caret {
-            label = String::from("v");
-        }
         if self.loading && !label.is_empty() {
             label.push('…');
         }
@@ -405,7 +401,7 @@ impl IntoElement for Button {
                 .focus(move |s| s.border_color(ring));
         }
 
-        if self.icon.is_some() && !label.is_empty() {
+        if (self.icon.is_some() || caret) && !label.is_empty() {
             el = el.gap_1();
         }
         if let Some(name) = self.icon {
@@ -418,6 +414,14 @@ impl IntoElement for Button {
         }
         if !label.is_empty() {
             el = el.child(text(label).color(face.fg).size(font));
+        }
+        if caret {
+            el = el.child(
+                Icon::new(IconName::ChevronDown)
+                    .themed(&self.theme)
+                    .color(face.fg)
+                    .with_size(self.size),
+            );
         }
 
         if interactive {
@@ -714,7 +718,8 @@ impl IntoElement for DropdownButton {
 
         let mut caret = Button::new(format!("{}-caret", self.id))
             .themed(&self.theme)
-            .label("v")
+            .icon(IconName::ChevronDown)
+            .compact()
             .with_variant(variant)
             .with_size(size)
             .disabled(self.disabled)

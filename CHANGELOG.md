@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **UI type** — 14–18px Inter keeps bowls (`a`/`o`/`w`) on the baseline: 2× raster + coverage lift, ceil advances, line boxes that fit the bitmap, layout that does not underestimate buttons/tabs.
+- **Kit Gallery** — host chrome is real knox-ui (Avatar, Label, Tag, Kbd keycaps, Badge, TabBar, StatusBar). Stories are paged (Controls / Display / Feedback / Forms / Overlays / Layout / Catalog) instead of the leftover Live/Catalog dump. Dropdown carets and table sort marks use Chevron icons.
 - **Modern GPU stack** — `./run.sh` uses `-vga virtio` as the primary display. DRM/KMS binds the live VirtIO-GPU scanout (`GATE_GPU modern stack`). Cursorq is proven (`GATE_GPU pointer plane`); QEMU cocoa does not composite that overlay, so the QEMU window pointer is the software arrow in the scanout plus the host cursor (`show-cursor=on`). USB tablet reports are not dropped when VirtIO-input is also bound.
 - **FUSE FLUSH** — FLUSH after WRITE succeeds; unknown nodeid fails (`GATE_FUSE flush`).
 - **FUSE FSYNCDIR** — FSYNCDIR of a directory succeeds; a file or unknown nodeid fails (`GATE_FUSE fsyncdir`).
