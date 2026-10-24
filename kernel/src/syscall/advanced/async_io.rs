@@ -24,7 +24,9 @@ pub fn sys_io_uring_setup(entries: u32, params_ptr: u64) -> SyscallResult {
     let ring = crate::io_uring::sys_io_uring_setup(entries, flags)
         .map_err(|_| SyscallError::InvalidArgument)?;
     let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
-    tables.entry(pid).or_insert_with(|| crate::fd::FdTable::new());
+    tables
+        .entry(pid)
+        .or_insert_with(|| crate::fd::FdTable::new());
     let fd_table = tables.get_mut(&pid).ok_or(SyscallError::TooManyFiles)?;
     let fd = match fd_table.open(
         &alloc::format!("iouring:{ring}"),
