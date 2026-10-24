@@ -5,9 +5,9 @@ use alloc::vec::Vec;
 
 use super::mount::{LOOPBACK, write_response};
 use super::protocol::{
-    F_UNLCK, FuseFileLock, FuseOpcode, FuseStatfs, POLLIN, POLLOUT, encode_bmap, encode_dirent,
-    encode_entry, encode_ioctl, encode_lk, encode_open, encode_poll, encode_statfs, lock_conflicts,
-    parse_fuse_lk,
+    F_UNLCK, FuseFileLock, FuseOpcode, FuseStatfs, POLLIN, POLLOUT, RENAME_NOREPLACE, encode_bmap,
+    encode_dirent, encode_direntplus, encode_entry, encode_ioctl, encode_lk, encode_open,
+    encode_poll, encode_statfs, lock_conflicts, parse_fuse_lk,
 };
 
 pub(super) fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]) {
@@ -599,6 +599,73 @@ pub(super) fn serve_loopback_poll(mount_point: &str, unique: u64, nodeid: u64) {
         revents |= POLLIN;
     }
     let _ = write_response(mount_point, unique, encode_poll(revents));
+}
+fn loopback_has_name(lb: &super::mount::LoopbackFs, name: &str) -> bool {
+    lb.files.contains_key(name)
+        || lb.dirs.contains_key(name)
+        || lb.links.contains_key(name)
+        || lb.nodes.contains_key(name)
+}
+pub(super) fn serve_loopback_readdirplus(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    let is_root = nodeid == 1;
+    let is_dir = lb.dirs.values().any(|&ino| ino == nodeid);
+    if !is_root && !is_dir {
+        return;
+    }
+    let mut out = Vec::new();
+    if is_root {
+        for (name, &(ino, ref data)) in &lb.files {
+            out.extend_from_slice(&encode_direntplus(ino, data.len() as u64, 0o100644, name));
+        }
+        for (name, &ino) in &lb.dirs {
+            out.extend_from_slice(&encode_direntplus(ino, 0, 0o040755, name));
+        }
+        for (name, &(ino, ref target)) in &lb.links {
+            out.extend_from_slice(&encode_direntplus(ino, target.len() as u64, 0o120777, name));
+        }
+        for (name, &(ino, mode)) in &lb.nodes {
+            out.extend_from_slice(&encode_direntplus(ino, 0, mode, name));
+        }
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, out);
+}
+pub(super) fn serve_loopback_rename2(mount_point: &str, unique: u64, req: &[u8]) {
+    if req.len() < 4 {
+        return;
+    }
+    let flags = u32::from_le_bytes(req[0..4].try_into().unwrap_or([0; 4]));
+    let Ok(s) = core::str::from_utf8(&req[4..]) else {
+        return;
+    };
+    let Some((old, new)) = s.split_once('\0') else {
+        return;
+    };
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    if !loopback_has_name(lb, old) {
+        return;
+    }
+    if flags & RENAME_NOREPLACE != 0 && loopback_has_name(lb, new) {
+        return;
+    }
+    if let Some(file) = lb.files.remove(old) {
+        lb.files.insert(String::from(new), file);
+    } else if let Some(ino) = lb.dirs.remove(old) {
+        lb.dirs.insert(String::from(new), ino);
+    } else if let Some(link) = lb.links.remove(old) {
+        lb.links.insert(String::from(new), link);
+    } else if let Some(node) = lb.nodes.remove(old) {
+        lb.nodes.insert(String::from(new), node);
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
 }
 pub(super) fn serve_loopback_fallocate(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
     if req.len() < 20 {

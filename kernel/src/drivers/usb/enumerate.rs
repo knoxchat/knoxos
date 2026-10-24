@@ -96,6 +96,10 @@ static ISOCHDELAY_LIVE: AtomicBool = AtomicBool::new(false);
 static HID_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when GET_DESCRIPTOR(HID Report) got a Transfer Event.
 static HIDREPORT_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when HID GET_REPORT got a Transfer Event.
+static HIDGETREPORT_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when HID SET_REPORT got a Transfer Event.
+static HIDSETREPORT_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -133,6 +137,8 @@ pub const GATE_XHCI_SETSEL_MARKER: &str = "GATE_USB xhci setsel";
 pub const GATE_XHCI_ISOCHDELAY_MARKER: &str = "GATE_USB xhci isochdelay";
 pub const GATE_XHCI_HID_MARKER: &str = "GATE_USB xhci hiddesc";
 pub const GATE_XHCI_HIDREPORT_MARKER: &str = "GATE_USB xhci hidreport";
+pub const GATE_XHCI_HIDGETREPORT_MARKER: &str = "GATE_USB xhci getreport";
+pub const GATE_XHCI_HIDSETREPORT_MARKER: &str = "GATE_USB xhci setreport";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -3473,5 +3479,153 @@ pub fn hidreport_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_HIDREPORT_MARKER);
+    true
+}
+
+/// HID GET_REPORT — class IN, Input report. Requires a Transfer Event.
+pub fn hid_get_report(slot_id: u8, report_id: u8, xfer_len: u32) -> Option<usize> {
+    serial_println!("[XHCI] GET_REPORT({}) for slot {}", report_id, slot_id);
+    restart_ep(slot_id, 1);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+    let wvalue = (1u16 << 8) | report_id as u16; // Input report
+
+    let mut setup = Trb::new();
+    // bmRequestType=0xA1 (IN, class, interface), bRequest=1 (GET_REPORT)
+    setup.param_lo = 0xA1 | 1u32 << 8 | (wvalue as u32) << 16;
+    setup.param_hi = xfer_len << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = xfer_len;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit GET_REPORT");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: USB2 HID may stall GET_REPORT.
+        if cc == 1 || cc == 13 || cc == 6 {
+            HIDGETREPORT_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] GET_REPORT complete cc={}", cc);
+            return Some(xfer_len as usize);
+        }
+        serial_println!("[XHCI] GET_REPORT completion code: {}", cc);
+        return None;
+    }
+    serial_println!("[XHCI] GET_REPORT timeout");
+    None
+}
+
+/// HID SET_REPORT — class OUT, Output report. Requires a Transfer Event.
+pub fn hid_set_report(slot_id: u8, report_id: u8, data: &[u8]) -> bool {
+    serial_println!("[XHCI] SET_REPORT({}) for slot {}", report_id, slot_id);
+    recover_control_ep(slot_id);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+    if !data.is_empty() {
+        // SAFETY: bounce page is a DMA frame we own; HC reads OUT data.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                data.as_ptr(),
+                dma_virt(data_buf) as *mut u8,
+                data.len(),
+            );
+        }
+    }
+    let wvalue = (2u16 << 8) | report_id as u16; // Output report
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x21 (OUT, class, interface), bRequest=9 (SET_REPORT)
+    setup.param_lo = 0x21 | 9u32 << 8 | (wvalue as u32) << 16;
+    setup.param_hi = (data.len() as u32) << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 2 << 16; // TRT = OUT Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data_trb = Trb::new();
+    data_trb.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data_trb.param_hi = (data_buf >> 32) as u32;
+    data_trb.status = data.len() as u32;
+    data_trb.set_type(TrbType::DataStage);
+    data_trb.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for OUT-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data_trb, status]) {
+        serial_println!("[XHCI] Failed to submit SET_REPORT");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: USB2 HID may stall SET_REPORT.
+        if cc == 1 || cc == 13 || cc == 6 {
+            HIDSETREPORT_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] SET_REPORT complete cc={}", cc);
+            return true;
+        }
+        serial_println!("[XHCI] SET_REPORT completion code: {}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] SET_REPORT timeout");
+    false
+}
+
+/// Prove HID GET_REPORT got a Transfer Event.
+pub fn getreport_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci getreport skipped (no controller)");
+        return true;
+    }
+    if !HIDGETREPORT_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = hid_get_report(slot_id, 0, 8);
+        }
+    }
+    if !HIDGETREPORT_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_REPORT had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_HIDGETREPORT_MARKER);
+    true
+}
+
+/// Prove HID SET_REPORT got a Transfer Event.
+pub fn setreport_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci setreport skipped (no controller)");
+        return true;
+    }
+    if !HIDSETREPORT_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = hid_set_report(slot_id, 0, &[0u8; 8]);
+        }
+    }
+    if !HIDSETREPORT_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SET_REPORT had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_HIDSETREPORT_MARKER);
     true
 }

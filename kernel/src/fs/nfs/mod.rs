@@ -36,15 +36,16 @@ pub use client::{NfsClient, NfsMountOptions};
 pub use compound::{NfsCompoundOp, NfsCompoundResult};
 pub use gates::{
     GATE_NFS_ACCESS_MARKER, GATE_NFS_CLOSE_MARKER, GATE_NFS_COMMIT_MARKER, GATE_NFS_CONFIRM_MARKER,
-    GATE_NFS_CREATE_MARKER, GATE_NFS_DOWNGRADE_MARKER, GATE_NFS_GETFH_MARKER, GATE_NFS_LINK_MARKER,
-    GATE_NFS_LOCK_MARKER, GATE_NFS_LOCKOWNER_MARKER, GATE_NFS_LOCKT_MARKER,
-    GATE_NFS_LOOKUPP_MARKER, GATE_NFS_MARKER, GATE_NFS_NVERIFY_MARKER, GATE_NFS_OPENATTR_MARKER,
-    GATE_NFS_OPENCONFIRM_MARKER, GATE_NFS_PUTFH_MARKER, GATE_NFS_PUTPUBFH_MARKER,
-    GATE_NFS_READDIR_MARKER, GATE_NFS_READLINK_MARKER, GATE_NFS_REMOVE_MARKER,
-    GATE_NFS_RENAME_MARKER, GATE_NFS_RENEW_MARKER, GATE_NFS_RESTOREFH_MARKER,
-    GATE_NFS_SECINFO_MARKER, GATE_NFS_SETATTR_MARKER, GATE_NFS_UNLOCK_MARKER,
-    GATE_NFS_VERIFY_MARKER, GATE_NFS_WRITE_MARKER, access_self_test, close_self_test,
-    commit_self_test, confirm_self_test, create_self_test, downgrade_self_test, getfh_self_test,
+    GATE_NFS_CREATE_MARKER, GATE_NFS_DELEGPURGE_MARKER, GATE_NFS_DELEGRETURN_MARKER,
+    GATE_NFS_DOWNGRADE_MARKER, GATE_NFS_GETFH_MARKER, GATE_NFS_LINK_MARKER, GATE_NFS_LOCK_MARKER,
+    GATE_NFS_LOCKOWNER_MARKER, GATE_NFS_LOCKT_MARKER, GATE_NFS_LOOKUPP_MARKER, GATE_NFS_MARKER,
+    GATE_NFS_NVERIFY_MARKER, GATE_NFS_OPENATTR_MARKER, GATE_NFS_OPENCONFIRM_MARKER,
+    GATE_NFS_PUTFH_MARKER, GATE_NFS_PUTPUBFH_MARKER, GATE_NFS_READDIR_MARKER,
+    GATE_NFS_READLINK_MARKER, GATE_NFS_REMOVE_MARKER, GATE_NFS_RENAME_MARKER,
+    GATE_NFS_RENEW_MARKER, GATE_NFS_RESTOREFH_MARKER, GATE_NFS_SECINFO_MARKER,
+    GATE_NFS_SETATTR_MARKER, GATE_NFS_UNLOCK_MARKER, GATE_NFS_VERIFY_MARKER, GATE_NFS_WRITE_MARKER,
+    access_self_test, close_self_test, commit_self_test, confirm_self_test, create_self_test,
+    delegpurge_self_test, delegreturn_self_test, downgrade_self_test, getfh_self_test,
     link_self_test, lock_self_test, lockowner_self_test, lockt_self_test, lookupp_self_test,
     nverify_self_test, openattr_self_test, openconfirm_self_test, putfh_self_test,
     putpubfh_self_test, readdir_self_test, readlink_self_test, remove_self_test, rename_self_test,
@@ -107,4 +108,6 @@ pub fn init() {
     let _ = downgrade_self_test();
     let _ = secinfo_self_test();
     let _ = openattr_self_test();
+    let _ = delegpurge_self_test();
+    let _ = delegreturn_self_test();
 }

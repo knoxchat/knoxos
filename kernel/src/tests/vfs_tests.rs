@@ -495,6 +495,28 @@ fn test_xhci_hid_report_descriptor() {
 }
 
 #[test_case]
+fn test_xhci_hid_get_report() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::getreport_self_test(),
+        "XHCI HID GET_REPORT must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_hid_set_report() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::setreport_self_test(),
+        "XHCI HID SET_REPORT must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_xhci_reset_device() {
     if !crate::usb::is_available() {
         return;
@@ -766,6 +788,22 @@ fn test_fuse_fallocate_size() {
     assert!(
         crate::fuse::fallocate_self_test(),
         "FUSE FALLOCATE of a known file must extend size; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_readdirplus_attrs() {
+    assert!(
+        crate::fuse::readdirplus_self_test(),
+        "FUSE READDIRPLUS of the root must list names with size; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_rename2_noreplace() {
+    assert!(
+        crate::fuse::rename2_self_test(),
+        "FUSE RENAME2 must move a name, fail NOREPLACE if dest exists, and fail if old is missing"
     );
 }
 
@@ -1106,6 +1144,24 @@ fn test_nfs_openattr() {
     assert!(
         crate::nfs::openattr_self_test(),
         "NFS4 OPENATTR must create a named-attr directory, NOENT without createdir, and NOFILEHANDLE without FH"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_delegpurge() {
+    assert!(
+        crate::nfs::delegpurge_self_test(),
+        "NFS4 DELEGPURGE must accept a confirmed client_id and return STALE_CLIENTID for a wrong id"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_delegreturn() {
+    assert!(
+        crate::nfs::delegreturn_self_test(),
+        "NFS4 DELEGRETURN must accept an OPEN state_id, BAD_STATEID a second time, and NOFILEHANDLE without FH"
     );
 }
 

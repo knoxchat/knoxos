@@ -10,7 +10,8 @@ use crate::serial_println;
 use super::connection::{release_name_on_bus, request_name_on_bus};
 use super::protocol::{DbusValue, Message, MessageType};
 use super::state::{
-    BUS_FEATURES, BusState, BusType, Connection, ConnectionId, DBUS_START_REPLY_ALREADY_RUNNING,
+    BUS_FEATURES, BusState, BusType, Connection, ConnectionId, DBUS_RELEASE_NAME_REPLY_RELEASED,
+    DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, DBUS_START_REPLY_ALREADY_RUNNING,
     DBUS_START_REPLY_SUCCESS, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE, GATE_SELINUX_CONTEXT,
     MACHINE_ID, MatchRule, get_bus,
 };
@@ -137,6 +138,44 @@ fn matches_signal(conn: &Connection, msg: &Message) -> bool {
     false
 }
 
+fn emit_bus_signal(bus: &mut BusState, mut msg: Message) {
+    msg.sender = Some(String::from("org.freedesktop.DBus"));
+    let matching: Vec<ConnectionId> = bus
+        .connections
+        .values()
+        .filter(|c| matches_signal(c, &msg))
+        .map(|c| c.id)
+        .collect();
+    for id in matching {
+        if let Some(conn) = bus.connections.get_mut(&id) {
+            conn.message_queue.push(msg.clone());
+        }
+    }
+}
+
+fn name_owner_changed(name: &str, old_owner: &str, new_owner: &str) -> Message {
+    let mut msg = Message::signal(
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameOwnerChanged",
+    );
+    msg.body = vec![
+        DbusValue::String(String::from(name)),
+        DbusValue::String(String::from(old_owner)),
+        DbusValue::String(String::from(new_owner)),
+    ];
+    msg.signature = Some(String::from("sss"));
+    msg
+}
+
+fn name_lost(name: &str) -> Message {
+    let mut msg = Message::signal("/org/freedesktop/DBus", "org.freedesktop.DBus", "NameLost");
+    msg.sender = Some(String::from("org.freedesktop.DBus"));
+    msg.body = vec![DbusValue::String(String::from(name))];
+    msg.signature = Some(String::from("s"));
+    msg
+}
+
 /// Handle bus-level methods (org.freedesktop.DBus)
 fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
     let member = msg.member.as_deref().unwrap_or("");
@@ -165,6 +204,12 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                     Some(DbusValue::Uint32(f)) => *f,
                     _ => 0,
                 };
+                let was_free = !bus.names.contains_key(&name);
+                let unique = bus
+                    .connections
+                    .get(&from)
+                    .map(|c| c.unique_name.clone())
+                    .unwrap_or_default();
                 let code = request_name_on_bus(bus, from, &name, flags);
                 let mut reply = Message::method_return(msg.header.serial);
                 reply.body = vec![DbusValue::Uint32(code)];
@@ -172,18 +217,30 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 if let Some(c) = bus.connections.get_mut(&from) {
                     c.message_queue.push(reply);
                 }
+                if code == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER && was_free {
+                    emit_bus_signal(bus, name_owner_changed(&name, "", &unique));
+                }
             }
             "ReleaseName" => {
                 let name = match msg.body.first() {
                     Some(DbusValue::String(s)) => s.clone(),
                     _ => return,
                 };
+                let unique = bus
+                    .connections
+                    .get(&from)
+                    .map(|c| c.unique_name.clone())
+                    .unwrap_or_default();
                 let code = release_name_on_bus(bus, from, &name);
                 let mut reply = Message::method_return(msg.header.serial);
                 reply.body = vec![DbusValue::Uint32(code)];
                 reply.signature = Some(String::from("u"));
                 if let Some(c) = bus.connections.get_mut(&from) {
                     c.message_queue.push(reply);
+                }
+                if code == DBUS_RELEASE_NAME_REPLY_RELEASED {
+                    emit_bus_signal(bus, name_lost(&name));
+                    emit_bus_signal(bus, name_owner_changed(&name, &unique, ""));
                 }
             }
             "ListNames" => {

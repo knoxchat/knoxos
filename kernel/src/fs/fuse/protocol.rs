@@ -45,6 +45,8 @@ pub enum FuseOpcode {
     Ioctl = 39,
     Poll = 40,
     Fallocate = 43,
+    Readdirplus = 44,
+    Rename2 = 45,
 }
 
 /// POSIX `R_OK` — FUSE ACCESS request/grant bit.
@@ -315,4 +317,39 @@ pub fn parse_fuse_poll(data: &[u8]) -> Option<u32> {
         return None;
     }
     Some(u32::from_le_bytes(data[0..4].try_into().ok()?))
+}
+
+/// Linux `RENAME_NOREPLACE` — fail if the destination exists.
+pub const RENAME_NOREPLACE: u32 = 1 << 0;
+
+pub(super) fn encode_direntplus(ino: u64, size: u64, mode: u32, name: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(24 + name.len());
+    out.extend_from_slice(&ino.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&mode.to_le_bytes());
+    out.extend_from_slice(&(name.len() as u32).to_le_bytes());
+    out.extend_from_slice(name.as_bytes());
+    out
+}
+
+/// Packed FUSE READDIRPLUS: ino u64, size u64, mode u32, namelen u32, name bytes.
+pub fn parse_fuse_direntplus(data: &[u8]) -> Vec<(u64, u64, u32, String)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 24 <= data.len() {
+        let ino = u64::from_le_bytes(data[i..i + 8].try_into().unwrap_or([0; 8]));
+        let size = u64::from_le_bytes(data[i + 8..i + 16].try_into().unwrap_or([0; 8]));
+        let mode = u32::from_le_bytes(data[i + 16..i + 20].try_into().unwrap_or([0; 4]));
+        let nlen = u32::from_le_bytes(data[i + 20..i + 24].try_into().unwrap_or([0; 4])) as usize;
+        i += 24;
+        if i + nlen > data.len() {
+            break;
+        }
+        let Ok(name) = core::str::from_utf8(&data[i..i + nlen]) else {
+            break;
+        };
+        out.push((ino, size, mode, String::from(name)));
+        i += nlen;
+    }
+    out
 }

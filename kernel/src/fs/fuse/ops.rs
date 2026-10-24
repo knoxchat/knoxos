@@ -9,16 +9,17 @@ use super::loopback::{
     serve_loopback_fsyncdir, serve_loopback_getattr, serve_loopback_getlk, serve_loopback_getxattr,
     serve_loopback_ioctl, serve_loopback_link, serve_loopback_listxattr, serve_loopback_mkdir,
     serve_loopback_mknod, serve_loopback_open, serve_loopback_opendir, serve_loopback_poll,
-    serve_loopback_read, serve_loopback_readdir, serve_loopback_readlink, serve_loopback_release,
-    serve_loopback_releasedir, serve_loopback_removexattr, serve_loopback_rename,
+    serve_loopback_read, serve_loopback_readdir, serve_loopback_readdirplus,
+    serve_loopback_readlink, serve_loopback_release, serve_loopback_releasedir,
+    serve_loopback_removexattr, serve_loopback_rename, serve_loopback_rename2,
     serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setlk, serve_loopback_setxattr,
     serve_loopback_statfs, serve_loopback_symlink, serve_loopback_unlink, serve_loopback_write,
 };
 use super::mount::{send_request, take_response};
 use super::protocol::{
     FuseAttr, FuseEntry, FuseFileLock, FuseOpcode, FuseStatfs, encode_lk, parse_fuse_bmap,
-    parse_fuse_dirents, parse_fuse_entry, parse_fuse_ioctl, parse_fuse_lk, parse_fuse_open,
-    parse_fuse_poll, parse_fuse_statfs,
+    parse_fuse_direntplus, parse_fuse_dirents, parse_fuse_entry, parse_fuse_ioctl, parse_fuse_lk,
+    parse_fuse_open, parse_fuse_poll, parse_fuse_statfs,
 };
 
 /// Handle a VFS lookup through FUSE
@@ -531,6 +532,34 @@ pub fn fuse_fallocate(
     data.extend_from_slice(&mode.to_le_bytes());
     let unique = send_request(mount_point, FuseOpcode::Fallocate, nodeid, data.clone())?;
     serve_loopback_fallocate(mount_point, unique, nodeid, &data);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS READDIRPLUS through FUSE. Root nodeid 1 lists names with attrs.
+pub fn fuse_readdirplus(
+    mount_point: &str,
+    nodeid: u64,
+) -> Result<Vec<(u64, u64, u32, String)>, &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Readdirplus, nodeid, Vec::new())?;
+    serve_loopback_readdirplus(mount_point, unique, nodeid);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    Ok(parse_fuse_direntplus(&resp))
+}
+/// Handle a VFS renameat2 through FUSE. Request body is flags u32 LE then `old\0new`.
+pub fn fuse_rename2(
+    mount_point: &str,
+    parent: u64,
+    old: &str,
+    new: &str,
+    flags: u32,
+) -> Result<(), &'static str> {
+    let mut data = Vec::with_capacity(4 + old.len() + new.len() + 1);
+    data.extend_from_slice(&flags.to_le_bytes());
+    data.extend_from_slice(old.as_bytes());
+    data.push(0);
+    data.extend_from_slice(new.as_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Rename2, parent, data.clone())?;
+    serve_loopback_rename2(mount_point, unique, &data);
     take_response(mount_point, unique).ok_or("would block")?;
     Ok(())
 }

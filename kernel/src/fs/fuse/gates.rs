@@ -9,11 +9,13 @@ use super::ops::{
     fuse_access, fuse_bmap, fuse_create, fuse_destroy, fuse_fallocate, fuse_flush, fuse_fsync,
     fuse_fsyncdir, fuse_getattr, fuse_getlk, fuse_getxattr, fuse_ioctl, fuse_link, fuse_listxattr,
     fuse_lookup, fuse_mkdir, fuse_mknod, fuse_open, fuse_opendir, fuse_poll, fuse_read,
-    fuse_readdir, fuse_readlink, fuse_release, fuse_releasedir, fuse_removexattr, fuse_rename,
-    fuse_rmdir, fuse_setattr, fuse_setlk, fuse_setlkw, fuse_setxattr, fuse_statfs, fuse_symlink,
-    fuse_unlink, fuse_write,
+    fuse_readdir, fuse_readdirplus, fuse_readlink, fuse_release, fuse_releasedir, fuse_removexattr,
+    fuse_rename, fuse_rename2, fuse_rmdir, fuse_setattr, fuse_setlk, fuse_setlkw, fuse_setxattr,
+    fuse_statfs, fuse_symlink, fuse_unlink, fuse_write,
 };
-use super::protocol::{F_UNLCK, F_WRLCK, FUSE_R_OK, FUSE_W_OK, FUSE_X_OK, FuseFileLock, POLLIN};
+use super::protocol::{
+    F_UNLCK, F_WRLCK, FUSE_R_OK, FUSE_W_OK, FUSE_X_OK, FuseFileLock, POLLIN, RENAME_NOREPLACE,
+};
 
 pub const GATE_FUSE_MARKER: &str = "GATE_FUSE lookup";
 const GATE_FUSE_PAYLOAD: &[u8] = b"knoxos-fuse\n";
@@ -1872,6 +1874,109 @@ pub fn fallocate_self_test() -> bool {
         GATE_FUSE_FALLOCATE_MARKER,
         attr.size,
         file.nodeid
+    );
+    true
+}
+
+pub const GATE_FUSE_READDIRPLUS_MARKER: &str = "GATE_FUSE readdirplus";
+
+/// READDIRPLUS of the root lists created names with size; unknown nodeid fails.
+pub fn readdirplus_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-readdirplus";
+    const PAYLOAD: &[u8] = b"knoxos-fuse-plus\n";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE readdirplus FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "plus.txt", PAYLOAD).is_err() {
+        serial_println!("[fuse] GATE_FUSE readdirplus FAILED: put");
+        return false;
+    }
+    let file = match fuse_lookup(MP, 1, "plus.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE readdirplus FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let entries = match fuse_readdirplus(MP, 1) {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE readdirplus FAILED: readdirplus ({})", e);
+            return false;
+        }
+    };
+    let found = entries.iter().any(|(ino, size, mode, name)| {
+        *ino == file.nodeid
+            && *size == PAYLOAD.len() as u64
+            && *mode == 0o100644
+            && name == "plus.txt"
+    });
+    if !found {
+        serial_println!("[fuse] GATE_FUSE readdirplus FAILED: missing plus.txt");
+        return false;
+    }
+    if fuse_readdirplus(MP, 0xFFFF_FFFF).is_ok() {
+        serial_println!("[fuse] GATE_FUSE readdirplus FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (READDIRPLUS ino={} size={})",
+        GATE_FUSE_READDIRPLUS_MARKER,
+        file.nodeid,
+        PAYLOAD.len()
+    );
+    true
+}
+
+pub const GATE_FUSE_RENAME2_MARKER: &str = "GATE_FUSE rename2";
+
+/// RENAME2 flags=0 moves the name; RENAME_NOREPLACE fails if dest exists; unknown old fails.
+pub fn rename2_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-rename2";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE rename2 FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "old2.txt", b"knoxos-fuse-r2\n").is_err() {
+        serial_println!("[fuse] GATE_FUSE rename2 FAILED: put old");
+        return false;
+    }
+    if let Err(e) = fuse_rename2(MP, 1, "old2.txt", "new2.txt", 0) {
+        serial_println!("[fuse] GATE_FUSE rename2 FAILED: rename2 ({})", e);
+        return false;
+    }
+    if fuse_lookup(MP, 1, "old2.txt").is_ok() {
+        serial_println!("[fuse] GATE_FUSE rename2 FAILED: old name still present");
+        return false;
+    }
+    if fuse_lookup(MP, 1, "new2.txt").is_err() {
+        serial_println!("[fuse] GATE_FUSE rename2 FAILED: new name missing");
+        return false;
+    }
+    if loopback_put(MP, "src2.txt", b"src\n").is_err()
+        || loopback_put(MP, "dst2.txt", b"dst\n").is_err()
+    {
+        serial_println!("[fuse] GATE_FUSE rename2 FAILED: put clash");
+        return false;
+    }
+    if fuse_rename2(MP, 1, "src2.txt", "dst2.txt", RENAME_NOREPLACE).is_ok() {
+        serial_println!("[fuse] GATE_FUSE rename2 FAILED: NOREPLACE dest succeeded");
+        return false;
+    }
+    if fuse_rename2(MP, 1, "missing2.txt", "gone2.txt", 0).is_ok() {
+        serial_println!("[fuse] GATE_FUSE rename2 FAILED: missing old succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (RENAME2 then NOREPLACE then missing)",
+        GATE_FUSE_RENAME2_MARKER
     );
     true
 }

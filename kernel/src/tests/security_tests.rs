@@ -822,6 +822,22 @@ fn test_dbus_get_managed_objects() {
 }
 
 #[test_case]
+fn test_dbus_name_owner_changed() {
+    assert!(
+        crate::dbus::ownerchanged_self_test(),
+        "NameOwnerChanged must be delivered after RequestName"
+    );
+}
+
+#[test_case]
+fn test_dbus_name_lost() {
+    assert!(
+        crate::dbus::namelost_self_test(),
+        "NameLost must be delivered after ReleaseName"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

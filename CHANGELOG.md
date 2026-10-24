@@ -4,6 +4,14 @@
 
 ## 0.2.6
 
+- **FUSE READDIRPLUS** — root lists created names with size; unknown nodeid fails (`GATE_FUSE readdirplus`).
+- **FUSE RENAME2** — flags=0 moves the name; `RENAME_NOREPLACE` fails if dest exists; unknown old fails (`GATE_FUSE rename2`).
+- **D-Bus NameOwnerChanged** — delivered to AddMatch listeners after `RequestName` (`GATE_DBUS ownerchanged`).
+- **D-Bus NameLost** — delivered after `ReleaseName` (`GATE_DBUS namelost`).
+- **XHCI HID GET_REPORT** — class IN Transfer Event (`GATE_USB xhci getreport`).
+- **XHCI HID SET_REPORT** — class OUT Transfer Event (`GATE_USB xhci setreport`).
+- **NFS DELEGPURGE** — confirmed client_id is OK; wrong id is STALE_CLIENTID (`GATE_NFS delegpurge`).
+- **NFS DELEGRETURN** — OPEN state_id is OK; second return is BAD_STATEID; missing FH is NOFILEHANDLE (`GATE_NFS delegreturn`).
 - **FUSE POLL** — POLL of a known file with data is POLLIN; unknown nodeid fails (`GATE_FUSE poll`).
 - **FUSE FALLOCATE** — mode 0 extends size; unknown nodeid fails (`GATE_FUSE fallocate`).
 - **D-Bus GetConnectionStats** — `UnixProcessID`; unknown is NameHasNoOwner (`GATE_DBUS connstats`).

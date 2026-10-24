@@ -109,6 +109,7 @@ pub struct NfsClient {
     export_links: BTreeMap<String, String>,
     export_dirs: BTreeSet<String>,
     named_attr_dirs: BTreeSet<NfsFileHandle>,
+    delegations: Vec<(NfsStateId, NfsFileHandle)>,
     uncommitted: BTreeMap<String, Vec<u8>>,
     fh_names: BTreeMap<NfsFileHandle, String>,
     fh_parents: BTreeMap<NfsFileHandle, NfsFileHandle>,
@@ -133,6 +134,7 @@ impl NfsClient {
             export_links: BTreeMap::new(),
             export_dirs: BTreeSet::new(),
             named_attr_dirs: BTreeSet::new(),
+            delegations: Vec::new(),
             uncommitted: BTreeMap::new(),
             fh_names: BTreeMap::new(),
             fh_parents: BTreeMap::new(),
@@ -309,6 +311,7 @@ impl NfsClient {
                 let state_id = NfsStateId::new(1);
                 self.open_files
                     .insert(fh.clone(), (state_id, *share_access));
+                self.delegations.push((state_id, fh.clone()));
                 self.fh_names.insert(fh.clone(), name.clone());
                 if *create {
                     self.export_files.entry(name.clone()).or_default();
@@ -752,6 +755,29 @@ impl NfsClient {
                 let attr_fh = NfsFileHandle::new(simple_hash(&data).to_le_bytes().to_vec());
                 self.current_fh = Some(attr_fh.clone());
                 NfsCompoundResult::FileHandle(attr_fh)
+            }
+            NfsCompoundOp::DelegPurge { client_id } => {
+                if self.client_id_confirmed && self.client_id != 0 && *client_id == self.client_id {
+                    self.delegations.clear();
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::StaleClientId)
+                }
+            }
+            NfsCompoundOp::DelegReturn { state_id } => {
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                if let Some(idx) = self
+                    .delegations
+                    .iter()
+                    .position(|(sid, d_fh)| sid == state_id && *d_fh == fh)
+                {
+                    self.delegations.remove(idx);
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::BadStateId)
+                }
             }
         }
     }

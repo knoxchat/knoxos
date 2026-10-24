@@ -286,5 +286,13 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 275. **XHCI HID Report** — GET_DESCRIPTOR(HID Report) Transfer Event (`GATE_USB xhci hidreport`).
 276. **NFS SECINFO** — known name AUTH_SYS; missing NOENT; missing FH NOFILEHANDLE (`GATE_NFS secinfo`).
 277. **NFS OPENATTR** — createdir OK; without is NOENT; missing FH NOFILEHANDLE (`GATE_NFS openattr`).
+278. **FUSE READDIRPLUS** — root lists names with size; unknown nodeid fails (`GATE_FUSE readdirplus`).
+279. **FUSE RENAME2** — flags=0 moves; NOREPLACE dest fails; unknown old fails (`GATE_FUSE rename2`).
+280. **D-Bus NameOwnerChanged** — after RequestName (`GATE_DBUS ownerchanged`).
+281. **D-Bus NameLost** — after ReleaseName (`GATE_DBUS namelost`).
+282. **XHCI HID GET_REPORT** — class IN Transfer Event (`GATE_USB xhci getreport`).
+283. **XHCI HID SET_REPORT** — class OUT Transfer Event (`GATE_USB xhci setreport`).
+284. **NFS DELEGPURGE** — confirmed client_id OK; wrong id STALE_CLIENTID (`GATE_NFS delegpurge`).
+285. **NFS DELEGRETURN** — OPEN state_id OK; second BAD_STATEID; missing FH NOFILEHANDLE (`GATE_NFS delegreturn`).
 
-Integration: `./tests/run_integration.sh` **563/563** on QEMU (2026-10-24).
+Integration: `./tests/run_integration.sh` **571/571** on QEMU (2026-10-24).

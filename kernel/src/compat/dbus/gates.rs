@@ -2007,3 +2007,139 @@ pub fn objects_self_test() -> bool {
         false
     }
 }
+
+pub const GATE_DBUS_OWNERCHANGED_MARKER: &str = "GATE_DBUS ownerchanged";
+
+fn owner_changed_names(body: &[DbusValue]) -> Option<(&str, &str, &str)> {
+    match body {
+        [
+            DbusValue::String(name),
+            DbusValue::String(old),
+            DbusValue::String(new),
+        ] => Some((name.as_str(), old.as_str(), new.as_str())),
+        _ => None,
+    }
+}
+
+/// `NameOwnerChanged` is delivered to AddMatch listeners after `RequestName`.
+pub fn ownerchanged_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateOwnerChanged";
+    const RULE: &str = "type='signal',interface='org.freedesktop.DBus',member='NameOwnerChanged'";
+    let listener = connect(BusType::System, 0xDB29, 1000);
+    let owner = connect(BusType::System, 0xDB2A, 1000);
+    let unique = format!(":1.{}", owner);
+
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, listener, add);
+    let _ = receive_message(BusType::System, listener);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let changed = receive_message(BusType::System, listener)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.member.as_deref() == Some("NameOwnerChanged")
+                && owner_changed_names(&msg.body) == Some((WELL_KNOWN, "", unique.as_str()))
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, listener);
+    disconnect(BusType::System, owner);
+    if changed {
+        serial_println!(
+            "[dbus] {} (NameOwnerChanged after RequestName)",
+            GATE_DBUS_OWNERCHANGED_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: NameOwnerChanged");
+        false
+    }
+}
+
+pub const GATE_DBUS_NAMELOST_MARKER: &str = "GATE_DBUS namelost";
+
+/// `NameLost` is delivered after `ReleaseName` to an AddMatch listener.
+pub fn namelost_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateNameLost";
+    const RULE: &str = "type='signal',interface='org.freedesktop.DBus',member='NameLost'";
+    let owner = connect(BusType::System, 0xDB2B, 1000);
+
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, owner, add);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut rel = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ReleaseName",
+    );
+    rel.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    rel.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, owner, rel);
+    let _ = receive_message(BusType::System, owner);
+
+    let lost = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.member.as_deref() == Some("NameLost")
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::String(s)) if s == WELL_KNOWN
+                )
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if lost {
+        serial_println!(
+            "[dbus] {} (NameLost after ReleaseName)",
+            GATE_DBUS_NAMELOST_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: NameLost");
+        false
+    }
+}

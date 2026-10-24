@@ -98,6 +98,12 @@ pub enum NfsCompoundOp {
     OpenAttr {
         createdir: bool,
     },
+    DelegPurge {
+        client_id: u64,
+    },
+    DelegReturn {
+        state_id: NfsStateId,
+    },
 }
 
 /// Result of a compound operation
