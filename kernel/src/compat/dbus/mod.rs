@@ -30,7 +30,7 @@
 ///   portal         — XDG desktop portal
 ///   upower         — org.freedesktop.UPower
 ///   unix           — AF_UNIX system bus socket
-///   gates          — GATE_DBUS self-tests
+///   gates          — GATE_DBUS self-tests (names, identity, match_rules, admin, introspection, stats)
 mod connection;
 mod gates;
 mod protocol;

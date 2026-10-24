@@ -9,7 +9,7 @@
 ///   mount     — mount table, loopback store, kernel↔daemon channel
 ///   loopback  — in-kernel FUSE daemon handlers
 ///   ops       — VFS lookup/read/write/... through FUSE
-///   gates     — GATE_FUSE serial markers and self-tests
+///   gates     — GATE_FUSE self-tests (io, names, dir, attr, xattr, file, lock, misc)
 mod gates;
 mod loopback;
 mod mount;

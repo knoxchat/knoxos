@@ -22,7 +22,7 @@
 ///   mount      — mount table, nfs_mount / nfs_umount
 ///   rpc        — TCP RPC send and real-network mount
 ///   util       — hash and timestamp helpers
-///   gates      — GATE_NFS compound/write/remove/... self-tests
+///   gates      — GATE_NFS self-tests (io, fh, verify, state, lock, open, attr, deleg, session)
 mod client;
 mod compound;
 mod gates;
