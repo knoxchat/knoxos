@@ -806,6 +806,22 @@ fn test_dbus_get_all_match_rules() {
 }
 
 #[test_case]
+fn test_dbus_get_connection_stats() {
+    assert!(
+        crate::dbus::connstats_self_test(),
+        "GetConnectionStats must return UnixProcessID; unknown is NameHasNoOwner"
+    );
+}
+
+#[test_case]
+fn test_dbus_get_managed_objects() {
+    assert!(
+        crate::dbus::objects_self_test(),
+        "GetManagedObjects must include /org/freedesktop/DBus"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

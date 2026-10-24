@@ -14,6 +14,7 @@ use super::types::{
     NfsStat, NfsStateId,
 };
 use super::util::{rdtsc, simple_hash};
+use super::xdr::AuthFlavor;
 
 const NFS4_ACCESS_ALL: u32 = NFS4_ACCESS_READ
     | NFS4_ACCESS_LOOKUP
@@ -107,6 +108,7 @@ pub struct NfsClient {
     pub(super) export_files: BTreeMap<String, Vec<u8>>,
     export_links: BTreeMap<String, String>,
     export_dirs: BTreeSet<String>,
+    named_attr_dirs: BTreeSet<NfsFileHandle>,
     uncommitted: BTreeMap<String, Vec<u8>>,
     fh_names: BTreeMap<NfsFileHandle, String>,
     fh_parents: BTreeMap<NfsFileHandle, NfsFileHandle>,
@@ -130,6 +132,7 @@ impl NfsClient {
             export_files: BTreeMap::new(),
             export_links: BTreeMap::new(),
             export_dirs: BTreeSet::new(),
+            named_attr_dirs: BTreeSet::new(),
             uncommitted: BTreeMap::new(),
             fh_names: BTreeMap::new(),
             fh_parents: BTreeMap::new(),
@@ -719,6 +722,36 @@ impl NfsClient {
                     }
                     _ => NfsCompoundResult::Status(NfsStat::BadStateId),
                 }
+            }
+            NfsCompoundOp::SecInfo { name } => {
+                if self.current_fh.is_none() {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                }
+                let known = self.export_files.contains_key(name)
+                    || self.export_dirs.contains(name)
+                    || self.export_links.contains_key(name);
+                if known {
+                    NfsCompoundResult::SecInfo {
+                        flavors: vec![AuthFlavor::Sys as u32],
+                    }
+                } else {
+                    NfsCompoundResult::Status(NfsStat::Noent)
+                }
+            }
+            NfsCompoundOp::OpenAttr { createdir } => {
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                if *createdir {
+                    self.named_attr_dirs.insert(fh.clone());
+                } else if !self.named_attr_dirs.contains(&fh) {
+                    return NfsCompoundResult::Status(NfsStat::Noent);
+                }
+                let mut data = fh.0.clone();
+                data.extend_from_slice(b"namedattr");
+                let attr_fh = NfsFileHandle::new(simple_hash(&data).to_le_bytes().to_vec());
+                self.current_fh = Some(attr_fh.clone());
+                NfsCompoundResult::FileHandle(attr_fh)
             }
         }
     }

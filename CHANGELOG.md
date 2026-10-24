@@ -4,6 +4,14 @@
 
 ## 0.2.6
 
+- **FUSE POLL** — POLL of a known file with data is POLLIN; unknown nodeid fails (`GATE_FUSE poll`).
+- **FUSE FALLOCATE** — mode 0 extends size; unknown nodeid fails (`GATE_FUSE fallocate`).
+- **D-Bus GetConnectionStats** — `UnixProcessID`; unknown is NameHasNoOwner (`GATE_DBUS connstats`).
+- **D-Bus ObjectManager.GetManagedObjects** — `/org/freedesktop/DBus` (`GATE_DBUS objects`).
+- **XHCI GET_DESCRIPTOR(HID)** — HID class descriptor Transfer Event (`GATE_USB xhci hiddesc`).
+- **XHCI GET_DESCRIPTOR(HID Report)** — HID report descriptor Transfer Event (`GATE_USB xhci hidreport`).
+- **NFS SECINFO** — known name is AUTH_SYS; missing is NOENT; missing FH is NOFILEHANDLE (`GATE_NFS secinfo`).
+- **NFS OPENATTR** — createdir is OK; without is NOENT; missing FH is NOFILEHANDLE (`GATE_NFS openattr`).
 - **UI type** — 14–18px Inter keeps bowls (`a`/`o`/`w`) on the baseline: 2× raster + coverage lift, ceil advances, line boxes that fit the bitmap, layout that does not underestimate buttons/tabs.
 - **Kit Gallery** — host chrome is real knox-ui (Avatar, Label, Tag, Kbd keycaps, Badge, TabBar, StatusBar). Stories are paged (Controls / Display / Feedback / Forms / Overlays / Layout / Catalog) instead of the leftover Live/Catalog dump. Dropdown carets and table sort marks use Chevron icons.
 - **Modern GPU stack** — `./run.sh` uses `-vga virtio` as the primary display. DRM/KMS binds the live VirtIO-GPU scanout (`GATE_GPU modern stack`). Cursorq is proven (`GATE_GPU pointer plane`); QEMU cocoa does not composite that overlay, so the QEMU window pointer is the software arrow in the scanout plus the host cursor (`show-cursor=on`). USB tablet reports are not dropped when VirtIO-input is also bound.

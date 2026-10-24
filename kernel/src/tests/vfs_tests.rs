@@ -473,6 +473,28 @@ fn test_xhci_set_isoch_delay() {
 }
 
 #[test_case]
+fn test_xhci_hid_descriptor() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::hid_self_test(),
+        "XHCI GET_DESCRIPTOR(HID) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_hid_report_descriptor() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::hidreport_self_test(),
+        "XHCI GET_DESCRIPTOR(HID Report) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_xhci_reset_device() {
     if !crate::usb::is_available() {
         return;
@@ -728,6 +750,22 @@ fn test_fuse_ioctl_cmd() {
     assert!(
         crate::fuse::ioctl_self_test(),
         "FUSE IOCTL of a known file must echo cmd; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_poll_events() {
+    assert!(
+        crate::fuse::poll_self_test(),
+        "FUSE POLL of a known file with data must set POLLIN; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_fallocate_size() {
+    assert!(
+        crate::fuse::fallocate_self_test(),
+        "FUSE FALLOCATE of a known file must extend size; unknown nodeid must fail"
     );
 }
 
@@ -1050,6 +1088,24 @@ fn test_nfs_open_downgrade() {
     assert!(
         crate::nfs::downgrade_self_test(),
         "NFS4 OPEN_DOWNGRADE must accept a subset, reject a superset, and missing FH as NOFILEHANDLE"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_secinfo() {
+    assert!(
+        crate::nfs::secinfo_self_test(),
+        "NFS4 SECINFO must return AUTH_SYS for a known name, NOENT for missing, and NOFILEHANDLE without FH"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_openattr() {
+    assert!(
+        crate::nfs::openattr_self_test(),
+        "NFS4 OPENATTR must create a named-attr directory, NOENT without createdir, and NOFILEHANDLE without FH"
     );
 }
 

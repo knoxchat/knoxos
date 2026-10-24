@@ -1,6 +1,6 @@
 # KnoxOS status
 
-> **Last updated**: 2026-10-23
+> **Last updated**: 2026-10-24
 > **Version**: 0.2.6 (`knoxos-kernel` Cargo.toml; boot banner prints v0.2.6)
 > **Architecture**: x86_64 (primary, QEMU-proven) · aarch64 / riscv64 (compile-time ports)
 > **Codebase**: 1035 Rust files in `kernel/src` (~28 at crate root) · ~388,000 lines · grouped under `drivers/` `fs/` `mm/` `arch/` `sched/` `ipc/` `security/` `net/` `crypto/` `compat/`

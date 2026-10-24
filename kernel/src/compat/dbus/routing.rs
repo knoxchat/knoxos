@@ -677,6 +677,90 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                     c.message_queue.push(reply);
                 }
             }
+            "GetConnectionStats" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let owner_id = bus.names.get(name).copied().or_else(|| {
+                    bus.connections
+                        .values()
+                        .find(|c| c.unique_name == name)
+                        .map(|c| c.id)
+                });
+                if let Some(id) = owner_id {
+                    let stats = bus.connections.get(&id).map(|c| {
+                        (
+                            c.unique_name.clone(),
+                            c.pid,
+                            c.uid,
+                            c.match_rules.len() as u32,
+                        )
+                    });
+                    if let Some((unique, pid, uid, rules)) = stats {
+                        let entries = vec![
+                            DbusValue::DictEntry(
+                                Box::new(DbusValue::String(String::from("UnixUser"))),
+                                Box::new(DbusValue::Variant(Box::new(DbusValue::Uint32(uid)))),
+                            ),
+                            DbusValue::DictEntry(
+                                Box::new(DbusValue::String(String::from("UnixProcessID"))),
+                                Box::new(DbusValue::Variant(Box::new(DbusValue::Uint32(pid)))),
+                            ),
+                            DbusValue::DictEntry(
+                                Box::new(DbusValue::String(String::from("UniqueName"))),
+                                Box::new(DbusValue::Variant(Box::new(DbusValue::String(unique)))),
+                            ),
+                            DbusValue::DictEntry(
+                                Box::new(DbusValue::String(String::from("MatchRules"))),
+                                Box::new(DbusValue::Variant(Box::new(DbusValue::Uint32(rules)))),
+                            ),
+                        ];
+                        let mut reply = Message::method_return(msg.header.serial);
+                        reply.body = vec![DbusValue::Array(entries)];
+                        reply.signature = Some(String::from("a{sv}"));
+                        if let Some(c) = bus.connections.get_mut(&from) {
+                            c.message_queue.push(reply);
+                        }
+                    }
+                } else if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(Message::error(
+                        msg.header.serial,
+                        "org.freedesktop.DBus.Error.NameHasNoOwner",
+                        name,
+                    ));
+                }
+            }
+            _ => {
+                serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
+            }
+        }
+    } else if interface == "org.freedesktop.DBus.ObjectManager" {
+        match member {
+            "GetManagedObjects" => {
+                let features: Vec<DbusValue> = BUS_FEATURES
+                    .iter()
+                    .map(|f| DbusValue::String(String::from(*f)))
+                    .collect();
+                let props = vec![DbusValue::DictEntry(
+                    Box::new(DbusValue::String(String::from("Features"))),
+                    Box::new(DbusValue::Variant(Box::new(DbusValue::Array(features)))),
+                )];
+                let ifaces = vec![DbusValue::DictEntry(
+                    Box::new(DbusValue::String(String::from("org.freedesktop.DBus"))),
+                    Box::new(DbusValue::Array(props)),
+                )];
+                let objects = vec![DbusValue::DictEntry(
+                    Box::new(DbusValue::ObjectPath(String::from("/org/freedesktop/DBus"))),
+                    Box::new(DbusValue::Array(ifaces)),
+                )];
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::Array(objects)];
+                reply.signature = Some(String::from("a{oa{sa{sv}}}"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
             _ => {
                 serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
             }

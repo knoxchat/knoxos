@@ -6,13 +6,14 @@ use crate::serial_println;
 
 use super::mount::{loopback_put, mount};
 use super::ops::{
-    fuse_access, fuse_bmap, fuse_create, fuse_destroy, fuse_flush, fuse_fsync, fuse_fsyncdir,
-    fuse_getattr, fuse_getlk, fuse_getxattr, fuse_ioctl, fuse_link, fuse_listxattr, fuse_lookup,
-    fuse_mkdir, fuse_mknod, fuse_open, fuse_opendir, fuse_read, fuse_readdir, fuse_readlink,
-    fuse_release, fuse_releasedir, fuse_removexattr, fuse_rename, fuse_rmdir, fuse_setattr,
-    fuse_setlk, fuse_setlkw, fuse_setxattr, fuse_statfs, fuse_symlink, fuse_unlink, fuse_write,
+    fuse_access, fuse_bmap, fuse_create, fuse_destroy, fuse_fallocate, fuse_flush, fuse_fsync,
+    fuse_fsyncdir, fuse_getattr, fuse_getlk, fuse_getxattr, fuse_ioctl, fuse_link, fuse_listxattr,
+    fuse_lookup, fuse_mkdir, fuse_mknod, fuse_open, fuse_opendir, fuse_poll, fuse_read,
+    fuse_readdir, fuse_readlink, fuse_release, fuse_releasedir, fuse_removexattr, fuse_rename,
+    fuse_rmdir, fuse_setattr, fuse_setlk, fuse_setlkw, fuse_setxattr, fuse_statfs, fuse_symlink,
+    fuse_unlink, fuse_write,
 };
-use super::protocol::{F_UNLCK, F_WRLCK, FUSE_R_OK, FUSE_W_OK, FUSE_X_OK, FuseFileLock};
+use super::protocol::{F_UNLCK, F_WRLCK, FUSE_R_OK, FUSE_W_OK, FUSE_X_OK, FuseFileLock, POLLIN};
 
 pub const GATE_FUSE_MARKER: &str = "GATE_FUSE lookup";
 const GATE_FUSE_PAYLOAD: &[u8] = b"knoxos-fuse\n";
@@ -1764,6 +1765,112 @@ pub fn ioctl_self_test() -> bool {
         "[fuse] {} (IOCTL cmd={:#06x} ino={})",
         GATE_FUSE_IOCTL_MARKER,
         CMD,
+        file.nodeid
+    );
+    true
+}
+
+pub const GATE_FUSE_POLL_MARKER: &str = "GATE_FUSE poll";
+
+/// POLL of a known file with data is POLLIN; unknown nodeid fails.
+pub fn poll_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-poll";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE poll FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "poll.txt", b"knoxos-fuse-poll\n").is_err() {
+        serial_println!("[fuse] GATE_FUSE poll FAILED: put");
+        return false;
+    }
+    let file = match fuse_lookup(MP, 1, "poll.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE poll FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let revents = match fuse_poll(MP, file.nodeid) {
+        Ok(r) => r,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE poll FAILED: poll ({})", e);
+            return false;
+        }
+    };
+    if revents & POLLIN == 0 {
+        serial_println!(
+            "[fuse] GATE_FUSE poll FAILED: revents={:#x} missing POLLIN",
+            revents
+        );
+        return false;
+    }
+    if fuse_poll(MP, 0xFFFF_FFFF).is_ok() {
+        serial_println!("[fuse] GATE_FUSE poll FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (POLL revents={:#x} ino={})",
+        GATE_FUSE_POLL_MARKER,
+        revents,
+        file.nodeid
+    );
+    true
+}
+
+pub const GATE_FUSE_FALLOCATE_MARKER: &str = "GATE_FUSE fallocate";
+
+/// FALLOCATE of a known file extends size; unknown nodeid fails.
+pub fn fallocate_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-fallocate";
+    const WANT: u64 = 32;
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE fallocate FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "fall.txt", b"x").is_err() {
+        serial_println!("[fuse] GATE_FUSE fallocate FAILED: put");
+        return false;
+    }
+    let file = match fuse_lookup(MP, 1, "fall.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE fallocate FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_fallocate(MP, file.nodeid, 0, WANT, 0) {
+        serial_println!("[fuse] GATE_FUSE fallocate FAILED: fallocate ({})", e);
+        return false;
+    }
+    let attr = match fuse_getattr(MP, file.nodeid) {
+        Ok(a) => a,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE fallocate FAILED: getattr ({})", e);
+            return false;
+        }
+    };
+    if attr.size != WANT {
+        serial_println!(
+            "[fuse] GATE_FUSE fallocate FAILED: size={} want {}",
+            attr.size,
+            WANT
+        );
+        return false;
+    }
+    if fuse_fallocate(MP, 0xFFFF_FFFF, 0, WANT, 0).is_ok() {
+        serial_println!("[fuse] GATE_FUSE fallocate FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (FALLOCATE size={} ino={})",
+        GATE_FUSE_FALLOCATE_MARKER,
+        attr.size,
         file.nodeid
     );
     true

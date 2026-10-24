@@ -92,6 +92,12 @@ pub enum NfsCompoundOp {
         share_access: u32,
         share_deny: u32,
     },
+    SecInfo {
+        name: String,
+    },
+    OpenAttr {
+        createdir: bool,
+    },
 }
 
 /// Result of a compound operation
@@ -132,5 +138,8 @@ pub enum NfsCompoundResult {
     },
     ReadLinkResult {
         target: String,
+    },
+    SecInfo {
+        flavors: Vec<u32>,
     },
 }

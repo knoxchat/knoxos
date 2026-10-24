@@ -92,6 +92,10 @@ static SYNCH_LIVE: AtomicBool = AtomicBool::new(false);
 static SETSEL_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when SET_ISOCH_DELAY got a Transfer Event.
 static ISOCHDELAY_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(HID) got a Transfer Event.
+static HID_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(HID Report) got a Transfer Event.
+static HIDREPORT_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -127,6 +131,8 @@ pub const GATE_XHCI_OSCFG_MARKER: &str = "GATE_USB xhci oscfg";
 pub const GATE_XHCI_SYNCH_MARKER: &str = "GATE_USB xhci synch";
 pub const GATE_XHCI_SETSEL_MARKER: &str = "GATE_USB xhci setsel";
 pub const GATE_XHCI_ISOCHDELAY_MARKER: &str = "GATE_USB xhci isochdelay";
+pub const GATE_XHCI_HID_MARKER: &str = "GATE_USB xhci hiddesc";
+pub const GATE_XHCI_HIDREPORT_MARKER: &str = "GATE_USB xhci hidreport";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -3047,6 +3053,18 @@ fn control_get_descriptor(
     live: &AtomicBool,
     what: &str,
 ) -> Option<usize> {
+    control_get_descriptor_at(slot_id, dtype, xfer_len, live, what, 0x80, 0)
+}
+
+fn control_get_descriptor_at(
+    slot_id: u8,
+    dtype: UsbDescriptorType,
+    xfer_len: u32,
+    live: &AtomicBool,
+    what: &str,
+    bm_request_type: u32,
+    w_index: u16,
+) -> Option<usize> {
     serial_println!("[XHCI] GET_DESCRIPTOR({}) for slot {}", what, slot_id);
     // Short Packet on a chained control TD can leave EP0 mid-TD (cc=19
     // Context State Error on the next Setup). Stop+Set TR Dequeue first.
@@ -3056,8 +3074,9 @@ fn control_get_descriptor(
     let wvalue = (dtype as u16) << 8;
 
     let mut setup = Trb::new();
-    setup.param_lo = 0x80 | (UsbRequestType::GetDescriptor as u32) << 8 | (wvalue as u32) << 16;
-    setup.param_hi = xfer_len << 16;
+    setup.param_lo =
+        bm_request_type | (UsbRequestType::GetDescriptor as u32) << 8 | (wvalue as u32) << 16;
+    setup.param_hi = w_index as u32 | xfer_len << 16;
     setup.status = 8;
     setup.set_type(TrbType::SetupStage);
     setup.control |= 3 << 16; // TRT = IN Data Stage
@@ -3398,5 +3417,61 @@ pub fn isochdelay_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_ISOCHDELAY_MARKER);
+    true
+}
+
+/// GET_DESCRIPTOR(HID) — interface recipient, 9-byte class descriptor.
+pub fn get_hid_descriptor(slot_id: u8) -> Option<usize> {
+    control_get_descriptor_at(
+        slot_id,
+        UsbDescriptorType::HID,
+        9,
+        &HID_LIVE,
+        "HID",
+        0x81,
+        0,
+    )
+}
+
+/// GET_DESCRIPTOR(HID Report) — interface recipient.
+pub fn get_hid_report_descriptor(slot_id: u8) -> Option<usize> {
+    control_get_descriptor_at(
+        slot_id,
+        UsbDescriptorType::HIDReport,
+        64,
+        &HIDREPORT_LIVE,
+        "HID Report",
+        0x81,
+        0,
+    )
+}
+
+/// Prove GET_DESCRIPTOR(HID) got a Transfer Event.
+pub fn hid_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci hiddesc skipped (no controller)");
+        return true;
+    }
+    descriptor_probe(&HID_LIVE, get_hid_descriptor);
+    if !HID_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(HID) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_HID_MARKER);
+    true
+}
+
+/// Prove GET_DESCRIPTOR(HID Report) got a Transfer Event.
+pub fn hidreport_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci hidreport skipped (no controller)");
+        return true;
+    }
+    descriptor_probe(&HIDREPORT_LIVE, get_hid_report_descriptor);
+    if !HIDREPORT_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(HID Report) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_HIDREPORT_MARKER);
     true
 }

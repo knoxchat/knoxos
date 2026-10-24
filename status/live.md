@@ -278,5 +278,13 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 267. **XHCI SET_ISOCH_DELAY** — SET_ISOCH_DELAY Transfer Event (`GATE_USB xhci isochdelay`).
 268. **NFS OPEN_CONFIRM** — issued OPEN OK; wrong id BAD_STATEID; missing FH NOFILEHANDLE (`GATE_NFS openconfirm`).
 269. **NFS OPEN_DOWNGRADE** — subset OK; superset INVAL; missing FH NOFILEHANDLE (`GATE_NFS downgrade`).
+270. **FUSE POLL** — known file with data is POLLIN; unknown nodeid fails (`GATE_FUSE poll`).
+271. **FUSE FALLOCATE** — mode 0 extends size; unknown nodeid fails (`GATE_FUSE fallocate`).
+272. **D-Bus GetConnectionStats** — UnixProcessID; unknown is NameHasNoOwner (`GATE_DBUS connstats`).
+273. **D-Bus GetManagedObjects** — `/org/freedesktop/DBus` (`GATE_DBUS objects`).
+274. **XHCI HID** — GET_DESCRIPTOR(HID) Transfer Event (`GATE_USB xhci hiddesc`).
+275. **XHCI HID Report** — GET_DESCRIPTOR(HID Report) Transfer Event (`GATE_USB xhci hidreport`).
+276. **NFS SECINFO** — known name AUTH_SYS; missing NOENT; missing FH NOFILEHANDLE (`GATE_NFS secinfo`).
+277. **NFS OPENATTR** — createdir OK; without is NOENT; missing FH NOFILEHANDLE (`GATE_NFS openattr`).
 
-Integration: `./tests/run_integration.sh` **555/555** on QEMU (2026-10-23).
+Integration: `./tests/run_integration.sh` **563/563** on QEMU (2026-10-24).

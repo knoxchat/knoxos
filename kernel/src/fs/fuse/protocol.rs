@@ -43,6 +43,8 @@ pub enum FuseOpcode {
     Bmap = 37,
     Destroy = 38,
     Ioctl = 39,
+    Poll = 40,
+    Fallocate = 43,
 }
 
 /// POSIX `R_OK` — FUSE ACCESS request/grant bit.
@@ -293,4 +295,24 @@ pub fn parse_fuse_ioctl(data: &[u8]) -> Option<i32> {
         return None;
     }
     Some(i32::from_le_bytes(data[0..4].try_into().ok()?))
+}
+
+/// Linux `POLLIN`.
+pub const POLLIN: u32 = 0x0001;
+/// Linux `POLLOUT`.
+pub const POLLOUT: u32 = 0x0004;
+
+pub(super) fn encode_poll(revents: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8);
+    out.extend_from_slice(&revents.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out
+}
+
+/// Packed FUSE POLL reply: revents u32 plus padding.
+pub fn parse_fuse_poll(data: &[u8]) -> Option<u32> {
+    if data.len() < 4 {
+        return None;
+    }
+    Some(u32::from_le_bytes(data[0..4].try_into().ok()?))
 }

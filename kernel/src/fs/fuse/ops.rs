@@ -5,20 +5,20 @@ use alloc::vec::Vec;
 
 use super::loopback::{
     serve_loopback, serve_loopback_access, serve_loopback_bmap, serve_loopback_create,
-    serve_loopback_destroy, serve_loopback_flush, serve_loopback_fsync, serve_loopback_fsyncdir,
-    serve_loopback_getattr, serve_loopback_getlk, serve_loopback_getxattr, serve_loopback_ioctl,
-    serve_loopback_link, serve_loopback_listxattr, serve_loopback_mkdir, serve_loopback_mknod,
-    serve_loopback_open, serve_loopback_opendir, serve_loopback_read, serve_loopback_readdir,
-    serve_loopback_readlink, serve_loopback_release, serve_loopback_releasedir,
-    serve_loopback_removexattr, serve_loopback_rename, serve_loopback_rmdir,
-    serve_loopback_setattr, serve_loopback_setlk, serve_loopback_setxattr, serve_loopback_statfs,
-    serve_loopback_symlink, serve_loopback_unlink, serve_loopback_write,
+    serve_loopback_destroy, serve_loopback_fallocate, serve_loopback_flush, serve_loopback_fsync,
+    serve_loopback_fsyncdir, serve_loopback_getattr, serve_loopback_getlk, serve_loopback_getxattr,
+    serve_loopback_ioctl, serve_loopback_link, serve_loopback_listxattr, serve_loopback_mkdir,
+    serve_loopback_mknod, serve_loopback_open, serve_loopback_opendir, serve_loopback_poll,
+    serve_loopback_read, serve_loopback_readdir, serve_loopback_readlink, serve_loopback_release,
+    serve_loopback_releasedir, serve_loopback_removexattr, serve_loopback_rename,
+    serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setlk, serve_loopback_setxattr,
+    serve_loopback_statfs, serve_loopback_symlink, serve_loopback_unlink, serve_loopback_write,
 };
 use super::mount::{send_request, take_response};
 use super::protocol::{
     FuseAttr, FuseEntry, FuseFileLock, FuseOpcode, FuseStatfs, encode_lk, parse_fuse_bmap,
     parse_fuse_dirents, parse_fuse_entry, parse_fuse_ioctl, parse_fuse_lk, parse_fuse_open,
-    parse_fuse_statfs,
+    parse_fuse_poll, parse_fuse_statfs,
 };
 
 /// Handle a VFS lookup through FUSE
@@ -509,4 +509,28 @@ pub fn fuse_ioctl(mount_point: &str, nodeid: u64, cmd: u32) -> Result<i32, &'sta
     serve_loopback_ioctl(mount_point, unique, nodeid, &data);
     let resp = take_response(mount_point, unique).ok_or("would block")?;
     parse_fuse_ioctl(&resp).ok_or("short ioctl")
+}
+/// Handle a VFS POLL through FUSE. Known files report POLLIN/POLLOUT; unknown nodeid fails.
+pub fn fuse_poll(mount_point: &str, nodeid: u64) -> Result<u32, &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Poll, nodeid, Vec::new())?;
+    serve_loopback_poll(mount_point, unique, nodeid);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    parse_fuse_poll(&resp).ok_or("short poll")
+}
+/// Handle a VFS FALLOCATE through FUSE. Mode 0 extends a known file; unknown nodeid fails.
+pub fn fuse_fallocate(
+    mount_point: &str,
+    nodeid: u64,
+    offset: u64,
+    length: u64,
+    mode: u32,
+) -> Result<(), &'static str> {
+    let mut data = Vec::with_capacity(20);
+    data.extend_from_slice(&offset.to_le_bytes());
+    data.extend_from_slice(&length.to_le_bytes());
+    data.extend_from_slice(&mode.to_le_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Fallocate, nodeid, data.clone())?;
+    serve_loopback_fallocate(mount_point, unique, nodeid, &data);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
 }

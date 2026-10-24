@@ -5,8 +5,9 @@ use alloc::vec::Vec;
 
 use super::mount::{LOOPBACK, write_response};
 use super::protocol::{
-    F_UNLCK, FuseFileLock, FuseOpcode, FuseStatfs, encode_bmap, encode_dirent, encode_entry,
-    encode_ioctl, encode_lk, encode_open, encode_statfs, lock_conflicts, parse_fuse_lk,
+    F_UNLCK, FuseFileLock, FuseOpcode, FuseStatfs, POLLIN, POLLOUT, encode_bmap, encode_dirent,
+    encode_entry, encode_ioctl, encode_lk, encode_open, encode_poll, encode_statfs, lock_conflicts,
+    parse_fuse_lk,
 };
 
 pub(super) fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]) {
@@ -579,4 +580,46 @@ pub(super) fn serve_loopback_ioctl(mount_point: &str, unique: u64, nodeid: u64, 
     }
     drop(lbs);
     let _ = write_response(mount_point, unique, encode_ioctl(cmd as i32));
+}
+pub(super) fn serve_loopback_poll(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    let nonempty = lb
+        .files
+        .values()
+        .any(|(ino, data)| *ino == nodeid && !data.is_empty());
+    drop(lbs);
+    let mut revents = POLLOUT;
+    if nonempty || nodeid == 1 {
+        revents |= POLLIN;
+    }
+    let _ = write_response(mount_point, unique, encode_poll(revents));
+}
+pub(super) fn serve_loopback_fallocate(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    if req.len() < 20 {
+        return;
+    }
+    let offset = u64::from_le_bytes(req[0..8].try_into().unwrap_or([0; 8]));
+    let length = u64::from_le_bytes(req[8..16].try_into().unwrap_or([0; 8]));
+    let mode = u32::from_le_bytes(req[16..20].try_into().unwrap_or([0; 4]));
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    let Some((_, data)) = lb.files.values_mut().find(|(ino, _)| *ino == nodeid) else {
+        return;
+    };
+    if mode == 0 {
+        let end = offset.saturating_add(length) as usize;
+        if end > data.len() {
+            data.resize(end, 0);
+        }
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
 }

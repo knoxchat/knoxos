@@ -1873,3 +1873,137 @@ pub fn matchrules_self_test() -> bool {
         false
     }
 }
+
+pub const GATE_DBUS_CONNSTATS_MARKER: &str = "GATE_DBUS connstats";
+
+fn connstats_u32(body: &[DbusValue], key: &str) -> Option<u32> {
+    let Some(DbusValue::Array(entries)) = body.first() else {
+        return None;
+    };
+    for entry in entries {
+        let DbusValue::DictEntry(k, value) = entry else {
+            continue;
+        };
+        if !matches!(k.as_ref(), DbusValue::String(s) if s == key) {
+            continue;
+        }
+        let DbusValue::Variant(inner) = value.as_ref() else {
+            continue;
+        };
+        if let DbusValue::Uint32(n) = inner.as_ref() {
+            return Some(*n);
+        }
+    }
+    None
+}
+
+/// `GetConnectionStats` returns UnixProcessID for a unique name; unknown is NameHasNoOwner.
+pub fn connstats_self_test() -> bool {
+    const PID: u32 = 0xDB27;
+    let conn = connect(BusType::System, PID, 1000);
+    let unique = format!(":1.{}", conn);
+    let mut stats = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Debug.Stats",
+        "GetConnectionStats",
+    );
+    stats.body = vec![DbusValue::String(unique.clone())];
+    stats.signature = Some(String::from("s"));
+    let serial = send_message(BusType::System, conn, stats);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && connstats_u32(&msg.body, "UnixProcessID") == Some(PID)
+        })
+        .unwrap_or(false);
+    let mut missing = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Debug.Stats",
+        "GetConnectionStats",
+    );
+    missing.body = vec![DbusValue::String(String::from(":1.missing-stats"))];
+    missing.signature = Some(String::from("s"));
+    let miss_serial = send_message(BusType::System, conn, missing);
+    let no_owner = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Error
+                && msg.reply_serial == Some(miss_serial)
+                && msg.error_name.as_deref() == Some("org.freedesktop.DBus.Error.NameHasNoOwner")
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok && no_owner {
+        serial_println!(
+            "[dbus] {} (GetConnectionStats UnixProcessID)",
+            GATE_DBUS_CONNSTATS_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: GetConnectionStats ok={} no_owner={}",
+            ok,
+            no_owner
+        );
+        false
+    }
+}
+
+pub const GATE_DBUS_OBJECTS_MARKER: &str = "GATE_DBUS objects";
+
+fn managed_has_bus(body: &[DbusValue]) -> bool {
+    let Some(DbusValue::Array(objects)) = body.first() else {
+        return false;
+    };
+    for object in objects {
+        let DbusValue::DictEntry(path, ifaces) = object else {
+            continue;
+        };
+        if !matches!(path.as_ref(), DbusValue::ObjectPath(p) if p == "/org/freedesktop/DBus") {
+            continue;
+        }
+        let DbusValue::Array(entries) = ifaces.as_ref() else {
+            continue;
+        };
+        return entries.iter().any(|e| {
+            matches!(
+                e,
+                DbusValue::DictEntry(k, _)
+                    if matches!(k.as_ref(), DbusValue::String(s) if s == "org.freedesktop.DBus")
+            )
+        });
+    }
+    false
+}
+
+/// `ObjectManager.GetManagedObjects` includes `/org/freedesktop/DBus`.
+pub fn objects_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB28, 1000);
+    let call = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.ObjectManager",
+        "GetManagedObjects",
+    );
+    let serial = send_message(BusType::System, conn, call);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::MethodReturn
+                && msg.reply_serial == Some(serial)
+                && managed_has_bus(&msg.body)
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok {
+        serial_println!(
+            "[dbus] {} (ObjectManager.GetManagedObjects)",
+            GATE_DBUS_OBJECTS_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: GetManagedObjects");
+        false
+    }
+}

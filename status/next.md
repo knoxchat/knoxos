@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Integration **555/555**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Integration **563/563**.
 
 ---
 
@@ -56,6 +56,8 @@ A dynamically linked musl binary runs (BM4). VirtIO-GPU scanout + hardware curso
 ## 4. Still production (not the later list)
 
 Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md](remaining.md) from this section are **done**, including this batch:
+
+- FUSE POLL (`GATE_FUSE poll`); FUSE FALLOCATE (`GATE_FUSE fallocate`); D-Bus GetConnectionStats (`GATE_DBUS connstats`); D-Bus ObjectManager.GetManagedObjects (`GATE_DBUS objects`); XHCI GET_DESCRIPTOR(HID) (`GATE_USB xhci hiddesc`); XHCI GET_DESCRIPTOR(HID Report) (`GATE_USB xhci hidreport`); NFS SECINFO (`GATE_NFS secinfo`); NFS OPENATTR (`GATE_NFS openattr`)
 
 - FUSE DESTROY (`GATE_FUSE destroy`); FUSE IOCTL (`GATE_FUSE ioctl`); D-Bus Debug.Stats.GetStats (`GATE_DBUS stats`); D-Bus GetAllMatchRules (`GATE_DBUS matchrules`); XHCI SET_SEL (`GATE_USB xhci setsel`); XHCI SET_ISOCH_DELAY (`GATE_USB xhci isochdelay`); NFS OPEN_CONFIRM (`GATE_NFS openconfirm`); NFS OPEN_DOWNGRADE (`GATE_NFS downgrade`)
 
