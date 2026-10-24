@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **FUSE SYNCFS** — known mount succeeds; unknown mount fails (`GATE_FUSE syncfs`).
+- **FUSE STATX** — size and `S_IFREG` for a known file; unknown nodeid fails (`GATE_FUSE statx`).
+- **D-Bus GetConfigFile** — returns `/etc/dbus-1/system.conf` (`GATE_DBUS config`).
+- **D-Bus ActivatableServicesChanged** — delivered after `ReloadConfig` (`GATE_DBUS svcchanged`).
+- **XHCI HID GET_PROTOCOL** — class IN Transfer Event (`GATE_USB xhci getprotocol`).
+- **XHCI HID SET_PROTOCOL** — class OUT Transfer Event (`GATE_USB xhci setprotocol`).
+- **NFS DESTROY_SESSION** — CREATE_SESSION id is OK; second/unknown is BADSESSION (`GATE_NFS destroysession`).
+- **NFS DESTROY_CLIENTID** — live session is CLIENTID_BUSY; after DESTROY_SESSION is OK; wrong id is STALE_CLIENTID (`GATE_NFS destroyclientid`).
 - **FUSE LSEEK** — SEEK_SET 0 is 0; SEEK_END is size; unknown nodeid fails (`GATE_FUSE lseek`).
 - **FUSE COPY_FILE_RANGE** — copies bytes between known files; unknown nodeid fails (`GATE_FUSE copy`).
 - **D-Bus NameAcquired** — delivered after `RequestName` (`GATE_DBUS nameacquired`).

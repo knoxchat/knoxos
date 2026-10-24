@@ -11,12 +11,12 @@ use super::ops::{
     fuse_link, fuse_listxattr, fuse_lookup, fuse_lseek, fuse_mkdir, fuse_mknod, fuse_open,
     fuse_opendir, fuse_poll, fuse_read, fuse_readdir, fuse_readdirplus, fuse_readlink,
     fuse_release, fuse_releasedir, fuse_removexattr, fuse_rename, fuse_rename2, fuse_rmdir,
-    fuse_setattr, fuse_setlk, fuse_setlkw, fuse_setxattr, fuse_statfs, fuse_symlink, fuse_unlink,
-    fuse_write,
+    fuse_setattr, fuse_setlk, fuse_setlkw, fuse_setxattr, fuse_statfs, fuse_statx, fuse_symlink,
+    fuse_syncfs, fuse_unlink, fuse_write,
 };
 use super::protocol::{
     F_UNLCK, F_WRLCK, FUSE_R_OK, FUSE_W_OK, FUSE_X_OK, FuseFileLock, POLLIN, RENAME_NOREPLACE,
-    SEEK_END, SEEK_SET,
+    SEEK_END, SEEK_SET, STATX_BASIC_STATS,
 };
 
 pub const GATE_FUSE_MARKER: &str = "GATE_FUSE lookup";
@@ -2108,6 +2108,89 @@ pub fn copy_file_range_self_test() -> bool {
         "[fuse] {} (COPY_FILE_RANGE {} bytes)",
         GATE_FUSE_COPY_FILE_RANGE_MARKER,
         copied
+    );
+    true
+}
+
+pub const GATE_FUSE_SYNCFS_MARKER: &str = "GATE_FUSE syncfs";
+
+/// SYNCFS of a known mount succeeds; unknown mount fails.
+pub fn syncfs_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-syncfs";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE syncfs FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if let Err(e) = fuse_syncfs(MP) {
+        serial_println!("[fuse] GATE_FUSE syncfs FAILED: syncfs ({})", e);
+        return false;
+    }
+    if fuse_syncfs("/mnt/fuse-missing-syncfs").is_ok() {
+        serial_println!("[fuse] GATE_FUSE syncfs FAILED: missing mount succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (SYNCFS then missing mount)",
+        GATE_FUSE_SYNCFS_MARKER
+    );
+    true
+}
+
+pub const GATE_FUSE_STATX_MARKER: &str = "GATE_FUSE statx";
+const GATE_FUSE_STATX_PAYLOAD: &[u8] = b"knoxos-fuse-sx\n";
+
+/// STATX of a known file returns size and S_IFREG; unknown nodeid fails.
+pub fn statx_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-statx";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE statx FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "statx.txt", GATE_FUSE_STATX_PAYLOAD).is_err() {
+        serial_println!("[fuse] GATE_FUSE statx FAILED: put");
+        return false;
+    }
+    let looked = match fuse_lookup(MP, 1, "statx.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE statx FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let attr = match fuse_statx(MP, looked.nodeid, STATX_BASIC_STATS) {
+        Ok(a) => a,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE statx FAILED: statx ({})", e);
+            return false;
+        }
+    };
+    if attr.ino != looked.nodeid
+        || attr.size != GATE_FUSE_STATX_PAYLOAD.len() as u64
+        || attr.mode & 0o170000 != 0o100000
+    {
+        serial_println!(
+            "[fuse] GATE_FUSE statx FAILED: ino={} size={} mode={:#o}",
+            attr.ino,
+            attr.size,
+            attr.mode
+        );
+        return false;
+    }
+    if fuse_statx(MP, 0xFFFF_FFFF, STATX_BASIC_STATS).is_ok() {
+        serial_println!("[fuse] GATE_FUSE statx FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (STATX size={} S_IFREG ino={})",
+        GATE_FUSE_STATX_MARKER,
+        attr.size,
+        attr.ino
     );
     true
 }

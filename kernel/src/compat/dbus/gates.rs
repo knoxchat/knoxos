@@ -13,7 +13,7 @@ use super::state::{
     BUS_FEATURES, BusType, DBUS_NAME_FLAG_DO_NOT_QUEUE, DBUS_REQUEST_NAME_REPLY_IN_QUEUE,
     DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, DBUS_START_REPLY_ALREADY_RUNNING,
     DBUS_START_REPLY_SUCCESS, GATE_ACTIVATABLE_NAME, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE,
-    GATE_LINUX_SECURITY_LABEL, GATE_SELINUX_CONTEXT, MACHINE_ID,
+    GATE_CONFIG_FILE, GATE_LINUX_SECURITY_LABEL, GATE_SELINUX_CONTEXT, MACHINE_ID,
 };
 
 pub const GATE_DBUS_METHOD_MARKER: &str = "GATE_DBUS method";
@@ -2268,6 +2268,89 @@ pub fn label_self_test() -> bool {
             unique_ok,
             well_known_ok
         );
+        false
+    }
+}
+
+pub const GATE_DBUS_CONFIG_MARKER: &str = "GATE_DBUS config";
+
+/// `GetConfigFile` must return the system bus config path.
+pub fn config_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB2E, 1000);
+    let get = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConfigFile",
+    );
+    let serial = send_message(BusType::System, conn, get);
+    let ok = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.reply_serial == Some(serial)
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::String(s)) if s == GATE_CONFIG_FILE
+                )
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if ok {
+        serial_println!(
+            "[dbus] {} (GetConfigFile {})",
+            GATE_DBUS_CONFIG_MARKER,
+            GATE_CONFIG_FILE
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: GetConfigFile");
+        false
+    }
+}
+
+pub const GATE_DBUS_SVCCHANGED_MARKER: &str = "GATE_DBUS svcchanged";
+
+/// `ActivatableServicesChanged` is delivered after `ReloadConfig` to an AddMatch listener.
+pub fn svcchanged_self_test() -> bool {
+    const RULE: &str =
+        "type='signal',interface='org.freedesktop.DBus',member='ActivatableServicesChanged'";
+    let listener = connect(BusType::System, 0xDB2F, 1000);
+
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, listener, add);
+    let _ = receive_message(BusType::System, listener);
+
+    let reload = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ReloadConfig",
+    );
+    let _ = send_message(BusType::System, listener, reload);
+    let _ = receive_message(BusType::System, listener);
+
+    let changed = receive_message(BusType::System, listener)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.member.as_deref() == Some("ActivatableServicesChanged")
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, listener);
+    if changed {
+        serial_println!(
+            "[dbus] {} (ActivatableServicesChanged after ReloadConfig)",
+            GATE_DBUS_SVCCHANGED_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: ActivatableServicesChanged");
         false
     }
 }

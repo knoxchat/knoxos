@@ -49,6 +49,8 @@ pub enum FuseOpcode {
     Rename2 = 45,
     Lseek = 46,
     CopyFileRange = 47,
+    Syncfs = 50,
+    Statx = 52,
 }
 
 /// POSIX `R_OK` — FUSE ACCESS request/grant bit.
@@ -361,6 +363,31 @@ pub fn parse_fuse_copy_file_range(data: &[u8]) -> Option<u64> {
         return None;
     }
     Some(u64::from_le_bytes(data[0..8].try_into().ok()?))
+}
+
+/// Linux `STATX_BASIC_STATS` (type, mode, nlink, uid, gid, atime, mtime, ctime, ino, size, blocks).
+pub const STATX_BASIC_STATS: u32 = 0x0000_07ff;
+
+pub(super) fn encode_statx(ino: u64, size: u64, mode: u32, mask: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(24);
+    out.extend_from_slice(&ino.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&mode.to_le_bytes());
+    out.extend_from_slice(&mask.to_le_bytes());
+    out
+}
+
+/// Packed FUSE STATX: ino u64, size u64, mode u32, mask u32.
+pub fn parse_fuse_statx(data: &[u8]) -> Option<(u64, u64, u32, u32)> {
+    if data.len() < 24 {
+        return None;
+    }
+    Some((
+        u64::from_le_bytes(data[0..8].try_into().ok()?),
+        u64::from_le_bytes(data[8..16].try_into().ok()?),
+        u32::from_le_bytes(data[16..20].try_into().ok()?),
+        u32::from_le_bytes(data[20..24].try_into().ok()?),
+    ))
 }
 
 /// Packed FUSE READDIRPLUS: ino u64, size u64, mode u32, namelen u32, name bytes.

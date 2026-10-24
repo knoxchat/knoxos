@@ -12,8 +12,8 @@ use super::protocol::{DbusValue, Message, MessageType};
 use super::state::{
     BUS_FEATURES, BusState, BusType, Connection, ConnectionId, DBUS_RELEASE_NAME_REPLY_RELEASED,
     DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, DBUS_START_REPLY_ALREADY_RUNNING,
-    DBUS_START_REPLY_SUCCESS, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE, GATE_LINUX_SECURITY_LABEL,
-    GATE_SELINUX_CONTEXT, MACHINE_ID, MatchRule, get_bus,
+    DBUS_START_REPLY_SUCCESS, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE, GATE_CONFIG_FILE,
+    GATE_LINUX_SECURITY_LABEL, GATE_SELINUX_CONTEXT, MACHINE_ID, MatchRule, get_bus,
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -188,6 +188,16 @@ fn name_acquired(name: &str) -> Message {
     msg
 }
 
+fn activatable_services_changed() -> Message {
+    let mut msg = Message::signal(
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ActivatableServicesChanged",
+    );
+    msg.sender = Some(String::from("org.freedesktop.DBus"));
+    msg
+}
+
 /// Handle bus-level methods (org.freedesktop.DBus)
 fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
     let member = msg.member.as_deref().unwrap_or("");
@@ -324,6 +334,14 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 let id = bus.machine_id.clone();
                 let mut reply = Message::method_return(msg.header.serial);
                 reply.body = vec![DbusValue::String(id)];
+                reply.signature = Some(String::from("s"));
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(reply);
+                }
+            }
+            "GetConfigFile" => {
+                let mut reply = Message::method_return(msg.header.serial);
+                reply.body = vec![DbusValue::String(String::from(GATE_CONFIG_FILE))];
                 reply.signature = Some(String::from("s"));
                 if let Some(c) = bus.connections.get_mut(&from) {
                     c.message_queue.push(reply);
@@ -584,6 +602,7 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                     c.message_queue
                         .push(Message::method_return(msg.header.serial));
                 }
+                emit_bus_signal(bus, activatable_services_changed());
             }
             _ => {
                 serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);

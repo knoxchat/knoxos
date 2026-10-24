@@ -28,15 +28,17 @@ pub use gates::{
     GATE_FUSE_RELEASEDIR_MARKER, GATE_FUSE_REMOVEXATTR_MARKER, GATE_FUSE_RENAME_MARKER,
     GATE_FUSE_RENAME2_MARKER, GATE_FUSE_RMDIR_MARKER, GATE_FUSE_SETATTR_MARKER,
     GATE_FUSE_SETLK_MARKER, GATE_FUSE_SETLKW_MARKER, GATE_FUSE_SETXATTR_MARKER,
-    GATE_FUSE_STATFS_MARKER, GATE_FUSE_SYMLINK_MARKER, GATE_FUSE_UNLINK_MARKER,
-    GATE_FUSE_WRITE_MARKER, access_self_test, bmap_self_test, copy_file_range_self_test,
-    create_self_test, destroy_self_test, fallocate_self_test, flush_self_test, fsync_self_test,
-    fsyncdir_self_test, getattr_self_test, getlk_self_test, getxattr_self_test, ioctl_self_test,
-    link_self_test, listxattr_self_test, lseek_self_test, mkdir_self_test, mknod_self_test,
-    open_self_test, opendir_self_test, poll_self_test, readdir_self_test, readdirplus_self_test,
-    release_self_test, releasedir_self_test, removexattr_self_test, rename_self_test,
-    rename2_self_test, rmdir_self_test, setattr_self_test, setlk_self_test, setlkw_self_test,
-    setxattr_self_test, statfs_self_test, symlink_self_test, unlink_self_test, write_self_test,
+    GATE_FUSE_STATFS_MARKER, GATE_FUSE_STATX_MARKER, GATE_FUSE_SYMLINK_MARKER,
+    GATE_FUSE_SYNCFS_MARKER, GATE_FUSE_UNLINK_MARKER, GATE_FUSE_WRITE_MARKER, access_self_test,
+    bmap_self_test, copy_file_range_self_test, create_self_test, destroy_self_test,
+    fallocate_self_test, flush_self_test, fsync_self_test, fsyncdir_self_test, getattr_self_test,
+    getlk_self_test, getxattr_self_test, ioctl_self_test, link_self_test, listxattr_self_test,
+    lseek_self_test, mkdir_self_test, mknod_self_test, open_self_test, opendir_self_test,
+    poll_self_test, readdir_self_test, readdirplus_self_test, release_self_test,
+    releasedir_self_test, removexattr_self_test, rename_self_test, rename2_self_test,
+    rmdir_self_test, setattr_self_test, setlk_self_test, setlkw_self_test, setxattr_self_test,
+    statfs_self_test, statx_self_test, symlink_self_test, syncfs_self_test, unlink_self_test,
+    write_self_test,
 };
 pub use mount::{
     FuseMount, FuseRequest, list_mounts, loopback_put, mount, read_request, unmount, write_response,
@@ -47,15 +49,16 @@ pub use ops::{
     fuse_link, fuse_listxattr, fuse_lookup, fuse_lseek, fuse_mkdir, fuse_mknod, fuse_open,
     fuse_opendir, fuse_poll, fuse_read, fuse_readdir, fuse_readdirplus, fuse_readlink,
     fuse_release, fuse_releasedir, fuse_removexattr, fuse_rename, fuse_rename2, fuse_rmdir,
-    fuse_setattr, fuse_setlk, fuse_setlkw, fuse_setxattr, fuse_statfs, fuse_symlink, fuse_unlink,
-    fuse_write,
+    fuse_setattr, fuse_setlk, fuse_setlkw, fuse_setxattr, fuse_statfs, fuse_statx, fuse_symlink,
+    fuse_syncfs, fuse_unlink, fuse_write,
 };
 pub use protocol::{
     F_RDLCK, F_UNLCK, F_WRLCK, FUSE_R_OK, FUSE_W_OK, FUSE_X_OK, FuseAttr, FuseEntry, FuseFileLock,
     FuseInHeader, FuseOpcode, FuseOutHeader, FuseStatfs, POLLIN, POLLOUT, RENAME_NOREPLACE,
-    SEEK_END, SEEK_SET, mode_to_access, parse_fuse_bmap, parse_fuse_copy_file_range,
-    parse_fuse_direntplus, parse_fuse_dirents, parse_fuse_entry, parse_fuse_ioctl, parse_fuse_lk,
-    parse_fuse_lseek, parse_fuse_open, parse_fuse_poll, parse_fuse_statfs,
+    SEEK_END, SEEK_SET, STATX_BASIC_STATS, mode_to_access, parse_fuse_bmap,
+    parse_fuse_copy_file_range, parse_fuse_direntplus, parse_fuse_dirents, parse_fuse_entry,
+    parse_fuse_ioctl, parse_fuse_lk, parse_fuse_lseek, parse_fuse_open, parse_fuse_poll,
+    parse_fuse_statfs, parse_fuse_statx,
 };
 
 use crate::serial_println;
@@ -103,4 +106,6 @@ pub fn init() {
     let _ = rename2_self_test();
     let _ = lseek_self_test();
     let _ = copy_file_range_self_test();
+    let _ = syncfs_self_test();
+    let _ = statx_self_test();
 }

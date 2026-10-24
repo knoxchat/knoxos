@@ -806,6 +806,25 @@ impl NfsClient {
                     NfsCompoundResult::Status(NfsStat::StaleClientId)
                 }
             }
+            NfsCompoundOp::DestroySession { session_id } => {
+                if self.session_id == Some(*session_id) {
+                    self.session_id = None;
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::BadSession)
+                }
+            }
+            NfsCompoundOp::DestroyClientId { client_id } => {
+                if !self.exchange_id_issued || self.client_id == 0 || *client_id != self.client_id {
+                    NfsCompoundResult::Status(NfsStat::StaleClientId)
+                } else if self.session_id.is_some() {
+                    NfsCompoundResult::Status(NfsStat::ClientIdBusy)
+                } else {
+                    self.exchange_id_issued = false;
+                    self.client_id = 0;
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                }
+            }
         }
     }
 

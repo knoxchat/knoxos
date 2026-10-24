@@ -302,5 +302,13 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 291. **XHCI HID SET_IDLE** — class OUT Transfer Event (`GATE_USB xhci setidle`).
 292. **NFS EXCHANGE_ID** — client_name returns client_id; empty is INVAL (`GATE_NFS exchangeid`).
 293. **NFS CREATE_SESSION** — EXCHANGE_ID client_id OK; wrong id STALE_CLIENTID (`GATE_NFS session`).
+294. **FUSE SYNCFS** — known mount succeeds; unknown mount fails (`GATE_FUSE syncfs`).
+295. **FUSE STATX** — size and `S_IFREG` for a known file; unknown nodeid fails (`GATE_FUSE statx`).
+296. **D-Bus GetConfigFile** — `/etc/dbus-1/system.conf` (`GATE_DBUS config`).
+297. **D-Bus ActivatableServicesChanged** — after ReloadConfig (`GATE_DBUS svcchanged`).
+298. **XHCI HID GET_PROTOCOL** — class IN Transfer Event (`GATE_USB xhci getprotocol`).
+299. **XHCI HID SET_PROTOCOL** — class OUT Transfer Event (`GATE_USB xhci setprotocol`).
+300. **NFS DESTROY_SESSION** — CREATE_SESSION id OK; second/unknown BADSESSION (`GATE_NFS destroysession`).
+301. **NFS DESTROY_CLIENTID** — live session CLIENTID_BUSY; after DESTROY_SESSION OK; wrong id STALE_CLIENTID (`GATE_NFS destroyclientid`).
 
-Integration: `./tests/run_integration.sh` **579/579** on QEMU (2026-10-24).
+Integration: `./tests/run_integration.sh` **587/587** on QEMU (2026-10-24).

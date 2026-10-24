@@ -104,6 +104,10 @@ static HIDSETREPORT_LIVE: AtomicBool = AtomicBool::new(false);
 static HIDGETIDLE_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when HID SET_IDLE got a Transfer Event.
 static HIDSETIDLE_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when HID GET_PROTOCOL got a Transfer Event.
+static HIDGETPROTOCOL_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when HID SET_PROTOCOL got a Transfer Event.
+static HIDSETPROTOCOL_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -145,6 +149,8 @@ pub const GATE_XHCI_HIDGETREPORT_MARKER: &str = "GATE_USB xhci getreport";
 pub const GATE_XHCI_HIDSETREPORT_MARKER: &str = "GATE_USB xhci setreport";
 pub const GATE_XHCI_HIDGETIDLE_MARKER: &str = "GATE_USB xhci getidle";
 pub const GATE_XHCI_HIDSETIDLE_MARKER: &str = "GATE_USB xhci setidle";
+pub const GATE_XHCI_HIDGETPROTOCOL_MARKER: &str = "GATE_USB xhci getprotocol";
+pub const GATE_XHCI_HIDSETPROTOCOL_MARKER: &str = "GATE_USB xhci setprotocol";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -3770,5 +3776,136 @@ pub fn setidle_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_HIDSETIDLE_MARKER);
+    true
+}
+
+/// HID GET_PROTOCOL — class IN, 1-byte boot/report protocol. Requires a Transfer Event.
+pub fn hid_get_protocol(slot_id: u8) -> Option<u8> {
+    serial_println!("[XHCI] GET_PROTOCOL for slot {}", slot_id);
+    restart_ep(slot_id, 1);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0xA1 (IN, class, interface), bRequest=3 (GET_PROTOCOL)
+    setup.param_lo = 0xA1 | 3u32 << 8;
+    setup.param_hi = 1u32 << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = 1;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= 1 << 2; // ISP
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit GET_PROTOCOL");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: USB2 HID may stall GET_PROTOCOL.
+        if cc == 1 || cc == 13 || cc == 6 {
+            // SAFETY: GET_PROTOCOL DMA page is owned by this transfer.
+            let value = unsafe { core::ptr::read(dma_virt(data_buf) as *const u8) };
+            HIDGETPROTOCOL_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] GET_PROTOCOL complete cc={} value={}", cc, value);
+            return Some(value);
+        }
+        serial_println!("[XHCI] GET_PROTOCOL completion code: {}", cc);
+        return None;
+    }
+    serial_println!("[XHCI] GET_PROTOCOL timeout");
+    None
+}
+
+/// HID SET_PROTOCOL — class OUT, 0=boot 1=report. Requires a Transfer Event.
+pub fn hid_set_protocol(slot_id: u8, protocol: u8) -> bool {
+    serial_println!("[XHCI] SET_PROTOCOL({}) for slot {}", protocol, slot_id);
+    recover_control_ep(slot_id);
+
+    let wvalue = protocol as u16;
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x21 (OUT, class, interface), bRequest=0x0B (SET_PROTOCOL)
+    setup.param_lo = 0x21 | 0x0Bu32 << 8 | (wvalue as u32) << 16;
+    setup.param_hi = 0; // wIndex=0, wLength=0
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for no-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, status]) {
+        serial_println!("[XHCI] Failed to submit SET_PROTOCOL");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: USB2 HID may stall SET_PROTOCOL.
+        if cc == 1 || cc == 13 || cc == 6 {
+            HIDSETPROTOCOL_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] SET_PROTOCOL complete cc={}", cc);
+            return true;
+        }
+        serial_println!("[XHCI] SET_PROTOCOL completion code: {}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] SET_PROTOCOL timeout");
+    false
+}
+
+/// Prove HID GET_PROTOCOL got a Transfer Event.
+pub fn getprotocol_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci getprotocol skipped (no controller)");
+        return true;
+    }
+    if !HIDGETPROTOCOL_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = hid_get_protocol(slot_id);
+        }
+    }
+    if !HIDGETPROTOCOL_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_PROTOCOL had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_HIDGETPROTOCOL_MARKER);
+    true
+}
+
+/// Prove HID SET_PROTOCOL got a Transfer Event.
+pub fn setprotocol_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci setprotocol skipped (no controller)");
+        return true;
+    }
+    if !HIDSETPROTOCOL_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = hid_set_protocol(slot_id, 0);
+        }
+    }
+    if !HIDSETPROTOCOL_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SET_PROTOCOL had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_HIDSETPROTOCOL_MARKER);
     true
 }

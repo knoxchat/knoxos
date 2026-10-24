@@ -110,6 +110,12 @@ pub enum NfsCompoundOp {
     CreateSession {
         client_id: u64,
     },
+    DestroySession {
+        session_id: u64,
+    },
+    DestroyClientId {
+        client_id: u64,
+    },
 }
 
 /// Result of a compound operation

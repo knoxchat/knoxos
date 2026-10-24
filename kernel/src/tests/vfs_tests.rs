@@ -539,6 +539,28 @@ fn test_xhci_hid_set_idle() {
 }
 
 #[test_case]
+fn test_xhci_hid_get_protocol() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::getprotocol_self_test(),
+        "XHCI HID GET_PROTOCOL must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_hid_set_protocol() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::setprotocol_self_test(),
+        "XHCI HID SET_PROTOCOL must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_xhci_reset_device() {
     if !crate::usb::is_available() {
         return;
@@ -842,6 +864,22 @@ fn test_fuse_copy_file_range() {
     assert!(
         crate::fuse::copy_file_range_self_test(),
         "FUSE COPY_FILE_RANGE must copy bytes between known files; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_syncfs() {
+    assert!(
+        crate::fuse::syncfs_self_test(),
+        "FUSE SYNCFS of a known mount must succeed; unknown mount must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_statx() {
+    assert!(
+        crate::fuse::statx_self_test(),
+        "FUSE STATX of a known file must return size and S_IFREG; unknown nodeid must fail"
     );
 }
 
@@ -1218,6 +1256,24 @@ fn test_nfs_create_session() {
     assert!(
         crate::nfs::session_self_test(),
         "NFS4 CREATE_SESSION must accept an EXCHANGE_ID client_id and return STALE_CLIENTID for a wrong id"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_destroy_session() {
+    assert!(
+        crate::nfs::destroysession_self_test(),
+        "NFS4 DESTROY_SESSION must accept a CREATE_SESSION id and return BADSESSION for a second or unknown id"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_destroy_clientid() {
+    assert!(
+        crate::nfs::destroyclientid_self_test(),
+        "NFS4 DESTROY_CLIENTID must return CLIENTID_BUSY with a session, OK after DESTROY_SESSION, and STALE_CLIENTID for a wrong id"
     );
 }
 

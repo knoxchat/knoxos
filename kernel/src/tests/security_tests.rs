@@ -854,6 +854,22 @@ fn test_dbus_linux_security_label() {
 }
 
 #[test_case]
+fn test_dbus_get_config_file() {
+    assert!(
+        crate::dbus::config_self_test(),
+        "GetConfigFile must return the system bus config path"
+    );
+}
+
+#[test_case]
+fn test_dbus_activatable_services_changed() {
+    assert!(
+        crate::dbus::svcchanged_self_test(),
+        "ActivatableServicesChanged must be delivered after ReloadConfig"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

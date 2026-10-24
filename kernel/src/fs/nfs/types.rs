@@ -66,6 +66,10 @@ pub enum NfsStat {
     BadName = 10041,
     Serverfault = 10042,
     Badiomode = 10049,
+    /// NFS4ERR_BADSESSION — DESTROY_SESSION of an unknown session.
+    BadSession = 10052,
+    /// NFS4ERR_CLIENTID_BUSY — DESTROY_CLIENTID while a session is active.
+    ClientIdBusy = 10070,
 }
 
 /// NFS4 operation codes
@@ -111,6 +115,8 @@ pub enum NfsOp {
     ReleaseLockOwner = 39,
     ExchangeId = 42,
     CreateSession = 43,
+    DestroySession = 44,
+    DestroyClientId = 57,
 }
 
 /// NFS4 file type

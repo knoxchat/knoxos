@@ -13,15 +13,15 @@ use super::loopback::{
     serve_loopback_readdirplus, serve_loopback_readlink, serve_loopback_release,
     serve_loopback_releasedir, serve_loopback_removexattr, serve_loopback_rename,
     serve_loopback_rename2, serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setlk,
-    serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_symlink, serve_loopback_unlink,
-    serve_loopback_write,
+    serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_statx, serve_loopback_symlink,
+    serve_loopback_syncfs, serve_loopback_unlink, serve_loopback_write,
 };
 use super::mount::{send_request, take_response};
 use super::protocol::{
     FuseAttr, FuseEntry, FuseFileLock, FuseOpcode, FuseStatfs, encode_lk, parse_fuse_bmap,
     parse_fuse_copy_file_range, parse_fuse_direntplus, parse_fuse_dirents, parse_fuse_entry,
     parse_fuse_ioctl, parse_fuse_lk, parse_fuse_lseek, parse_fuse_open, parse_fuse_poll,
-    parse_fuse_statfs,
+    parse_fuse_statfs, parse_fuse_statx,
 };
 
 /// Handle a VFS lookup through FUSE
@@ -603,4 +603,35 @@ pub fn fuse_copy_file_range(
     serve_loopback_copy_file_range(mount_point, unique, nodeid_in, &data);
     let resp = take_response(mount_point, unique).ok_or("would block")?;
     parse_fuse_copy_file_range(&resp).ok_or("short copy_file_range")
+}
+/// Handle a VFS syncfs through FUSE. Known mounts succeed; unknown mounts fail.
+pub fn fuse_syncfs(mount_point: &str) -> Result<(), &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Syncfs, 0, Vec::new())?;
+    serve_loopback_syncfs(mount_point, unique);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a VFS statx through FUSE. Known files return size and mode; unknown nodeid fails.
+pub fn fuse_statx(mount_point: &str, nodeid: u64, mask: u32) -> Result<FuseAttr, &'static str> {
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::Statx,
+        nodeid,
+        mask.to_le_bytes().to_vec(),
+    )?;
+    serve_loopback_statx(mount_point, unique, nodeid, &mask.to_le_bytes());
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    let (ino, size, mode, _mask) = parse_fuse_statx(&resp).ok_or("short statx")?;
+    Ok(FuseAttr {
+        ino,
+        size,
+        blocks: size.div_ceil(512),
+        mode,
+        nlink: 1,
+        uid: 0,
+        gid: 0,
+        atime: 0,
+        mtime: 0,
+        ctime: 0,
+    })
 }

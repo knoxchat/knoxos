@@ -7,8 +7,8 @@ use super::mount::{LOOPBACK, write_response};
 use super::protocol::{
     F_UNLCK, FuseFileLock, FuseOpcode, FuseStatfs, POLLIN, POLLOUT, RENAME_NOREPLACE, SEEK_END,
     SEEK_SET, encode_bmap, encode_copy_file_range, encode_dirent, encode_direntplus, encode_entry,
-    encode_ioctl, encode_lk, encode_lseek, encode_open, encode_poll, encode_statfs, lock_conflicts,
-    parse_fuse_lk,
+    encode_ioctl, encode_lk, encode_lseek, encode_open, encode_poll, encode_statfs, encode_statx,
+    lock_conflicts, parse_fuse_lk,
 };
 
 pub(super) fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]) {
@@ -738,6 +738,40 @@ pub(super) fn serve_loopback_copy_file_range(
     }
     drop(lbs);
     let _ = write_response(mount_point, unique, encode_copy_file_range(copied));
+}
+pub(super) fn serve_loopback_syncfs(mount_point: &str, unique: u64) {
+    let lbs = LOOPBACK.lock();
+    if lbs.get(mount_point).is_none() {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_statx(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    if req.len() < 4 {
+        return;
+    }
+    let mask = u32::from_le_bytes(req[0..4].try_into().unwrap_or([0; 4]));
+    if mask == 0 {
+        return;
+    }
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    let entry = if let Some((_, data)) = lb.files.values().find(|(ino, _)| *ino == nodeid) {
+        encode_statx(nodeid, data.len() as u64, 0o100644, mask)
+    } else if lb.dirs.values().any(|&ino| ino == nodeid) {
+        encode_statx(nodeid, 0, 0o040755, mask)
+    } else if let Some((_, target)) = lb.links.values().find(|(ino, _)| *ino == nodeid) {
+        encode_statx(nodeid, target.len() as u64, 0o120777, mask)
+    } else if let Some(&(_, mode)) = lb.nodes.values().find(|(ino, _)| *ino == nodeid) {
+        encode_statx(nodeid, 0, mode, mask)
+    } else {
+        return;
+    };
+    drop(lbs);
+    let _ = write_response(mount_point, unique, entry);
 }
 pub(super) fn serve_loopback_fallocate(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
     if req.len() < 20 {

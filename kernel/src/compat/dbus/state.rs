@@ -105,6 +105,9 @@ pub const GATE_SELINUX_CONTEXT: &str = "system_u:system_r:unconfined_t:s0";
 /// LSM label returned by `GetConnectionLinuxSecurityLabel`.
 pub const GATE_LINUX_SECURITY_LABEL: &str = "system_u:object_r:knoxos_t:s0";
 
+/// Config path returned by `GetConfigFile`.
+pub const GATE_CONFIG_FILE: &str = "/etc/dbus-1/system.conf";
+
 /// AppArmor profile returned by `GetConnectionAppArmorSecurityContext`.
 pub const GATE_APPARMOR_PROFILE: &str = "unconfined";
 
