@@ -385,10 +385,18 @@ pub fn sys_io_uring_setup(entries: u32, flags: u32) -> Result<u64, IoUringError>
     *next += 1;
     drop(next);
 
-    let instance = IoUringInstance::new(id, entries, flags, 0);
+    let owner = crate::scheduler::current_pid().unwrap_or(0) as u64;
+    let instance = IoUringInstance::new(id, entries, flags, owner);
     INSTANCES.lock().insert(id, instance);
 
     Ok(id)
+}
+
+/// Ring id for the current process's `io_uring` fd (`iouring:{id}`).
+pub fn ring_id_for_current_fd(fd: i32) -> Option<u64> {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let tables = crate::fd::PROCESS_FD_TABLES.lock();
+    crate::fd::iouring_id_from_path(&tables.get(&pid)?.get(fd)?.path)
 }
 
 /// io_uring_enter — submit I/O and optionally wait for completions

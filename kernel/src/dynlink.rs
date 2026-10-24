@@ -336,6 +336,30 @@ pub fn register_virtual_library(lib_name: &str, provider: &str) {
     serial_println!("[dynlink] Virtual library: {} → {}", lib_name, provider);
 }
 
+/// Record a VFS-backed `.so` with a non-zero base. Replaces empty virtual
+/// `SharedObject { base: 0 }` stubs. Does not dereference `base_addr`.
+pub fn register_vfs_shared_object(path: &str, data: &[u8], base_addr: u64) -> SharedObject {
+    let needed = crate::elf::needed_libraries(data);
+    let so = SharedObject {
+        name: String::from(path),
+        base_addr,
+        mem_size: data.len() as u64,
+        init_func: None,
+        fini_func: None,
+        exports: BTreeMap::new(),
+        needed,
+        ref_count: 1,
+    };
+    LOADED_OBJECTS.lock().insert(String::from(path), so.clone());
+    serial_println!(
+        "[dynlink] VFS SO '{}' at {:#x} (size={:#x})",
+        path,
+        base_addr,
+        so.mem_size
+    );
+    so
+}
+
 /// Parse the dynamic section of an ELF and extract metadata
 pub fn parse_dynamic_section(dynamic_start: u64, base: u64) -> DynamicInfo {
     let mut info = DynamicInfo::default();

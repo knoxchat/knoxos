@@ -185,6 +185,17 @@ pub fn read_proc_file(path: &str) -> Option<Vec<u8>> {
         // /proc/hostname
         "hostname" | "sys/kernel/hostname" => Some(b"knoxos\n".to_vec()),
 
+        // /proc/sys/kernel/... — Chromium sandbox probes
+        "sys" => match parts.get(1..).map(|p| p.join("/")).as_deref() {
+            Some("kernel/unprivileged_userns_clone") => Some(b"1\n".to_vec()),
+            Some("kernel/core_pattern") => Some(b"core.%p\n".to_vec()),
+            Some("kernel/yama/ptrace_scope") => Some(b"1\n".to_vec()),
+            Some("kernel/hostname") => Some(b"knoxos\n".to_vec()),
+            Some("kernel/ostype") => Some(b"Linux\n".to_vec()),
+            Some("kernel/osrelease") => Some(b"6.1.0-knoxos\n".to_vec()),
+            _ => None,
+        },
+
         // /proc/self - symlink to current process
         "self" => {
             if parts.len() > 1 {
@@ -216,7 +227,20 @@ pub fn read_proc_file(path: &str) -> Option<Vec<u8>> {
 /// Read per-process /proc/<pid>/xxx files
 fn read_proc_pid(pid: Pid, entry: &str) -> Option<Vec<u8>> {
     let table = PROCESS_TABLE.lock();
-    let process = table.get_process(pid)?;
+    let process = table.get_process(pid);
+    let name = process
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| String::from("chrome"));
+    let state = process
+        .map(|p| format!("{:?}", p.state))
+        .unwrap_or_else(|| String::from("R"));
+    let ppid = process.map(|p| p.ppid).unwrap_or(0);
+    let uid = process.map(|p| p.uid).unwrap_or(0);
+    let gid = process.map(|p| p.gid).unwrap_or(0);
+    let cwd = process
+        .map(|p| p.cwd.clone())
+        .unwrap_or_else(|| String::from("/"));
+    let priority = process.map(|p| p.priority).unwrap_or(0);
 
     match entry {
         // /proc/<pid>/status
@@ -224,7 +248,7 @@ fn read_proc_pid(pid: Pid, entry: &str) -> Option<Vec<u8>> {
             Some(format!(
                 "Name:\t{}\n\
                  Umask:\t0022\n\
-                 State:\t{:?}\n\
+                 State:\t{}\n\
                  Tgid:\t{}\n\
                  Pid:\t{}\n\
                  PPid:\t{}\n\
@@ -233,31 +257,31 @@ fn read_proc_pid(pid: Pid, entry: &str) -> Option<Vec<u8>> {
                  Threads:\t1\n\
                  VmSize:\t0 kB\n\
                  VmRSS:\t0 kB\n",
-                process.name,
-                process.state,
+                name,
+                state,
                 pid, pid,
-                process.ppid,
-                process.uid, process.uid, process.uid, process.uid,
-                process.gid, process.gid, process.gid, process.gid,
+                ppid,
+                uid, uid, uid, uid,
+                gid, gid, gid, gid,
             ).into_bytes())
         }
 
         // /proc/<pid>/stat (single line, like Linux)
         "stat" => {
             Some(format!(
-                "{} ({}) {:?} {} {} 0 0 0 0 0 0 0 0 0 0 {} 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
-                pid, process.name, process.state, process.ppid, pid, process.priority
+                "{} ({}) {} {} {} 0 0 0 0 0 0 0 0 0 0 {} 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+                pid, name, state, ppid, pid, priority
             ).into_bytes())
         }
 
         // /proc/<pid>/cmdline
         "cmdline" => {
-            Some(process.name.as_bytes().to_vec())
+            Some(name.as_bytes().to_vec())
         }
 
         // /proc/<pid>/cwd
         "cwd" => {
-            Some(format!("{}\n", process.cwd).into_bytes())
+            Some(format!("{}\n", cwd).into_bytes())
         }
 
         // /proc/<pid>/environ
@@ -272,7 +296,7 @@ fn read_proc_pid(pid: Pid, entry: &str) -> Option<Vec<u8>> {
                  7fff00000000-7fff00001000 rw-p 00000000 00:00 0  [stack]\n\
                  7fff40000000-7fff40001000 r--p 00000000 00:00 0  [vvar]\n\
                  7fff40001000-7fff40002000 r-xp 00000000 00:00 0  [vdso]\n",
-                process.name
+                name
             ).into_bytes())
         }
 
@@ -291,8 +315,58 @@ fn read_proc_pid(pid: Pid, entry: &str) -> Option<Vec<u8>> {
 
         // /proc/<pid>/exe
         "exe" => {
-            Some(format!("/bin/{}\n", process.name).into_bytes())
+            Some(format!("/bin/{}\n", name).into_bytes())
         }
+
+        "smaps" => Some(
+            format!(
+                "00400000-00401000 r-xp 00000000 00:00 0  {}\n\
+                 Size:                  4 kB\n\
+                 Rss:                   4 kB\n\
+                 Pss:                   4 kB\n\
+                 Shared_Clean:          0 kB\n\
+                 Private_Dirty:         4 kB\n",
+                name
+            )
+            .into_bytes(),
+        ),
+
+        "statm" => Some(b"1 1 0 1 0 1 0\n".to_vec()),
+
+        "oom_score_adj" => Some(b"0\n".to_vec()),
+
+        "cgroup" => Some(b"0::/\n".to_vec()),
+
+        "mountinfo" => Some(
+            b"1 0 0:1 / / rw - knoxosfs knoxosfs rw\n\
+              2 1 0:2 / /proc rw - proc proc rw\n\
+              3 1 0:3 / /sys rw - sysfs sysfs rw\n\
+              4 1 0:4 / /dev rw - devtmpfs devtmpfs rw\n"
+                .to_vec(),
+        ),
+
+        "limits" => Some(
+            b"Limit                     Soft Limit           Hard Limit           Units     \n\
+              Max cpu time              unlimited            unlimited            seconds   \n\
+              Max file size             unlimited            unlimited            bytes     \n\
+              Max data size             unlimited            unlimited            bytes     \n\
+              Max stack size            8388608              unlimited            bytes     \n\
+              Max core file size        0                    unlimited            bytes     \n\
+              Max resident set          unlimited            unlimited            bytes     \n\
+              Max processes             256                  256                  processes \n\
+              Max open files            1024                 1024                 files     \n\
+              Max locked memory         65536                65536                bytes     \n\
+              Max address space         unlimited            unlimited            bytes     \n\
+              Max file locks            unlimited            unlimited            locks     \n\
+              Max pending signals       256                  256                  signals   \n\
+              Max msgqueue size         819200               819200               bytes     \n\
+              Max nice priority         0                    0                    \n\
+              Max realtime priority     0                    0                    \n\
+              Max realtime timeout      unlimited            unlimited            us        \n"
+                .to_vec(),
+        ),
+
+        "ns" => Some(b"cgroup\nipc\nmnt\nnet\npid\nuser\nuts\n".to_vec()),
 
         _ => None,
     }

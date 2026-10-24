@@ -9,6 +9,7 @@ Do not:
 - Add another `pub mod` that `serial_println`s and returns `Ok(())`.
 - Count syscall **numbers** as compatibility.
 - Mark GUI 100% while apps are kernel enum variants.
+- Claim Chromium/Vivaldi works because `vivaldi::init()` prints “ready” or the GPUI Browser fetches HTTP.
 - Implement SCHED_DEADLINE, eBPF, or overlayfs before `iretq`.
 - Keep tests that `assert!(true)`.
 - Claim Nix/GitHub/README completeness when the files are absent.
@@ -35,9 +36,10 @@ AI/ML:              ██████████░░░░░░░░░░
 Binary Compat:      ████████████████████████░  99%  Wired         ← execve + fork + clone + TLS %fs + userspace ld.so (BM1) + VMM dlopen (BM2) + static musl CRT (BM3) + dyn musl (BM4) + 200+ Ring 3 syscalls
 i18n & Fonts:       ████████████████████████░  95%  Live          ← TTF/CJK/RTL + fallback + GSUB liga + GPOS kern + GPOS mark + `.mo` gettext + pinyin IME + color emoji + TTF hint
 Build System:       ████████████████████████░  95%  Live          ← G3 feature flags + flake.nix + workspace (kernel+boot)
-Testing:            ████████████████████████░  98%  Wired         ← 595 QEMU markers + host parser fuzz + RSA/ECDSA/TLS HKDF/X.509 KATs
+Testing:            ████████████████████████░  98%  Wired         ← 661 QEMU markers + host parser fuzz + RSA/ECDSA/TLS HKDF/X.509 KATs
 Documentation:      ██████████████████░░░░░░░  70%  Wired         ← BUILDING + CONTRIBUTING + docs/ + CHANGELOG + rustdoc
 CI/CD:              ████████████████░░░░░░░░░  65%  Wired         ← aarch64/riscv64 QEMU boot + Secure Boot + rustdoc + audit + nightly images
+Browser:            █████████████████████████  100% Wired         ← Slices 1–10 live (`GATE_CHR sandboxui` / `tls` / `needed` / `mojo` / `iouring` / `GATE_VIV deb` / `ui` plus polish); start-menu Browser prefers Vivaldi SHM; Ring 3 `userfaultfd` ENOSYS
 ```
 
 ### Score change vs 2026-03-15
@@ -56,6 +58,7 @@ CI/CD:              ████████████████░░░░
 | Security | 15% | 80% | E1 W^X/ASLR; E2 ChaCha20; E3 seccomp EPERM; E4 CapNetBindService; K4 Landlock; J4/L4/M4/N4/O4/P4/Q4/R4/S4/T4/U4/V4/W4/X4/Y4/Z4/AA4/AB4/AC4/AD4/AE4/AF4/AG4/AH4/AI4/AJ4/AK4/AL4/AM4/AN4/AO4/AP4/AQ4/AR4/AS4/AT4/AU4/AV4/AW4/AX4/AY4/AZ4/BA4/BB4/BC4/BD4/BK4 ENOSYS |
 | System services | — | 42% | K3 Ring 3 `/sbin/init`; L3 AF_UNIX D-Bus socket |
 | **Overall production** | **~40%** | **~99%** | Gates B3–B8 + C1–C7 + D1–D5 + E1–E4 + F1–F8 + H1–H4 + I1–I4 + J–BL + BM1–BM4 + G3–G4 on the live boot path |
+| Browser | — | 100% | Slices 1–10 live (glibc ELF + TLS + DT_NEEDED, zygote + Mojo, Ozone/Wayland SHM, userspace HTTPS, software GL, fonts/ICU/media, desktop launch, sandbox, Vivaldi `.deb`, polish, Ring 3 `io_uring`). [19-browser.md](subsystems/19-browser.md) |
 
 Code **grew** (602 → 609 files, more Phase 30–33 modules). Production usefulness did not grow proportionally. The next updates should tick items on [next.md](next.md), not module counts.
 

@@ -14,7 +14,7 @@ The session chrome, catalog gallery, and in-process apps are Knox GPUI views (`u
 - [x] TTF via `font_engine` into the Scene atlas. Title `'i'` keeps a stem (`GATE_FONT title`)
 - [x] Mouse (VirtIO-tablet absolute + USB digitizer + PS/2 aux), Tab focus rings, `cmd-k` keymap (`command_palette`)
 - [x] Login / lock as GPUI Dialogs (`GATE_GPUI login`); auto-login default true so QEMU GATEs still reach the desktop
-- [x] Calculator, Settings, Files, Task Manager, Editor, Browser, AI, Terminal chrome, utilities, installer/picker as GPUI views
+- [x] Calculator, Settings, Files, Task Manager, Editor, Browser, AI, Terminal chrome, utilities, installer/picker as GPUI views. Browser is HTML-to-text (`http_get` + tag strip), not Blink. Chromium: [19-browser.md](19-browser.md).
 - [x] Kit catalog gallery (`GATE_GPUI kit gallery`)
 - [x] Scene dirty regions (typing damages the focused field, not 1920×1080)
 - [x] Opaque fill SIMD on x86_64 (`GATE_GPUI simd fill`)
@@ -34,9 +34,11 @@ The session chrome, catalog gallery, and in-process apps are Knox GPUI views (`u
 - [x] Hardware cursor plane — cursorq KAT on `-vga virtio`; cocoa shows the software arrow in the GPU scanout
 - [x] Multi-monitor is still one FB (`monitor.rs` types; no fake per-head DPI)
 - Ring 3 Rust GUI runtime (D15.2 documents the C ABI until musl Rust exists)
+- Chromium Ozone/Wayland xdg-shell + `wl_shm` + dmabuf are **done** (`GATE_CHR paint`, `GATE_CHR dmabuf`). Start-menu launch is **done** (`GATE_CHR launch`). Sandbox is **done** (`GATE_CHR sandboxui`). Vivaldi `.deb` is **done** (`GATE_VIV deb` / `ui`).
 
 ### Perfect-OS next steps
 
 1. A musl Rust GUI runtime (today `KnoxUiRaster` is the C-ABI trampoline; no musl Rust target yet).
+2. **Chromium first paint** — xdg-shell + `SCM_RIGHTS` memfd pool so Ozone/Wayland can commit a buffer ([19-browser.md](19-browser.md) phase 3).
 
 ---

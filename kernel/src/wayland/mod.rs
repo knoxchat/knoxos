@@ -45,11 +45,15 @@ pub use gates::{
     GATE_WL_MARKER, WAYLAND_SOCKET_PATH, shm_pool_self_test,
 };
 pub use present::{
-    dismiss_gate_demo_windows, forget_window, present_unix_buffer, present_user_buffer,
-    pty_key_to_window, ring3_calc_key_self_test, set_window_shm_pixels, window_pty,
-    window_shm_pixels,
+    dismiss_gate_demo_windows, forget_window, present_chromium_shm, present_unix_buffer,
+    present_user_buffer, present_vivaldi_shm, pty_key_to_window, ring3_calc_key_self_test,
+    set_window_shm_pixels, window_pty, window_shm_pixels,
 };
-pub use protocol::{dispatch_client_bytes, on_client_connected};
+pub use protocol::{
+    GATE_CHR_PAINT_MAGIC, GATE_VIV_PAINT_MAGIC, dispatch_client_bytes,
+    dispatch_client_bytes_with_fds, gl_wayland_blob, on_client_connected, ozone_protocol_self_test,
+    ozone_wayland_blob,
+};
 pub use seat::{PointerAxis, PointerButton, Seat};
 pub use shm::{PixelFormat, ShmBuffer, ShmPool};
 pub use surface::{DamageRect, Popup, Surface, SurfaceRole, SurfaceState, Toplevel, ToplevelState};

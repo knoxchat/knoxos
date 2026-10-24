@@ -501,6 +501,8 @@ pub fn install_dynlink_files() {
     vfs.write_file(MUSL_BIN_PATH, &musl_static_user_elf_data());
     vfs.write_file(MUSL_DYN_BIN_PATH, &musl_dyn_user_elf_data());
     vfs.write_file(MUSL_UI_BIN_PATH, &musl_ui_user_elf_data());
+    drop(vfs);
+    super::install_chromium_files();
 }
 
 // ─── Runtime dlopen (Gate BM2) ──────────────────────────────────────────
@@ -685,3 +687,4 @@ include!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../userspace/libs/libc/elf.rs"
 ));
+include!("chromium_elf.rs");

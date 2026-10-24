@@ -24,5 +24,6 @@
 2. `README.md`: what KnoxOS is, honesty paragraph, `./run.sh`, screenshots, link here.
 3. Boot flow diagram: bootloader → `kernel_main` → compositor loop.
 4. Syscall table: **behavior** (`Ok(0)` vs implemented vs ENOSYS), not just numbers.
+5. Browser backlog lives in [19-browser.md](19-browser.md); `docs/gui.md` records Chromium/Vivaldi SHM (`GATE_CHR paint` / `GATE_VIV ui`).
 
 ---

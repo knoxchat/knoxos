@@ -436,7 +436,37 @@ pub fn sys_getrandom(buf_ptr: u64, len: usize, flags: u32) -> SyscallResult {
 
 // ── Seccomp ─────────────────────────────────────────────────────────
 
-pub fn sys_seccomp(operation: u32, _flags: u32, _args: u64) -> SyscallResult {
+fn copy_sock_fprog(
+    pid: u32,
+    ptr: u64,
+) -> Result<alloc::vec::Vec<crate::seccomp::BpfInsn>, SyscallError> {
+    if ptr == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let mut hdr = [0u8; 16];
+    crate::vmm::read_user_memory(pid, ptr, &mut hdr);
+    let len = u16::from_ne_bytes([hdr[0], hdr[1]]) as usize;
+    let filter_ptr = u64::from_ne_bytes([
+        hdr[8], hdr[9], hdr[10], hdr[11], hdr[12], hdr[13], hdr[14], hdr[15],
+    ]);
+    if len == 0 || len > 4096 || filter_ptr == 0 {
+        return Err(SyscallError::InvalidArgument);
+    }
+    let mut raw = alloc::vec![0u8; len * 8];
+    crate::vmm::read_user_memory(pid, filter_ptr, &mut raw);
+    let mut insns = alloc::vec::Vec::with_capacity(len);
+    for chunk in raw.chunks_exact(8) {
+        insns.push(crate::seccomp::BpfInsn {
+            code: u16::from_ne_bytes([chunk[0], chunk[1]]),
+            jt: chunk[2],
+            jf: chunk[3],
+            k: u32::from_ne_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]),
+        });
+    }
+    Ok(insns)
+}
+
+pub fn sys_seccomp(operation: u32, _flags: u32, args: u64) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
     match operation {
         1 => {
@@ -446,8 +476,14 @@ pub fn sys_seccomp(operation: u32, _flags: u32, _args: u64) -> SyscallResult {
                 .map_err(|_| SyscallError::InvalidArgument)
         }
         2 => {
-            // SECCOMP_SET_MODE_FILTER
-            crate::seccomp::seccomp_set_mode_filter(pid, alloc::vec![])
+            // SECCOMP_SET_MODE_FILTER — copy the userspace sock_fprog BPF.
+            // Linux requires NO_NEW_PRIVS unless CAP_SYS_ADMIN.
+            let uid = crate::users::get_current_uid();
+            if !super::advanced::no_new_privs(pid) && uid != 0 {
+                return Err(SyscallError::PermissionDenied);
+            }
+            let program = copy_sock_fprog(pid, args)?;
+            crate::seccomp::seccomp_set_mode_filter(pid, program)
                 .map(|_| 0u64)
                 .map_err(|_| SyscallError::InvalidArgument)
         }

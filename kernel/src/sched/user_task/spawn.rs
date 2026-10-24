@@ -107,6 +107,9 @@ pub fn spawn_elf(
 
     let cr3 = crate::vmm::get_cr3(pid).unwrap_or(0);
     crate::context::create_user_process_context(pid, entry, initial_rsp, cr3);
+    if loaded.tls_tp != 0 {
+        crate::context::set_user_fs_base(pid, loaded.tls_tp);
+    }
 
     {
         let mut table = crate::process::PROCESS_TABLE.lock();

@@ -14,8 +14,8 @@
 
 ### Explicitly later (after Gates A–E)
 
-KVM, containers/k8s, ZFS, WPA3/bridge, TLS 1.3 handshake/X.509 chain, GPU compute, AI inference, package formats, Chromium/Vivaldi, aarch64/riscv64 **runtime**, Thunderbolt, TPM measured boot.
+k8s orchestration, aarch64/riscv64 **runtime**, nested VT-x on real hardware, RPM/APK, production tokenizer vocab, another unused `pub mod`.
 
-Shipping these before Gate B **increases** the distance to a perfect OS.
+Chromium slices 1–10 (including Vivaldi `.deb` and Ring 3 `io_uring`) are live: [19-browser.md](../subsystems/19-browser.md). Ring 3 `userfaultfd` stays ENOSYS. Shipping k8s or a new unused `pub mod` **increases** the distance to a perfect OS.
 
 ---

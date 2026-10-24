@@ -356,6 +356,18 @@ pub fn nss_resolve_host(hostname: &str) -> Option<NssHostResult> {
         });
     }
 
+    // Chromium getaddrinfo: off-box A/AAAA, not NSS localhost-only.
+    if let Some((a, aaaa)) = crate::init::chrome_nss_lookup(hostname) {
+        let mut v4 = [0u8; 16];
+        v4[..4].copy_from_slice(&a);
+        return Some(NssHostResult {
+            name: String::from(hostname),
+            aliases: vec![],
+            addr_type: 2,
+            addresses: vec![v4, aaaa],
+        });
+    }
+
     None
 }
 

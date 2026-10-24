@@ -93,6 +93,11 @@ pub(crate) fn memfd_id_from_path(path: &str) -> Option<u64> {
     path.strip_prefix("memfd:")?.parse().ok()
 }
 
+/// Parse `iouring:{id}` written by `io_uring_setup`.
+pub(crate) fn iouring_id_from_path(path: &str) -> Option<u64> {
+    path.strip_prefix("iouring:")?.parse().ok()
+}
+
 /// Parse `timerfd:{id}` written by `sys_timerfd_create`.
 pub(crate) fn timerfd_id_from_path(path: &str) -> Option<i32> {
     path.strip_prefix("timerfd:")?.parse().ok()
@@ -171,7 +176,38 @@ pub enum FileType {
     ProcFile,
 }
 
+fn encode_file_type(t: FileType) -> u8 {
+    match t {
+        FileType::Regular => 0,
+        FileType::Directory => 1,
+        FileType::CharDevice => 2,
+        FileType::BlockDevice => 3,
+        FileType::Pipe => 4,
+        FileType::Fifo => 5,
+        FileType::Socket => 6,
+        FileType::Symlink => 7,
+        FileType::StdIO => 8,
+        FileType::ProcFile => 9,
+    }
+}
+
+fn decode_file_type(v: u8) -> FileType {
+    match v {
+        1 => FileType::Directory,
+        2 => FileType::CharDevice,
+        3 => FileType::BlockDevice,
+        4 => FileType::Pipe,
+        5 => FileType::Fifo,
+        6 => FileType::Socket,
+        7 => FileType::Symlink,
+        8 => FileType::StdIO,
+        9 => FileType::ProcFile,
+        _ => FileType::Regular,
+    }
+}
+
 /// An open file description (shared between dup'd fds)
+#[derive(Clone)]
 pub struct OpenFile {
     /// Path in the VFS
     pub path: String,
@@ -208,6 +244,34 @@ impl OpenFile {
             buffer: None,
             cloexec: flags.0 & OpenFlags::O_CLOEXEC != 0,
             nonblock: flags.0 & OpenFlags::O_NONBLOCK != 0,
+        }
+    }
+
+    pub fn to_unix_rights(&self) -> crate::uds::UnixRights {
+        crate::uds::UnixRights {
+            path: self.path.clone(),
+            file_type: encode_file_type(self.file_type),
+            flags: self.flags.0,
+            offset: self.offset,
+            size: self.size,
+            inode: self.inode,
+            cloexec: self.cloexec,
+            nonblock: self.nonblock,
+        }
+    }
+
+    pub fn from_unix_rights(rights: crate::uds::UnixRights) -> Self {
+        Self {
+            path: rights.path,
+            file_type: decode_file_type(rights.file_type),
+            flags: OpenFlags(rights.flags),
+            offset: rights.offset,
+            size: rights.size,
+            ref_count: 1,
+            inode: rights.inode,
+            buffer: None,
+            cloexec: rights.cloexec,
+            nonblock: rights.nonblock,
         }
     }
 
@@ -289,6 +353,13 @@ impl FdTable {
         Ok(fd)
     }
 
+    /// Install a snapshot (for example an `SCM_RIGHTS` payload) as a new fd.
+    pub fn install(&mut self, file: OpenFile) -> Result<Fd, i32> {
+        let fd = self.alloc_fd().ok_or(-24i32)?; // EMFILE
+        self.files.insert(fd, file);
+        Ok(fd)
+    }
+
     /// Close a file descriptor
     pub fn close(&mut self, fd: Fd) -> Result<(), i32> {
         let file = self.files.remove(&fd).ok_or(-9i32)?;
@@ -318,6 +389,9 @@ impl FdTable {
         }
         if let Some(id) = memfd_id_from_path(&file.path) {
             crate::memfd::memfd_close(id);
+        }
+        if let Some(id) = iouring_id_from_path(&file.path) {
+            crate::io_uring::io_uring_destroy(id);
         }
         if let Some(id) = timerfd_id_from_path(&file.path) {
             crate::timerfd::timerfd_close(id);
@@ -515,6 +589,22 @@ impl FdTable {
                 crate::uds::socket_recv(id, buf)
             }
             FileType::Regular | FileType::ProcFile => {
+                if file.file_type == FileType::ProcFile {
+                    if let Some(data) = crate::procfs::read_proc_file(&file.path) {
+                        let available = if file.offset >= data.len() {
+                            0
+                        } else {
+                            data.len() - file.offset
+                        };
+                        let to_read = buf.len().min(available);
+                        if to_read > 0 {
+                            buf[..to_read]
+                                .copy_from_slice(&data[file.offset..file.offset + to_read]);
+                            file.offset += to_read;
+                        }
+                        return Ok(to_read);
+                    }
+                }
                 if file.file_type == FileType::Regular {
                     let mut ino = file.inode;
                     if ino == 0 {
@@ -954,6 +1044,29 @@ pub fn sys_fstat(fd: Fd) -> Result<FileStat, i32> {
     } else {
         Err(-9) // EBADF
     }
+}
+
+/// Snapshot open files for `SCM_RIGHTS` send.
+pub fn snapshot_rights(pid: u32, fds: &[Fd]) -> Vec<crate::uds::UnixRights> {
+    let tables = PROCESS_FD_TABLES.lock();
+    let Some(table) = tables.get(&pid) else {
+        return Vec::new();
+    };
+    fds.iter()
+        .filter_map(|&fd| table.get(fd).map(|f| f.to_unix_rights()))
+        .collect()
+}
+
+/// Install `SCM_RIGHTS` snapshots into `pid`'s fd table. Returns the new fds.
+pub fn install_rights(pid: u32, rights: Vec<crate::uds::UnixRights>) -> Vec<Fd> {
+    let mut tables = PROCESS_FD_TABLES.lock();
+    let Some(table) = tables.get_mut(&pid) else {
+        return Vec::new();
+    };
+    rights
+        .into_iter()
+        .filter_map(|r| table.install(OpenFile::from_unix_rights(r)).ok())
+        .collect()
 }
 
 /// Get the path of an open file descriptor

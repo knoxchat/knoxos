@@ -29,4 +29,8 @@
 - [x] Suspend/hibernate, logind — S3 save/restore hooks (`GATE_SUSPEND resume`); session create/list/terminate (`GATE_LOGIND session`)
 - [x] PulseAudio mixing to HDA (`GATE_PA mix`)
 
----
+### Perfect-OS next steps
+
+1. ~~**Chromium-shaped D-Bus**~~ **Done** (slice 7) — session `Hello` unique name (`GATE_CHR dbus`); page notifications (`GATE_CHR notify`); XDG FileChooser/ScreenCast/Settings/Secret (`GATE_CHR portal`). Kernel `GATE_DBUS` remains the bus KAT.
+2. ~~**Pulse native protocol**~~ **Done** (slice 6) — Chromium AUTH + tone on `/run/user/1000/pulse/native` (`GATE_CHR pulse`). `GATE_PA mix` remains the kernel mixer KAT.
+

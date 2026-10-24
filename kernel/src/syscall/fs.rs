@@ -87,7 +87,11 @@ pub(crate) fn open_path(path: &str, flags: u32, mode: u16) -> SyscallResult {
     } else {
         crate::landlock::LANDLOCK_ACCESS_FS_READ_FILE
     };
-    if !crate::landlock::check_process_fs_access(pid as u64, &path, access) {
+    if !crate::landlock::check_process_fs_access(
+        crate::landlock::current_check_pid(),
+        &path,
+        access,
+    ) {
         return Err(SyscallError::PermissionDenied);
     }
 

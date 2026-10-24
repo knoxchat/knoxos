@@ -364,6 +364,19 @@ pub fn fork_into_new_pid_ns(parent: u32, child: u32) -> Result<u32, i32> {
     PIDNS.lock().fork_into_new_pid_ns(parent, child)
 }
 
+/// Move an already-forked process into a fresh PID namespace as PID 1.
+pub fn move_to_new_pid_ns(global_pid: u32) -> Result<u32, i32> {
+    let mut state = PIDNS.lock();
+    let parent_ns = state
+        .process_ns
+        .get(&global_pid)
+        .copied()
+        .unwrap_or(state.root_ns);
+    state.remove_process(global_pid);
+    let new_ns = state.create_namespace(parent_ns, global_pid)?;
+    state.add_process(global_pid, new_ns)
+}
+
 pub fn ns_pid(global_pid: u32) -> u32 {
     PIDNS.lock().ns_pid(global_pid)
 }

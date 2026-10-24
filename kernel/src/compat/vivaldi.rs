@@ -164,8 +164,7 @@ impl VivaldiInstance {
                 String::from("--use-gl=egl"),
                 String::from("--enable-gpu-rasterization"),
                 String::from("--enable-zero-copy"),
-                String::from("--disable-gpu-sandbox"),
-                String::from("--no-sandbox-and-elevated"), // KnoxOS manages sandbox
+                String::from("--disable-widevine-cdm"),
             ],
         }
     }
@@ -448,65 +447,17 @@ pub fn launch(url: Option<&str>) -> Result<(), String> {
     //   f. Jump to ld-linux-x86-64.so.2 entry (or our linker)
     //   g. Linker calls __libc_start_main → main()
 
-    // Register the browser process
-    instance.processes.push(VivaldiProcess {
-        pid: allocate_pid(),
-        role: ProcessRole::Browser,
-        sandbox_active: false, // Browser process is NOT sandboxed
-        memory_kb: 0,
-        cpu_time_ms: 0,
-    });
+    drop(instance);
 
-    // The browser process will then spawn:
-    // - Zygote (fork server)
-    // - GPU process
-    // - Renderer processes (one per tab)
-    // - Utility processes (audio service, network service)
-
-    // Spawn Zygote fork server
-    serial_println!("[vivaldi] Starting Zygote fork server...");
-    instance.processes.push(VivaldiProcess {
-        pid: allocate_pid(),
-        role: ProcessRole::Zygote,
-        sandbox_active: true,
-        memory_kb: 0,
-        cpu_time_ms: 0,
-    });
-
-    // Spawn GPU process
-    serial_println!("[vivaldi] Starting GPU process...");
-    instance.processes.push(VivaldiProcess {
-        pid: allocate_pid(),
-        role: ProcessRole::GpuProcess,
-        sandbox_active: true,
-        memory_kb: 0,
-        cpu_time_ms: 0,
-    });
-
-    // Spawn initial renderer for the first tab
-    serial_println!("[vivaldi] Starting initial renderer process...");
-    instance.processes.push(VivaldiProcess {
-        pid: allocate_pid(),
-        role: ProcessRole::Renderer,
-        sandbox_active: true,
-        memory_kb: 0,
-        cpu_time_ms: 0,
-    });
-
-    // Spawn crashpad handler
-    serial_println!("[vivaldi] Starting crash handler...");
-    instance.processes.push(VivaldiProcess {
-        pid: allocate_pid(),
-        role: ProcessRole::CrashHandler,
-        sandbox_active: false,
-        memory_kb: 0,
-        cpu_time_ms: 0,
-    });
-
-    instance.state = VivaldiState::Running;
+    if !crate::init::launch_vivaldi_from_desktop(url.unwrap_or("vivaldi://newtab")) {
+        let mut instance = INSTANCE.lock();
+        instance.state = VivaldiState::Crashed;
+        return Err(String::from("spawn vivaldi-bin failed"));
+    }
+    let instance = INSTANCE.lock();
 
     serial_println!(
-        "[vivaldi] Vivaldi {} running ({} processes)",
+        "[vivaldi] Vivaldi {} running ({} scheduler tasks)",
         instance.version,
         instance.processes.len()
     );
@@ -540,15 +491,22 @@ fn create_profile_directories(user_data_dir: &str) {
 
     for dir in &dirs {
         let path = format!("{}{}", user_data_dir, dir);
-        // In a full implementation: crate::vfs::create_dir_all(&path);
+        crate::vfs::ensure_directory(&path);
         serial_println!("[vivaldi] Created directory: {}", path);
     }
 }
 
-/// PID allocator for Vivaldi sub-processes
-fn allocate_pid() -> u64 {
-    static NEXT_PID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1000);
-    NEXT_PID.fetch_add(1, core::sync::atomic::Ordering::Relaxed)
+fn spawn_role(path: &str, name: &str, argv: &[&str]) -> Result<u64, String> {
+    let Some(elf) = crate::vfs::VFS.lock().read_file(path).map(|d| d.to_vec()) else {
+        return Err(format!("missing {path}"));
+    };
+    if !crate::elf::is_elf(&elf) {
+        return Err(format!("{path} is not ELF"));
+    }
+    match crate::user_task::spawn_elf(&elf, name, argv, &[], None) {
+        crate::user_task::SpawnOutcome::Spawned(pid) => Ok(pid as u64),
+        _ => Err(format!("spawn {name} failed")),
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -563,7 +521,13 @@ pub fn spawn_renderer(site_url: &str) -> Result<u64, String> {
         return Err(String::from("Vivaldi is not running"));
     }
 
-    let pid = allocate_pid();
+    drop(instance);
+    let pid = spawn_role(
+        crate::init::VIVALDI_BIN_PATH,
+        "vivaldi-renderer",
+        &["--type=renderer", site_url],
+    )?;
+    let mut instance = INSTANCE.lock();
 
     serial_println!(
         "[vivaldi] Spawning renderer process {} for: {}",
@@ -571,7 +535,6 @@ pub fn spawn_renderer(site_url: &str) -> Result<u64, String> {
         site_url
     );
 
-    // Apply sandbox via chromium_sandbox
     let profile = crate::chromium_sandbox::SandboxProfile::renderer();
     let _ = crate::chromium_sandbox::apply_sandbox(pid as u32, profile);
 
@@ -839,4 +802,28 @@ pub fn mark_installed(version: &str) {
     instance.state = VivaldiState::Installed;
     instance.version = version.to_string();
     serial_println!("[vivaldi] Marked as installed: {}", version);
+}
+
+/// Record a live `spawn_elf` browser PID (scheduler task, not an atomic).
+pub fn record_launched(pid: u32, version: &str) -> Result<(), String> {
+    if pid <= 1
+        || crate::process::PROCESS_TABLE
+            .lock()
+            .get_process(pid)
+            .is_none()
+    {
+        return Err(String::from("vivaldi pid is not a scheduler task"));
+    }
+    let mut instance = INSTANCE.lock();
+    instance.state = VivaldiState::Running;
+    instance.version = version.to_string();
+    instance.processes.clear();
+    instance.processes.push(VivaldiProcess {
+        pid: pid as u64,
+        role: ProcessRole::Browser,
+        sandbox_active: false,
+        memory_kb: 0,
+        cpu_time_ms: 0,
+    });
+    Ok(())
 }

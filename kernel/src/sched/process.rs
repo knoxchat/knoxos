@@ -456,7 +456,7 @@ pub fn exec_elf(elf_data: &[u8], name: &str, argv: &[&str], envp: &[&str]) -> Op
     }
 
     // 3. Load ELF segments into the address space
-    let (entry_point, _brk) = match crate::vmm::load_elf_into_address_space(pid, elf_data) {
+    let (entry_point, _brk, tls_tp) = match crate::vmm::load_elf_into_address_space(pid, elf_data) {
         Ok(result) => result,
         Err(e) => {
             crate::serial_println!("[exec] Failed to load ELF for PID {}: {}", pid, e);
@@ -495,6 +495,9 @@ pub fn exec_elf(elf_data: &[u8], name: &str, argv: &[&str], envp: &[&str]) -> Op
 
     // 8. Create user-mode context with CR3
     crate::context::create_user_process_context(pid, entry_point, initial_rsp, cr3);
+    if tls_tp != 0 {
+        crate::context::set_user_fs_base(pid, tls_tp);
+    }
 
     // 9. Set up fd table, signals, and scheduler entry
     crate::fd::create_fd_table(pid);

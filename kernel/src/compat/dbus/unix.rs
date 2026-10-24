@@ -3,9 +3,12 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::serial_println;
 
 static SYSTEM_LISTEN_ID: AtomicU32 = AtomicU32::new(0);
+static SESSION_LISTEN_ID: AtomicU32 = AtomicU32::new(0);
 
 /// Path of the live system bus AF_UNIX socket.
 pub const SYSTEM_BUS_PATH: &str = "/run/dbus/system_bus_socket";
+/// Path of the live session bus AF_UNIX socket.
+pub const SESSION_BUS_PATH: &str = "/run/user/1000/bus";
 pub const GATE_L3_MARKER: &str = "GATE_L3 dbus unix";
 
 /// Bind + listen `/run/dbus/system_bus_socket` once.
@@ -23,6 +26,24 @@ pub(super) fn ensure_system_bus_listen() -> Option<u32> {
     crate::uds::socket_bind(id, SYSTEM_BUS_PATH).ok()?;
     crate::uds::socket_listen(id, 16).ok()?;
     SYSTEM_LISTEN_ID.store(id, Ordering::Relaxed);
+    Some(id)
+}
+
+/// Bind + listen `/run/user/1000/bus` once.
+pub fn ensure_session_bus_listen() -> Option<u32> {
+    let existing = SESSION_LISTEN_ID.load(Ordering::Relaxed);
+    if existing != 0 {
+        return Some(existing);
+    }
+    if let Some(id) = crate::uds::socket_id_for_path(SESSION_BUS_PATH) {
+        SESSION_LISTEN_ID.store(id, Ordering::Relaxed);
+        return Some(id);
+    }
+    crate::vfs::ensure_directory("/run/user/1000");
+    let id = crate::uds::socket_create(crate::uds::UnixSocketType::Stream).ok()?;
+    crate::uds::socket_bind(id, SESSION_BUS_PATH).ok()?;
+    crate::uds::socket_listen(id, 16).ok()?;
+    SESSION_LISTEN_ID.store(id, Ordering::Relaxed);
     Some(id)
 }
 

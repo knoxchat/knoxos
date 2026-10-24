@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Chromium Ring 3 `io_uring`** — `io_uring_setup(8)` returns a ring fd and a NOP CQE (`GATE_CHR iouring`); `io_uring_setup(0,0)` stays `-ENOSYS` (M4); Ring 3 `userfaultfd` stays `-ENOSYS` (N4).
+- **Vivaldi `.deb`** — live dpkg `vivaldi-stable`; `/opt/vivaldi/vivaldi-bin` is a loadable ELF (`GATE_VIV deb`); Vivaldi chrome paints (`GATE_VIV ui`); sync fails with a real TLS error (`GATE_VIV sync`); Widevine disabled (`GATE_VIV cdm`). `vivaldi::launch` uses `spawn_elf` scheduler PIDs.
+- **Chromium glibc loader leftover** — PT_TLS `%fs` (`GATE_CHR tls`); DT_NEEDED `.so`s as real ELFs (`GATE_CHR needed`); skip-GTK Ozone (`GATE_CHR ozone`); host `scripts/check-chromium-ldd.sh` rejects stub `.so`s (`GATE_CHR ldd`).
+- **Chromium Mojo** — browser → zygote → renderer `socketpair` without `--single-process` (`GATE_CHR mojo`).
+- **Chromium polish** — unpacked extension (`GATE_CHR extensions`); `getUserMedia` (`GATE_CHR webrtc`); `~/Downloads` (`GATE_CHR download`); DevTools (`GATE_CHR devtools`); incognito (`GATE_CHR profiles`); HiDPI scale 2 (`GATE_CHR hidpi`); WebGPU (`GATE_CHR webgpu`).
+- **Chromium desktop launch** — session bus `Hello` + `RequestName` `org.chromium.Chromium` (`GATE_CHR dbus`); page `Notify` in the Knox tray (`GATE_CHR notify`); XDG FileChooser/ScreenCast/Settings/Secret (`GATE_CHR portal`); `xdg-open https://` execs Chromium (`GATE_CHR mime`); `libcups.so.2` + `--disable-print-preview` (`GATE_CHR cups`); start-menu Browser execs `/opt/chromium/chrome` SHM, GPUI HTML-to-text only if the ELF is missing (`GATE_CHR launch`).
+- **Chromium fonts/ICU/media** — real `icudtl.dat` `CmnD` TOC so V8 starts (`GATE_CHR icu`); `libfontconfig`+`libfreetype` on `/etc/fonts` + Inter TTF (`GATE_CHR fontconfig`); `libffmpeg.so` H.264/AAC/VP9/AV1 decodes a local MP4 (`GATE_CHR ffmpeg`); Pulse native AUTH+tone on `/run/user/1000/pulse/native` (`GATE_CHR pulse`); ALSA `/dev/snd/pcmC0D0p` playback without Pulse (`GATE_CHR alsa`); video+audio CSS/JS in the Chromium SHM window (`GATE_CHR media`).
+- **Chromium software GL** — Ring 3 `drmGetVersion` on `/dev/dri/card0` (`GATE_CHR drm`); `--use-gl=swiftshader` GLES2 (`GATE_CHR egl`); `zwp_linux_dmabuf_v1` + PRIME (`GATE_CHR dmabuf`); `chrome://gpu` reports SwiftShader WebGL (`GATE_CHR virgl`); CSS/JS gpuinfo in the Chromium SHM window (`GATE_CHR gpuinfo`).
+- **Chromium HTTPS** — userspace `getaddrinfo` off-box A/AAAA (`GATE_CHR dns`); BoringSSL/NSS ClientHello on the chrome socket with `cert9.db` (`GATE_CHR nss`); TLS 1.3 records (`GATE_CHR tlsrec`); Happy Eyeballs + HTTP/2 SETTINGS (`GATE_CHR h2`); cookie jar + bad-cert alert (`GATE_CHR cookies`); `https://` CSS/JS in the Chromium SHM window (`GATE_CHR https`).
+- **Chromium Ozone SHM** — Linux `wl_shm.create_pool` via `SCM_RIGHTS`+memfd (`GATE_CHR wlshm`); xdg-shell toplevel (`GATE_CHR xdgshell`); `wl_seat` click+key (`GATE_CHR wlseat`); `wl_output`+`wl_surface.frame` (`GATE_CHR wloutput`); clipboard `wl_data_source` (`GATE_CHR wldata`); `zwp_text_input_v3` (`GATE_CHR textinput`); first paint is Chromium SHM, not GPUI Browser (`GATE_CHR paint`).
+- **Chromium Linux shape** — `/proc/self/{maps,status,stat,smaps,…}` (`GATE_CHR proc`); cpuinfo/meminfo/sysctl (`GATE_CHR sysctl`); `/dev/{null,zero,urandom,shm,dri}` (`GATE_CHR dev`); `/etc/{passwd,nsswitch,hosts,resolv,ssl}` (`GATE_CHR etc`); XDG dirs (`GATE_CHR xdg`).
+- **Chromium SCM_RIGHTS** — Ring 3 `socketpair` `sendmsg`/`recvmsg` passes a memfd (`GATE_CHR scmrights`).
+- **Chromium zygote** — Ring 3 `fork`+`execve` of `/opt/chromium/chrome-zygote` with `--type=zygote --no-sandbox --single-process` (`GATE_CHR fork`).
+- **Chromium unpack** — `/opt/chromium/chrome` is ELF64 with `PT_INTERP` `/lib64/ld-linux-x86-64.so.2`; `icudtl.dat` has ICU `0xDA27`; `resources.pak` is v5 (`GATE_CHR unpack`).
+- **Chromium exec** — Ring 3 `_start` of that ELF runs (`GATE_CHR exec`). A shebang interp is not ELF.
+- **Chromium ld-linux** — `/lib64/ld-linux-x86-64.so.2` is the userspace interpreter mapped as `PT_INTERP` (`GATE_CHR ldso`).
+- **Chromium glibc** — `/lib/libc.so.6` `__libc_start_main` calls `main` (`GATE_CHR glibc`).
 - **FUSE INIT** — known mount returns major 7; unknown mount or major 0 fails (`GATE_FUSE init`).
 - **FUSE FORGET** — known nodeid succeeds; unknown nodeid or nlookup 0 fails (`GATE_FUSE forget`).
 - **D-Bus PropertiesChanged** — delivered after `ReloadConfig` (`GATE_DBUS propschanged`).

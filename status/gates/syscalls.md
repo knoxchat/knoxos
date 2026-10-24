@@ -38,7 +38,7 @@ These gates prove Linux syscalls and namespaces on the QEMU boot path. They are 
 | M1 | PID namespace isolation | **Done** — `unshare(CLONE_NEWPID)` child `getpid` is 1; parent unchanged (`GATE_M1 pid ns`) |
 | M2 | `pipe()` write/read round-trip | **Done** — Ring 3 write/read through the shared ipc buffer (`GATE_M2 pipe`) |
 | M3 | futex wait/wake | **Done** — `clone(CLONE_VM)` child `FUTEX_WAIT`s; parent `FUTEX_WAKE`s (`GATE_M3 futex`) |
-| M4 | More silent `Ok(0)` → ENOSYS | **Done** — Ring 3 `io_uring_setup` returns `-ENOSYS` (`GATE_M4 enosys`) |
+| M4 | More silent `Ok(0)` → ENOSYS | **Done** — Ring 3 `io_uring_setup(0, 0)` returns `-ENOSYS` (`GATE_M4 enosys`); `io_uring_setup(8)` is a ring fd (`GATE_CHR iouring`) |
 
 ### Gate N — Mount ns, socketpair, eventfd, honest syscalls (after M)
 

@@ -41,7 +41,7 @@ A perfect KnoxOS is not “more modules.” It is an OS that satisfies these **g
 6. **Compose** — GUI clients in separate address spaces (Wayland or equivalent), not in-kernel `WindowContentType`.
 7. **Prove** — Tests that can fail, CI on every push, README/LICENSE, and a threat model.
 
-Until gates 2–4 pass, extra drivers, AI, KVM, and package managers are theater. Gates A–F, H–I, syscall gates J–BL, BM1–BM4 (`ld.so` + musl), F5 (Wayland AF_UNIX), `GATE_WL` (`wl_display` objects), C7–C8 (`/bin` persist + JBD2), G3–G4 (feature flags + syscall audit), F6–F8 (calculator + Files userspace + VirtIO-GPU scanout/cursor), `GATE_GPU` desktop scanout, I4 (SMP balance), USB HID URB completion, XHCI mapped MMIO, and Ring 3 Terminal PTY I/O are **done** on QEMU. The remaining work is in [next.md](next.md).
+Until gates 2–4 pass, extra drivers, AI, KVM, and package managers are theater. Gates A–F, H–I, syscall gates J–BL, BM1–BM4 (`ld.so` + musl), F5 (Wayland AF_UNIX), `GATE_WL` (`wl_display` objects), C7–C8 (`/bin` persist + JBD2), G3–G4 (feature flags + syscall audit), F6–F8 (calculator + Files userspace + VirtIO-GPU scanout/cursor), `GATE_GPU` desktop scanout, I4 (SMP balance), USB HID URB completion, XHCI mapped MMIO, and Ring 3 Terminal PTY I/O are **done** on QEMU. Chromium slices 1–10 (Vivaldi `.deb`, Mojo, ELF TLS / DT_NEEDED, polish, Ring 3 `io_uring`) are **done**. Ring 3 `userfaultfd` stays ENOSYS — [next.md](next.md) §5 / [19-browser.md](subsystems/19-browser.md).
 
 Stop adding Phase 34 modules. **Wire, delete, or feature-gate.**
 
@@ -57,7 +57,7 @@ Read top to bottom if you are choosing work. Skip the archives unless you need e
 | [remaining.md](remaining.md) | Every open `- [ ]` | Inventory, not sequence |
 | [blockers.md](blockers.md) | Architectural gaps that still matter | After next.md |
 | [live.md](live.md) | What the QEMU boot path actually does | “Does X work today?” |
-| [subsystems.md](subsystems.md) | Grades and one-line truth for 18 areas | Scores |
+| [subsystems.md](subsystems.md) | Grades and one-line truth for 19 areas | Scores |
 | [subsystems/](subsystems.md) | Live / Wired / Stub checklists | Implementing in one area |
 | [gates/](gates/README.md) | Gate A–BL tables (almost all **Done**) | Proving a gate; not the backlog |
 | [progress.md](progress.md) | Score bars, anti-goals, vs March 2026 | Reporting |
@@ -84,3 +84,4 @@ Read top to bottom if you are choosing work. Skip the archives unless you need e
 | 16 | [16-testing.md](subsystems/16-testing.md) | Wired 98% | Critical |
 | 17 | [17-docs.md](subsystems/17-docs.md) | Wired 70% | Critical |
 | 18 | [18-ci.md](subsystems/18-ci.md) | Wired 55% | High |
+| 19 | [19-browser.md](subsystems/19-browser.md) | Wired 98% | **High** |

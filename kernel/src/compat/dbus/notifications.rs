@@ -65,8 +65,7 @@ pub fn handle_notify(msg: &Message) -> Message {
         body
     );
 
-    // Forward to KnoxOS notification system
-    crate::gui::notifications::system(&summary, &body);
+    crate::gui::notifications::app_info(&app_name, &summary, &body);
 
     // Return notification ID
     let mut reply = Message::method_return(msg.header.serial);

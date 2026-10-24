@@ -1,7 +1,9 @@
 /// Application launch routing from desktop icons / start menu / shortcuts.
 ///
 /// Boot gates still spawn Ring 3 SHM clients (`spawn_*_app`). Desktop clicks
-/// open the in-kernel apps so Files/Terminal/Browser/Settings actually work.
+/// open the in-kernel apps so Files/Terminal/Settings actually work. Browser
+/// prefers `/opt/vivaldi/vivaldi-bin` (`GATE_VIV ui`) then `/opt/chromium/chrome`
+/// (`GATE_CHR launch`); GPUI is the fallback.
 ///
 /// **D0.2 freeze:** do not add launcher names or `WindowContentType` paint UIs.
 /// This match is the last hand-drawn table. New surfaces are Knox GPUI views
@@ -246,6 +248,18 @@ pub fn open_explorer_at(path: &str) {
 
 /// Open the browser, optionally navigating to `url`.
 pub fn open_browser_at(url: &str) {
+    if crate::init::vivaldi_bin_present() && crate::init::launch_vivaldi_from_desktop(url) {
+        crate::serial_println!("[KnoxOS] Launched Vivaldi (start menu, not GPUI Browser)");
+        crate::gui::sounds::window_open();
+        crate::gui::request_redraw();
+        return;
+    }
+    if crate::init::launch_chromium_from_desktop(url) {
+        crate::serial_println!("[KnoxOS] Launched Chromium (start menu, not GPUI Browser)");
+        crate::gui::sounds::window_open();
+        crate::gui::request_redraw();
+        return;
+    }
     let offset = cascade_offset();
     let mut win = Window::new("Browser", 180 + offset, 70 + offset, 1000, 680);
     win.content_type = WindowContentType::Gpui(ViewKind::Browser);

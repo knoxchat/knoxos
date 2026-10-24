@@ -69,6 +69,98 @@ pub fn validate_elf(data: &[u8]) -> Result<(), ElfValidateError> {
     Ok(())
 }
 
+/// `\x7fELF` plus zeros is the wget-stub Chromium `.so` shape. Real SOs must
+/// have non-zero bytes after the ident.
+pub fn is_stub_so(data: &[u8]) -> bool {
+    if data.len() < 64 || !elf_magic_ok(data) {
+        return true;
+    }
+    data.iter().skip(4).all(|&b| b == 0)
+}
+
+const PT_LOAD: u32 = 1;
+const PT_DYNAMIC: u32 = 2;
+const DT_NULL: i64 = 0;
+const DT_NEEDED: i64 = 1;
+const DT_STRTAB: i64 = 5;
+
+/// Host copy of kernel `elf::needed_libraries`.
+pub fn needed_libraries(data: &[u8]) -> Vec<String> {
+    if validate_elf(data).is_err() || data.len() < ELF64_EHDR {
+        return Vec::new();
+    }
+    let phoff = u64::from_le_bytes(data[32..40].try_into().unwrap()) as usize;
+    let phentsize = u16::from_le_bytes([data[54], data[55]]) as usize;
+    let phnum = u16::from_le_bytes([data[56], data[57]]) as usize;
+    let mut loads: Vec<(u64, u64, u64)> = Vec::new();
+    let mut dyn_off = None;
+    let mut dyn_filesz = 0usize;
+    for i in 0..phnum {
+        let o = phoff.saturating_add(i.saturating_mul(phentsize));
+        if o + 48 > data.len() {
+            break;
+        }
+        let p_type = u32::from_le_bytes(data[o..o + 4].try_into().unwrap());
+        let p_offset = u64::from_le_bytes(data[o + 8..o + 16].try_into().unwrap());
+        let p_vaddr = u64::from_le_bytes(data[o + 16..o + 24].try_into().unwrap());
+        let p_filesz = u64::from_le_bytes(data[o + 32..o + 40].try_into().unwrap());
+        if p_type == PT_LOAD {
+            loads.push((p_vaddr, p_offset, p_filesz));
+        }
+        if p_type == PT_DYNAMIC {
+            dyn_off = Some(p_offset as usize);
+            dyn_filesz = p_filesz as usize;
+        }
+    }
+    let Some(dyn_off) = dyn_off else {
+        return Vec::new();
+    };
+    let dyn_end = dyn_off.saturating_add(dyn_filesz).min(data.len());
+    let mut strtab_vaddr = 0u64;
+    let mut needed_offs: Vec<u32> = Vec::new();
+    let mut pos = dyn_off;
+    while pos + 16 <= dyn_end {
+        let tag = i64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+        let val = u64::from_le_bytes(data[pos + 8..pos + 16].try_into().unwrap());
+        if tag == DT_NULL {
+            break;
+        }
+        if tag == DT_NEEDED {
+            needed_offs.push(val as u32);
+        }
+        if tag == DT_STRTAB {
+            strtab_vaddr = val;
+        }
+        pos += 16;
+    }
+    let Some((vaddr, file_off, filesz)) = loads
+        .iter()
+        .copied()
+        .find(|(v, _, sz)| strtab_vaddr >= *v && strtab_vaddr < v.saturating_add(*sz))
+    else {
+        return Vec::new();
+    };
+    if strtab_vaddr - vaddr >= filesz {
+        return Vec::new();
+    }
+    let strtab_off = (file_off + (strtab_vaddr - vaddr)) as usize;
+    let mut out = Vec::new();
+    for off in needed_offs {
+        let start = strtab_off.saturating_add(off as usize);
+        if start >= data.len() {
+            continue;
+        }
+        let rest = &data[start..];
+        let end = rest.iter().position(|&b| b == 0).unwrap_or(rest.len());
+        if let Ok(name) = core::str::from_utf8(&rest[..end]) {
+            if !name.is_empty() {
+                out.push(name.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// ICMPv6 checksum over the IPv6 pseudo-header (next header 58).
 pub fn icmpv6_checksum(src: &[u8; 16], dst: &[u8; 16], icmp_data: &[u8]) -> u16 {
     let mut sum: u32 = 0;
@@ -747,6 +839,18 @@ mod tests {
         huge[56..58].copy_from_slice(&16u16.to_le_bytes());
         assert_eq!(validate_elf(&huge), Err(ElfValidateError::TruncatedPhdr));
         assert!(validate_elf(&minimal_elf()).is_ok());
+    }
+
+    #[test]
+    fn chromium_ldd_rejects_stub_so() {
+        let mut stub = vec![0u8; 64];
+        stub[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
+        assert!(is_stub_so(&stub));
+        assert!(is_stub_so(&[]));
+        let real = minimal_elf();
+        assert!(!is_stub_so(&real));
+        assert!(needed_libraries(&stub).is_empty());
+        assert!(needed_libraries(&real).is_empty());
     }
 
     #[test]

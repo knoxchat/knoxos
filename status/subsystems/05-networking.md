@@ -34,5 +34,6 @@
 2. ~~Fix VirtIO-net avail/used rings; TX one UDP ping.~~ **D2 done** — DHCP DISCOVER TX + UDP reply RX vs QEMU user-net.
 3. ~~Wire `Socket` → `netint::send_*`; ARP then DHCP that **writes the interface IP**.~~ **D3 done.**
 4. ~~TCP: SYN/ACK, seq/ack, RTO, then CUBIC.~~ **SYN/ACK + RTO + HTTP GET done (D4). CUBIC cwnd done (D5).**
+5. ~~**Chromium HTTPS**~~ **Done** (slice 4) — userspace `getaddrinfo` off-box A/AAAA, TLS/h2 on Chromium’s socket, CSS/JS paint (`GATE_CHR https`). Software GL is **done** (slice 5, `GATE_CHR gpuinfo`). Fonts/ICU/media are **done** (slice 6, `GATE_CHR media`). Start-menu launch is **done** (slice 7, `GATE_CHR launch`). Sandbox is **done** (slice 8, `GATE_CHR sandboxui`). Vivaldi `.deb` is **done** (slice 9, `GATE_VIV deb` / `ui`).
 
 ---

@@ -127,6 +127,27 @@ impl VirtualFS {
             b"root:x:0:0:root:/root:/bin/sh\nuser:x:1000:1000:KnoxOS User:/home/user:/bin/sh\n",
             0o644,
         );
+        vfs.create_file_under(
+            etc,
+            "nsswitch.conf",
+            FileType::Regular,
+            b"passwd: files\ngroup: files\nhosts: files dns\n",
+            0o644,
+        );
+        vfs.create_file_under(
+            etc,
+            "hosts",
+            FileType::Regular,
+            b"127.0.0.1\tlocalhost\n::1\tlocalhost\n",
+            0o644,
+        );
+        vfs.create_file_under(
+            etc,
+            "resolv.conf",
+            FileType::Regular,
+            b"nameserver 1.1.1.1\nnameserver 8.8.8.8\n",
+            0o644,
+        );
 
         // Temp
         let _ = tmp;
@@ -1066,6 +1087,14 @@ fn overlay_path(path: &str, for_write: bool) -> alloc::string::String {
 pub fn read_file_dispatch(path: &str) -> Option<Vec<u8>> {
     let path = overlay_path(path, false);
     let path = path.as_str();
+    let pid = crate::landlock::current_check_pid();
+    if !crate::landlock::check_process_fs_access(
+        pid,
+        path,
+        crate::landlock::LANDLOCK_ACCESS_FS_READ_FILE,
+    ) {
+        return None;
+    }
     #[cfg(feature = "fs-ext4")]
     if let Some((fs_idx, rel_path)) = crate::mount::find_ext4_fs_for_path(path) {
         match crate::ext4::read_file(fs_idx, &rel_path) {

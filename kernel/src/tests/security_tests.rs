@@ -542,6 +542,14 @@ fn test_socketpair_roundtrip() {
 }
 
 #[test_case]
+fn test_scmrights_roundtrip() {
+    assert!(
+        crate::uds::scmrights_roundtrip_self_test(),
+        "socketpair sendmsg rights then recv must return the snapshot path"
+    );
+}
+
+#[test_case]
 fn test_eventfd_counter_roundtrip() {
     assert!(
         crate::eventfd::eventfd_roundtrip_self_test(),

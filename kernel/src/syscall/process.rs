@@ -4,6 +4,7 @@ use crate::serial_println;
 /// fork, execve, exit, wait4, waitid, kill, getpid, getppid,
 /// process groups, sessions
 use alloc::string::String;
+use alloc::vec::Vec;
 
 pub fn sys_fork() -> SyscallResult {
     let ppid = crate::scheduler::current_pid().unwrap_or(1);
@@ -44,19 +45,61 @@ pub fn sys_fork() -> SyscallResult {
 
 /// clone(flags, stack, ptid, ctid, tls) — CLONE_VM shares page tables;
 /// CLONE_THREAD also registers joinable thread metadata.
+const CLONE_VM: u64 = 0x00000100;
+const CLONE_THREAD: u64 = 0x00010000;
+const CLONE_SETTLS: u64 = 0x00080000;
+const CLONE_NEWNS: u64 = 0x00020000;
+const CLONE_NEWCGROUP: u64 = 0x02000000;
+const CLONE_NEWUTS: u64 = 0x04000000;
+const CLONE_NEWIPC: u64 = 0x08000000;
+const CLONE_NEWUSER: u64 = 0x10000000;
+const CLONE_NEWPID: u64 = 0x20000000;
+const CLONE_NEWNET: u64 = 0x40000000;
+const CLONE_NEWTIME: u64 = 0x00000080;
+
+fn apply_clone_namespaces(child: u32, flags: u64) {
+    let mut ns = 0u32;
+    if flags & CLONE_NEWNS != 0 {
+        ns |= CLONE_NEWNS as u32;
+    }
+    if flags & CLONE_NEWUTS != 0 {
+        ns |= CLONE_NEWUTS as u32;
+    }
+    if flags & CLONE_NEWIPC != 0 {
+        ns |= CLONE_NEWIPC as u32;
+    }
+    if flags & CLONE_NEWUSER != 0 {
+        ns |= CLONE_NEWUSER as u32;
+    }
+    if flags & CLONE_NEWNET != 0 {
+        ns |= CLONE_NEWNET as u32;
+    }
+    if flags & CLONE_NEWCGROUP != 0 {
+        ns |= CLONE_NEWCGROUP as u32;
+    }
+    if flags & CLONE_NEWTIME != 0 {
+        ns |= CLONE_NEWTIME as u32;
+    }
+    if ns != 0 {
+        let _ = crate::namespaces::unshare(child, ns);
+    }
+    if flags & CLONE_NEWPID != 0 {
+        let _ = crate::pidns::move_to_new_pid_ns(child);
+    }
+}
+
 pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> SyscallResult {
-    const CLONE_VM: u64 = 0x00000100;
-    const CLONE_THREAD: u64 = 0x00010000;
-    const CLONE_SETTLS: u64 = 0x00080000;
-    const CLONE_NEWNS: u64 = 0x00020000;
-    const CLONE_NEWUTS: u64 = 0x04000000;
-    const CLONE_NEWPID: u64 = 0x20000000;
-    const CLONE_NEWTIME: u64 = 0x00000080;
     if flags & CLONE_THREAD != 0 && flags & CLONE_VM == 0 {
         return Err(SyscallError::InvalidArgument);
     }
     if flags & CLONE_VM == 0 {
-        return sys_fork();
+        let child = sys_fork()?;
+        apply_clone_namespaces(child as u32, flags);
+        if ptid != 0 {
+            let ppid = crate::scheduler::current_pid().unwrap_or(1);
+            crate::vmm::write_user_memory(ppid, ptid, &(child as u32).to_ne_bytes());
+        }
+        return Ok(child);
     }
 
     let ppid = crate::scheduler::current_pid().unwrap_or(1);
@@ -87,20 +130,12 @@ pub fn sys_clone(flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> Sysc
 
     crate::namespaces::inherit_namespaces(child_pid, ppid);
     crate::rlimit::inherit_limits(ppid, child_pid);
-    if flags & CLONE_NEWNS != 0 {
-        let _ = crate::namespaces::unshare(child_pid, CLONE_NEWNS as u32);
-    }
-    if flags & CLONE_NEWUTS != 0 {
-        let _ = crate::namespaces::unshare(child_pid, CLONE_NEWUTS as u32);
-    }
-    if flags & CLONE_NEWTIME != 0 {
-        let _ = crate::namespaces::unshare(child_pid, CLONE_NEWTIME as u32);
-    }
     if flags & CLONE_NEWPID != 0 {
         let _ = crate::pidns::fork_into_new_pid_ns(ppid, child_pid);
     } else {
         let _ = crate::pidns::on_fork(ppid, child_pid);
     }
+    apply_clone_namespaces(child_pid, flags & !CLONE_NEWPID);
     if flags & CLONE_SETTLS != 0 {
         crate::context::set_user_fs_base(child_pid, tls);
     }
@@ -157,8 +192,30 @@ pub fn sys_execveat(
     execve_path(&path, argv, envp)
 }
 
-fn execve_path(filename: &str, _argv: u64, _envp: u64) -> SyscallResult {
+fn read_user_cstr_array(ptr: u64, max: usize) -> Vec<String> {
+    if ptr == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for i in 0..max {
+        // SAFETY: argv/envp is a user NULL-terminated pointer table; the current CR3 still maps it.
+        let p = unsafe { core::ptr::read((ptr as *const u64).add(i)) };
+        if p == 0 {
+            break;
+        }
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
+        if let Some(s) = unsafe { read_user_string(p) } {
+            out.push(s);
+        }
+    }
+    out
+}
+
+fn execve_path(filename: &str, argv_ptr: u64, envp_ptr: u64) -> SyscallResult {
     let pid = crate::scheduler::current_pid().unwrap_or(1);
+    // Copy argv/envp before replace_address_space drops the old CR3.
+    let mut argv = read_user_cstr_array(argv_ptr, 32);
+    let envp = read_user_cstr_array(envp_ptr, 32);
 
     // Gate B2's hello runs as a boot-time one-shot on the kernel's own page
     // tables, so there is no task to replace; keep the old name-only path.
@@ -221,12 +278,19 @@ fn execve_path(filename: &str, _argv: u64, _envp: u64) -> SyscallResult {
     }
 
     let name = filename.rsplit('/').next().unwrap_or(filename);
-    let argv_strs: &[&str] = &[name];
+    if argv.is_empty() {
+        argv.push(String::from(name));
+    }
+    if filename.contains("zygote") || filename.contains("chromium") {
+        serial_println!("[execve] argv={:?} env={:?}", argv, envp);
+    }
+    let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
+    let env_refs: Vec<&str> = envp.iter().map(|s| s.as_str()).collect();
     let initial_rsp = crate::vmm::setup_initial_stack(
         pid,
         stack_top,
-        argv_strs,
-        &[],
+        &argv_refs,
+        &env_refs,
         loaded.main_entry,
         loaded.phdr,
         loaded.phnum,

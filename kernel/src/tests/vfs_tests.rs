@@ -922,6 +922,190 @@ fn test_fuse_forget() {
 }
 
 #[test_case]
+fn test_chrome_unpack() {
+    assert!(
+        crate::init::unpack_self_test(),
+        "Chromium tree must be ELF + ICU magic + pak v5, not zero-fill"
+    );
+}
+
+#[test_case]
+fn test_chrome_exec_interp() {
+    assert!(
+        crate::init::exec_self_test(),
+        "chrome PT_INTERP must be ld-linux ELF; a shebang interp must not count as ELF"
+    );
+}
+
+#[test_case]
+fn test_chrome_ldso() {
+    assert!(
+        crate::init::ldso_self_test(),
+        "/lib64/ld-linux-x86-64.so.2 must be a loadable ELF"
+    );
+}
+
+#[test_case]
+fn test_chrome_glibc() {
+    assert!(
+        crate::init::glibc_self_test(),
+        "/lib/libc.so.6 must be ELF and export __libc_start_main"
+    );
+}
+
+#[test_case]
+fn test_chrome_scmrights() {
+    assert!(
+        crate::init::scmrights_self_test(),
+        "unix socketpair must pass an SCM_RIGHTS snapshot with the payload"
+    );
+}
+
+#[test_case]
+fn test_chrome_fork_zygote() {
+    assert!(
+        crate::init::fork_self_test(),
+        "chrome-zygote must be a loadable ELF on VFS, not a fake PID"
+    );
+}
+
+#[test_case]
+fn test_chrome_linux_shape() {
+    assert!(
+        crate::init::linux_shape_self_test(),
+        "/proc /sys /dev /etc /XDG must exist and parse for Chromium"
+    );
+}
+
+#[test_case]
+fn test_chrome_ozone() {
+    assert!(
+        crate::init::ozone_self_test(),
+        "Linux wl_shm.create_pool + xdg-shell must present Chromium SHM, not GPUI Browser"
+    );
+}
+
+#[test_case]
+fn test_chrome_https() {
+    assert!(
+        crate::init::https_self_test(),
+        "userspace getaddrinfo + TLS/h2 on Chromium's socket must fetch https:// with CSS/JS"
+    );
+    assert!(
+        crate::init::https_userspace_elf_data().len() > 0x1000,
+        "Ring 3 chrome-https ELF must be a loadable image"
+    );
+}
+
+#[test_case]
+fn test_chrome_gl() {
+    assert!(
+        crate::init::gl_self_test(),
+        "Ring 3 drmGetVersion + SwiftShader EGL + dmabuf must paint chrome://gpu CSS/JS"
+    );
+    assert!(
+        crate::init::gl_userspace_elf_data().len() > 0x1000,
+        "Ring 3 chrome-gl ELF must be a loadable image"
+    );
+}
+
+#[test_case]
+fn test_chrome_media() {
+    assert!(
+        crate::init::media_self_test(),
+        "ICU/V8 + fontconfig/FreeType + ffmpeg MP4 + Pulse/ALSA must paint video+audio"
+    );
+    assert!(
+        crate::init::media_userspace_elf_data().len() > 0x1000,
+        "Ring 3 chrome-media ELF must be a loadable image"
+    );
+}
+
+#[test_case]
+fn test_chrome_desktop() {
+    assert!(
+        crate::init::desktop_self_test(),
+        "session Hello + tray notify + portals + xdg-open + CUPS must launch Chromium, not GPUI"
+    );
+    assert!(
+        crate::init::desktop_userspace_elf_data().len() > 0x1000,
+        "Ring 3 chrome-desktop ELF must be a loadable image"
+    );
+}
+
+#[test_case]
+fn test_chrome_sandbox() {
+    assert!(
+        crate::init::sandbox_self_test(),
+        "chrome-sandbox helper + Landlock + GPU sandbox + Crashpad must paint chrome://sandbox"
+    );
+    assert!(
+        crate::init::sandbox_userspace_elf_data().len() > 0x1000,
+        "Ring 3 chrome-sandbox ELF must be a loadable image"
+    );
+}
+
+#[test_case]
+fn test_chrome_loader() {
+    assert!(
+        crate::init::loader_self_test(),
+        "glibc PT_TLS + DT_NEEDED real ELFs + skip-GTK Ozone + no stub .so"
+    );
+    assert!(
+        crate::init::glibc_tls_userspace_elf_data().len() > 0x1000,
+        "Ring 3 glibc TLS ELF must be a loadable image"
+    );
+}
+
+#[test_case]
+fn test_chrome_mojo() {
+    assert!(
+        crate::init::mojo_self_test(),
+        "browser/zygote/renderer must be scheduler tasks without --single-process"
+    );
+    assert!(
+        crate::init::mojo_userspace_elf_data().len() > 0x1000,
+        "Ring 3 chrome-mojo ELF must be a loadable image"
+    );
+}
+
+#[test_case]
+fn test_chrome_iouring() {
+    assert!(
+        crate::init::iouring_self_test(),
+        "Ring 3 io_uring_setup(8) must return a ring fd and complete a NOP CQE"
+    );
+    assert!(
+        crate::init::iouring_userspace_elf_data().len() > 0x1000,
+        "Ring 3 chrome-iouring ELF must be a loadable image"
+    );
+}
+
+#[test_case]
+fn test_vivaldi_deb() {
+    assert!(
+        crate::init::vivaldi_self_test(),
+        "dpkg vivaldi-stable must extract a loadable vivaldi-bin and paint Vivaldi UI"
+    );
+    assert!(
+        crate::init::vivaldi_userspace_elf_data().len() > 0x1000,
+        "Ring 3 vivaldi ELF must be a loadable image"
+    );
+}
+
+#[test_case]
+fn test_chrome_polish() {
+    assert!(
+        crate::init::polish_self_test(),
+        "unpacked extension + getUserMedia + Downloads + DevTools + profiles + HiDPI + WebGPU"
+    );
+    assert!(
+        crate::init::polish_userspace_elf_data().len() > 0x1000,
+        "Ring 3 chrome-polish ELF must be a loadable image"
+    );
+}
+
+#[test_case]
 fn test_fat32_ramdisk() {
     assert!(
         crate::fat32::block_self_test(),

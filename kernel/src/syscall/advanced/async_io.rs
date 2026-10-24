@@ -4,24 +4,65 @@ use crate::syscall::{SyscallError, SyscallResult};
 
 // ── io_uring ────────────────────────────────────────────────────────
 
+/// Linux `io_uring_params` is 120 bytes; we fill sq/cq entries + flags.
+const IO_URING_PARAMS_SIZE: usize = 120;
+
 pub fn sys_io_uring_setup(entries: u32, params_ptr: u64) -> SyscallResult {
-    let flags = if params_ptr != 0 {
-        // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
-        unsafe { *(params_ptr as *const u32) }
-    } else {
-        0
+    // Gate M4: `io_uring_setup(0, 0)` stays `-ENOSYS`. Chromium uses entries ≥ 1.
+    if entries == 0 {
+        return Err(SyscallError::NotImplemented);
+    }
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let mut flags = 0u32;
+    if params_ptr != 0 {
+        let mut buf = [0u8; 12];
+        crate::vmm::read_user_memory(pid, params_ptr, &mut buf);
+        let mut raw = [0u8; 4];
+        raw.copy_from_slice(&buf[8..12]);
+        flags = u32::from_le_bytes(raw);
+    }
+    let ring = crate::io_uring::sys_io_uring_setup(entries, flags)
+        .map_err(|_| SyscallError::InvalidArgument)?;
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    tables.entry(pid).or_insert_with(|| crate::fd::FdTable::new());
+    let fd_table = tables.get_mut(&pid).ok_or(SyscallError::TooManyFiles)?;
+    let fd = match fd_table.open(
+        &alloc::format!("iouring:{ring}"),
+        crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+        crate::fd::FileType::CharDevice,
+    ) {
+        Ok(fd) => fd,
+        Err(_) => {
+            drop(tables);
+            crate::io_uring::io_uring_destroy(ring);
+            return Err(SyscallError::TooManyFiles);
+        }
     };
-    crate::io_uring::sys_io_uring_setup(entries, flags).map_err(|_| SyscallError::InvalidArgument)
+    drop(tables);
+    if params_ptr != 0 {
+        if let Some(stats) = crate::io_uring::io_uring_stats(ring) {
+            let mut params = [0u8; IO_URING_PARAMS_SIZE];
+            params[0..4].copy_from_slice(&stats.sq_entries.to_le_bytes());
+            params[4..8].copy_from_slice(&stats.cq_entries.to_le_bytes());
+            params[8..12].copy_from_slice(&stats.flags.to_le_bytes());
+            crate::vmm::write_user_memory(pid, params_ptr, &params);
+        }
+    }
+    Ok(fd as u64)
 }
 
 pub fn sys_io_uring_enter(fd: u64, to_submit: u32, min_complete: u32, flags: u32) -> SyscallResult {
-    crate::io_uring::sys_io_uring_enter(fd, to_submit, min_complete, flags)
+    let ring = crate::io_uring::ring_id_for_current_fd(fd as i32)
+        .ok_or(SyscallError::BadFileDescriptor)?;
+    crate::io_uring::sys_io_uring_enter(ring, to_submit, min_complete, flags)
         .map(|n| n as u64)
         .map_err(|_| SyscallError::InvalidArgument)
 }
 
 pub fn sys_io_uring_register(fd: u64, opcode: u32, arg: u64, nr_args: u32) -> SyscallResult {
-    crate::io_uring::sys_io_uring_register(fd, opcode, arg, nr_args)
+    let ring = crate::io_uring::ring_id_for_current_fd(fd as i32)
+        .ok_or(SyscallError::BadFileDescriptor)?;
+    crate::io_uring::sys_io_uring_register(ring, opcode, arg, nr_args)
         .map(|n| n as u64)
         .map_err(|_| SyscallError::InvalidArgument)
 }

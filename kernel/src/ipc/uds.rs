@@ -31,6 +31,25 @@ pub enum UnixSocketState {
     Closed,
 }
 
+/// Snapshot of an open file passed over `SCM_RIGHTS`.
+#[derive(Clone)]
+pub struct UnixRights {
+    pub path: String,
+    pub file_type: u8,
+    pub flags: u32,
+    pub offset: usize,
+    pub size: usize,
+    pub inode: u64,
+    pub cloexec: bool,
+    pub nonblock: bool,
+}
+
+/// One datagram / stream record, optionally carrying passed fds.
+pub struct UnixMessage {
+    pub data: Vec<u8>,
+    pub rights: Vec<UnixRights>,
+}
+
 /// A Unix domain socket
 struct UnixSocket {
     id: u32,
@@ -38,7 +57,7 @@ struct UnixSocket {
     state: UnixSocketState,
     bound_path: Option<String>,
     peer_id: Option<u32>,
-    recv_buffer: VecDeque<Vec<u8>>,
+    recv_buffer: VecDeque<UnixMessage>,
     pending_connections: VecDeque<u32>,
     backlog: usize,
     nonblocking: bool,
@@ -67,7 +86,7 @@ impl UnixSocket {
     }
 
     fn recv_buf_size(&self) -> usize {
-        self.recv_buffer.iter().map(|v| v.len()).sum()
+        self.recv_buffer.iter().map(|m| m.data.len()).sum()
     }
 }
 
@@ -201,6 +220,15 @@ pub fn socket_accept(id: u32) -> Result<u32, i32> {
 
 /// Send data through a unix socket
 pub fn socket_send(id: u32, data: &[u8]) -> Result<usize, i32> {
+    socket_send_with_rights(id, data, Vec::new())
+}
+
+/// Send data plus `SCM_RIGHTS` file-description snapshots.
+pub fn socket_send_with_rights(
+    id: u32,
+    data: &[u8],
+    rights: Vec<UnixRights>,
+) -> Result<usize, i32> {
     let sockets = UNIX_SOCKETS.lock();
     let socket = sockets.get(&id).ok_or(-9i32)?;
 
@@ -219,12 +247,25 @@ pub fn socket_send(id: u32, data: &[u8]) -> Result<usize, i32> {
         return Err(-11); // EAGAIN
     }
 
-    peer.recv_buffer.push_back(data.to_vec());
+    peer.recv_buffer.push_back(UnixMessage {
+        data: data.to_vec(),
+        rights,
+    });
     Ok(data.len())
 }
 
 /// Receive data from a unix socket
 pub fn socket_recv(id: u32, buf: &mut [u8]) -> Result<usize, i32> {
+    let mut rights = Vec::new();
+    socket_recv_with_rights(id, buf, &mut rights)
+}
+
+/// Receive one queued message and any passed fds.
+pub fn socket_recv_with_rights(
+    id: u32,
+    buf: &mut [u8],
+    rights: &mut Vec<UnixRights>,
+) -> Result<usize, i32> {
     let mut sockets = UNIX_SOCKETS.lock();
     let socket = sockets.get_mut(&id).ok_or(-9i32)?;
 
@@ -233,15 +274,16 @@ pub fn socket_recv(id: u32, buf: &mut [u8]) -> Result<usize, i32> {
     }
 
     if let Some(msg) = socket.recv_buffer.pop_front() {
-        let copy_len = msg.len().min(buf.len());
-        buf[..copy_len].copy_from_slice(&msg[..copy_len]);
-        Ok(copy_len)
-    } else {
-        if socket.nonblocking {
-            Err(-11) // EAGAIN
-        } else {
-            Ok(0) // EOF / no data
+        let copy_len = msg.data.len().min(buf.len());
+        if copy_len > 0 {
+            buf[..copy_len].copy_from_slice(&msg.data[..copy_len]);
         }
+        *rights = msg.rights;
+        Ok(copy_len)
+    } else if socket.nonblocking {
+        Err(-11) // EAGAIN
+    } else {
+        Ok(0) // EOF / no data
     }
 }
 
@@ -259,7 +301,10 @@ pub fn socket_sendto(id: u32, data: &[u8], path: &str) -> Result<usize, i32> {
         return Err(-11); // EAGAIN
     }
 
-    peer.recv_buffer.push_back(data.to_vec());
+    peer.recv_buffer.push_back(UnixMessage {
+        data: data.to_vec(),
+        rights: Vec::new(),
+    });
     Ok(data.len())
 }
 
@@ -269,15 +314,15 @@ pub fn socket_recvfrom(id: u32, buf: &mut [u8]) -> Result<(usize, Option<String>
     let socket = sockets.get_mut(&id).ok_or(-9i32)?;
 
     if let Some(msg) = socket.recv_buffer.pop_front() {
-        let copy_len = msg.len().min(buf.len());
-        buf[..copy_len].copy_from_slice(&msg[..copy_len]);
-        Ok((copy_len, socket.bound_path.clone()))
-    } else {
-        if socket.nonblocking {
-            Err(-11) // EAGAIN
-        } else {
-            Ok((0, None))
+        let copy_len = msg.data.len().min(buf.len());
+        if copy_len > 0 {
+            buf[..copy_len].copy_from_slice(&msg.data[..copy_len]);
         }
+        Ok((copy_len, socket.bound_path.clone()))
+    } else if socket.nonblocking {
+        Err(-11) // EAGAIN
+    } else {
+        Ok((0, None))
     }
 }
 
@@ -347,6 +392,35 @@ pub fn socketpair_roundtrip_self_test() -> bool {
     let _ = socket_close(a);
     let _ = socket_close(b);
     n == payload.len() && &buf[..n] == payload
+}
+
+/// Queue a payload plus one passed-fd snapshot and retrieve both on recv.
+pub fn scmrights_roundtrip_self_test() -> bool {
+    let Ok((a, b)) = socketpair(UnixSocketType::Stream) else {
+        return false;
+    };
+    let payload = b"x";
+    let rights = alloc::vec![UnixRights {
+        path: String::from("memfd:scm"),
+        file_type: 2, // CharDevice
+        flags: 2,     // O_RDWR
+        offset: 0,
+        size: 1,
+        inode: 0,
+        cloexec: false,
+        nonblock: false,
+    }];
+    if socket_send_with_rights(a, payload, rights) != Ok(payload.len()) {
+        let _ = socket_close(a);
+        let _ = socket_close(b);
+        return false;
+    }
+    let mut buf = [0u8; 8];
+    let mut got = Vec::new();
+    let n = socket_recv_with_rights(b, &mut buf, &mut got).unwrap_or(0);
+    let _ = socket_close(a);
+    let _ = socket_close(b);
+    n == payload.len() && buf[0] == b'x' && got.len() == 1 && got[0].path == "memfd:scm"
 }
 
 /// Initialize unix socket subsystem

@@ -40,6 +40,7 @@ jobs:
         run: |
           cargo test -p knoxos-host-tests
           cargo test -p knox-gpui
+          ./scripts/check-chromium-ldd.sh
 
   fmt:
     name: rustfmt

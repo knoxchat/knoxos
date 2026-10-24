@@ -71,6 +71,28 @@ pub(super) fn run_gate_bh3() {
     serial_println!("[user_task] Gate BH3 parent pid={} reaped={}", pid, reaped);
 }
 
+pub(super) fn run_gate_chr_scmrights() {
+    serial_println!("[user_task] Chromium slice 2: SCM_RIGHTS sendmsg/recvmsg");
+    if !crate::init::scmrights_self_test() {
+        serial_println!("[user_task] Chromium scmrights FAILED");
+        return;
+    }
+    let elf = crate::init::scmrights_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "scmrights-demo") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate CHR scmrights parent pid={} reaped={}",
+        pid,
+        reaped
+    );
+}
+
 pub(super) fn run_gate_bi1() {
     serial_println!("[user_task] Gate BI1: sendmsg UDP byte");
     let elf = crate::init::sendmsg_userspace_elf_data();

@@ -15,14 +15,36 @@
 ///   elf      — static ELF64 packer; Gate B2 hello blob (source in userspace/apps/hello)
 ///   launch   — filesystem search, hello iretq, start_init
 ///   programs — Ring 3 gate fixtures (process, I/O, fs, identity, net, display, ENOSYS)
+mod chromium;
+mod chromium_desktop;
+mod chromium_gl;
+mod chromium_https;
+mod chromium_iouring;
+mod chromium_loader;
+mod chromium_media;
+mod chromium_mojo;
+mod chromium_polish;
+mod chromium_sandbox;
 mod dynlink;
 mod elf;
 mod launch;
 mod programs;
 mod types;
+mod vivaldi;
 
+pub use chromium::*;
+pub use chromium_desktop::*;
+pub use chromium_gl::*;
+pub use chromium_https::*;
+pub use chromium_iouring::*;
+pub use chromium_loader::*;
+pub use chromium_media::*;
+pub use chromium_mojo::*;
+pub use chromium_polish::*;
+pub use chromium_sandbox::*;
 pub use dynlink::*;
 pub use elf::*;
 pub use launch::*;
 pub use programs::*;
 pub use types::*;
+pub use vivaldi::*;

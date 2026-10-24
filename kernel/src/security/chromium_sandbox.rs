@@ -333,74 +333,155 @@ lazy_static::lazy_static! {
     static ref SANDBOXES: Mutex<BTreeMap<u32, ActiveSandbox>> = Mutex::new(BTreeMap::new());
 }
 
-/// Apply a sandbox to the current process
+fn ensure_sandbox_process(pid: u32, name: &str) {
+    let mut table = crate::process::PROCESS_TABLE.lock();
+    if table.get_process(pid).is_some() {
+        return;
+    }
+    table.processes.push(crate::process::Process {
+        pid,
+        ppid: 1,
+        name: String::from(name),
+        state: crate::process::ProcessState::Ready,
+        uid: 1000,
+        gid: 1000,
+        cwd: String::from("/"),
+        root: String::from("/"),
+        old_root: String::new(),
+        put_old: String::new(),
+        priority: 0,
+        has_address_space: false,
+        entry_point: 0,
+        user_stack_top: 0,
+        exit_code: 0,
+    });
+}
+
+fn apply_landlock(pid: u32, profile: &SandboxProfile) -> Result<(), i32> {
+    use crate::landlock::{
+        LANDLOCK_ACCESS_FS_READ_DIR, LANDLOCK_ACCESS_FS_READ_FILE, LANDLOCK_ACCESS_FS_WRITE_FILE,
+        LandlockRule, LandlockRuleType, LandlockRulesetAttr, PathBeneathRule,
+        sys_landlock_add_rule, sys_landlock_create_ruleset, sys_landlock_restrict_self,
+    };
+    let attr = LandlockRulesetAttr {
+        handled_access_fs: LANDLOCK_ACCESS_FS_READ_FILE
+            | LANDLOCK_ACCESS_FS_READ_DIR
+            | LANDLOCK_ACCESS_FS_WRITE_FILE,
+        handled_access_net: 0,
+    };
+    let id = sys_landlock_create_ruleset(&attr, 16, 0).map_err(|_| -22i32)?;
+    let mut paths: Vec<(String, u64)> = Vec::new();
+    for p in &profile.allowed_read_paths {
+        paths.push((
+            p.clone(),
+            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR,
+        ));
+    }
+    for p in &profile.allowed_devices {
+        paths.push((
+            p.clone(),
+            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE,
+        ));
+    }
+    for p in &profile.allowed_write_paths {
+        paths.push((
+            p.clone(),
+            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE,
+        ));
+    }
+    for (parent, access) in paths {
+        let rule = LandlockRule::PathBeneath(PathBeneathRule {
+            allowed_access: access,
+            parent_path: parent,
+        });
+        sys_landlock_add_rule(id, LandlockRuleType::PathBeneath, rule, 0).map_err(|_| -22i32)?;
+    }
+    sys_landlock_restrict_self(id, 0, pid as u64).map_err(|_| -22i32)
+}
+
+/// Apply a sandbox to `pid` (clone3 namespaces + NNP + seccomp + Landlock).
 pub fn apply_sandbox(pid: u32, profile: SandboxProfile) -> Result<(), i32> {
     serial_println!(
         "[sandbox] Applying {:?} sandbox to PID {}",
         profile.sandbox_type,
         pid
     );
+    ensure_sandbox_process(pid, "chrome-sandbox");
+    crate::namespaces::inherit_namespaces(pid, 1);
 
-    // Step 1: Set PR_SET_NO_NEW_PRIVS
     if profile.no_new_privs {
+        crate::syscall::set_no_new_privs(pid);
+        crate::syscall::set_dumpable(pid, false);
         serial_println!("[sandbox]   PR_SET_NO_NEW_PRIVS = 1");
-        // prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
     }
 
-    // Step 2: Create namespaces
+    let mut ns_flags = 0u32;
     if profile.user_namespace {
-        serial_println!("[sandbox]   Creating user namespace");
-        // unshare(CLONE_NEWUSER)
-        // Write uid_map / gid_map
+        ns_flags |= crate::namespaces::NamespaceType::User as u32;
     }
     if profile.pid_namespace {
-        serial_println!("[sandbox]   Creating PID namespace");
+        ns_flags |= crate::namespaces::NamespaceType::Pid as u32;
     }
     if profile.net_namespace {
-        serial_println!("[sandbox]   Creating network namespace (isolated)");
+        ns_flags |= crate::namespaces::NamespaceType::Net as u32;
     }
     if profile.mount_namespace {
-        serial_println!("[sandbox]   Creating mount namespace");
-        // Set up minimal mount tree:
-        // - /proc (new instance)
-        // - /dev/null, /dev/zero, /dev/urandom (bind mounts)
-        // - /dev/dri/* (for GPU sandbox only)
-        // - /dev/shm (tmpfs)
-        // - Read-only bind mounts from allowed_read_paths
+        ns_flags |= crate::namespaces::NamespaceType::Mount as u32;
+    }
+    let mut namespaces_active = false;
+    if ns_flags != 0 {
+        crate::namespaces::unshare(pid, ns_flags)?;
+        if profile.pid_namespace {
+            let _ = crate::pidns::move_to_new_pid_ns(pid);
+        }
+        namespaces_active = true;
+        serial_println!("[sandbox]   namespaces flags={:#x}", ns_flags);
     }
 
-    // Step 3: Drop capabilities
+    if profile.mount_namespace {
+        crate::vfs::ensure_directory("/tmp/chrome-jail");
+        crate::vfs::ensure_directory("/tmp/chrome-jail/old");
+        crate::vfs::ensure_directory("/tmp/chrome-jail/dev");
+        if crate::process::chroot(pid, "/tmp/chrome-jail").is_err() {
+            serial_println!("[sandbox]   chroot skipped (jail)");
+        }
+    }
+
     if profile.drop_caps {
-        serial_println!("[sandbox]   Dropping all capabilities");
-        // capset() to clear all caps
-    }
-
-    // Step 4: Apply resource limits
-    for &(resource, soft, hard) in &profile.rlimits {
-        serial_println!(
-            "[sandbox]   RLIMIT_{}: soft={}, hard={}",
-            resource,
-            soft,
-            hard
+        crate::capabilities::set_capabilities(
+            pid,
+            crate::capabilities::ProcessCapabilities::user(),
         );
-        // prlimit64(pid, resource, {soft, hard}, NULL)
+        serial_println!("[sandbox]   Dropping all capabilities");
     }
 
-    // Step 5: Install seccomp-BPF filter
+    for &(resource, soft, hard) in &profile.rlimits {
+        let mut old = None;
+        let _ = crate::rlimit::prlimit64(
+            pid,
+            resource,
+            Some(crate::rlimit::Rlimit {
+                rlim_cur: soft,
+                rlim_max: hard,
+            }),
+            &mut old,
+        );
+    }
+
     serial_println!(
         "[sandbox]   Installing seccomp-BPF filter ({} allowed syscalls)",
         profile.allowed_syscalls.len()
     );
     install_seccomp_filter(pid, &profile.allowed_syscalls)?;
+    let _ = apply_landlock(pid, &profile);
 
-    // Record active sandbox
     SANDBOXES.lock().insert(
         pid,
         ActiveSandbox {
             pid,
             profile,
             seccomp_active: true,
-            namespaces_active: true,
+            namespaces_active,
             caps_dropped: true,
         },
     );
@@ -409,89 +490,17 @@ pub fn apply_sandbox(pid: u32, profile: SandboxProfile) -> Result<(), i32> {
     Ok(())
 }
 
-/// Install a seccomp-BPF filter for allowed syscalls
+/// Install a seccomp-BPF filter that EPERMs syscalls outside `allowed`.
 fn install_seccomp_filter(pid: u32, allowed: &[u64]) -> Result<(), i32> {
-    // Build BPF program:
-    // 1. Load syscall number
-    // 2. Check architecture (must be AUDIT_ARCH_X86_64)
-    // 3. Compare against each allowed syscall
-    // 4. ALLOW if matched, KILL_PROCESS if not
-
-    let program_size = 3 + allowed.len() * 2 + 1; // arch check + comparisons + default kill
+    let allowed_u32: Vec<u32> = allowed.iter().map(|&n| n as u32).collect();
+    let program = crate::seccomp::build_whitelist_errno_filter(&allowed_u32, 1);
     serial_println!(
         "[sandbox] BPF program: {} instructions for {} allowed syscalls",
-        program_size,
+        program.len(),
         allowed.len()
     );
-
-    // Create seccomp state for process
-    let mut state = crate::seccomp::SeccompState::new();
-
-    // Build BPF instructions
-    let mut insns = Vec::new();
-
-    // Load architecture
-    insns.push(crate::seccomp::BpfInsn {
-        code: crate::seccomp::BPF_LD | crate::seccomp::BPF_W | crate::seccomp::BPF_ABS,
-        jt: 0,
-        jf: 0,
-        k: crate::seccomp::SECCOMP_DATA_ARCH,
-    });
-
-    // Check architecture == AUDIT_ARCH_X86_64 (0xC000003E)
-    insns.push(crate::seccomp::BpfInsn {
-        code: crate::seccomp::BPF_JMP | crate::seccomp::BPF_JEQ | crate::seccomp::BPF_K,
-        jt: 1,
-        jf: 0,
-        k: 0xC000003E,
-    });
-
-    // Kill if wrong architecture
-    insns.push(crate::seccomp::BpfInsn {
-        code: crate::seccomp::BPF_RET | crate::seccomp::BPF_K,
-        jt: 0,
-        jf: 0,
-        k: crate::seccomp::SECCOMP_RET_KILL_PROCESS,
-    });
-
-    // Load syscall number
-    insns.push(crate::seccomp::BpfInsn {
-        code: crate::seccomp::BPF_LD | crate::seccomp::BPF_W | crate::seccomp::BPF_ABS,
-        jt: 0,
-        jf: 0,
-        k: crate::seccomp::SECCOMP_DATA_NR,
-    });
-
-    // Check each allowed syscall
-    let remaining = allowed.len();
-    for (i, &syscall_nr) in allowed.iter().enumerate() {
-        let jump_to_allow = (remaining - i) as u8;
-        insns.push(crate::seccomp::BpfInsn {
-            code: crate::seccomp::BPF_JMP | crate::seccomp::BPF_JEQ | crate::seccomp::BPF_K,
-            jt: jump_to_allow,
-            jf: 0,
-            k: syscall_nr as u32,
-        });
-    }
-
-    // Default: KILL
-    insns.push(crate::seccomp::BpfInsn {
-        code: crate::seccomp::BPF_RET | crate::seccomp::BPF_K,
-        jt: 0,
-        jf: 0,
-        k: crate::seccomp::SECCOMP_RET_KILL_PROCESS,
-    });
-
-    // ALLOW
-    insns.push(crate::seccomp::BpfInsn {
-        code: crate::seccomp::BPF_RET | crate::seccomp::BPF_K,
-        jt: 0,
-        jf: 0,
-        k: crate::seccomp::SECCOMP_RET_ALLOW,
-    });
-
-    state.add_filter(insns).map_err(|_| -22)?;
-    Ok(())
+    crate::seccomp::create_process_seccomp(pid);
+    crate::seccomp::seccomp_set_mode_filter(pid, program)
 }
 
 /// Check if a process is sandboxed

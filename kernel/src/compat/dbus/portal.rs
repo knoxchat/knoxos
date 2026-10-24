@@ -5,6 +5,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 use spin::Mutex;
 
@@ -30,6 +31,7 @@ pub struct PortalRequest {
 lazy_static::lazy_static! {
     static ref REQUESTS: Mutex<BTreeMap<String, PortalRequest>> =
         Mutex::new(BTreeMap::new());
+    static ref LAST_FILE_URIS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 }
 
 static NEXT_REQUEST: AtomicU32 = AtomicU32::new(1);
@@ -38,12 +40,58 @@ static NEXT_REQUEST: AtomicU32 = AtomicU32::new(1);
 pub fn open_file(msg: &Message) -> Message {
     let req_id = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
     let handle = format!("/org/freedesktop/portal/desktop/request/{}", req_id);
+    let uri = String::from("file:///home/user/Documents/upload.txt");
 
-    serial_println!("[dbus:portal] FileChooser.OpenFile -> {}", handle);
+    serial_println!("[dbus:portal] FileChooser.OpenFile -> {} ({})", handle, uri);
+
+    let mut results = BTreeMap::new();
+    results.insert(
+        String::from("uris"),
+        DbusValue::Array(vec![DbusValue::String(uri.clone())]),
+    );
+    REQUESTS.lock().insert(
+        handle.clone(),
+        PortalRequest {
+            handle: handle.clone(),
+            sender: 0,
+            interface: String::from("org.freedesktop.portal.FileChooser"),
+            completed: true,
+            response: 0,
+            results,
+        },
+    );
+    LAST_FILE_URIS.lock().push(uri);
 
     let mut reply = Message::method_return(msg.header.serial);
     reply.body = vec![DbusValue::ObjectPath(handle)];
     reply.signature = Some(String::from("o"));
+    reply
+}
+
+/// URIs from the last FileChooser.OpenFile (Chromium `<input type=file>`).
+pub fn last_file_uris() -> Vec<String> {
+    LAST_FILE_URIS.lock().clone()
+}
+
+/// Handle ScreenCast.CreateSession
+pub fn create_session(msg: &Message) -> Message {
+    let req_id = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
+    let handle = format!("/org/freedesktop/portal/desktop/session/{}", req_id);
+    serial_println!("[dbus:portal] ScreenCast.CreateSession -> {}", handle);
+    let mut reply = Message::method_return(msg.header.serial);
+    reply.body = vec![DbusValue::ObjectPath(handle)];
+    reply.signature = Some(String::from("o"));
+    reply
+}
+
+/// Handle Secret.RetrieveSecret
+pub fn retrieve_secret(msg: &Message) -> Message {
+    serial_println!("[dbus:portal] Secret.RetrieveSecret");
+    let mut reply = Message::method_return(msg.header.serial);
+    reply.body = vec![DbusValue::Variant(alloc::boxed::Box::new(
+        DbusValue::String(String::from("knoxos-secret")),
+    ))];
+    reply.signature = Some(String::from("v"));
     reply
 }
 

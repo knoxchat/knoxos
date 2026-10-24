@@ -34,6 +34,10 @@ pub fn send_message(bus_type: BusType, from: ConnectionId, msg: Message) -> u32 
             // well-known name `org.freedesktop.DBus` — they are handled here.
             if dest == "org.freedesktop.DBus" || iface == "org.freedesktop.DBus" {
                 handle_bus_method(&mut bus, from, &msg);
+            } else if let Some(reply) = dispatch_desktop_service(&msg) {
+                if let Some(conn) = bus.connections.get_mut(&from) {
+                    conn.message_queue.push(reply);
+                }
             } else if let Some(ref dest) = msg.destination {
                 let target_id = if dest.starts_with(':') {
                     // Direct connection name
@@ -237,6 +241,36 @@ fn interfaces_added(name: &str) -> Message {
     ];
     msg.signature = Some(String::from("oa{sa{sv}}"));
     msg
+}
+
+/// Chromium session services: Notifications + XDG portals (not GATE_DBUS).
+fn dispatch_desktop_service(msg: &Message) -> Option<Message> {
+    let dest = msg.destination.as_deref().unwrap_or("");
+    let iface = msg.interface.as_deref().unwrap_or("");
+    let member = msg.member.as_deref().unwrap_or("");
+    let notifications =
+        dest == "org.freedesktop.Notifications" || iface == "org.freedesktop.Notifications";
+    if notifications && member == "Notify" {
+        return Some(super::notifications::handle_notify(msg));
+    }
+    let portal = dest == "org.freedesktop.portal.Desktop"
+        || dest == "org.freedesktop.portal.FileChooser"
+        || dest == "org.freedesktop.portal.ScreenCast"
+        || dest == "org.freedesktop.portal.Settings"
+        || dest == "org.freedesktop.portal.Secret"
+        || dest == "org.freedesktop.secrets"
+        || iface.starts_with("org.freedesktop.portal.");
+    if !portal {
+        return None;
+    }
+    match (iface, member) {
+        (_, "OpenFile") => Some(super::portal::open_file(msg)),
+        (_, "SaveFile") => Some(super::portal::save_file(msg)),
+        (_, "CreateSession") => Some(super::portal::create_session(msg)),
+        (_, "Read") => Some(super::portal::read_setting(msg)),
+        (_, "RetrieveSecret") => Some(super::portal::retrieve_secret(msg)),
+        _ => None,
+    }
 }
 
 /// Handle bus-level methods (org.freedesktop.DBus)

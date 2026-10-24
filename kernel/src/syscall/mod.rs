@@ -37,6 +37,7 @@ mod time;
 mod user;
 
 pub(crate) use advanced::{cleanup_mlock, cleanup_robust_list, is_page_locked};
+pub use advanced::{dumpable, no_new_privs, ptracer, set_dumpable, set_no_new_privs, set_ptracer};
 pub use advanced::{
     faccessat_self_test, faccessat2_self_test, fchmod_self_test, fchmodat_self_test,
     fchownat_self_test, flistxattr_self_test, fsetxattr_self_test, fstatfs_self_test,

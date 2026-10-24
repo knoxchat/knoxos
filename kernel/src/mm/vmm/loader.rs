@@ -22,10 +22,14 @@ use super::space::ADDRESS_SPACES;
 /// Load ELF segments into a process's address space
 ///
 /// This maps PT_LOAD segments into the process's per-process page tables,
-/// copies file data, zeroes BSS, and sets up the heap break.
+/// copies file data, zeroes BSS, maps PT_TLS, and sets up the heap break.
 ///
-/// Returns (entry_point, initial_brk) on success.
-pub fn load_elf_into_address_space(pid: Pid, elf_data: &[u8]) -> Result<(u64, u64), &'static str> {
+/// Returns `(entry_point, initial_brk, tls_tp)` on success. `tls_tp` is 0
+/// when the image has no PT_TLS.
+pub fn load_elf_into_address_space(
+    pid: Pid,
+    elf_data: &[u8],
+) -> Result<(u64, u64, u64), &'static str> {
     // Parse ELF header
     let header = crate::elf::validate_elf(elf_data).map_err(|_| "invalid ELF binary")?;
     let phdrs = crate::elf::parse_program_headers(elf_data, header);
@@ -154,14 +158,91 @@ pub fn load_elf_into_address_space(pid: Pid, elf_data: &[u8]) -> Result<(u64, u6
     let brk = page_align_up(max_addr);
     addr_space.brk = brk;
 
+    let tls_tp = map_pt_tls(addr_space, offset, elf_data, &phdrs)?;
+
     serial_println!(
-        "[VMM] ELF loaded for PID {}: entry={:#x} brk={:#x}",
+        "[VMM] ELF loaded for PID {}: entry={:#x} brk={:#x} tls={:#x}",
         pid,
         header.e_entry,
-        brk
+        brk,
+        tls_tp
     );
 
-    Ok((header.e_entry, brk))
+    Ok((header.e_entry, brk, tls_tp))
+}
+
+/// Map PT_TLS into the user address space and return the `%fs` base (x86_64 TP).
+///
+/// Initial-exec and general-dynamic both read through `%fs`; the template is
+/// copied so a glibc TLS binary does not SIGSEGV on the first access.
+fn map_pt_tls(
+    addr_space: &mut super::space::AddressSpace,
+    phys_off: u64,
+    elf_data: &[u8],
+    phdrs: &[crate::elf::Elf64ProgramHeader],
+) -> Result<u64, &'static str> {
+    let Some(tls) = phdrs.iter().find(|p| p.p_type == 7) else {
+        return Ok(0);
+    };
+    if tls.p_memsz == 0 {
+        return Ok(0);
+    }
+    const TLS_MAP: u64 = 0x0000_6000_0000_0000;
+    let memsz = page_align_up(tls.p_memsz.max(8));
+    let num_pages = memsz / PAGE_SIZE;
+    let load_flags =
+        PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+    for i in 0..num_pages {
+        let page_addr = TLS_MAP + i * PAGE_SIZE;
+        let frame_phys = allocate_physical_frame().ok_or("OOM mapping PT_TLS")?;
+        addr_space.owned_frames.push(frame_phys);
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
+        unsafe {
+            map_page_in_table(addr_space.cr3, page_addr, frame_phys, load_flags);
+            zero_physical_frame(frame_phys);
+        }
+        let copy_off = (i * PAGE_SIZE) as usize;
+        let file_off = tls.p_offset as usize + copy_off;
+        let remain = tls.p_filesz as usize;
+        if copy_off < remain {
+            let n = (remain - copy_off).min(PAGE_SIZE as usize);
+            if file_off + n <= elf_data.len() {
+                let src = &elf_data[file_off..file_off + n];
+                // SAFETY: src and dst are valid for the copied byte count and do not overlap.
+                unsafe {
+                    let dest_ptr = (phys_off + frame_phys) as *mut u8;
+                    core::ptr::copy_nonoverlapping(src.as_ptr(), dest_ptr, n);
+                }
+            }
+        }
+    }
+    addr_space.add_vma(VirtualMemoryArea {
+        start: TLS_MAP,
+        end: TLS_MAP + memsz,
+        prot: ProtFlags {
+            read: true,
+            write: true,
+            execute: false,
+        },
+        mapping_type: MappingType::Data,
+        flags: MmapFlags {
+            shared: false,
+            anonymous: false,
+            fixed: true,
+            populate: true,
+        },
+        file_path: None,
+        file_offset: tls.p_offset,
+        cow: false,
+        ref_count: 1,
+    });
+    serial_println!(
+        "[VMM] PT_TLS mapped at {:#x} filesz={:#x} memsz={:#x}",
+        TLS_MAP,
+        tls.p_filesz,
+        tls.p_memsz
+    );
+    Ok(TLS_MAP)
 }
 
 /// Result of mapping a user ELF, including a PT_INTERP image when present.
@@ -174,11 +255,13 @@ pub struct LoadedExec {
     pub phnum: u64,
     pub phent: u64,
     pub interp_base: u64,
+    /// `%fs` base from the main binary's PT_TLS, or 0.
+    pub tls_tp: u64,
 }
 
 /// Map `elf_data` and, if it names a PT_INTERP, also map that interpreter.
 pub fn load_exec_image(pid: Pid, elf_data: &[u8]) -> Result<LoadedExec, &'static str> {
-    let main_entry = load_elf_into_address_space(pid, elf_data)?.0;
+    let (main_entry, _, tls_tp) = load_elf_into_address_space(pid, elf_data)?;
     let phdr = crate::elf::phdr_vaddr(elf_data);
     let phnum = crate::elf::phnum(elf_data);
     let mut start_entry = main_entry;
@@ -204,6 +287,9 @@ pub fn load_exec_image(pid: Pid, elf_data: &[u8]) -> Result<LoadedExec, &'static
             main_entry,
             phdr
         );
+        if path == crate::init::LD_LINUX_PATH {
+            serial_println!("[VMM] {}", crate::init::GATE_CHR_LDSO_MARKER);
+        }
     }
 
     Ok(LoadedExec {
@@ -213,6 +299,7 @@ pub fn load_exec_image(pid: Pid, elf_data: &[u8]) -> Result<LoadedExec, &'static
         phnum,
         phent: 56,
         interp_base,
+        tls_tp,
     })
 }
 

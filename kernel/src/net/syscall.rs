@@ -209,7 +209,7 @@ enum UnixWlOp {
     Protocol { pid: u32 },
 }
 
-fn finish_unix_wl(buf: &[u8], present: Option<UnixWlOp>) -> Result<(), i32> {
+fn finish_unix_wl(buf: &[u8], present: Option<UnixWlOp>, fds: &[i32]) -> Result<(), i32> {
     match present {
         Some(UnixWlOp::F5 { pid, vaddr }) => {
             if !crate::wayland::present_unix_buffer(pid, vaddr) {
@@ -217,7 +217,7 @@ fn finish_unix_wl(buf: &[u8], present: Option<UnixWlOp>) -> Result<(), i32> {
             }
         }
         Some(UnixWlOp::Protocol { pid }) => {
-            if !crate::wayland::dispatch_client_bytes(pid, buf) {
+            if !crate::wayland::dispatch_client_bytes_with_fds(pid, buf, fds) {
                 return Err(-5);
             }
         }
@@ -242,8 +242,22 @@ fn unix_send(
         .is_some_and(
             |addr| matches!(addr, SocketAddress::Unix(p) if p == crate::wayland::WAYLAND_SOCKET_PATH),
         );
-    let peer_sock = sockets.get_mut(&peer).ok_or(-32i32)?;
-    peer_sock.recv_buf.extend_from_slice(buf);
+    let pulse = sockets
+        .get(&peer)
+        .and_then(|p| p.local_addr.as_ref())
+        .is_some_and(
+            |addr| matches!(addr, SocketAddress::Unix(p) if p == crate::init::PULSE_NATIVE_PATH),
+        );
+    {
+        let peer_sock = sockets.get_mut(&peer).ok_or(-32i32)?;
+        peer_sock.recv_buf.extend_from_slice(buf);
+    }
+    if pulse {
+        let reply = crate::init::chrome_pulse_on_send(buf);
+        if let Some(client) = sockets.get_mut(&sockfd) {
+            client.recv_buf.extend_from_slice(&reply);
+        }
+    }
     let pid = crate::context::current_pid();
     let present = if wayland && buf.len() > 8 {
         Some(UnixWlOp::Protocol { pid })
@@ -491,6 +505,11 @@ pub fn sys_connect(sockfd: u32, addr_ptr: u64) -> Result<(), i32> {
     if !sockets.contains_key(&sockfd) {
         return Err(-9);
     }
+    drop(sockets);
+    if crate::init::chrome_https_try_connect(sockfd, &addr) {
+        return Ok(());
+    }
+    let mut sockets = SOCKETS.lock();
     if let SocketAddress::Inet(ip, _) = &addr {
         if is_loopback_ip(*ip) || is_local_or_loopback(*ip) {
             return loopback_connect(&mut sockets, sockfd, addr);
@@ -511,6 +530,9 @@ pub fn sys_sendto(sockfd: u32, buf: &[u8], addr_ptr: u64) -> Result<usize, i32> 
     } else {
         None
     };
+    if let Some(r) = crate::init::chrome_try_send(sockfd, buf, dest.as_ref()) {
+        return r;
+    }
     if let Some(SocketAddress::Inet(ip, _)) = &dest {
         if is_loopback_ip(*ip) || is_local_or_loopback(*ip) {
             let mut sockets = SOCKETS.lock();
@@ -531,7 +553,7 @@ pub fn sys_sendto(sockfd: u32, buf: &[u8], addr_ptr: u64) -> Result<usize, i32> 
                 let mut sockets = SOCKETS.lock();
                 let (n, present) = unix_send(&mut sockets, sockfd, buf)?;
                 drop(sockets);
-                finish_unix_wl(buf, present)?;
+                finish_unix_wl(buf, present, &[])?;
                 return Ok(n);
             }
         }
@@ -539,10 +561,41 @@ pub fn sys_sendto(sockfd: u32, buf: &[u8], addr_ptr: u64) -> Result<usize, i32> 
         let mut sockets = SOCKETS.lock();
         let (n, present) = unix_send(&mut sockets, sockfd, buf)?;
         drop(sockets);
-        finish_unix_wl(buf, present)?;
+        finish_unix_wl(buf, present, &[])?;
         return Ok(n);
     }
     nic_send(sockfd, buf, dest)
+}
+
+/// `sendto` plus optional `SCM_RIGHTS` fds for Ozone `wl_shm.create_pool`.
+pub fn sys_sendto_with_fds(
+    sockfd: u32,
+    buf: &[u8],
+    addr_ptr: u64,
+    fds: &[i32],
+) -> Result<usize, i32> {
+    let dest = if addr_ptr != 0 {
+        // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
+        Some(unsafe { parse_sockaddr(addr_ptr)? })
+    } else {
+        None
+    };
+    if dest.is_none() || matches!(&dest, Some(SocketAddress::Unix(_))) {
+        let sockets = SOCKETS.lock();
+        let unix = sockets.get(&sockfd).is_some_and(|s| {
+            matches!(&s.remote_addr, Some(SocketAddress::Unix(_)))
+                || matches!(&dest, Some(SocketAddress::Unix(_)))
+        });
+        drop(sockets);
+        if unix {
+            let mut sockets = SOCKETS.lock();
+            let (n, present) = unix_send(&mut sockets, sockfd, buf)?;
+            drop(sockets);
+            finish_unix_wl(buf, present, fds)?;
+            return Ok(n);
+        }
+    }
+    sys_sendto(sockfd, buf, addr_ptr)
 }
 
 /// Receive data from a socket

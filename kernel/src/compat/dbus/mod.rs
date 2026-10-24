@@ -86,7 +86,10 @@ pub use state::{
     DBUS_START_REPLY_SUCCESS, GATE_ACTIVATABLE_NAME, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE,
     GATE_CONFIG_FILE, GATE_LINUX_SECURITY_LABEL, GATE_SELINUX_CONTEXT, MACHINE_ID, MatchRule,
 };
-pub use unix::{GATE_L3_MARKER, SYSTEM_BUS_PATH, unix_bus_self_test};
+pub use unix::{
+    GATE_L3_MARKER, SESSION_BUS_PATH, SYSTEM_BUS_PATH, ensure_session_bus_listen,
+    unix_bus_self_test,
+};
 
 use crate::serial_println;
 
@@ -125,7 +128,11 @@ pub fn init() {
     } else {
         serial_println!("[dbus] System bus bind/listen failed");
     }
-    serial_println!("[dbus] Session bus: /run/user/1000/bus");
+    if let Some(id) = ensure_session_bus_listen() {
+        serial_println!("[dbus] Session bus: {} (id={})", SESSION_BUS_PATH, id);
+    } else {
+        serial_println!("[dbus] Session bus bind/listen failed");
+    }
 
     // Register built-in services
     notifications::init();
@@ -163,6 +170,19 @@ pub fn init() {
         "org.freedesktop.portal.Settings",
         0,
     );
+    request_name(
+        BusType::Session,
+        session_conn,
+        "org.freedesktop.portal.ScreenCast",
+        0,
+    );
+    request_name(
+        BusType::Session,
+        session_conn,
+        "org.freedesktop.portal.Secret",
+        0,
+    );
+    request_name(BusType::Session, session_conn, "org.freedesktop.secrets", 0);
 
     serial_println!(
         "[dbus] D-Bus initialized ({} system names, {} session names)",

@@ -405,6 +405,39 @@ pub fn build_blacklist_filter(blocked_syscalls: &[u32]) -> Vec<BpfInsn> {
     program
 }
 
+/// Helper: whitelist; unmatched syscalls return `errno` (typically EPERM).
+pub fn build_whitelist_errno_filter(allowed_syscalls: &[u32], errno: u16) -> Vec<BpfInsn> {
+    let mut program = Vec::new();
+    program.push(BpfInsn {
+        code: BPF_LD | BPF_W | BPF_ABS,
+        jt: 0,
+        jf: 0,
+        k: SECCOMP_DATA_NR,
+    });
+    for (i, &nr) in allowed_syscalls.iter().enumerate() {
+        let remaining = allowed_syscalls.len() - i - 1;
+        program.push(BpfInsn {
+            code: BPF_JMP | BPF_JEQ | BPF_K,
+            jt: (remaining + 1) as u8,
+            jf: 0,
+            k: nr,
+        });
+    }
+    program.push(BpfInsn {
+        code: BPF_RET | BPF_K,
+        jt: 0,
+        jf: 0,
+        k: SECCOMP_RET_ERRNO | (errno as u32),
+    });
+    program.push(BpfInsn {
+        code: BPF_RET | BPF_K,
+        jt: 0,
+        jf: 0,
+        k: SECCOMP_RET_ALLOW,
+    });
+    program
+}
+
 /// Helper: Build a "whitelist only" filter
 pub fn build_whitelist_filter(allowed_syscalls: &[u32]) -> Vec<BpfInsn> {
     let mut program = Vec::new();

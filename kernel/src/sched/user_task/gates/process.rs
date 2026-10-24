@@ -311,6 +311,293 @@ pub(super) fn run_gate_bm4() {
     serial_println!("[user_task] Gate BM4 parent pid={} reaped={}", pid, reaped);
 }
 
+pub(super) fn run_gate_chr() {
+    serial_println!("[user_task] Chromium slice 1: unpack + glibc exec");
+    crate::init::install_chromium_files();
+    if !crate::init::unpack_self_test() {
+        serial_println!("[user_task] GATE_CHR unpack FAILED");
+        return;
+    }
+    let elf = {
+        let vfs = crate::vfs::VFS.lock();
+        match vfs.read_file(crate::init::CHROME_PATH) {
+            Some(data) => data.to_vec(),
+            None => crate::init::chrome_elf_data(),
+        }
+    };
+    let Some(pid) = spawn_or_log(&elf, "chrome") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR parent pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_chr_fork() {
+    serial_println!("[user_task] Chromium slice 2: zygote fork+execve");
+    crate::init::install_chromium_files();
+    if !crate::init::fork_self_test() {
+        serial_println!("[user_task] Chromium zygote fork FAILED");
+        return;
+    }
+    let elf = crate::init::zygote_parent_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-zygote-parent") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate CHR fork parent pid={} reaped={}",
+        pid,
+        reaped
+    );
+}
+
+pub(super) fn run_gate_chr_linux_shape() {
+    serial_println!("[user_task] Chromium slice 3: /proc /dev /etc /XDG");
+    crate::init::install_chromium_linux_shape();
+    if !crate::init::linux_shape_self_test() {
+        serial_println!("[user_task] Chromium linux-shape FAILED");
+        return;
+    }
+    let elf = crate::init::linux_shape_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-linux-shape") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!(
+        "[user_task] Gate CHR linux-shape pid={} reaped={}",
+        pid,
+        reaped
+    );
+}
+
+pub(super) fn run_gate_chr_ozone() {
+    serial_println!("[user_task] Chromium slice 3: Ozone/Wayland SHM");
+    crate::init::install_chromium_files();
+    if !crate::init::ozone_self_test() {
+        serial_println!("[user_task] Chromium ozone FAILED");
+        return;
+    }
+    let elf = crate::init::ozone_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-ozone") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR ozone pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_chr_https() {
+    serial_println!("[user_task] Chromium slice 4: userspace HTTPS");
+    crate::init::install_chromium_files();
+    if !crate::init::https_self_test() {
+        serial_println!("[user_task] Chromium https FAILED");
+        return;
+    }
+    let elf = crate::init::https_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-https") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR https pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_chr_gl() {
+    serial_println!("[user_task] Chromium slice 5: software GL / chrome://gpu");
+    crate::init::install_chromium_files();
+    if !crate::init::gl_self_test() {
+        serial_println!("[user_task] Chromium gl FAILED");
+        return;
+    }
+    let elf = crate::init::gl_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-gl") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR gl pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_chr_media() {
+    serial_println!("[user_task] Chromium slice 6: fonts/ICU/media");
+    crate::init::install_chromium_files();
+    if !crate::init::media_self_test() {
+        serial_println!("[user_task] Chromium media FAILED");
+        return;
+    }
+    let elf = crate::init::media_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-media") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR media pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_chr_desktop() {
+    serial_println!("[user_task] Chromium slice 7: desktop launch");
+    crate::init::install_chromium_files();
+    if !crate::init::desktop_self_test() {
+        serial_println!("[user_task] Chromium desktop FAILED");
+        return;
+    }
+    let elf = crate::init::desktop_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-desktop") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR desktop pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_chr_sandbox() {
+    serial_println!("[user_task] Chromium slice 8: sandbox");
+    crate::init::install_chromium_files();
+    if !crate::init::sandbox_self_test() {
+        serial_println!("[user_task] Chromium sandbox FAILED");
+        return;
+    }
+    let elf = crate::init::sandbox_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-sandbox") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR sandbox pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_chr_loader() {
+    serial_println!("[user_task] Chromium leftover: TLS + DT_NEEDED + skip-GTK + ldd");
+    crate::init::install_chromium_files();
+    if !crate::init::loader_self_test() {
+        serial_println!("[user_task] Chromium loader FAILED");
+        return;
+    }
+    let elf = crate::init::glibc_tls_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-tls") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR tls pid={} reaped={}", pid, reaped);
+    let elf = crate::init::needed_userspace_elf_data();
+    if let Some(pid) = spawn_or_log(&elf, "chrome-needed") {
+        // SAFETY: live Ring 3 context; switch until the desktop is current.
+        unsafe {
+            run_until_desktop(pid);
+        }
+        let _ = reap_child(pid);
+    }
+}
+
+pub(super) fn run_gate_chr_mojo() {
+    serial_println!("[user_task] Chromium leftover: Mojo without --single-process");
+    crate::init::install_chromium_files();
+    if !crate::init::mojo_self_test() {
+        serial_println!("[user_task] Chromium mojo FAILED");
+        return;
+    }
+    let elf = crate::init::mojo_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-mojo") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR mojo pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_viv() {
+    serial_println!("[user_task] Chromium slice 9: Vivaldi .deb");
+    crate::init::install_chromium_files();
+    if !crate::init::vivaldi_self_test() {
+        serial_println!("[user_task] Vivaldi slice FAILED");
+        return;
+    }
+    let elf = crate::init::vivaldi_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "vivaldi") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate VIV pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_chr_iouring() {
+    serial_println!("[user_task] Chromium leftover: Ring 3 io_uring_setup");
+    if !crate::init::iouring_self_test() {
+        serial_println!("[user_task] Chromium iouring FAILED");
+        return;
+    }
+    let elf = crate::init::iouring_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-iouring") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR iouring pid={} reaped={}", pid, reaped);
+}
+
+pub(super) fn run_gate_chr_polish() {
+    serial_println!("[user_task] Chromium slice 10: polish");
+    crate::init::install_chromium_files();
+    if !crate::init::polish_self_test() {
+        serial_println!("[user_task] Chromium polish FAILED");
+        return;
+    }
+    let elf = crate::init::polish_userspace_elf_data();
+    let Some(pid) = spawn_or_log(&elf, "chrome-polish") else {
+        return;
+    };
+    // SAFETY: `pid` was spawned with a live Ring 3 context; we only context-switch until the desktop is current again.
+    unsafe {
+        run_until_desktop(pid);
+    }
+    let reaped = reap_child(pid);
+    serial_println!("[user_task] Gate CHR polish pid={} reaped={}", pid, reaped);
+}
+
 pub(super) fn run_gate_musl_ui() {
     serial_println!("[user_task] musl CRT calls KnoxUiRaster");
     crate::init::install_dynlink_files();

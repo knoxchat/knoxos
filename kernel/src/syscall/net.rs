@@ -185,55 +185,208 @@ pub fn sys_socketpair(domain: i32, sock_type: i32, _protocol: i32, sv: u64) -> S
     Ok(0)
 }
 
+// Linux msghdr / iovec on x86_64.
+#[repr(C)]
+struct Msghdr {
+    msg_name: u64,
+    msg_namelen: u32,
+    _pad1: u32,
+    msg_iov: u64,
+    msg_iovlen: u64,
+    msg_control: u64,
+    msg_controllen: u64,
+    msg_flags: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Iovec {
+    iov_base: u64,
+    iov_len: usize,
+}
+
+const SOL_SOCKET: i32 = 1;
+const SCM_RIGHTS: i32 = 1;
+const MSG_CTRUNC: i32 = 8;
+const CMSG_HDR_LEN: usize = 16;
+const MAX_IOV: usize = 8;
+const MAX_CMSG: usize = 256;
+const MAX_SCM_FDS: usize = 8;
+
+fn unix_id_for_fd(sockfd: i32) -> Option<u32> {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    crate::fd::path_for_fd(pid, sockfd).and_then(|p| crate::fd::unix_id_from_path(&p))
+}
+
+fn cmsg_align(len: usize) -> usize {
+    (len + 7) & !7
+}
+
+fn gather_iov(msg: &Msghdr) -> Result<alloc::vec::Vec<u8>, SyscallError> {
+    let mut data = alloc::vec::Vec::new();
+    if msg.msg_iov == 0 || msg.msg_iovlen == 0 {
+        return Ok(data);
+    }
+    let n = msg.msg_iovlen as usize;
+    if n > MAX_IOV {
+        return Err(SyscallError::InvalidArgument);
+    }
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
+    let iovecs = unsafe { core::slice::from_raw_parts(msg.msg_iov as *const Iovec, n) };
+    for iov in iovecs {
+        if iov.iov_base != 0 && iov.iov_len > 0 {
+            if data.len() + iov.iov_len > 4096 {
+                return Err(SyscallError::InvalidArgument);
+            }
+            // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
+            let chunk =
+                unsafe { core::slice::from_raw_parts(iov.iov_base as *const u8, iov.iov_len) };
+            data.extend_from_slice(chunk);
+        }
+    }
+    Ok(data)
+}
+
+fn scatter_iov(msg: &Msghdr, data: &[u8]) -> usize {
+    if msg.msg_iov == 0 || msg.msg_iovlen == 0 || data.is_empty() {
+        return 0;
+    }
+    let n = (msg.msg_iovlen as usize).min(MAX_IOV);
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
+    let iovecs = unsafe { core::slice::from_raw_parts(msg.msg_iov as *const Iovec, n) };
+    let mut copied = 0usize;
+    for iov in iovecs {
+        if copied >= data.len() {
+            break;
+        }
+        if iov.iov_base != 0 && iov.iov_len > 0 {
+            let n = (iov.iov_len).min(data.len() - copied);
+            // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
+            let buf = unsafe { core::slice::from_raw_parts_mut(iov.iov_base as *mut u8, n) };
+            buf.copy_from_slice(&data[copied..copied + n]);
+            copied += n;
+        }
+    }
+    copied
+}
+
+fn parse_scm_rights(control: u64, controllen: u64) -> alloc::vec::Vec<i32> {
+    if control == 0 || controllen < CMSG_HDR_LEN as u64 {
+        return alloc::vec::Vec::new();
+    }
+    let len = (controllen as usize).min(MAX_CMSG);
+    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
+    let bytes = unsafe { core::slice::from_raw_parts(control as *const u8, len) };
+    let mut fds = alloc::vec::Vec::new();
+    let mut off = 0usize;
+    while off + CMSG_HDR_LEN <= bytes.len() && fds.len() < MAX_SCM_FDS {
+        let mut len_bytes = [0u8; 8];
+        len_bytes.copy_from_slice(&bytes[off..off + 8]);
+        let cmsg_len = u64::from_ne_bytes(len_bytes) as usize;
+        if cmsg_len < CMSG_HDR_LEN || off + cmsg_len > bytes.len() {
+            break;
+        }
+        let mut level_bytes = [0u8; 4];
+        level_bytes.copy_from_slice(&bytes[off + 8..off + 12]);
+        let mut type_bytes = [0u8; 4];
+        type_bytes.copy_from_slice(&bytes[off + 12..off + 16]);
+        let level = i32::from_ne_bytes(level_bytes);
+        let ty = i32::from_ne_bytes(type_bytes);
+        if level == SOL_SOCKET && ty == SCM_RIGHTS {
+            let mut data_off = off + CMSG_HDR_LEN;
+            let data_end = off + cmsg_len;
+            while data_off + 4 <= data_end && fds.len() < MAX_SCM_FDS {
+                let mut fd_bytes = [0u8; 4];
+                fd_bytes.copy_from_slice(&bytes[data_off..data_off + 4]);
+                fds.push(i32::from_ne_bytes(fd_bytes));
+                data_off += 4;
+            }
+        }
+        let next = cmsg_align(cmsg_len);
+        if next == 0 {
+            break;
+        }
+        off = off.saturating_add(next);
+    }
+    fds
+}
+
+fn write_scm_rights(control: u64, controllen: u64, fds: &[i32]) -> (u64, i32) {
+    if fds.is_empty() {
+        return (0, 0);
+    }
+    let data_len = fds.len() * 4;
+    let cmsg_len = CMSG_HDR_LEN + data_len;
+    if control == 0 || (controllen as usize) < cmsg_len {
+        return (0, MSG_CTRUNC);
+    }
+    // SAFETY: pointer is a user/kernel buffer supplied for this recvmsg and is large enough for the cmsg we just sized.
+    unsafe {
+        core::ptr::write(control as *mut u64, cmsg_len as u64);
+        core::ptr::write((control as *mut u8).add(8) as *mut i32, SOL_SOCKET);
+        core::ptr::write((control as *mut u8).add(12) as *mut i32, SCM_RIGHTS);
+        for (i, fd) in fds.iter().enumerate() {
+            core::ptr::write(
+                (control as *mut u8).add(CMSG_HDR_LEN + i * 4) as *mut i32,
+                *fd,
+            );
+        }
+    }
+    (cmsg_len as u64, 0)
+}
+
+fn unix_sendmsg(unix_id: u32, msg: &Msghdr) -> SyscallResult {
+    let data = gather_iov(msg)?;
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let fds = parse_scm_rights(msg.msg_control, msg.msg_controllen);
+    let rights = crate::fd::snapshot_rights(pid, &fds);
+    crate::uds::socket_send_with_rights(unix_id, &data, rights).map_err(|e| match e {
+        -107 => SyscallError::NotConnected,
+        -32 => SyscallError::BrokenPipe,
+        -11 => SyscallError::WouldBlock,
+        _ => SyscallError::IoError,
+    })?;
+    Ok(data.len() as u64)
+}
+
+fn unix_recvmsg(unix_id: u32, msg: &mut Msghdr) -> SyscallResult {
+    let mut scratch = [0u8; 4096];
+    let mut rights = alloc::vec::Vec::new();
+    let n = crate::uds::socket_recv_with_rights(unix_id, &mut scratch, &mut rights).map_err(
+        |e| match e {
+            -107 => SyscallError::NotConnected,
+            -11 => SyscallError::WouldBlock,
+            _ => SyscallError::WouldBlock,
+        },
+    )?;
+    let copied = scatter_iov(msg, &scratch[..n]);
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    let new_fds = crate::fd::install_rights(pid, rights);
+    let (used, trunc) = write_scm_rights(msg.msg_control, msg.msg_controllen, &new_fds);
+    msg.msg_controllen = used;
+    msg.msg_flags = trunc;
+    Ok(copied as u64)
+}
+
 /// sendmsg(sockfd, msg, flags) — send structured message
 pub fn sys_sendmsg(sockfd: i32, msg_ptr: u64, flags: i32) -> SyscallResult {
     if msg_ptr == 0 {
         return Err(SyscallError::InvalidArgument);
     }
 
-    // Linux msghdr structure
-    #[repr(C)]
-    struct Msghdr {
-        msg_name: u64, // optional address
-        msg_namelen: u32,
-        _pad1: u32,
-        msg_iov: u64,        // scatter/gather array
-        msg_iovlen: u64,     // # elements in msg_iov
-        msg_control: u64,    // ancillary data
-        msg_controllen: u64, // ancillary data length
-        msg_flags: i32,      // flags on received message
-    }
-
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct Iovec {
-        iov_base: u64,
-        iov_len: usize,
-    }
-
     // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let msg = unsafe { &*(msg_ptr as *const Msghdr) };
-    let mut total_sent = 0usize;
+    let _ = flags;
 
-    if msg.msg_iov != 0 && msg.msg_iovlen > 0 {
-        // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
-        let iovecs = unsafe {
-            core::slice::from_raw_parts(msg.msg_iov as *const Iovec, msg.msg_iovlen as usize)
-        };
-        for iov in iovecs {
-            if iov.iov_base != 0 && iov.iov_len > 0 {
-                let data =
-                    // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
-                    unsafe { core::slice::from_raw_parts(iov.iov_base as *const u8, iov.iov_len) };
-                let sent = crate::net::sys_sendto(sockfd as u32, data, msg.msg_name)
-                    .map_err(|_| SyscallError::IoError)?;
-                total_sent += sent;
-            }
-        }
+    if let Some(unix_id) = unix_id_for_fd(sockfd) {
+        return unix_sendmsg(unix_id, msg);
     }
 
-    let _ = flags;
-    Ok(total_sent as u64)
+    let data = gather_iov(msg)?;
+    let fds = parse_scm_rights(msg.msg_control, msg.msg_controllen);
+    let sent = crate::net::sys_sendto_with_fds(sockfd as u32, &data, msg.msg_name, &fds)
+        .map_err(|_| SyscallError::IoError)?;
+    Ok(sent as u64)
 }
 
 /// recvmsg(sockfd, msg, flags) — receive structured message
@@ -242,34 +395,19 @@ pub fn sys_recvmsg(sockfd: i32, msg_ptr: u64, flags: i32) -> SyscallResult {
         return Err(SyscallError::InvalidArgument);
     }
 
-    #[repr(C)]
-    struct Msghdr {
-        msg_name: u64,
-        msg_namelen: u32,
-        _pad1: u32,
-        msg_iov: u64,
-        msg_iovlen: u64,
-        msg_control: u64,
-        msg_controllen: u64,
-        msg_flags: i32,
-    }
-
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct Iovec {
-        iov_base: u64,
-        iov_len: usize,
-    }
-
     // SAFETY: the pointer is derived from a kernel object we own or a mapped physical address; the type layout matches the hardware or on-disk record.
     let msg = unsafe { &mut *(msg_ptr as *mut Msghdr) };
-    let mut total_recv = 0usize;
+    let _ = flags;
 
+    if let Some(unix_id) = unix_id_for_fd(sockfd) {
+        return unix_recvmsg(unix_id, msg);
+    }
+
+    let mut total_recv = 0usize;
     if msg.msg_iov != 0 && msg.msg_iovlen > 0 {
+        let n = (msg.msg_iovlen as usize).min(MAX_IOV);
         // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded slice.
-        let iovecs = unsafe {
-            core::slice::from_raw_parts(msg.msg_iov as *const Iovec, msg.msg_iovlen as usize)
-        };
+        let iovecs = unsafe { core::slice::from_raw_parts(msg.msg_iov as *const Iovec, n) };
         for iov in iovecs {
             if iov.iov_base != 0 && iov.iov_len > 0 {
                 // SAFETY: pointer and length come from the current kernel-mode caller and are used only as a bounded mutable slice.
@@ -279,7 +417,7 @@ pub fn sys_recvmsg(sockfd: i32, msg_ptr: u64, flags: i32) -> SyscallResult {
                 match crate::net::sys_recvfrom(sockfd as u32, buf) {
                     Ok(n) => {
                         total_recv += n;
-                        break; // One recv per call typically
+                        break;
                     }
                     Err(_) => {
                         if total_recv > 0 {
@@ -292,10 +430,7 @@ pub fn sys_recvmsg(sockfd: i32, msg_ptr: u64, flags: i32) -> SyscallResult {
         }
     }
 
-    // Set msg_flags
     msg.msg_flags = 0;
     msg.msg_controllen = 0;
-
-    let _ = flags;
     Ok(total_recv as u64)
 }

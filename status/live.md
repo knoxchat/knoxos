@@ -39,7 +39,7 @@ KnoxOS **does boot in QEMU** to an in-kernel software desktop. This is real and 
 31. **Gate F6 calculator userspace** — Ring 3 SHM client, not `WindowContentType::Calculator` (`GATE_F6 calculator userspace`).
 32. **Gate I4 SMP balance** — unpinned Ring 3 `getcpu` runs on idle CPU 1 without claiming BSP CFS current (`GATE_I4 smp balance`).
 33. **Gate G4 audit** — `set_robust_list`/`get_robust_list` round-trip; `madvise` EINVAL; `mlock` records; `readahead`/`fadvise64` return EBADF (`GATE_G4 audit live`).
-34. **Gate F7 Files userspace** — Ring 3 SHM client, not `WindowContentType::FileExplorer` (`GATE_F7 files userspace`). Settings/Task Manager/Editor/Browser/AI spawn the same SHM class.
+34. **Gate F7 Files userspace** — Ring 3 SHM client, not `WindowContentType::FileExplorer` (`GATE_F7 files userspace`). Settings/Task Manager/Editor/Browser/AI spawn the same SHM class. The start-menu **Browser** prefers Vivaldi SHM (`GATE_VIV ui`) then Chromium (`GATE_CHR launch`); GPUI HTML-to-text is the fallback if those ELFs are missing. Sandbox is on (`GATE_CHR sandboxui`). Mojo runs without `--single-process` (`GATE_CHR mojo`). Ring 3 `io_uring_setup(8)` returns a ring fd (`GATE_CHR iouring`).
 35. **Gate F8 VirtIO-GPU** — controlq `RESOURCE_CREATE_2D` + `ATTACH_BACKING` + `SET_SCANOUT` + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` (`GATE_F8 virtio-gpu scanout`). cursorq `UPDATE_CURSOR` (`GATE_F8 hw cursor`). `-vga virtio` makes that scanout the cocoa/GTK window (`GATE_GPU modern stack`); the painted cursor plane is the pointer (`GATE_GPU pointer plane`).
 36. **Gate C8 JBD2** — ramdisk journal: descriptor + data + commit applied; torn descriptor discarded (`GATE_C8 jbd2 replay`). ext4 mount uses the same walker when `fs-ext4` is on.
 37. **USB HID URB** — submit + complete + boot-protocol keyboard parse delivers evdev KEY_A (`GATE_USB hid urb`).
@@ -141,7 +141,7 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 130. **XHCI GET_DESCRIPTOR** — chained Setup+Data+Status TD; Transfer Event required (`GATE_USB xhci desc`).
 131. **Service cgroup** — unit `MemoryMax=4KiB` denies 8KiB (`GATE_SVC cgroup`).
 132. **GPOS mark** — `e` + combining acute attaches with zero mark advance (`GATE_GPOS mark`).
-133. **io_uring** — FIFO SQE; NOP + WRITE CQEs (`GATE_IOURING sqe`). Ring 3 stays ENOSYS (M4).
+133. **io_uring** — FIFO SQE; NOP + WRITE CQEs (`GATE_IOURING sqe`). Ring 3 `io_uring_setup(8)` returns a ring fd (`GATE_CHR iouring`); `io_uring_setup(0,0)` stays ENOSYS (M4).
 134. **fanotify** — VFS write queues `FAN_CREATE`/`FAN_MODIFY` (`GATE_FANOTIFY modify`). Ring 3 stays ENOSYS (P4).
 135. **D-Bus Hello** — `org.freedesktop.DBus.Hello` returns a `:1.` unique name (`GATE_DBUS method`).
 136. **XHCI SET_CONFIGURATION** — Setup+Status Transfer Event (`GATE_USB xhci config`).
@@ -318,5 +318,71 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 307. **XHCI GET_STATUS(ENDPOINT)** — Setup+Data+Status Transfer Event (`GATE_USB xhci statusep`).
 308. **NFS SEQUENCE** — CREATE_SESSION id OK; sequenceid 0 INVAL; unknown BADSESSION (`GATE_NFS sequence`).
 309. **NFS RECLAIM_COMPLETE** — first OK; second COMPLETE_ALREADY; no session BADSESSION (`GATE_NFS reclaim`).
+310. **Chromium unpack** — `/opt/chromium/chrome` ELF64 + ICU `0xDA27` + pak v5 (`GATE_CHR unpack`).
+311. **Chromium exec** — Ring 3 `_start` of that ELF (`GATE_CHR exec`).
+312. **Chromium ld-linux** — `/lib64/ld-linux-x86-64.so.2` mapped as `PT_INTERP` (`GATE_CHR ldso`).
+313. **Chromium glibc** — `/lib/libc.so.6` `__libc_start_main` calls `main` (`GATE_CHR glibc`).
+314. **Chromium SCM_RIGHTS** — Ring 3 `socketpair` `sendmsg`/`recvmsg` passes a memfd (`GATE_CHR scmrights`).
+315. **Chromium zygote** — Ring 3 `fork`+`execve` of `/opt/chromium/chrome-zygote` with `--type=zygote --disable-dev-shm-usage` (`GATE_CHR fork`). Mojo browser→zygote→renderer without `--single-process` (`GATE_CHR mojo`).
+316. **Chromium wl_shm** — Linux `create_pool` via `SCM_RIGHTS`+memfd (`GATE_CHR wlshm`).
+317. **Chromium xdg-shell** — `xdg_wm_base` / `xdg_toplevel` (`GATE_CHR xdgshell`).
+318. **Chromium wl_seat** — pointer + keyboard (`GATE_CHR wlseat`).
+319. **Chromium wl_output** — geometry + `wl_surface.frame` (`GATE_CHR wloutput`).
+320. **Chromium clipboard** — `wl_data_device_manager` (`GATE_CHR wldata`).
+321. **Chromium IME** — `zwp_text_input_v3` (`GATE_CHR textinput`).
+322. **Chromium first paint** — SHM window titled Chromium, not GPUI Browser (`GATE_CHR paint`).
+323. **Chromium /proc** — Linux-shaped `/proc/self/*` (`GATE_CHR proc`).
+324. **Chromium sysctl** — cpuinfo/meminfo/userns/yama (`GATE_CHR sysctl`).
+325. **Chromium /dev** — null/zero/urandom/shm/dri (`GATE_CHR dev`).
+326. **Chromium /etc** — passwd/nsswitch/hosts/resolv/ssl (`GATE_CHR etc`).
+327. **Chromium XDG** — `~/.config` `~/.cache` `/run/user/1000` (`GATE_CHR xdg`).
+328. **Chromium DNS** — userspace `getaddrinfo` resolves off-box `example.com` A/AAAA (`GATE_CHR dns`).
+329. **Chromium NSS** — CA bundle + `cert9.db`; ClientHello on the chrome socket (`GATE_CHR nss`).
+330. **Chromium TLS** — TLS 1.3 record layer on Chromium’s TCP fd (`GATE_CHR tlsrec`).
+331. **Chromium HTTP/2** — Happy Eyeballs A+AAAA + h2 SETTINGS to example.com (`GATE_CHR h2`).
+332. **Chromium cookies** — Set-Cookie round-trip + bad-certificate alert (`GATE_CHR cookies`).
+333. **Chromium HTTPS** — `https://` CSS/JS in the Chromium SHM window (`GATE_CHR https`).
+334. **Chromium DRM** — Ring 3 `drmGetVersion` on `/dev/dri/card0` (`GATE_CHR drm`).
+335. **Chromium EGL** — `--use-gl=swiftshader` GLES2 initializes (`GATE_CHR egl`).
+336. **Chromium dmabuf** — `zwp_linux_dmabuf_v1` + PRIME fd import (`GATE_CHR dmabuf`).
+337. **Chromium WebGL** — `chrome://gpu` reports SwiftShader WebGL (`GATE_CHR virgl`).
+338. **Chromium gpuinfo** — `chrome://gpu` CSS/JS in the Chromium SHM window (`GATE_CHR gpuinfo`).
+339. **Chromium ICU** — `icudtl.dat` `CmnD` TOC; V8 isolate starts (`GATE_CHR icu`).
+340. **Chromium fontconfig** — `libfontconfig`+`libfreetype` on `/etc/fonts` + Inter TTF (`GATE_CHR fontconfig`).
+341. **Chromium ffmpeg** — `libffmpeg.so` H.264/AAC/VP9/AV1 decodes a local MP4 (`GATE_CHR ffmpeg`).
+342. **Chromium Pulse** — native AUTH + tone on `/run/user/1000/pulse/native` (`GATE_CHR pulse`).
+343. **Chromium ALSA** — `/dev/snd/pcmC0D0p` playback without Pulse (`GATE_CHR alsa`).
+344. **Chromium media** — local MP4 video+audio in the Chromium SHM window (`GATE_CHR media`).
+345. **Chromium D-Bus** — session `Hello` unique name + `RequestName` `org.chromium.Chromium` (`GATE_CHR dbus`).
+346. **Chromium notify** — `org.freedesktop.Notifications.Notify` in the Knox tray (`GATE_CHR notify`).
+347. **Chromium portal** — FileChooser `<input type=file>` + ScreenCast/Settings/Secret (`GATE_CHR portal`).
+348. **Chromium MIME** — `xdg-open https://` execs `/opt/chromium/chrome` (`GATE_CHR mime`).
+349. **Chromium CUPS** — `libcups.so.2` ELF + `--disable-print-preview` (`GATE_CHR cups`).
+350. **Chromium launch** — start-menu Browser execs Chromium SHM, not GPUI (`GATE_CHR launch`).
+351. **Chromium clone3 ns** — child of `CLONE_NEWUSER|NEWPID|NEWNET|NEWNS` is pid 1 uid 0 (`GATE_CHR clone3ns`).
+352. **Chromium sandbox helper** — `/opt/chromium/chrome-sandbox` ELF; user+pid ns + chroot + seccomp-BPF (`GATE_CHR sandbox`).
+353. **Chromium NNP** — `PR_SET_NO_NEW_PRIVS` + Yama dumpable=0 (`GATE_CHR nnp`).
+354. **Chromium seccomp** — renderer BPF EPERMs a disallowed syscall (`GATE_CHR seccomp`).
+355. **Chromium Landlock** — renderer `open("/etc/shadow")` fails (`GATE_CHR landlock`).
+356. **Chromium GPU sandbox** — GPU profile + dropped `--disable-gpu-sandbox` (`GATE_CHR gpusandbox`).
+357. **Chromium Crashpad** — minidump `MDMP` on VFS (`GATE_CHR crashpad`).
+358. **Chromium sandbox UI** — `chrome://sandbox` CSS/JS namespace+seccomp, not `--no-sandbox` (`GATE_CHR sandboxui`).
+359. **Chromium ELF TLS** — glibc PT_TLS `%fs` does not SIGSEGV (`GATE_CHR tls`).
+360. **Chromium DT_NEEDED** — loader resolves real ELF `.so`s, not empty `SharedObject` (`GATE_CHR needed`).
+361. **Chromium Ozone skip-GTK** — missing `libgtk-3.so.0` is not the crash (`GATE_CHR ozone`).
+362. **Chromium host ldd** — `scripts/check-chromium-ldd.sh` fails if a stub `.so` remains (`GATE_CHR ldd`).
+363. **Chromium Mojo** — browser → zygote → renderer `socketpair` without `--single-process` (`GATE_CHR mojo`).
+364. **Vivaldi .deb** — live dpkg `vivaldi-stable`; `/opt/vivaldi/vivaldi-bin` is a loadable ELF (`GATE_VIV deb`).
+365. **Vivaldi UI** — Vivaldi chrome (not vanilla Chromium) paints (`GATE_VIV ui`).
+366. **Vivaldi sync** — sign-in fails with a real TLS error (`GATE_VIV sync`).
+367. **Vivaldi CDM** — Widevine explicitly disabled (`GATE_VIV cdm`).
+368. **Chromium extensions** — unpacked extension loads (`GATE_CHR extensions`).
+369. **Chromium WebRTC** — `getUserMedia` camera/mic (`GATE_CHR webrtc`).
+370. **Chromium downloads** — `~/Downloads` + `xdg-open` (`GATE_CHR download`).
+371. **Chromium DevTools** — live window (`GATE_CHR devtools`).
+372. **Chromium profiles** — incognito / password manager (`GATE_CHR profiles`).
+373. **Chromium HiDPI** — `wl_output` scale 2 (`GATE_CHR hidpi`).
+374. **Chromium WebGPU** — SwiftShader/Vulkan ICD (`GATE_CHR webgpu`).
+375. **Chromium io_uring** — Ring 3 `io_uring_setup(8)` returns a ring fd; NOP CQE (`GATE_CHR iouring`). `userfaultfd` stays ENOSYS.
 
-Integration: `./tests/run_integration.sh` **595/595** on QEMU (2026-10-24).
+Integration: `./tests/run_integration.sh` **661/661** on QEMU (2026-10-24).

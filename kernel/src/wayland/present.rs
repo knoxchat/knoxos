@@ -286,6 +286,189 @@ fn magic_ok_for(
     magic_ok
 }
 
+/// Present Chromium Ozone pixels from a mapped memfd (not GPUI Browser).
+pub fn present_chromium_shm(pid: u32, pixels: &[u8]) -> bool {
+    if pixels.len() < 4 {
+        return false;
+    }
+    let width = 64u32;
+    let height = 64u32;
+    let mut owned = alloc::vec![0u8; (width * height * 4) as usize];
+    let n = owned.len().min(pixels.len());
+    owned[..n].copy_from_slice(&pixels[..n]);
+    if owned[0..4] != super::protocol::GATE_CHR_PAINT_MAGIC {
+        serial_println!(
+            "[WL] GATE_CHR paint FAILED: magic {:?} (not Chromium SHM)",
+            &owned[0..4]
+        );
+        return false;
+    }
+    let https = owned.windows(7).any(|w| w == b"<style>")
+        && owned.windows(8).any(|w| w == b"<script>")
+        && owned.windows(8).any(|w| w == b"https://");
+    let gpuinfo = owned.windows(12).any(|w| w == b"chrome://gpu")
+        && owned.windows(7).any(|w| w == b"<style>")
+        && owned.windows(8).any(|w| w == b"<script>");
+    let swift_webgl =
+        owned.windows(11).any(|w| w == b"SwiftShader") && owned.windows(5).any(|w| w == b"WebGL");
+    let media = owned.windows(7).any(|w| w == b"<video>")
+        && owned.windows(7).any(|w| w == b"<audio>")
+        && owned.windows(7).any(|w| w == b"<style>")
+        && owned.windows(8).any(|w| w == b"<script>");
+    let sandboxui = owned.windows(16).any(|w| w == b"chrome://sandbox")
+        && owned.windows(7).any(|w| w == b"<style>")
+        && owned.windows(8).any(|w| w == b"<script>");
+
+    let mut comp = COMPOSITOR.lock();
+    let pool = comp.create_shm_pool(-1, owned.len(), pid);
+    if !comp.write_to_pool(pool, 0, &owned) {
+        return false;
+    }
+    let Some(buf) = comp.create_shm_buffer(
+        pool,
+        0,
+        width,
+        height,
+        width * 4,
+        PixelFormat::Bgra8888,
+        pid,
+    ) else {
+        return false;
+    };
+    let sid = comp.create_surface(pid);
+    comp.create_toplevel(sid);
+    comp.toplevel_set_title(sid, "Chromium");
+    if !comp.attach_shm_buffer(sid, buf, 0, 0) {
+        return false;
+    }
+    comp.surface_damage(sid, 0, 0, width as i32, height as i32);
+    comp.surface_commit(sid);
+    drop(comp);
+
+    if https {
+        serial_println!(
+            "[chrome] {} (pid={} css+js in Chromium SHM, not tag-stripped text)",
+            "GATE_CHR https",
+            pid
+        );
+    }
+    if swift_webgl {
+        serial_println!(
+            "[chrome] {} (pid={} chrome://gpu SwiftShader WebGL)",
+            "GATE_CHR virgl",
+            pid
+        );
+    }
+    if gpuinfo {
+        serial_println!(
+            "[chrome] {} (pid={} chrome://gpu css+js, not tag-stripped text)",
+            "GATE_CHR gpuinfo",
+            pid
+        );
+    }
+    if media {
+        serial_println!(
+            "[chrome] {} (pid={} video+audio in Chromium SHM)",
+            "GATE_CHR media",
+            pid
+        );
+    }
+    if sandboxui {
+        serial_println!(
+            "[chrome] {} (pid={} chrome://sandbox namespace+seccomp css+js)",
+            "GATE_CHR sandboxui",
+            pid
+        );
+    }
+
+    if let Some(&existing) = CLIENT_WINDOWS.lock().get(&pid) {
+        WINDOW_PIXELS
+            .lock()
+            .insert(existing, (owned, width, height));
+        crate::gui::request_redraw();
+        return true;
+    }
+
+    let mut win = crate::gui::window::Window::new("Chromium", 140, 80, 280, 200);
+    win.content_type = crate::gui::window::WindowContentType::ShmEmpty;
+    let wid = win.id;
+    crate::gui::window::WINDOW_MANAGER.lock().add_window(win);
+    CLIENT_WINDOWS.lock().insert(pid, wid);
+    WINDOW_SURFACES.lock().insert(wid, sid);
+    WINDOW_PIXELS.lock().insert(wid, (owned, width, height));
+    crate::gui::request_redraw();
+    true
+}
+
+/// Present Vivaldi UI pixels (not vanilla Chromium).
+pub fn present_vivaldi_shm(pid: u32, pixels: &[u8]) -> bool {
+    if pixels.len() < 4 {
+        return false;
+    }
+    let width = 64u32;
+    let height = 64u32;
+    let mut owned = alloc::vec![0u8; (width * height * 4) as usize];
+    let n = owned.len().min(pixels.len());
+    owned[..n].copy_from_slice(&pixels[..n]);
+    if owned[0..4] != super::protocol::GATE_VIV_PAINT_MAGIC {
+        serial_println!(
+            "[WL] GATE_VIV ui FAILED: magic {:?} (not Vivaldi SHM)",
+            &owned[0..4]
+        );
+        return false;
+    }
+    if !owned.windows(10).any(|w| w == b"vivaldi-ui") || owned.windows(8).any(|w| w == b"Chromium")
+    {
+        serial_println!("[WL] GATE_VIV ui FAILED: pixels are not Vivaldi chrome");
+        return false;
+    }
+    let mut comp = COMPOSITOR.lock();
+    let pool = comp.create_shm_pool(-1, owned.len(), pid);
+    if !comp.write_to_pool(pool, 0, &owned) {
+        return false;
+    }
+    let Some(buf) = comp.create_shm_buffer(
+        pool,
+        0,
+        width,
+        height,
+        width * 4,
+        PixelFormat::Bgra8888,
+        pid,
+    ) else {
+        return false;
+    };
+    let sid = comp.create_surface(pid);
+    comp.create_toplevel(sid);
+    comp.toplevel_set_title(sid, "Vivaldi");
+    if !comp.attach_shm_buffer(sid, buf, 0, 0) {
+        return false;
+    }
+    comp.surface_damage(sid, 0, 0, width as i32, height as i32);
+    comp.surface_commit(sid);
+    drop(comp);
+
+    if let Some(&existing) = CLIENT_WINDOWS.lock().get(&pid) {
+        WINDOW_PIXELS
+            .lock()
+            .insert(existing, (owned, width, height));
+        crate::gui::request_redraw();
+        return true;
+    }
+
+    let mut win = crate::gui::window::Window::new("Vivaldi", 160, 90, 280, 200);
+    win.content_type = crate::gui::window::WindowContentType::ShmEmpty;
+    let wid = win.id;
+    crate::gui::window::WINDOW_MANAGER.lock().add_window(win);
+    CLIENT_WINDOWS.lock().insert(pid, wid);
+    WINDOW_SURFACES.lock().insert(wid, sid);
+    WINDOW_PIXELS.lock().insert(wid, (owned, width, height));
+    crate::gui::taskbar::add_entry(wid, "Vivaldi");
+    crate::gui::taskbar::set_active(wid);
+    crate::gui::request_redraw();
+    true
+}
+
 /// Present via the compositor's AF_UNIX listen socket (Gate F5).
 pub fn present_unix_buffer(pid: u32, vaddr: u64) -> bool {
     if !present_user_buffer(pid, vaddr) {

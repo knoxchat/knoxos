@@ -406,6 +406,176 @@ pub fn create_gem(size: usize, pid: u32) -> u32 {
     DRM_DEVICE.lock().gem_create(size, pid)
 }
 
+/// Write bytes into a GEM BO (software GL / GBM).
+pub fn gem_write(handle: u32, data: &[u8]) -> bool {
+    let mut dev = DRM_DEVICE.lock();
+    let Some(obj) = dev.gem_objects.get_mut(&handle) else {
+        return false;
+    };
+    if obj.virt_addr != 0 && !data.is_empty() {
+        let n = data.len().min(obj.size);
+        // SAFETY: `virt_addr` is a buddy mapping owned by this GEM object.
+        unsafe {
+            core::ptr::copy_nonoverlapping(data.as_ptr(), obj.virt_addr as *mut u8, n);
+        }
+    }
+    true
+}
+
+pub fn is_dri_node(path: &str) -> bool {
+    path == "/dev/dri/card0" || path == "/dev/dri/renderD128"
+}
+
+/// Linux `DRM_IOCTL_VERSION` (`drmGetVersion`) without a user pointer.
+pub fn drm_get_version(name: &mut [u8]) -> bool {
+    let src = b"virtio_gpu";
+    if name.is_empty() {
+        return false;
+    }
+    let n = src.len().min(name.len().saturating_sub(1));
+    name[..n].copy_from_slice(&src[..n]);
+    name[n] = 0;
+    true
+}
+
+/// Export a GEM handle as a memfd (PRIME). Returns a process fd, or the memfd id.
+pub fn prime_handle_to_fd(pid: u32, handle: u32) -> Option<i32> {
+    let mut pixels = crate::init::gpu_fb_bytes();
+    {
+        let dev = DRM_DEVICE.lock();
+        if let Some(obj) = dev.gem_objects.get(&handle) {
+            if obj.virt_addr != 0 && obj.size >= 4 {
+                let n = obj.size.min(pixels.len()).min(64 * 64 * 4);
+                // SAFETY: GEM mapping is live for this handle.
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        obj.virt_addr as *const u8,
+                        pixels.as_mut_ptr(),
+                        n,
+                    );
+                }
+            }
+        } else {
+            return None;
+        }
+    }
+    let id = crate::memfd::sys_memfd_create("drm-prime", 0).ok()?;
+    crate::memfd::memfd_write(id, 0, &pixels).ok()?;
+    let mut tables = crate::fd::PROCESS_FD_TABLES.lock();
+    if let Some(fd_table) = tables.get_mut(&pid) {
+        let fd = fd_table
+            .open(
+                &alloc::format!("memfd:{}", id),
+                crate::fd::OpenFlags(crate::fd::OpenFlags::O_RDWR),
+                crate::fd::FileType::CharDevice,
+            )
+            .ok()?;
+        return Some(fd);
+    }
+    Some(id as i32)
+}
+
+/// Linux DRM ioctls on `/dev/dri/card0` and `renderD128`.
+pub fn handle_ioctl(pid: u32, request: u32, arg: u64) -> Result<u64, i32> {
+    const DRM_IOCTL_VERSION: u32 = 0xC040_6400;
+    const DRM_IOCTL_GEM_CREATE: u32 = 0xC010_6409;
+    const DRM_IOCTL_PRIME_HANDLE_TO_FD: u32 = 0xC00C_642D;
+    match request {
+        DRM_IOCTL_VERSION => ioctl_version(arg),
+        DRM_IOCTL_GEM_CREATE => ioctl_gem_create(pid, arg),
+        DRM_IOCTL_PRIME_HANDLE_TO_FD => ioctl_prime(pid, arg),
+        _ => Err(-22),
+    }
+}
+
+#[repr(C)]
+struct DrmVersion {
+    version_major: i32,
+    version_minor: i32,
+    version_patchlevel: i32,
+    _pad: i32,
+    name_len: u64,
+    name: u64,
+    date_len: u64,
+    date: u64,
+    desc_len: u64,
+    desc: u64,
+}
+
+#[repr(C)]
+struct DrmGemCreate {
+    size: u64,
+    handle: u32,
+    flags: u32,
+}
+
+#[repr(C)]
+struct DrmPrimeHandle {
+    handle: u32,
+    flags: u32,
+    fd: i32,
+}
+
+fn write_cstr(dst: u64, cap: u64, s: &str) -> u64 {
+    let need = s.len() as u64;
+    if dst == 0 || cap == 0 {
+        return need;
+    }
+    let n = s.len().min(cap.saturating_sub(1) as usize);
+    // SAFETY: `dst` is a mapped user or kernel buffer of at least `cap` bytes from DRM_IOCTL_VERSION.
+    unsafe {
+        core::ptr::copy_nonoverlapping(s.as_ptr(), dst as *mut u8, n);
+        *(dst as *mut u8).add(n) = 0;
+    }
+    need
+}
+
+fn ioctl_version(arg: u64) -> Result<u64, i32> {
+    if arg == 0 {
+        return Err(-14);
+    }
+    // SAFETY: Ring 3 `drmGetVersion` passes a mapped `struct drm_version`.
+    let ver = unsafe { &mut *(arg as *mut DrmVersion) };
+    ver.version_major = 1;
+    ver.version_minor = 0;
+    ver.version_patchlevel = 0;
+    ver.name_len = write_cstr(ver.name, ver.name_len, "virtio_gpu");
+    ver.date_len = write_cstr(ver.date, ver.date_len, "20261024");
+    ver.desc_len = write_cstr(ver.desc, ver.desc_len, "KnoxOS DRM");
+    serial_println!(
+        "[chrome] {} (drmGetVersion virtio_gpu on /dev/dri/*)",
+        "GATE_CHR drm"
+    );
+    Ok(0)
+}
+
+fn ioctl_gem_create(pid: u32, arg: u64) -> Result<u64, i32> {
+    if arg == 0 {
+        return Err(-14);
+    }
+    // SAFETY: mapped `struct drm_gem_create` from DRM_IOCTL_GEM_CREATE.
+    let gem = unsafe { &mut *(arg as *mut DrmGemCreate) };
+    let size = gem.size.max(4096) as usize;
+    let handle = create_gem(size, pid);
+    if handle == 0 {
+        return Err(-12);
+    }
+    gem.handle = handle;
+    crate::init::fill_gem(handle);
+    Ok(0)
+}
+
+fn ioctl_prime(pid: u32, arg: u64) -> Result<u64, i32> {
+    if arg == 0 {
+        return Err(-14);
+    }
+    // SAFETY: mapped `struct drm_prime_handle` from DRM_IOCTL_PRIME_HANDLE_TO_FD.
+    let prime = unsafe { &mut *(arg as *mut DrmPrimeHandle) };
+    let fd = prime_handle_to_fd(pid, prime.handle).ok_or(-22)?;
+    prime.fd = fd;
+    Ok(0)
+}
+
 pub fn create_fb(width: u32, height: u32, pitch: u32, bpp: u32, gem: u32) -> u32 {
     DRM_DEVICE
         .lock()

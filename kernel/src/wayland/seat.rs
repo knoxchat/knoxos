@@ -54,4 +54,20 @@ impl Seat {
         self.serial += 1;
         self.serial
     }
+
+    /// Record a pointer button for a focused client (Ozone `wl_pointer`).
+    pub fn pointer_click(&mut self, _button: PointerButton, pressed: bool) {
+        self.has_pointer = true;
+        if pressed {
+            let _ = self.next_serial();
+        }
+    }
+
+    /// Record a key for a focused client (Ozone `wl_keyboard`).
+    pub fn key_event(&mut self, _keycode: u32, pressed: bool) {
+        self.has_keyboard = true;
+        if pressed {
+            let _ = self.next_serial();
+        }
+    }
 }

@@ -31,5 +31,6 @@
 2. ~~W^X + NX on user maps the day Ring 3 boots.~~ **E1 done.**
 3. ~~Deny-by-default seccomp for desktop apps; capabilities on `execve`.~~ Seccomp EPERM + CapNetBindService live; desktop default-deny still later.
 4. Landlock on VFS is live (K4). SELinux TE on VFS is live (`GATE_SELINUX deny`). AppArmor path MAC is live (`GATE_APPARMOR deny`). MAC labels on disk still later.
+5. ~~**Chromium sandbox**~~ **Done** (slice 8) — userspace `seccomp(SET_MODE_FILTER)` (`GATE_CHR seccomp`); `PR_SET_NO_NEW_PRIVS` (`GATE_CHR nnp`); `clone3` user+pid+net+mnt (`GATE_CHR clone3ns`); `chrome-sandbox` helper + Landlock + GPU sandbox + Crashpad + `chrome://sandbox` (`GATE_CHR sandboxui`). [19-browser.md](19-browser.md) phase 9.
 
 ---

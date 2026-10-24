@@ -2,7 +2,7 @@
 
 ← [Status index](README.md)
 
-Gates **A–F, H–I**, syscall gates **J–BL**, **BM1–BM4** (userspace `ld.so` + musl static/dynamic), **F5** (Wayland AF_UNIX), **C7–C8** (`/bin` persist + JBD2), **G3** (feature flags), **G4** (syscall audit), **F6–F8** (calculator + Files userspace + VirtIO-GPU scanout/cursor), **I4** (SMP balance onto an idle AP), USB HID URB completion, **D6** (IPv6 echo TX), udev `/dev` hotplug, service restart, quota `EDQUOT`, cron `@reboot` + timer, VSync pacing, Ring 3 `openpty`+SHM (`GATE_TERM`), memory cgroups, job control, IMA, lockdown, wipe-on-free, UEFI time, and NetworkManager DHCP are done on QEMU. Adding another `GATE_xx` ENOSYS is **not** the critical path.
+Gates **A–F, H–I**, syscall gates **J–BL**, **BM1–BM4** (userspace `ld.so` + musl static/dynamic), **F5** (Wayland AF_UNIX), **C7–C8** (`/bin` persist + JBD2), **G3** (feature flags), **G4** (syscall audit), **F6–F8** (calculator + Files userspace + VirtIO-GPU scanout/cursor), **I4** (SMP balance onto an idle AP), USB HID URB completion, **D6** (IPv6 echo TX), udev `/dev` hotplug, service restart, quota `EDQUOT`, cron `@reboot` + timer, VSync pacing, Ring 3 `openpty`+SHM (`GATE_TERM`), memory cgroups, job control, IMA, lockdown, wipe-on-free, UEFI time, and NetworkManager DHCP are done on QEMU. Adding another `GATE_xx` ENOSYS is **not** the critical path. Chromium slices 1–10 are live, including Vivaldi `.deb`, Mojo without `--single-process`, ELF TLS / DT_NEEDED `.so`s, real `vivaldi::launch` PIDs, and Ring 3 `io_uring_setup` (`GATE_CHR iouring`). No open browser checkbox — [19-browser.md](subsystems/19-browser.md).
 
 Work top to bottom. Skip anything marked later.
 
@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Integration **595/595**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Chromium slices 1–10 are live (`GATE_CHR unpack` / `exec` / `ldso` / `glibc` / `scmrights` / `fork` / `wlshm` / `xdgshell` / `paint` / `proc` / `dev` / `dns` / `nss` / `tlsrec` / `h2` / `cookies` / `https` / `drm` / `egl` / `dmabuf` / `virgl` / `gpuinfo` / `icu` / `fontconfig` / `ffmpeg` / `pulse` / `alsa` / `media` / `dbus` / `notify` / `portal` / `mime` / `cups` / `launch` / `sandbox` / `landlock` / `gpusandbox` / `crashpad` / `sandboxui` / `tls` / `needed` / `ozone` / `ldd` / `mojo` / `extensions` / `webrtc` / `download` / `devtools` / `profiles` / `hidpi` / `webgpu` / `iouring` plus `GATE_VIV deb` / `ui` / `sync` / `cdm`). Integration **661/661**.
 
 ---
 
@@ -55,7 +55,7 @@ A dynamically linked musl binary runs (BM4). VirtIO-GPU scanout + hardware curso
 
 ## 4. Still production (not the later list)
 
-Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md](remaining.md) from this section are **done**, including this batch:
+Skip [Do not start](#do-not-start). Highest-leverage open rows from this leftover section are **done** (FUSE/D-Bus/XHCI/NFS). Required Chromium/Vivaldi slices 1–10 in [§5 Browser](#5-browser-chromium--vivaldi--implement-in-order) are **done**, including Ring 3 `io_uring` (`GATE_CHR iouring`). Ring 3 `userfaultfd` stays ENOSYS (N4). Landed leftover batches:
 
 - FUSE INIT (`GATE_FUSE init`); FUSE FORGET (`GATE_FUSE forget`); D-Bus PropertiesChanged (`GATE_DBUS propschanged`); D-Bus InterfacesAdded (`GATE_DBUS ifacesadded`); XHCI GET_STATUS(INTERFACE) (`GATE_USB xhci statusiface`); XHCI GET_STATUS(ENDPOINT) (`GATE_USB xhci statusep`); NFS SEQUENCE (`GATE_NFS sequence`); NFS RECLAIM_COMPLETE (`GATE_NFS reclaim`)
 
@@ -110,13 +110,38 @@ Earlier in this section:
 
 ---
 
+## 5. Browser (Chromium / Vivaldi) — implement in order
+
+The leftover FUSE/D-Bus/XHCI/NFS inventory above is **done**. Slice 8 sandbox is live (`GATE_CHR sandboxui`). Slice 9 Vivaldi `.deb` is live (`GATE_VIV deb` / `ui`). `vivaldi::launch` uses `spawn_elf` scheduler PIDs. Leftover TLS / DT_NEEDED / Mojo / polish / Ring 3 `io_uring` are live.
+
+Required slices 1–10 are **done**. Full checkboxes: [19-browser.md](subsystems/19-browser.md). Inventory: [remaining.md §19](remaining.md). Ring 3 `io_uring_setup(8)` is live (`GATE_CHR iouring`); `userfaultfd` stays ENOSYS.
+
+| Slice | Phases | First proof |
+|-------|--------|-------------|
+| 1 | 0–1 Policy + glibc loader | **Done** — Chromium-shaped ELF + ICU/pak (`GATE_CHR unpack`); Ring 3 `_start` (`GATE_CHR exec`); ld-linux mapped (`GATE_CHR ldso`); `__libc_start_main` calls `main` (`GATE_CHR glibc`) |
+| 2 | 2 Process/IPC | **Done** — `SCM_RIGHTS` on `sendmsg`/`recvmsg` (`GATE_CHR scmrights`); zygote `fork`+`execve` with `--type=zygote --no-sandbox --single-process` (`GATE_CHR fork`) |
+| 3 | 3–4 Ozone/Wayland + proc/dev | **Done** — xdg-shell SHM (`GATE_CHR paint`) + Linux `/proc`/`/dev`/`/etc`/XDG |
+| 4 | 6 HTTPS | **Done** — userspace DNS + NSS/TLS + h2 + cookies (`GATE_CHR https`) |
+| 5 | 5 Software GL | **Done** — Ring 3 DRM + SwiftShader EGL + dmabuf (`GATE_CHR gpuinfo`) |
+| 6 | 7 Fonts/ICU/media | **Done** — ICU/V8, fontconfig+FreeType, ffmpeg, Pulse+ALSA (`GATE_CHR media`) |
+| 7 | 8 Desktop | **Done** — start menu launches Chromium (`GATE_CHR launch`) |
+| 8 | 9 Sandbox | **Done** — drop `--no-sandbox` (`GATE_CHR sandboxui`) |
+| 9 | 10 Vivaldi | **Done** — real `.deb` (`GATE_VIV deb`, `GATE_VIV ui`); sync TLS error (`GATE_VIV sync`); Widevine disabled (`GATE_VIV cdm`) |
+| 10 | 11 Polish | **Done** — extensions, WebRTC, downloads, DevTools, profiles, HiDPI, WebGPU, Ring 3 `io_uring` (`GATE_CHR iouring`). |
+
+Strategy: official Linux x86_64 Chromium (Ozone/Wayland, skip GTK if possible). Do not grow the in-kernel viewer into Blink. Do not rebuild Chromium against musl.
+
+---
+
 ## Do not start
 
 These increase the distance to a perfect OS. Full list: [gates/quality.md](gates/quality.md).
 
-k8s orchestration, Chromium/Vivaldi, aarch64/riscv64 **runtime**, nested VT-x `VMXON`/`VMLAUNCH` on real hardware, RPM/APK, production tokenizer vocab, another unused `pub mod`.
+k8s orchestration, aarch64/riscv64 **runtime**, nested VT-x `VMXON`/`VMLAUNCH` on real hardware, RPM/APK, production tokenizer vocab, another unused `pub mod`.
 
-Open checkboxes for those live in [remaining.md](remaining.md) so they are not forgotten — they are not next.
+Chromium/Vivaldi is **not** on this list anymore — it is [§5](#5-browser-chromium--vivaldi--implement-in-order).
+
+Open checkboxes for the later list live in [remaining.md](remaining.md) so they are not forgotten — they are not next.
 
 ---
 

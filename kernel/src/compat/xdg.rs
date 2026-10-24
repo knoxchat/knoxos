@@ -352,7 +352,16 @@ pub fn xdg_open(uri: &str) -> Result<(), String> {
             app.name,
             app.exec.as_deref().unwrap_or("(no exec)")
         );
-        // In a full implementation, exec the application with the URI as argument
+        if app
+            .exec
+            .as_deref()
+            .is_some_and(|e| e.contains("/opt/chromium/chrome"))
+        {
+            if crate::init::launch_chromium_from_desktop(uri) {
+                return Ok(());
+            }
+            return Err(String::from("Chromium ELF missing"));
+        }
         Ok(())
     } else {
         Err(format!("No application registered for {}", mime_type))
@@ -505,7 +514,7 @@ fn create_xdg_directories() {
 
     for path in &paths {
         serial_println!("[xdg] Creating directory: {}", path);
-        // In a full implementation: vfs::mkdir_p(path, 0o700)
+        crate::vfs::ensure_directory(path);
     }
 }
 

@@ -32,9 +32,15 @@ const EM_X86_64: u16 = 62;
 
 /// Program header type
 const PT_LOAD: u32 = 1; // Loadable segment
+const PT_DYNAMIC: u32 = 2; // Dynamic linking information
 const PT_INTERP: u32 = 3; // Interpreter path
 const PT_NOTE: u32 = 4; // Note segment
 const PT_PHDR: u32 = 6; // Program header table
+const PT_TLS: u32 = 7; // Thread-local storage template
+
+const DT_NULL: i64 = 0;
+const DT_NEEDED: i64 = 1;
+const DT_STRTAB: i64 = 5;
 
 /// Program header flags
 const PF_X: u32 = 1; // Execute
@@ -258,6 +264,14 @@ pub fn load_elf(data: &[u8]) -> Result<ElfLoadResult, ElfError> {
             PT_PHDR => {
                 serial_println!("[KnoxOS]   PHDR: vaddr={:#x}", phdr.p_vaddr);
             }
+            PT_TLS => {
+                serial_println!(
+                    "[KnoxOS]   TLS: filesz={:#x} memsz={:#x} align={:#x}",
+                    phdr.p_filesz,
+                    phdr.p_memsz,
+                    phdr.p_align
+                );
+            }
             _ => {}
         }
     }
@@ -314,6 +328,74 @@ pub fn phdr_vaddr(data: &[u8]) -> u64 {
 
 pub fn phnum(data: &[u8]) -> u64 {
     validate_elf(data).map(|h| h.e_phnum as u64).unwrap_or(0)
+}
+
+/// PT_TLS template: `(file_offset, filesz, memsz, align)`.
+pub fn tls_segment(data: &[u8]) -> Option<(u64, u64, u64, u64)> {
+    let header = validate_elf(data).ok()?;
+    parse_program_headers(data, header)
+        .into_iter()
+        .find(|p| p.p_type == PT_TLS)
+        .map(|p| (p.p_offset, p.p_filesz, p.p_memsz, p.p_align.max(1)))
+}
+
+fn vaddr_to_file_offset(phdrs: &[Elf64ProgramHeader], vaddr: u64) -> Option<usize> {
+    for p in phdrs.iter().filter(|p| p.p_type == PT_LOAD) {
+        if vaddr >= p.p_vaddr && vaddr < p.p_vaddr.saturating_add(p.p_filesz) {
+            return Some((p.p_offset + (vaddr - p.p_vaddr)) as usize);
+        }
+    }
+    None
+}
+
+/// `DT_NEEDED` library names from the on-disk dynamic section.
+pub fn needed_libraries(data: &[u8]) -> alloc::vec::Vec<String> {
+    let Ok(header) = validate_elf(data) else {
+        return alloc::vec::Vec::new();
+    };
+    let phdrs = parse_program_headers(data, header);
+    let Some(dyn_ph) = phdrs.iter().find(|p| p.p_type == PT_DYNAMIC) else {
+        return alloc::vec::Vec::new();
+    };
+    let dyn_off = dyn_ph.p_offset as usize;
+    let dyn_end = dyn_off
+        .saturating_add(dyn_ph.p_filesz as usize)
+        .min(data.len());
+    let mut strtab_vaddr = 0u64;
+    let mut needed_offs: alloc::vec::Vec<u32> = alloc::vec::Vec::new();
+    let mut pos = dyn_off;
+    while pos + 16 <= dyn_end {
+        let tag = i64::from_le_bytes(data[pos..pos + 8].try_into().unwrap_or([0; 8]));
+        let val = u64::from_le_bytes(data[pos + 8..pos + 16].try_into().unwrap_or([0; 8]));
+        if tag == DT_NULL {
+            break;
+        }
+        if tag == DT_NEEDED {
+            needed_offs.push(val as u32);
+        }
+        if tag == DT_STRTAB {
+            strtab_vaddr = val;
+        }
+        pos += 16;
+    }
+    let Some(strtab_off) = vaddr_to_file_offset(&phdrs, strtab_vaddr) else {
+        return alloc::vec::Vec::new();
+    };
+    let mut out = alloc::vec::Vec::new();
+    for off in needed_offs {
+        let start = strtab_off.saturating_add(off as usize);
+        if start >= data.len() {
+            continue;
+        }
+        let rest = &data[start..];
+        let end = rest.iter().position(|&b| b == 0).unwrap_or(rest.len());
+        if let Ok(name) = core::str::from_utf8(&rest[..end]) {
+            if !name.is_empty() {
+                out.push(String::from(name));
+            }
+        }
+    }
+    out
 }
 
 /// Lowest PT_LOAD `p_vaddr` — used as AT_BASE for the interpreter.

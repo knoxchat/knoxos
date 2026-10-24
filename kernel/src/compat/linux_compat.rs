@@ -774,11 +774,8 @@ pub fn setup_lib_hierarchy() {
         crate::vfs::ensure_directory(dir);
     }
 
-    // Create interpreter symlinks
-    crate::vfs::create_file_dispatch(
-        "/lib64/ld-linux-x86-64.so.2",
-        b"#!/lib64/ld-linux-x86-64.so.2\n",
-    );
+    // Real ELF interpreter (not a shebang stub). Same image as `/lib/ld-knoxos.so`.
+    crate::vfs::write_file_dispatch("/lib64/ld-linux-x86-64.so.2", &crate::init::ldso_elf_data());
     crate::vfs::create_file_dispatch("/lib/ld-musl-x86_64.so.1", b"#!/lib/ld-musl-x86_64.so.1\n");
 
     crate::serial_println!("[linux_compat] Library hierarchy initialized");
