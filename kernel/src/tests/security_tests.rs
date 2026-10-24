@@ -870,6 +870,22 @@ fn test_dbus_activatable_services_changed() {
 }
 
 #[test_case]
+fn test_dbus_properties_changed() {
+    assert!(
+        crate::dbus::propschanged_self_test(),
+        "PropertiesChanged must be delivered after ReloadConfig"
+    );
+}
+
+#[test_case]
+fn test_dbus_interfaces_added() {
+    assert!(
+        crate::dbus::ifacesadded_self_test(),
+        "InterfacesAdded must be delivered after RequestName"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

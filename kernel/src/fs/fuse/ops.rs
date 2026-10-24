@@ -6,22 +6,23 @@ use alloc::vec::Vec;
 use super::loopback::{
     serve_loopback, serve_loopback_access, serve_loopback_bmap, serve_loopback_copy_file_range,
     serve_loopback_create, serve_loopback_destroy, serve_loopback_fallocate, serve_loopback_flush,
-    serve_loopback_fsync, serve_loopback_fsyncdir, serve_loopback_getattr, serve_loopback_getlk,
-    serve_loopback_getxattr, serve_loopback_ioctl, serve_loopback_link, serve_loopback_listxattr,
-    serve_loopback_lseek, serve_loopback_mkdir, serve_loopback_mknod, serve_loopback_open,
-    serve_loopback_opendir, serve_loopback_poll, serve_loopback_read, serve_loopback_readdir,
-    serve_loopback_readdirplus, serve_loopback_readlink, serve_loopback_release,
-    serve_loopback_releasedir, serve_loopback_removexattr, serve_loopback_rename,
-    serve_loopback_rename2, serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setlk,
-    serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_statx, serve_loopback_symlink,
-    serve_loopback_syncfs, serve_loopback_unlink, serve_loopback_write,
+    serve_loopback_forget, serve_loopback_fsync, serve_loopback_fsyncdir, serve_loopback_getattr,
+    serve_loopback_getlk, serve_loopback_getxattr, serve_loopback_init, serve_loopback_ioctl,
+    serve_loopback_link, serve_loopback_listxattr, serve_loopback_lseek, serve_loopback_mkdir,
+    serve_loopback_mknod, serve_loopback_open, serve_loopback_opendir, serve_loopback_poll,
+    serve_loopback_read, serve_loopback_readdir, serve_loopback_readdirplus,
+    serve_loopback_readlink, serve_loopback_release, serve_loopback_releasedir,
+    serve_loopback_removexattr, serve_loopback_rename, serve_loopback_rename2,
+    serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setlk, serve_loopback_setxattr,
+    serve_loopback_statfs, serve_loopback_statx, serve_loopback_symlink, serve_loopback_syncfs,
+    serve_loopback_unlink, serve_loopback_write,
 };
 use super::mount::{send_request, take_response};
 use super::protocol::{
     FuseAttr, FuseEntry, FuseFileLock, FuseOpcode, FuseStatfs, encode_lk, parse_fuse_bmap,
     parse_fuse_copy_file_range, parse_fuse_direntplus, parse_fuse_dirents, parse_fuse_entry,
-    parse_fuse_ioctl, parse_fuse_lk, parse_fuse_lseek, parse_fuse_open, parse_fuse_poll,
-    parse_fuse_statfs, parse_fuse_statx,
+    parse_fuse_init, parse_fuse_ioctl, parse_fuse_lk, parse_fuse_lseek, parse_fuse_open,
+    parse_fuse_poll, parse_fuse_statfs, parse_fuse_statx,
 };
 
 /// Handle a VFS lookup through FUSE
@@ -634,4 +635,26 @@ pub fn fuse_statx(mount_point: &str, nodeid: u64, mask: u32) -> Result<FuseAttr,
         mtime: 0,
         ctime: 0,
     })
+}
+/// Handle a FUSE INIT handshake. Known mounts return the kernel major/minor; unknown mounts fail.
+pub fn fuse_init(mount_point: &str, major: u32, minor: u32) -> Result<(u32, u32), &'static str> {
+    let mut data = Vec::with_capacity(8);
+    data.extend_from_slice(&major.to_le_bytes());
+    data.extend_from_slice(&minor.to_le_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Init, 0, data.clone())?;
+    serve_loopback_init(mount_point, unique, &data);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    parse_fuse_init(&resp).ok_or("short init")
+}
+/// Handle a FUSE FORGET. Known nodeids succeed; unknown nodeid or nlookup 0 fails.
+pub fn fuse_forget(mount_point: &str, nodeid: u64, nlookup: u64) -> Result<(), &'static str> {
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::Forget,
+        nodeid,
+        nlookup.to_le_bytes().to_vec(),
+    )?;
+    serve_loopback_forget(mount_point, unique, nodeid, &nlookup.to_le_bytes());
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
 }

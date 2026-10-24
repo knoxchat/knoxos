@@ -274,3 +274,168 @@ pub fn destroyclientid_self_test() -> bool {
         }
     }
 }
+
+pub const GATE_NFS_SEQUENCE_MARKER: &str = "GATE_NFS sequence";
+
+/// SEQUENCE of a CREATE_SESSION id returns that session; sequenceid 0 is INVAL; unknown is BADSESSION.
+pub fn sequence_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let issued = client.compound(
+        "sequence-exchangeid",
+        &[NfsCompoundOp::ExchangeId {
+            client_name: String::from("knoxos-seq"),
+        }],
+    );
+    let client_id = match issued.first() {
+        Some(NfsCompoundResult::ClientId { client_id, .. }) => *client_id,
+        other => {
+            serial_println!("[NFS] GATE_NFS sequence FAILED: exchangeid {:?}", other);
+            return false;
+        }
+    };
+    let created = client.compound(
+        "sequence-create",
+        &[NfsCompoundOp::CreateSession { client_id }],
+    );
+    let session_id = match created.first() {
+        Some(NfsCompoundResult::Session { session_id }) => *session_id,
+        other => {
+            serial_println!("[NFS] GATE_NFS sequence FAILED: create {:?}", other);
+            return false;
+        }
+    };
+    let sequenced = client.compound(
+        "sequence",
+        &[NfsCompoundOp::Sequence {
+            session_id,
+            sequenceid: 1,
+        }],
+    );
+    let seq_ok = matches!(
+        sequenced.first(),
+        Some(NfsCompoundResult::Sequence {
+            session_id: sid,
+            sequenceid: 1
+        }) if *sid == session_id
+    );
+    let inval = client.compound(
+        "sequence-zero",
+        &[NfsCompoundOp::Sequence {
+            session_id,
+            sequenceid: 0,
+        }],
+    );
+    let inval_ok = matches!(
+        inval.first(),
+        Some(NfsCompoundResult::Status(NfsStat::Inval))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "sequence-missing",
+        &[NfsCompoundOp::Sequence {
+            session_id,
+            sequenceid: 1,
+        }],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::BadSession)) if seq_ok && inval_ok => {
+            serial_println!(
+                "[NFS] {} (SEQUENCE then INVAL then BADSESSION)",
+                GATE_NFS_SEQUENCE_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS sequence FAILED seq={} inval={} missing={:?}",
+                seq_ok,
+                inval_ok,
+                other
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_RECLAIM_MARKER: &str = "GATE_NFS reclaim";
+
+/// RECLAIM_COMPLETE of a live session is OK; a second is COMPLETE_ALREADY; no session is BADSESSION.
+pub fn reclaim_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let issued = client.compound(
+        "reclaim-exchangeid",
+        &[NfsCompoundOp::ExchangeId {
+            client_name: String::from("knoxos-reclaim"),
+        }],
+    );
+    let client_id = match issued.first() {
+        Some(NfsCompoundResult::ClientId { client_id, .. }) => *client_id,
+        other => {
+            serial_println!("[NFS] GATE_NFS reclaim FAILED: exchangeid {:?}", other);
+            return false;
+        }
+    };
+    let created = client.compound(
+        "reclaim-create",
+        &[NfsCompoundOp::CreateSession { client_id }],
+    );
+    if !matches!(created.first(), Some(NfsCompoundResult::Session { .. })) {
+        serial_println!(
+            "[NFS] GATE_NFS reclaim FAILED: create {:?}",
+            created.first()
+        );
+        return false;
+    }
+    let first = client.compound(
+        "reclaim",
+        &[NfsCompoundOp::ReclaimComplete { one_fs: false }],
+    );
+    let first_ok = matches!(first.first(), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let second = client.compound(
+        "reclaim-again",
+        &[NfsCompoundOp::ReclaimComplete { one_fs: false }],
+    );
+    let second_ok = matches!(
+        second.first(),
+        Some(NfsCompoundResult::Status(NfsStat::CompleteAlready))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "reclaim-missing",
+        &[NfsCompoundOp::ReclaimComplete { one_fs: false }],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::BadSession)) if first_ok && second_ok => {
+            serial_println!(
+                "[NFS] {} (RECLAIM_COMPLETE then COMPLETE_ALREADY then BADSESSION)",
+                GATE_NFS_RECLAIM_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS reclaim FAILED first={} second={} missing={:?}",
+                first_ok,
+                second_ok,
+                other
+            );
+            false
+        }
+    }
+}

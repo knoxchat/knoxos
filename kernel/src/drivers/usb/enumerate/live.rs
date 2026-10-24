@@ -81,5 +81,9 @@ pub(super) static HIDSETIDLE_LIVE: AtomicBool = AtomicBool::new(false);
 pub(super) static HIDGETPROTOCOL_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when HID SET_PROTOCOL got a Transfer Event.
 pub(super) static HIDSETPROTOCOL_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_STATUS(INTERFACE) got a Transfer Event.
+pub(super) static STATUSIFACE_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_STATUS(ENDPOINT) got a Transfer Event.
+pub(super) static STATUSEP_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 pub(super) static ENUM_LIVE: AtomicBool = AtomicBool::new(false);

@@ -116,6 +116,13 @@ pub enum NfsCompoundOp {
     DestroyClientId {
         client_id: u64,
     },
+    Sequence {
+        session_id: u64,
+        sequenceid: u32,
+    },
+    ReclaimComplete {
+        one_fs: bool,
+    },
 }
 
 /// Result of a compound operation
@@ -162,5 +169,9 @@ pub enum NfsCompoundResult {
     },
     Session {
         session_id: u64,
+    },
+    Sequence {
+        session_id: u64,
+        sequenceid: u32,
     },
 }

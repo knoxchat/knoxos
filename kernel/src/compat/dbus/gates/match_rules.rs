@@ -423,3 +423,113 @@ pub fn svcchanged_self_test() -> bool {
         false
     }
 }
+
+pub const GATE_DBUS_PROPSCHANGED_MARKER: &str = "GATE_DBUS propschanged";
+
+/// `PropertiesChanged` is delivered after `ReloadConfig` to an AddMatch listener.
+pub fn propschanged_self_test() -> bool {
+    const RULE: &str =
+        "type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'";
+    let listener = connect(BusType::System, 0xDB30, 1000);
+
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, listener, add);
+    let _ = receive_message(BusType::System, listener);
+
+    let reload = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ReloadConfig",
+    );
+    let _ = send_message(BusType::System, listener, reload);
+    let _ = receive_message(BusType::System, listener);
+
+    let changed = receive_message(BusType::System, listener)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.member.as_deref() == Some("PropertiesChanged")
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::String(s)) if s == "org.freedesktop.DBus"
+                )
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, listener);
+    if changed {
+        serial_println!(
+            "[dbus] {} (PropertiesChanged after ReloadConfig)",
+            GATE_DBUS_PROPSCHANGED_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: PropertiesChanged");
+        false
+    }
+}
+
+pub const GATE_DBUS_IFACESADDED_MARKER: &str = "GATE_DBUS ifacesadded";
+
+/// `InterfacesAdded` is delivered after `RequestName` to an AddMatch listener.
+pub fn ifacesadded_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateIfacesAdded";
+    const RULE: &str =
+        "type='signal',interface='org.freedesktop.DBus.ObjectManager',member='InterfacesAdded'";
+    let owner = connect(BusType::System, 0xDB31, 1000);
+
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, owner, add);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let added = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.member.as_deref() == Some("InterfacesAdded")
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::ObjectPath(p)) if p == "/org/freedesktop/DBus"
+                )
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if added {
+        serial_println!(
+            "[dbus] {} (InterfacesAdded after RequestName)",
+            GATE_DBUS_IFACESADDED_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: InterfacesAdded");
+        false
+    }
+}

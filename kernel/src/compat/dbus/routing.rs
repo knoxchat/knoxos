@@ -198,6 +198,47 @@ fn activatable_services_changed() -> Message {
     msg
 }
 
+fn properties_changed() -> Message {
+    let mut msg = Message::signal(
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.Properties",
+        "PropertiesChanged",
+    );
+    msg.sender = Some(String::from("org.freedesktop.DBus"));
+    msg.body = vec![
+        DbusValue::String(String::from("org.freedesktop.DBus")),
+        DbusValue::Array(Vec::new()),
+        DbusValue::Array(vec![DbusValue::String(String::from("Features"))]),
+    ];
+    msg.signature = Some(String::from("sa{sv}as"));
+    msg
+}
+
+fn interfaces_added(name: &str) -> Message {
+    let mut msg = Message::signal(
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.ObjectManager",
+        "InterfacesAdded",
+    );
+    msg.sender = Some(String::from("org.freedesktop.DBus"));
+    let props = vec![DbusValue::DictEntry(
+        Box::new(DbusValue::String(String::from("Name"))),
+        Box::new(DbusValue::Variant(Box::new(DbusValue::String(
+            String::from(name),
+        )))),
+    )];
+    let ifaces = vec![DbusValue::DictEntry(
+        Box::new(DbusValue::String(String::from("org.freedesktop.DBus"))),
+        Box::new(DbusValue::Array(props)),
+    )];
+    msg.body = vec![
+        DbusValue::ObjectPath(String::from("/org/freedesktop/DBus")),
+        DbusValue::Array(ifaces),
+    ];
+    msg.signature = Some(String::from("oa{sa{sv}}"));
+    msg
+}
+
 /// Handle bus-level methods (org.freedesktop.DBus)
 fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
     let member = msg.member.as_deref().unwrap_or("");
@@ -242,6 +283,7 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 if code == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER && was_free {
                     emit_bus_signal(bus, name_acquired(&name));
                     emit_bus_signal(bus, name_owner_changed(&name, "", &unique));
+                    emit_bus_signal(bus, interfaces_added(&name));
                 }
             }
             "ReleaseName" => {
@@ -603,6 +645,7 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                         .push(Message::method_return(msg.header.serial));
                 }
                 emit_bus_signal(bus, activatable_services_changed());
+                emit_bus_signal(bus, properties_changed());
             }
             _ => {
                 serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);

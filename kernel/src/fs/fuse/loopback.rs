@@ -5,10 +5,11 @@ use alloc::vec::Vec;
 
 use super::mount::{LOOPBACK, write_response};
 use super::protocol::{
-    F_UNLCK, FuseFileLock, FuseOpcode, FuseStatfs, POLLIN, POLLOUT, RENAME_NOREPLACE, SEEK_END,
-    SEEK_SET, encode_bmap, encode_copy_file_range, encode_dirent, encode_direntplus, encode_entry,
-    encode_ioctl, encode_lk, encode_lseek, encode_open, encode_poll, encode_statfs, encode_statx,
-    lock_conflicts, parse_fuse_lk,
+    F_UNLCK, FUSE_KERNEL_MINOR_VERSION, FUSE_KERNEL_VERSION, FuseFileLock, FuseOpcode, FuseStatfs,
+    POLLIN, POLLOUT, RENAME_NOREPLACE, SEEK_END, SEEK_SET, encode_bmap, encode_copy_file_range,
+    encode_dirent, encode_direntplus, encode_entry, encode_init, encode_ioctl, encode_lk,
+    encode_lseek, encode_open, encode_poll, encode_statfs, encode_statx, lock_conflicts,
+    parse_fuse_lk,
 };
 
 pub(super) fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]) {
@@ -772,6 +773,48 @@ pub(super) fn serve_loopback_statx(mount_point: &str, unique: u64, nodeid: u64, 
     };
     drop(lbs);
     let _ = write_response(mount_point, unique, entry);
+}
+pub(super) fn serve_loopback_init(mount_point: &str, unique: u64, req: &[u8]) {
+    if req.len() < 8 {
+        return;
+    }
+    let major = u32::from_le_bytes(req[0..4].try_into().unwrap_or([0; 4]));
+    if major == 0 {
+        return;
+    }
+    let lbs = LOOPBACK.lock();
+    if lbs.get(mount_point).is_none() {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(
+        mount_point,
+        unique,
+        encode_init(FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION),
+    );
+}
+pub(super) fn serve_loopback_forget(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    if req.len() < 8 {
+        return;
+    }
+    let nlookup = u64::from_le_bytes(req[0..8].try_into().unwrap_or([0; 8]));
+    if nlookup == 0 {
+        return;
+    }
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    let known = nodeid == 1
+        || lb.files.values().any(|(ino, _)| *ino == nodeid)
+        || lb.dirs.values().any(|&ino| ino == nodeid)
+        || lb.links.values().any(|(ino, _)| *ino == nodeid)
+        || lb.nodes.values().any(|(ino, _)| *ino == nodeid);
+    if !known {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
 }
 pub(super) fn serve_loopback_fallocate(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
     if req.len() < 20 {

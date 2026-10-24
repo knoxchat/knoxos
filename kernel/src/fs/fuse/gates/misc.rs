@@ -1,8 +1,11 @@
 use crate::serial_println;
 
 use super::super::mount::{loopback_put, mount};
-use super::super::ops::{fuse_bmap, fuse_destroy, fuse_ioctl, fuse_lookup, fuse_poll, fuse_syncfs};
-use super::super::protocol::POLLIN;
+use super::super::ops::{
+    fuse_bmap, fuse_destroy, fuse_forget, fuse_init, fuse_ioctl, fuse_lookup, fuse_poll,
+    fuse_syncfs,
+};
+use super::super::protocol::{FUSE_KERNEL_MINOR_VERSION, FUSE_KERNEL_VERSION, POLLIN};
 
 pub const GATE_FUSE_BMAP_MARKER: &str = "GATE_FUSE bmap";
 
@@ -204,6 +207,99 @@ pub fn syncfs_self_test() -> bool {
     serial_println!(
         "[fuse] {} (SYNCFS then missing mount)",
         GATE_FUSE_SYNCFS_MARKER
+    );
+    true
+}
+
+pub const GATE_FUSE_INIT_MARKER: &str = "GATE_FUSE init";
+
+/// INIT of a known mount returns kernel major 7; unknown mount or major 0 fails.
+pub fn init_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-init";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE init FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    let (major, minor) = match fuse_init(MP, FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION) {
+        Ok(v) => v,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE init FAILED: init ({})", e);
+            return false;
+        }
+    };
+    if major != FUSE_KERNEL_VERSION || minor != FUSE_KERNEL_MINOR_VERSION {
+        serial_println!(
+            "[fuse] GATE_FUSE init FAILED: major={} minor={}",
+            major,
+            minor
+        );
+        return false;
+    }
+    if fuse_init(MP, 0, 0).is_ok() {
+        serial_println!("[fuse] GATE_FUSE init FAILED: major 0 succeeded");
+        return false;
+    }
+    if fuse_init(
+        "/mnt/fuse-missing-init",
+        FUSE_KERNEL_VERSION,
+        FUSE_KERNEL_MINOR_VERSION,
+    )
+    .is_ok()
+    {
+        serial_println!("[fuse] GATE_FUSE init FAILED: missing mount succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (INIT major={} minor={})",
+        GATE_FUSE_INIT_MARKER,
+        major,
+        minor
+    );
+    true
+}
+
+pub const GATE_FUSE_FORGET_MARKER: &str = "GATE_FUSE forget";
+
+/// FORGET of a known nodeid succeeds; unknown nodeid or nlookup 0 fails.
+pub fn forget_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-forget";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE forget FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "forget.txt", b"x").is_err() {
+        serial_println!("[fuse] GATE_FUSE forget FAILED: put");
+        return false;
+    }
+    let file = match fuse_lookup(MP, 1, "forget.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE forget FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    if let Err(e) = fuse_forget(MP, file.nodeid, 1) {
+        serial_println!("[fuse] GATE_FUSE forget FAILED: forget ({})", e);
+        return false;
+    }
+    if fuse_forget(MP, file.nodeid, 0).is_ok() {
+        serial_println!("[fuse] GATE_FUSE forget FAILED: nlookup 0 succeeded");
+        return false;
+    }
+    if fuse_forget(MP, 0xFFFF_FFFF, 1).is_ok() {
+        serial_println!("[fuse] GATE_FUSE forget FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (FORGET ino={})",
+        GATE_FUSE_FORGET_MARKER,
+        file.nodeid
     );
     true
 }

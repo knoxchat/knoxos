@@ -39,25 +39,27 @@ pub use enumerate::{
     GATE_XHCI_OSCFG_MARKER, GATE_XHCI_QUAL_MARKER, GATE_XHCI_RESETDEV_MARKER,
     GATE_XHCI_RESETEP_MARKER, GATE_XHCI_SET_MARKER, GATE_XHCI_SETDESC_MARKER,
     GATE_XHCI_SETSEL_MARKER, GATE_XHCI_SETTR_MARKER, GATE_XHCI_SLOT_MARKER,
-    GATE_XHCI_STATUS_MARKER, GATE_XHCI_STOP_MARKER, GATE_XHCI_STRING_MARKER,
-    GATE_XHCI_SYNCH_MARKER, GATE_XHCI_TRNOOP_MARKER, addr_self_test, address_device, bos_self_test,
-    bulk_in, bulk_in_self_test, bulk_out, bulk_self_test, clear_feature, clear_self_test,
-    config_self_test, configure_endpoint, descriptor_self_test, disable_self_test, disable_slot,
-    enable_slot, enum_self_test, enumerate_all_devices, enumerate_device, ep_self_test,
-    eval_self_test, evaluate_context, get_bos_descriptor, get_config_descriptor, get_configuration,
-    get_device_descriptor, get_device_qualifier, get_hid_descriptor, get_hid_report_descriptor,
-    get_interface, get_other_speed_config, get_status, get_string_descriptor, getcfg_self_test,
-    getidle_self_test, getiface_self_test, getprotocol_self_test, getreport_self_test,
-    hid_get_idle, hid_get_protocol, hid_get_report, hid_self_test, hid_set_idle, hid_set_protocol,
-    hid_set_report, hidreport_self_test, iface_self_test, interrupt_in, interrupt_in_self_test,
-    isoch_in, isoch_in_self_test, isochdelay_self_test, no_op_command, noop_self_test,
-    oscfg_self_test, poll_events, poll_transfer_event, qual_self_test, reset_device,
-    reset_endpoint, resetdev_self_test, resetep_self_test, set_configuration, set_descriptor,
-    set_descriptor_self_test, set_feature, set_interface, set_isoch_delay, set_sel, set_self_test,
-    set_tr_dequeue, setidle_self_test, setprotocol_self_test, setreport_self_test,
-    setsel_self_test, settr_self_test, slot_self_test, status_self_test, stop_endpoint,
-    stop_self_test, string_self_test, submit_interrupt_urb, submit_interrupt_urb_for_hid,
-    synch_frame, synch_self_test, transfer_noop, trnoop_self_test,
+    GATE_XHCI_STATUS_MARKER, GATE_XHCI_STATUSEP_MARKER, GATE_XHCI_STATUSIFACE_MARKER,
+    GATE_XHCI_STOP_MARKER, GATE_XHCI_STRING_MARKER, GATE_XHCI_SYNCH_MARKER,
+    GATE_XHCI_TRNOOP_MARKER, addr_self_test, address_device, bos_self_test, bulk_in,
+    bulk_in_self_test, bulk_out, bulk_self_test, clear_feature, clear_self_test, config_self_test,
+    configure_endpoint, descriptor_self_test, disable_self_test, disable_slot, enable_slot,
+    enum_self_test, enumerate_all_devices, enumerate_device, ep_self_test, eval_self_test,
+    evaluate_context, get_bos_descriptor, get_config_descriptor, get_configuration,
+    get_device_descriptor, get_device_qualifier, get_endpoint_status, get_hid_descriptor,
+    get_hid_report_descriptor, get_interface, get_interface_status, get_other_speed_config,
+    get_status, get_string_descriptor, getcfg_self_test, getidle_self_test, getiface_self_test,
+    getprotocol_self_test, getreport_self_test, hid_get_idle, hid_get_protocol, hid_get_report,
+    hid_self_test, hid_set_idle, hid_set_protocol, hid_set_report, hidreport_self_test,
+    iface_self_test, interrupt_in, interrupt_in_self_test, isoch_in, isoch_in_self_test,
+    isochdelay_self_test, no_op_command, noop_self_test, oscfg_self_test, poll_events,
+    poll_transfer_event, qual_self_test, reset_device, reset_endpoint, resetdev_self_test,
+    resetep_self_test, set_configuration, set_descriptor, set_descriptor_self_test, set_feature,
+    set_interface, set_isoch_delay, set_sel, set_self_test, set_tr_dequeue, setidle_self_test,
+    setprotocol_self_test, setreport_self_test, setsel_self_test, settr_self_test, slot_self_test,
+    status_self_test, statusep_self_test, statusiface_self_test, stop_endpoint, stop_self_test,
+    string_self_test, submit_interrupt_urb, submit_interrupt_urb_for_hid, synch_frame,
+    synch_self_test, transfer_noop, trnoop_self_test,
 };
 pub use ethernet::*;
 pub use gamepad::*;
@@ -139,6 +141,8 @@ pub fn init() {
             let _ = setidle_self_test();
             let _ = getprotocol_self_test();
             let _ = setprotocol_self_test();
+            let _ = statusiface_self_test();
+            let _ = statusep_self_test();
             let _ = resetdev_self_test();
             let _ = enum_self_test();
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **FUSE INIT** — known mount returns major 7; unknown mount or major 0 fails (`GATE_FUSE init`).
+- **FUSE FORGET** — known nodeid succeeds; unknown nodeid or nlookup 0 fails (`GATE_FUSE forget`).
+- **D-Bus PropertiesChanged** — delivered after `ReloadConfig` (`GATE_DBUS propschanged`).
+- **D-Bus InterfacesAdded** — delivered after `RequestName` (`GATE_DBUS ifacesadded`).
+- **XHCI GET_STATUS(INTERFACE)** — class/standard IN Transfer Event (`GATE_USB xhci statusiface`).
+- **XHCI GET_STATUS(ENDPOINT)** — standard IN Transfer Event (`GATE_USB xhci statusep`).
+- **NFS SEQUENCE** — CREATE_SESSION id is OK; sequenceid 0 is INVAL; unknown is BADSESSION (`GATE_NFS sequence`).
+- **NFS RECLAIM_COMPLETE** — first is OK; second is COMPLETE_ALREADY; no session is BADSESSION (`GATE_NFS reclaim`).
 - **FUSE SYNCFS** — known mount succeeds; unknown mount fails (`GATE_FUSE syncfs`).
 - **FUSE STATX** — size and `S_IFREG` for a known file; unknown nodeid fails (`GATE_FUSE statx`).
 - **D-Bus GetConfigFile** — returns `/etc/dbus-1/system.conf` (`GATE_DBUS config`).

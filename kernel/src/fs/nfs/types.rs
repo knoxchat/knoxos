@@ -68,6 +68,8 @@ pub enum NfsStat {
     Badiomode = 10049,
     /// NFS4ERR_BADSESSION — DESTROY_SESSION of an unknown session.
     BadSession = 10052,
+    /// NFS4ERR_COMPLETE_ALREADY — RECLAIM_COMPLETE of a session that already reclaimed.
+    CompleteAlready = 10054,
     /// NFS4ERR_CLIENTID_BUSY — DESTROY_CLIENTID while a session is active.
     ClientIdBusy = 10070,
 }
@@ -116,7 +118,9 @@ pub enum NfsOp {
     ExchangeId = 42,
     CreateSession = 43,
     DestroySession = 44,
+    Sequence = 53,
     DestroyClientId = 57,
+    ReclaimComplete = 58,
 }
 
 /// NFS4 file type

@@ -11,7 +11,7 @@ use super::command::{TRB_CH, submit_transfer, wait_command_completion};
 use super::live::{
     BOS_LIVE, CLEAR_LIVE, CONFIG_DESC_LIVE, CONFIG_LIVE, DESC_LIVE, GETCFG_LIVE, GETIFACE_LIVE,
     IFACE_LIVE, ISOCHDELAY_LIVE, OSCFG_LIVE, QUAL_LIVE, SET_LIVE, SETDESC_LIVE, SETSEL_LIVE,
-    STATUS_LIVE, STRING_LIVE, SYNCH_LIVE,
+    STATUS_LIVE, STATUSEP_LIVE, STATUSIFACE_LIVE, STRING_LIVE, SYNCH_LIVE,
 };
 use super::slot::{recover_control_ep, restart_ep};
 
@@ -172,6 +172,128 @@ pub fn get_status(slot_id: u8) -> Option<u16> {
     }
 
     serial_println!("[XHCI] GET_STATUS timeout");
+    None
+}
+
+/// GET_STATUS(interface) — Setup+Data+Status. Requires a Transfer Event.
+pub fn get_interface_status(slot_id: u8, iface: u8) -> Option<u16> {
+    serial_println!(
+        "[XHCI] GET_STATUS(interface={}) for slot {}",
+        iface,
+        slot_id
+    );
+    recover_control_ep(slot_id);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x81 (IN, standard, interface), bRequest=0 (GET_STATUS)
+    setup.param_lo = 0x81 | (UsbRequestType::GetStatus as u32) << 8;
+    setup.param_hi = iface as u32 | 2u32 << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = 2;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= 1 << 2; // ISP
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit GET_STATUS(interface)");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: some HID devices stall GET_STATUS(interface).
+        if cc == 1 || cc == 13 || cc == 6 {
+            // SAFETY: GET_STATUS(interface) DMA page is owned by this transfer.
+            let word = unsafe { core::ptr::read(dma_virt(data_buf) as *const u16) };
+            STATUSIFACE_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] GET_STATUS(interface) complete cc={} value={:#06x}",
+                cc,
+                word
+            );
+            return Some(word);
+        }
+        serial_println!("[XHCI] GET_STATUS(interface) completion code: {}", cc);
+        return None;
+    }
+
+    serial_println!("[XHCI] GET_STATUS(interface) timeout");
+    None
+}
+
+/// GET_STATUS(endpoint) — Setup+Data+Status. Requires a Transfer Event.
+pub fn get_endpoint_status(slot_id: u8, endpoint: u8) -> Option<u16> {
+    serial_println!(
+        "[XHCI] GET_STATUS(endpoint={:#04x}) for slot {}",
+        endpoint,
+        slot_id
+    );
+    recover_control_ep(slot_id);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x82 (IN, standard, endpoint), bRequest=0 (GET_STATUS)
+    setup.param_lo = 0x82 | (UsbRequestType::GetStatus as u32) << 8;
+    setup.param_hi = endpoint as u32 | 2u32 << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = 2;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= 1 << 2; // ISP
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit GET_STATUS(endpoint)");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: some HID devices stall GET_STATUS(endpoint).
+        if cc == 1 || cc == 13 || cc == 6 {
+            // SAFETY: GET_STATUS(endpoint) DMA page is owned by this transfer.
+            let word = unsafe { core::ptr::read(dma_virt(data_buf) as *const u16) };
+            STATUSEP_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] GET_STATUS(endpoint) complete cc={} value={:#06x}",
+                cc,
+                word
+            );
+            return Some(word);
+        }
+        serial_println!("[XHCI] GET_STATUS(endpoint) completion code: {}", cc);
+        return None;
+    }
+
+    serial_println!("[XHCI] GET_STATUS(endpoint) timeout");
     None
 }
 

@@ -561,6 +561,28 @@ fn test_xhci_hid_set_protocol() {
 }
 
 #[test_case]
+fn test_xhci_get_status_interface() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::statusiface_self_test(),
+        "XHCI GET_STATUS(INTERFACE) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_get_status_endpoint() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::statusep_self_test(),
+        "XHCI GET_STATUS(ENDPOINT) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_xhci_reset_device() {
     if !crate::usb::is_available() {
         return;
@@ -880,6 +902,22 @@ fn test_fuse_statx() {
     assert!(
         crate::fuse::statx_self_test(),
         "FUSE STATX of a known file must return size and S_IFREG; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_init() {
+    assert!(
+        crate::fuse::init_self_test(),
+        "FUSE INIT of a known mount must return major 7; unknown mount or major 0 must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_forget() {
+    assert!(
+        crate::fuse::forget_self_test(),
+        "FUSE FORGET of a known nodeid must succeed; unknown nodeid or nlookup 0 must fail"
     );
 }
 
@@ -1274,6 +1312,24 @@ fn test_nfs_destroy_clientid() {
     assert!(
         crate::nfs::destroyclientid_self_test(),
         "NFS4 DESTROY_CLIENTID must return CLIENTID_BUSY with a session, OK after DESTROY_SESSION, and STALE_CLIENTID for a wrong id"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_sequence() {
+    assert!(
+        crate::nfs::sequence_self_test(),
+        "NFS4 SEQUENCE must accept a CREATE_SESSION id, return INVAL for sequenceid 0, and BADSESSION for an unknown session"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_reclaim_complete() {
+    assert!(
+        crate::nfs::reclaim_self_test(),
+        "NFS4 RECLAIM_COMPLETE must succeed once, return COMPLETE_ALREADY the second time, and BADSESSION without a session"
     );
 }
 

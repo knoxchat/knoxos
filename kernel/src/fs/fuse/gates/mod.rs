@@ -12,7 +12,7 @@
 //!   xattr  — SETXATTR, GETXATTR, LISTXATTR, REMOVEXATTR
 //!   file   — OPEN, RELEASE, FLUSH, FSYNC, FALLOCATE, LSEEK, COPY_FILE_RANGE
 //!   lock   — GETLK, SETLK, SETLKW
-//!   misc   — BMAP, DESTROY, IOCTL, POLL, SYNCFS
+//!   misc   — BMAP, DESTROY, IOCTL, POLL, SYNCFS, INIT, FORGET
 mod attr;
 mod dir;
 mod file;

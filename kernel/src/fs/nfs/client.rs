@@ -116,6 +116,8 @@ pub struct NfsClient {
     pub(super) client_id_confirmed: bool,
     exchange_id_issued: bool,
     session_id: Option<u64>,
+    sequenceid: u32,
+    reclaim_complete: bool,
 }
 
 impl NfsClient {
@@ -143,6 +145,8 @@ impl NfsClient {
             client_id_confirmed: false,
             exchange_id_issued: false,
             session_id: None,
+            sequenceid: 0,
+            reclaim_complete: false,
         }
     }
 
@@ -801,6 +805,8 @@ impl NfsClient {
                         .session_id
                         .unwrap_or_else(|| simple_hash(&client_id.to_le_bytes()));
                     self.session_id = Some(session_id);
+                    self.sequenceid = 0;
+                    self.reclaim_complete = false;
                     NfsCompoundResult::Session { session_id }
                 } else {
                     NfsCompoundResult::Status(NfsStat::StaleClientId)
@@ -809,6 +815,8 @@ impl NfsClient {
             NfsCompoundOp::DestroySession { session_id } => {
                 if self.session_id == Some(*session_id) {
                     self.session_id = None;
+                    self.sequenceid = 0;
+                    self.reclaim_complete = false;
                     NfsCompoundResult::Status(NfsStat::Ok)
                 } else {
                     NfsCompoundResult::Status(NfsStat::BadSession)
@@ -822,6 +830,34 @@ impl NfsClient {
                 } else {
                     self.exchange_id_issued = false;
                     self.client_id = 0;
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                }
+            }
+            NfsCompoundOp::Sequence {
+                session_id,
+                sequenceid,
+            } => {
+                if self.session_id == Some(*session_id) {
+                    if *sequenceid == 0 {
+                        NfsCompoundResult::Status(NfsStat::Inval)
+                    } else {
+                        self.sequenceid = *sequenceid;
+                        NfsCompoundResult::Sequence {
+                            session_id: *session_id,
+                            sequenceid: *sequenceid,
+                        }
+                    }
+                } else {
+                    NfsCompoundResult::Status(NfsStat::BadSession)
+                }
+            }
+            NfsCompoundOp::ReclaimComplete { one_fs: _ } => {
+                if self.session_id.is_none() {
+                    NfsCompoundResult::Status(NfsStat::BadSession)
+                } else if self.reclaim_complete {
+                    NfsCompoundResult::Status(NfsStat::CompleteAlready)
+                } else {
+                    self.reclaim_complete = true;
                     NfsCompoundResult::Status(NfsStat::Ok)
                 }
             }

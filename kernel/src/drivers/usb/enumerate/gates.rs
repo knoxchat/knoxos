@@ -17,15 +17,15 @@ use super::live::{
     HID_LIVE, HIDGETIDLE_LIVE, HIDGETPROTOCOL_LIVE, HIDGETREPORT_LIVE, HIDREPORT_LIVE,
     HIDSETIDLE_LIVE, HIDSETPROTOCOL_LIVE, HIDSETREPORT_LIVE, IFACE_LIVE, INTR_LIVE, ISOCH_IN_LIVE,
     ISOCHDELAY_LIVE, NOOP_LIVE, OSCFG_LIVE, QUAL_LIVE, RESETDEV_LIVE, RESETEP_LIVE, SET_LIVE,
-    SETDESC_LIVE, SETSEL_LIVE, SETTR_LIVE, SLOT_ENABLE_LIVE, STATUS_LIVE, STOP_LIVE, STRING_LIVE,
-    SYNCH_LIVE, TRNOOP_LIVE,
+    SETDESC_LIVE, SETSEL_LIVE, SETTR_LIVE, SLOT_ENABLE_LIVE, STATUS_LIVE, STATUSEP_LIVE,
+    STATUSIFACE_LIVE, STOP_LIVE, STRING_LIVE, SYNCH_LIVE, TRNOOP_LIVE,
 };
 use super::pipes::{bulk_in, bulk_out, interrupt_in, isoch_in, transfer_noop};
 use super::requests::{
     clear_feature, get_bos_descriptor, get_configuration, get_device_descriptor,
-    get_device_qualifier, get_interface, get_other_speed_config, get_status, get_string_descriptor,
-    set_configuration, set_descriptor, set_feature, set_interface, set_isoch_delay, set_sel,
-    synch_frame,
+    get_device_qualifier, get_endpoint_status, get_interface, get_interface_status,
+    get_other_speed_config, get_status, get_string_descriptor, set_configuration, set_descriptor,
+    set_feature, set_interface, set_isoch_delay, set_sel, synch_frame,
 };
 use super::slot::{
     address_device, configure_interrupt_ep, disable_slot, enable_slot, evaluate_context,
@@ -73,6 +73,8 @@ pub const GATE_XHCI_HIDGETIDLE_MARKER: &str = "GATE_USB xhci getidle";
 pub const GATE_XHCI_HIDSETIDLE_MARKER: &str = "GATE_USB xhci setidle";
 pub const GATE_XHCI_HIDGETPROTOCOL_MARKER: &str = "GATE_USB xhci getprotocol";
 pub const GATE_XHCI_HIDSETPROTOCOL_MARKER: &str = "GATE_USB xhci setprotocol";
+pub const GATE_XHCI_STATUSIFACE_MARKER: &str = "GATE_USB xhci statusiface";
+pub const GATE_XHCI_STATUSEP_MARKER: &str = "GATE_USB xhci statusep";
 
 /// Prove Enable Slot got a Command Completion (cc=1), not a timeout fallback.
 pub fn slot_self_test() -> bool {
@@ -1089,5 +1091,43 @@ pub fn setprotocol_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_HIDSETPROTOCOL_MARKER);
+    true
+}
+
+/// Prove GET_STATUS(INTERFACE) got a Transfer Event.
+pub fn statusiface_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci statusiface skipped (no controller)");
+        return true;
+    }
+    if !STATUSIFACE_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = get_interface_status(slot_id, 0);
+        }
+    }
+    if !STATUSIFACE_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_STATUS(INTERFACE) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_STATUSIFACE_MARKER);
+    true
+}
+
+/// Prove GET_STATUS(ENDPOINT) got a Transfer Event.
+pub fn statusep_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci statusep skipped (no controller)");
+        return true;
+    }
+    if !STATUSEP_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = get_endpoint_status(slot_id, 0x81);
+        }
+    }
+    if !STATUSEP_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_STATUS(ENDPOINT) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_STATUSEP_MARKER);
     true
 }

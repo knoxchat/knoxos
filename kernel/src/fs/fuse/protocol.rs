@@ -53,6 +53,11 @@ pub enum FuseOpcode {
     Statx = 52,
 }
 
+/// Linux `FUSE_KERNEL_VERSION`.
+pub const FUSE_KERNEL_VERSION: u32 = 7;
+/// Linux `FUSE_KERNEL_MINOR_VERSION` (7.31 is FALLOCATE/LSEEK-era).
+pub const FUSE_KERNEL_MINOR_VERSION: u32 = 31;
+
 /// POSIX `R_OK` — FUSE ACCESS request/grant bit.
 pub const FUSE_R_OK: u32 = 4;
 /// POSIX `W_OK` — FUSE ACCESS request/grant bit.
@@ -375,6 +380,24 @@ pub(super) fn encode_statx(ino: u64, size: u64, mode: u32, mask: u32) -> Vec<u8>
     out.extend_from_slice(&mode.to_le_bytes());
     out.extend_from_slice(&mask.to_le_bytes());
     out
+}
+
+pub(super) fn encode_init(major: u32, minor: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8);
+    out.extend_from_slice(&major.to_le_bytes());
+    out.extend_from_slice(&minor.to_le_bytes());
+    out
+}
+
+/// Packed FUSE INIT reply: major u32, minor u32.
+pub fn parse_fuse_init(data: &[u8]) -> Option<(u32, u32)> {
+    if data.len() < 8 {
+        return None;
+    }
+    Some((
+        u32::from_le_bytes(data[0..4].try_into().ok()?),
+        u32::from_le_bytes(data[4..8].try_into().ok()?),
+    ))
 }
 
 /// Packed FUSE STATX: ino u64, size u64, mode u32, mask u32.

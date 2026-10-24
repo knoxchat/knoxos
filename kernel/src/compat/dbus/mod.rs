@@ -47,23 +47,25 @@ pub use gates::{
     GATE_DBUS_ACTIVATE_MARKER, GATE_DBUS_ADT_MARKER, GATE_DBUS_APPARMOR_MARKER,
     GATE_DBUS_CONFIG_MARKER, GATE_DBUS_CONNSTATS_MARKER, GATE_DBUS_CREDS_MARKER,
     GATE_DBUS_ENV_MARKER, GATE_DBUS_GETALL_MARKER, GATE_DBUS_HAS_OWNER_MARKER, GATE_DBUS_ID_MARKER,
-    GATE_DBUS_INTROSPECT_MARKER, GATE_DBUS_LABEL_MARKER, GATE_DBUS_LIST_MARKER,
-    GATE_DBUS_MACHINEID_MARKER, GATE_DBUS_MATCH_MARKER, GATE_DBUS_MATCHRULES_MARKER,
-    GATE_DBUS_METHOD_MARKER, GATE_DBUS_MONITOR_MARKER, GATE_DBUS_NAME_MARKER,
-    GATE_DBUS_NAMEACQUIRED_MARKER, GATE_DBUS_NAMELOST_MARKER, GATE_DBUS_OBJECTS_MARKER,
-    GATE_DBUS_OWNER_MARKER, GATE_DBUS_OWNERCHANGED_MARKER, GATE_DBUS_PID_MARKER,
-    GATE_DBUS_PING_MARKER, GATE_DBUS_PROPS_MARKER, GATE_DBUS_QUEUE_MARKER,
-    GATE_DBUS_RELEASE_MARKER, GATE_DBUS_RELOAD_MARKER, GATE_DBUS_REMOVE_MARKER,
-    GATE_DBUS_SELINUX_MARKER, GATE_DBUS_SETPROP_MARKER, GATE_DBUS_START_MARKER,
-    GATE_DBUS_STATS_MARKER, GATE_DBUS_SVCCHANGED_MARKER, GATE_DBUS_UID_MARKER, activate_self_test,
-    add_match_self_test, adt_self_test, apparmor_self_test, config_self_test, connstats_self_test,
-    creds_self_test, env_self_test, get_id_self_test, getall_self_test, has_owner_self_test,
+    GATE_DBUS_IFACESADDED_MARKER, GATE_DBUS_INTROSPECT_MARKER, GATE_DBUS_LABEL_MARKER,
+    GATE_DBUS_LIST_MARKER, GATE_DBUS_MACHINEID_MARKER, GATE_DBUS_MATCH_MARKER,
+    GATE_DBUS_MATCHRULES_MARKER, GATE_DBUS_METHOD_MARKER, GATE_DBUS_MONITOR_MARKER,
+    GATE_DBUS_NAME_MARKER, GATE_DBUS_NAMEACQUIRED_MARKER, GATE_DBUS_NAMELOST_MARKER,
+    GATE_DBUS_OBJECTS_MARKER, GATE_DBUS_OWNER_MARKER, GATE_DBUS_OWNERCHANGED_MARKER,
+    GATE_DBUS_PID_MARKER, GATE_DBUS_PING_MARKER, GATE_DBUS_PROPS_MARKER,
+    GATE_DBUS_PROPSCHANGED_MARKER, GATE_DBUS_QUEUE_MARKER, GATE_DBUS_RELEASE_MARKER,
+    GATE_DBUS_RELOAD_MARKER, GATE_DBUS_REMOVE_MARKER, GATE_DBUS_SELINUX_MARKER,
+    GATE_DBUS_SETPROP_MARKER, GATE_DBUS_START_MARKER, GATE_DBUS_STATS_MARKER,
+    GATE_DBUS_SVCCHANGED_MARKER, GATE_DBUS_UID_MARKER, activate_self_test, add_match_self_test,
+    adt_self_test, apparmor_self_test, config_self_test, connstats_self_test, creds_self_test,
+    env_self_test, get_id_self_test, getall_self_test, has_owner_self_test, ifacesadded_self_test,
     introspect_self_test, label_self_test, list_self_test, machineid_self_test,
     matchrules_self_test, method_self_test, monitor_self_test, name_self_test,
     nameacquired_self_test, namelost_self_test, objects_self_test, owner_self_test,
-    ownerchanged_self_test, pid_self_test, ping_self_test, props_self_test, queue_self_test,
-    release_self_test, reload_self_test, remove_match_self_test, selinux_self_test,
-    setprop_self_test, start_self_test, stats_self_test, svcchanged_self_test, uid_self_test,
+    ownerchanged_self_test, pid_self_test, ping_self_test, props_self_test, propschanged_self_test,
+    queue_self_test, release_self_test, reload_self_test, remove_match_self_test,
+    selinux_self_test, setprop_self_test, start_self_test, stats_self_test, svcchanged_self_test,
+    uid_self_test,
 };
 pub use protocol::{
     ALLOW_INTERACTIVE_AUTH, DBUS_TYPE_ARRAY, DBUS_TYPE_BOOLEAN, DBUS_TYPE_BYTE,
@@ -205,4 +207,6 @@ pub fn init() {
     let _ = label_self_test();
     let _ = config_self_test();
     let _ = svcchanged_self_test();
+    let _ = propschanged_self_test();
+    let _ = ifacesadded_self_test();
 }
