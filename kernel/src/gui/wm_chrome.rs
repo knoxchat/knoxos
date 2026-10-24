@@ -130,7 +130,22 @@ impl Window {
         }
 
         // ══════════════════════════════════════════════════════════
-        // WINDOW BODY — Glassmorphism with depth gradient
+        // TITLE BAR — Frosted glass with depth gradient
+        // D10.2: skip SSD chrome when the client draws TitleBar CSD.
+        // Empty SHM keeps `decorations = true` (kernel bars).
+        // CSD must not fill a kernel frame first: a transparent GPUI store
+        // used to leave a black rounded box (boot Settings).
+        // ══════════════════════════════════════════════════════════
+        if !self.decorations {
+            self.draw_content(fb);
+            if is_anim {
+                self.rect = original_rect;
+            }
+            return;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // WINDOW BODY — Glassmorphism with depth gradient (SSD only)
         // ══════════════════════════════════════════════════════════
         let r = if self.state == WindowState::Normal {
             scaled_portal_radius()
@@ -187,19 +202,6 @@ impl Window {
             );
         } else {
             fb.draw_rounded_rect(self.rect, border_color, r, 1);
-        }
-
-        // ══════════════════════════════════════════════════════════
-        // TITLE BAR — Frosted glass with depth gradient
-        // D10.2: skip SSD chrome when the client draws TitleBar CSD.
-        // Empty SHM keeps `decorations = true` (kernel bars).
-        // ══════════════════════════════════════════════════════════
-        if !self.decorations {
-            self.draw_content(fb);
-            if is_anim {
-                self.rect = original_rect;
-            }
-            return;
         }
         let title_top = if self.focused {
             Pixel::new(28, 26, 34, 240)

@@ -328,10 +328,12 @@ fn categorized_list(
                     .themed(theme)
                     .ghost()
                     .small()
+                    .align_start()
+                    .w(width)
                     .icon(app.icon)
                     .label(app.name.clone())
                     .selected(highlight == i)
-                    .on_click(move || {
+                    .on_press(move || {
                         if let Some(p) = &pick {
                             p(i);
                         }
@@ -586,6 +588,7 @@ mod tests {
             .map(|h| Point::xy(h.bounds.x() + 8, h.bounds.y() + 8))
             .expect("app row");
         dispatch_mouse_down(&mut el, &mut input, p);
+        assert_eq!(hit.load(Ordering::SeqCst), 0);
         dispatch_mouse_up(&mut el, &mut input, p);
         assert_eq!(hit.load(Ordering::SeqCst), 0);
     }

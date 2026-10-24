@@ -109,7 +109,7 @@ impl Element for FocusTrap {
                 let n = id.as_u32();
                 n >= start && n <= end
             });
-            if !focused_in {
+            if !focused_in && !cx.is_mouse_down() {
                 let _ = cx.tab(false);
             }
         }

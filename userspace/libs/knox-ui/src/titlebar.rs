@@ -148,7 +148,6 @@ impl IntoElement for TitleBar {
             .flex()
             .items_center()
             .justify_between()
-            .grow()
             .h(px(36))
             .pad_x(self.theme.spacing.sm)
             .pad_y(self.theme.spacing.xs)

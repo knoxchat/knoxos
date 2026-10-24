@@ -349,12 +349,7 @@ pub fn pointer_moved(x: i32, y: i32) -> bool {
     let old = win.input().hover_mask();
     win.input_mut().set_pointer_position(local);
     let new = win.input().hover_mask();
-    if old != new {
-        win.request_layout();
-        true
-    } else {
-        false
-    }
+    old != new
 }
 
 pub fn dispatch_scroll(x: i32, y: i32, delta_y: i32) -> bool {

@@ -51,14 +51,12 @@ fn freeze_hand_drawn_launcher(canonical: &str) {
     );
 }
 
-/// Open Settings once when a session first reaches the desktop.
-/// Kit Gallery stays in the app list; it is not a boot window.
+/// Session start: icons + panel only. Apps open from a click, not at boot.
+/// Auto-launching Settings drew an empty CSD shell (dark rounded frame) because
+/// the GPUI store was still transparent on the first composite.
 pub fn open_session_defaults() {
     static DONE: AtomicBool = AtomicBool::new(false);
-    if DONE.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    open_application("Settings", IconType::Settings);
+    let _ = DONE.swap(true, Ordering::SeqCst);
 }
 
 /// Open an application by creating a new in-kernel window.

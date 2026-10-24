@@ -88,6 +88,10 @@ pub async fn process_mouse_events() {
                 process_mouse_byte(byte);
             }
         }
+        // PS/2 aux is skipped when VirtIO-input is bound; still drain tablet
+        // and USB HID here so motion is not stuck behind a slow composite.
+        crate::virtio_input::poll();
+        crate::usb_hid::poll_devices();
         // Yield to other tasks — next poll will drain any newly arrived bytes
         crate::yield_once().await;
     }

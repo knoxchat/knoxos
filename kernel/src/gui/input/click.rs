@@ -263,10 +263,11 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
 
     // D9.4 / D9.5: toast, notification-center, and tray-menu clicks are GPUI.
 
-    // Check taskbar clicks BEFORE start menu, so clicking the start button
-    // properly toggles the menu (instead of close→reopen race)
+    // Panel / launcher / desktop-icon GPUI hits. Returning here used to skip
+    // desktop icons because they were dispatched only at the bottom of this
+    // function; they now live in `pointer_down_button`.
     let taskbar_y = screen_h as i32 - crate::gui::scale::taskbar_height() as i32;
-    if crate::gui::gpui_platform::panel_is_live() {
+    if crate::gui::gpui_platform::panel_is_live() || crate::gui::gpui_platform::launcher_is_live() {
         if crate::gui::gpui_platform::pointer_down(x, y) {
             crate::gui::gpui_platform::damage_proof();
             crate::gui::request_taskbar_redraw();
@@ -277,16 +278,14 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
         return;
     }
 
-    // Check start menu (if visible, clicking a menu item or outside to close)
-    if startmenu::is_visible() {
-        if crate::gui::gpui_platform::launcher_is_live() {
-            startmenu::close();
-        } else if let Some(item) = startmenu::handle_click(x, y) {
+    // Legacy start menu only. GPUI launcher hits are consumed in `pointer_down`
+    // (including press-to-open); outside clicks close there too.
+    if startmenu::is_visible() && !crate::gui::gpui_platform::launcher_is_live() {
+        if let Some(item) = startmenu::handle_click(x, y) {
             crate::serial_println!("[KnoxOS] Start menu: Opening {}", item.name);
             desktop::open_application(&item.name, item.icon_type);
             return;
         } else {
-            // If clicking outside the menu (and not on taskbar which was handled above), close it
             startmenu::close();
         }
     }

@@ -93,6 +93,7 @@ pub fn ensure_files_windows(app: &mut knox_gpui::App) -> Vec<WindowId> {
             snap.rect.width as i32,
             snap.rect.height as i32,
         );
+        let created = !map.contains_key(&snap.wm_id);
         let gpui = if let Some(&raw) = map.get(&snap.wm_id) {
             WindowId::from_u64(raw)
         } else {
@@ -105,7 +106,9 @@ pub fn ensure_files_windows(app: &mut knox_gpui::App) -> Vec<WindowId> {
             win.set_chrome(ChromeKind::Csd);
             win.set_min_size(Size::wh(480, 320));
             win.set_bounds(bounds);
-            win.request_layout();
+            if created {
+                win.request_layout();
+            }
         }
         ids.push(gpui);
     }
@@ -163,7 +166,6 @@ fn select_entry(wid: WmId, index: usize) {
         win.explorer_selected = index as i32;
         prev
     };
-    explorer::start_file_drag(wid);
     if prev == index as i32 {
         explorer::activate_selected(wid);
     }
@@ -423,13 +425,7 @@ pub fn pointer_moved(x: i32, y: i32) -> bool {
         return false;
     };
     let local = Point::xy(x - win.bounds().x(), y - win.bounds().y());
-    let old = win.input().hover_mask();
     win.input_mut().set_pointer_position(local);
-    let new = win.input().hover_mask();
-    if old != new {
-        win.request_layout();
-        true
-    } else {
-        false
-    }
+    // Hover must not relayout: 900×640 Files raster on TCG starves the tablet.
+    false
 }

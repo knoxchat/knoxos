@@ -98,7 +98,6 @@ pub fn ensure_term_windows(app: &mut knox_gpui::App) -> Vec<WindowId> {
             win.set_chrome(ChromeKind::Csd);
             win.set_min_size(Size::wh(400, 240));
             win.set_bounds(bounds);
-            win.request_layout();
         }
         ids.push(gpui);
     }
@@ -413,13 +412,6 @@ pub fn pointer_moved(x: i32, y: i32) -> bool {
         return false;
     };
     let local = Point::xy(x - win.bounds().x(), y - win.bounds().y());
-    let old = win.input().hover_mask();
     win.input_mut().set_pointer_position(local);
-    let new = win.input().hover_mask();
-    if old != new {
-        win.request_layout();
-        true
-    } else {
-        false
-    }
+    false
 }

@@ -113,6 +113,10 @@ pub struct Desktop {
     /// Current drag position (icon origin while dragging)
     pub drag_x: i32,
     pub drag_y: i32,
+    /// Click-to-open arms `dragging_icon` but must not snap-on-release until
+    /// the pointer actually moved. Otherwise mouse-up is treated as a drop and
+    /// GPUI never sees pointer-up (second clicks die).
+    pub icon_drag_committed: bool,
     /// Rubber band selection state
     pub rubber_band: Option<RubberBand>,
 }
@@ -215,6 +219,7 @@ impl Desktop {
             drag_offset_y: 0,
             drag_x: 0,
             drag_y: 0,
+            icon_drag_committed: false,
             rubber_band: None,
         }
     }

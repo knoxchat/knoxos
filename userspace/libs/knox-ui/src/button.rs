@@ -118,6 +118,7 @@ pub struct Button {
     omit_left_border: bool,
     omit_top_border: bool,
     on_click: Option<Handler>,
+    on_press: Option<Handler>,
 }
 
 impl Button {
@@ -143,6 +144,7 @@ impl Button {
             omit_left_border: false,
             omit_top_border: false,
             on_click: None,
+            on_press: None,
         }
     }
 
@@ -205,6 +207,13 @@ impl Button {
 
     pub fn on_click(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
         self.on_click = Some(Arc::new(f));
+        self
+    }
+
+    /// Activate on mouse down (start-menu rows). `on_click` still fires on
+    /// mouse up; use one or the other so a press does not launch twice.
+    pub fn on_press(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_press = Some(Arc::new(f));
         self
     }
 
@@ -527,6 +536,10 @@ impl IntoElement for Button {
         }
 
         if interactive {
+            if let Some(handler) = self.on_press {
+                let press = handler;
+                el = el.on_mouse_down(move |_| press());
+            }
             if let Some(handler) = self.on_click {
                 el = bind_activate(el, handler);
             } else {

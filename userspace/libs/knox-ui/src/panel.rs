@@ -324,7 +324,7 @@ impl IntoElement for Panel {
             .icon(IconName::LayoutGrid)
             .selected(self.start_open);
         if let Some(s) = self.on_start {
-            start = start.on_click(move || s());
+            start = start.on_press(move || s());
         }
         let mut dock = Dock::new()
             .themed(&self.theme)

@@ -181,7 +181,11 @@ pub(super) fn icons_tree(theme: &Theme) -> knox_gpui::Div {
     };
     let entries = {
         let desktop = DESKTOP.lock();
-        let dragging = desktop.dragging_icon;
+        let dragging = if desktop.icon_drag_committed {
+            desktop.dragging_icon
+        } else {
+            None
+        };
         desktop
             .icons
             .iter()
@@ -442,16 +446,46 @@ pub fn dispatch_icons_pointer_down(x: i32, y: i32, button: MouseButton) -> bool 
     true
 }
 
+pub fn dispatch_icons_pointer_up(x: i32, y: i32) -> bool {
+    let mut slot = APP.lock();
+    let Some(app) = slot.as_mut() else {
+        return false;
+    };
+    let Some(id) = icons_window_id() else {
+        return false;
+    };
+    let theme = app_theme(app);
+    let Some(win) = app.window_mut(id) else {
+        return false;
+    };
+    if !win.input().is_mouse_down() && win.input().mouse_down_hitbox().is_none() {
+        return false;
+    }
+    let bounds = win.bounds();
+    let local = local_point(bounds, x, y);
+    let size = Size::wh(bounds.width(), bounds.height());
+    {
+        let input = win.input_mut();
+        let mut root = icons_tree(&theme);
+        prepare_element(&mut root, Point::ZERO, size, input);
+        let _ = dispatch_mouse_up(&mut root, input, local);
+    }
+    win.request_layout();
+    true
+}
+
 pub fn pointer_moved(x: i32, y: i32) -> bool {
     if menu_is_open() {
         if contains_menu(x, y) || menu_armed() {
-            return hover_window(menu_window_id(), x, y, |theme| menu_tree(theme));
+            return hover_window(menu_window_id(), x, y, true, |theme| menu_tree(theme));
         }
     }
     if !contains_icons(x, y) {
         return false;
     }
-    hover_window(icons_window_id(), x, y, |theme| icons_tree(theme))
+    // Icon-strip hover must not relayout: TCG paint of the column on every
+    // tablet sample (and a stuck mouse-down) starves polling.
+    hover_window(icons_window_id(), x, y, false, |theme| icons_tree(theme))
 }
 
 fn menu_armed() -> bool {
@@ -472,6 +506,7 @@ fn hover_window(
     id: Option<WindowId>,
     x: i32,
     y: i32,
+    relayout: bool,
     tree: impl FnOnce(&Theme) -> knox_gpui::Div,
 ) -> bool {
     let mut slot = APP.lock();
@@ -488,6 +523,11 @@ fn hover_window(
     let bounds = win.bounds();
     let local = local_point(bounds, x, y);
     let armed = win.input().is_mouse_down() || win.input().mouse_down_hitbox().is_some();
+    if !relayout {
+        win.input_mut().set_pointer_position(local);
+        drop(tree);
+        return false;
+    }
     let old = win.input().hover_mask();
     if armed {
         let size = Size::wh(bounds.width(), bounds.height());

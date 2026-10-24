@@ -18,7 +18,7 @@ pub(crate) fn draw_desktop_icons(fb: &mut FrameBuffer) {
     for (i, icon) in desktop.icons.iter().enumerate() {
         // If this icon is being dragged, draw a dim ghost at original position
         // and draw the actual icon at the drag position
-        let is_dragging = desktop.dragging_icon == Some(i);
+        let is_dragging = desktop.icon_drag_committed && desktop.dragging_icon == Some(i);
 
         if gpui && !is_dragging {
             continue;
@@ -67,28 +67,30 @@ pub(crate) fn draw_desktop_icons(fb: &mut FrameBuffer) {
     }
 
     // Draw the dragging icon on top of everything (at drag position)
-    if let Some(drag_idx) = desktop.dragging_icon {
-        if let Some(icon) = desktop.icons.get(drag_idx) {
-            let dx = desktop.drag_x;
-            let dy = desktop.drag_y;
+    if desktop.icon_drag_committed {
+        if let Some(drag_idx) = desktop.dragging_icon {
+            if let Some(icon) = desktop.icons.get(drag_idx) {
+                let dx = desktop.drag_x;
+                let dy = desktop.drag_y;
 
-            // Floating card with glow
-            fb.fill_rounded_rect_aa(
-                Rect::new(dx, dy, ICON_WIDTH, ICON_HEIGHT),
-                colors::with_alpha(colors::ACCENT_PRIMARY, 45),
-                6,
-            );
-            fb.draw_rounded_rect(
-                Rect::new(dx, dy, ICON_WIDTH, ICON_HEIGHT),
-                colors::with_alpha(colors::ACCENT_BRIGHT, 100),
-                6,
-                1,
-            );
+                // Floating card with glow
+                fb.fill_rounded_rect_aa(
+                    Rect::new(dx, dy, ICON_WIDTH, ICON_HEIGHT),
+                    colors::with_alpha(colors::ACCENT_PRIMARY, 45),
+                    6,
+                );
+                fb.draw_rounded_rect(
+                    Rect::new(dx, dy, ICON_WIDTH, ICON_HEIGHT),
+                    colors::with_alpha(colors::ACCENT_BRIGHT, 100),
+                    6,
+                    1,
+                );
 
-            let iy = dy + (ICON_HEIGHT as i32 - ICON_SIZE_ACTUAL) / 2;
-            let ix = dx + TEXT_LABEL_PADDING_LEFT;
-            draw_icon_graphic(fb, ix, iy, icon.icon_type);
-            draw_icon_label_fe(fb, dx, dy, &icon.name);
+                let iy = dy + (ICON_HEIGHT as i32 - ICON_SIZE_ACTUAL) / 2;
+                let ix = dx + TEXT_LABEL_PADDING_LEFT;
+                draw_icon_graphic(fb, ix, iy, icon.icon_type);
+                draw_icon_label_fe(fb, dx, dy, &icon.name);
+            }
         }
     }
 }

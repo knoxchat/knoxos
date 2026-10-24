@@ -276,15 +276,8 @@ pub fn pointer_moved(x: i32, y: i32) -> bool {
         return false;
     };
     let local = Point::xy(x - win.bounds().x(), y - win.bounds().y());
-    let old = win.input().hover_mask();
     win.input_mut().set_pointer_position(local);
-    let new = win.input().hover_mask();
-    if old != new {
-        win.request_layout();
-        true
-    } else {
-        false
-    }
+    false
 }
 
 pub fn cursor_style_at(x: i32, y: i32) -> Option<knox_gpui::CursorStyle> {

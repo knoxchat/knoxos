@@ -112,10 +112,12 @@ pub(crate) fn draw_snap_preview(fb: &mut FrameBuffer, mx: i32, my: i32) {
 
 /// Handle desktop click
 pub fn handle_click(x: i32, y: i32) {
-    // Close start menu if open and clicking outside
+    // Close start menu if open and clicking outside. GPUI launcher owns its
+    // own hits; reaching the desktop with it open means the click missed it.
     if startmenu::is_visible() {
         if crate::gui::gpui_platform::launcher_is_live() {
             startmenu::close();
+            crate::gui::gpui_platform::launcher_reset();
             crate::gui::request_redraw();
             return;
         }
@@ -143,7 +145,8 @@ pub fn handle_click(x: i32, y: i32) {
     }
 }
 
-/// Select an icon, start compositor DnD (D9.9), and open it (legacy single-click).
+/// Select an icon and open it (legacy single-click). Rearrange only starts
+/// after the pointer moves past [`ICON_DRAG_THRESHOLD`] so a click is not a drop.
 pub fn press_icon(idx: usize, x: i32, y: i32) {
     let mut desktop = DESKTOP.lock();
     if idx >= desktop.icons.len() {
@@ -156,6 +159,7 @@ pub fn press_icon(idx: usize, x: i32, y: i32) {
     let name = desktop.icons[idx].name.clone();
     let icon_type = desktop.icons[idx].icon_type;
     desktop.dragging_icon = Some(idx);
+    desktop.icon_drag_committed = false;
     desktop.drag_offset_x = x - desktop.icons[idx].x;
     desktop.drag_offset_y = y - desktop.icons[idx].y;
     desktop.drag_x = desktop.icons[idx].x;
@@ -189,6 +193,7 @@ pub fn handle_double_click(x: i32, y: i32) {
     {
         let mut desktop = DESKTOP.lock();
         desktop.dragging_icon = None;
+        desktop.icon_drag_committed = false;
     }
 
     let desktop = DESKTOP.lock();
@@ -207,9 +212,40 @@ pub fn handle_double_click(x: i32, y: i32) {
     }
 }
 
-/// Check if a desktop icon is currently being dragged
+/// Pixels the pointer must move before a click-to-open becomes an icon drag.
+const ICON_DRAG_THRESHOLD: i32 = 8;
+
+/// Check if a desktop icon is currently being dragged (past the click slop).
 pub fn is_dragging_icon() -> bool {
-    DESKTOP.lock().dragging_icon.is_some()
+    let desktop = DESKTOP.lock();
+    desktop.dragging_icon.is_some() && desktop.icon_drag_committed
+}
+
+/// Icon mouse-down that has not yet moved far enough to rearrange.
+pub fn is_icon_press_pending() -> bool {
+    let desktop = DESKTOP.lock();
+    desktop.dragging_icon.is_some() && !desktop.icon_drag_committed
+}
+
+/// Promote a pending icon press to a real drag once the pointer leaves the slop.
+pub fn commit_icon_drag_if_moved(mx: i32, my: i32) {
+    let mut desktop = DESKTOP.lock();
+    let Some(idx) = desktop.dragging_icon else {
+        return;
+    };
+    if desktop.icon_drag_committed {
+        return;
+    }
+    if idx >= desktop.icons.len() {
+        desktop.dragging_icon = None;
+        desktop.icon_drag_committed = false;
+        return;
+    }
+    let orig_x = desktop.icons[idx].x + desktop.drag_offset_x;
+    let orig_y = desktop.icons[idx].y + desktop.drag_offset_y;
+    if (mx - orig_x).abs() > ICON_DRAG_THRESHOLD || (my - orig_y).abs() > ICON_DRAG_THRESHOLD {
+        desktop.icon_drag_committed = true;
+    }
 }
 
 /// Handle icon drag movement. Called from input.rs handle_drag() when
@@ -284,6 +320,7 @@ pub fn handle_icon_drop(mx: i32, my: i32) {
                         // leak to get 'static str — acceptable in kernel
                         // Use the stack buffer approach instead
                         desktop.dragging_icon = None;
+                        desktop.icon_drag_committed = false;
                         drop(desktop);
                         match crate::vfs::move_file_dispatch(&src_path, &fallback) {
                             Ok(()) => {
@@ -309,6 +346,7 @@ pub fn handle_icon_drop(mx: i32, my: i32) {
                 };
 
                 desktop.dragging_icon = None;
+                desktop.icon_drag_committed = false;
                 drop(desktop);
 
                 match crate::vfs::move_file_dispatch(&src_path, dst_dir) {
@@ -359,10 +397,12 @@ pub fn handle_icon_drop(mx: i32, my: i32) {
         desktop.icons[idx].x = snapped_x;
         desktop.icons[idx].y = snapped_y;
         desktop.dragging_icon = None;
+        desktop.icon_drag_committed = false;
 
         crate::serial_println!("[KnoxOS] Icon dropped at grid ({}, {})", col, row,);
     } else {
         desktop.dragging_icon = None;
+        desktop.icon_drag_committed = false;
     }
     drop(desktop);
     crate::gui::request_redraw();
@@ -372,6 +412,7 @@ pub fn handle_icon_drop(mx: i32, my: i32) {
 pub fn cancel_icon_drag() {
     let mut desktop = DESKTOP.lock();
     desktop.dragging_icon = None;
+    desktop.icon_drag_committed = false;
 }
 
 /// Check if rubber band selection is active

@@ -54,8 +54,12 @@ pub(super) fn handle_drag(x: i32, y: i32) {
     let (screen_w, screen_h) = crate::gui::cached_screen_size();
 
     // ── Desktop icon drag (D9.9: compositor-owned preview) ───
+    desktop::commit_icon_drag_if_moved(x, y);
     if desktop::is_dragging_icon() {
         desktop::handle_icon_drag(x, y);
+        return;
+    }
+    if desktop::is_icon_press_pending() {
         return;
     }
 
@@ -262,15 +266,18 @@ pub(super) fn handle_mouse_up(x: i32, y: i32) {
     LAST_SNAP_ZONE.store(0, core::sync::atomic::Ordering::Relaxed);
 
     // ── Desktop icon drop ────────────────────────────────────
+    // Click-to-open arms a pending press; only a committed drag snaps to grid.
+    // Never skip GPUI pointer_up — that left `WindowInput.mouse_down` stuck so
+    // the next desktop/window click could not retarget.
     if desktop::is_dragging_icon() {
         desktop::handle_icon_drop(x, y);
-        return;
+    } else {
+        desktop::cancel_icon_drag();
     }
 
     // ── Rubber band selection end ────────────────────────────
     if desktop::is_rubber_band_active() {
         desktop::finish_rubber_band();
-        return;
     }
 
     // ── Explorer file drag-and-drop (9.70) ───────────────────
@@ -307,13 +314,11 @@ pub(super) fn handle_mouse_up(x: i32, y: i32) {
             }
             crate::gui::explorer::cancel_file_drag();
         }
-        return;
     }
 
-    // Knox GPUI proof window press (D3.6): complete click / clear active.
+    // Knox GPUI press (D3.6): complete click / clear active even after a drop.
     if crate::gui::gpui_platform::pointer_up(x, y) {
         crate::gui::gpui_platform::damage_proof();
-        return;
     }
 
     // Notify the drag-and-drop state machine that the mouse was released.

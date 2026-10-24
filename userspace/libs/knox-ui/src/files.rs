@@ -224,6 +224,8 @@ impl IntoElement for FilesView {
         }
 
         let body_h = px((self.height.0 - 40).max(80));
+        let sidebar_bg = self.theme.colors.muted;
+        let list_bg = self.theme.colors.background;
         div()
             .flex_col()
             .w(self.width)
@@ -235,8 +237,8 @@ impl IntoElement for FilesView {
                     .flex()
                     .grow()
                     .h(body_h)
-                    .child(div().w(px(160)).child(tree))
-                    .child(div().grow().child(list)),
+                    .child(div().w(px(160)).h(body_h).bg(sidebar_bg).child(tree))
+                    .child(div().grow().h(body_h).bg(list_bg).child(list)),
             )
     }
 }

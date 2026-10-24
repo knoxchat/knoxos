@@ -520,7 +520,11 @@ pub fn deliver_hardware_report(hid_id: u32, slot_id: u8, report: &[u8]) {
 
 /// QEMU `usb-tablet` digitizer: `[buttons, x_lo, x_hi, y_lo, y_hi]`, X/Y 0..32767.
 pub fn parse_tablet_report(device: &mut HidDevice, report: &[u8]) {
-    if crate::virtio_input::is_active() {
+    // Drop USB absolute reports only once VirtIO-tablet is actually delivering
+    // events. Binding the PCI device is not enough — cocoa often sends the
+    // pointer to usb-tablet, and a silent virtqueue then leaves the desktop
+    // frozen.
+    if crate::virtio_input::pointer_live() {
         return;
     }
     if report.len() < 5 {

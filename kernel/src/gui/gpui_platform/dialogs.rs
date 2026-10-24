@@ -157,7 +157,6 @@ pub fn ensure_wizard_windows(app: &mut knox_gpui::App) -> Vec<WindowId> {
             win.set_chrome(ChromeKind::Csd);
             win.set_min_size(Size::wh(420, 320));
             win.set_bounds(bounds);
-            win.request_layout();
         }
         ids.push(gpui);
     }

@@ -140,9 +140,6 @@ pub fn pump(fb: &mut FrameBuffer, screen_w: u32, screen_h: u32, damage: Rect, is
                 dest.width as i32,
                 dest.height as i32,
             ));
-            if is_full || damage.intersects(&dest) {
-                win.request_layout();
-            }
         }
         if id == rubber_id {
             let dest = super::desktop::rubber_dest_rect(screen_w, screen_h);
@@ -180,7 +177,7 @@ pub fn pump(fb: &mut FrameBuffer, screen_w: u32, screen_h: u32, damage: Rect, is
                 dest.width as i32,
                 dest.height as i32,
             ));
-            if crate::gui::startmenu::is_visible() {
+            if crate::gui::startmenu::is_visible() && (is_full || damage.intersects(&dest)) {
                 win.request_layout();
             }
         }

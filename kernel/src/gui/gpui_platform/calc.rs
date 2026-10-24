@@ -372,7 +372,7 @@ pub fn dispatch_pointer_up(x: i32, y: i32) -> bool {
 }
 
 pub fn pointer_moved(x: i32, y: i32) -> bool {
-    let Some((wm_id, id)) = hit_visible(x, y) else {
+    let Some((_wm_id, id)) = hit_visible(x, y) else {
         return false;
     };
     let mut slot = APP.lock();
@@ -383,16 +383,8 @@ pub fn pointer_moved(x: i32, y: i32) -> bool {
         return false;
     };
     let local = Point::xy(x - win.bounds().x(), y - win.bounds().y());
-    let old = win.input().hover_mask();
     win.input_mut().set_pointer_position(local);
-    let new = win.input().hover_mask();
-    if old != new {
-        win.request_layout();
-        true
-    } else {
-        let _ = wm_id;
-        false
-    }
+    false
 }
 
 pub fn key_to_code(key: Key) -> Option<char> {

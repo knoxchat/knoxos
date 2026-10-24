@@ -29,9 +29,9 @@ pub use folder::{
     empty_trash, move_to_trash, restore_from_trash, sync_desktop_folder, trash_count,
 };
 pub use interaction::{
-    begin_rubber_band, cancel_icon_drag, finish_rubber_band, handle_click, handle_double_click,
-    handle_icon_drag, handle_icon_drop, handle_rubber_band_drag, is_dragging_icon,
-    is_rubber_band_active, press_icon,
+    begin_rubber_band, cancel_icon_drag, commit_icon_drag_if_moved, finish_rubber_band,
+    handle_click, handle_double_click, handle_icon_drag, handle_icon_drop, handle_rubber_band_drag,
+    is_dragging_icon, is_icon_press_pending, is_rubber_band_active, press_icon,
 };
 pub use types::{
     CONTEXT_MENU, ContextAction, ContextMenuItem, DESKTOP, Desktop, DesktopContextMenu,

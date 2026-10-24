@@ -259,8 +259,13 @@ fn gpu_move_cursor_cmd(gpu: &mut LiveGpu, x: u32, y: u32) -> bool {
     gpu.submit_cursor_cmd(&cmd)
 }
 
+/// Packed BGRA for Aurora Dark `rgb(22, 20, 26)`. The GATE used to stamp a
+/// teal test pattern (`0xFF20_C997`) onto the live scanout, which filled the
+/// QEMU window with green until the desktop presented.
+const SCANOUT_CLEAR_BGRA: u32 = 0xFF16_141A;
+
 pub(super) fn scanout_self_test(gpu: &mut LiveGpu) -> bool {
-    fill_pattern(gpu.scanout_phys, gpu.scanout_bytes, 0xFF20_C997);
+    fill_pattern(gpu.scanout_phys, gpu.scanout_bytes, SCANOUT_CLEAR_BGRA);
     paint_arrow_cursor(gpu.cursor_phys);
 
     let display = gpu_cmd_get_display(gpu);
