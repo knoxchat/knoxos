@@ -1985,3 +1985,111 @@ pub fn delegreturn_self_test() -> bool {
         }
     }
 }
+
+pub const GATE_NFS_EXCHANGEID_MARKER: &str = "GATE_NFS exchangeid";
+
+/// EXCHANGE_ID of a client_name returns a client_id; an empty name is INVAL.
+pub fn exchangeid_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let issued = client.compound(
+        "exchangeid",
+        &[NfsCompoundOp::ExchangeId {
+            client_name: String::from("knoxos-exid"),
+        }],
+    );
+    let client_id = match issued.first() {
+        Some(NfsCompoundResult::ClientId { client_id, .. }) if *client_id != 0 => *client_id,
+        other => {
+            serial_println!("[NFS] GATE_NFS exchangeid FAILED: {:?}", other);
+            return false;
+        }
+    };
+    let empty = client.compound(
+        "exchangeid-empty",
+        &[NfsCompoundOp::ExchangeId {
+            client_name: String::new(),
+        }],
+    );
+    match empty.first() {
+        Some(NfsCompoundResult::Status(NfsStat::Inval)) => {
+            serial_println!(
+                "[NFS] {} (EXCHANGE_ID {:#x} then INVAL)",
+                GATE_NFS_EXCHANGEID_MARKER,
+                client_id
+            );
+            true
+        }
+        other => {
+            serial_println!("[NFS] GATE_NFS exchangeid FAILED empty={:?}", other);
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_SESSION_MARKER: &str = "GATE_NFS session";
+
+/// CREATE_SESSION of an EXCHANGE_ID client_id is OK; a wrong id is STALE_CLIENTID.
+pub fn session_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let issued = client.compound(
+        "session-exchangeid",
+        &[NfsCompoundOp::ExchangeId {
+            client_name: String::from("knoxos-session"),
+        }],
+    );
+    let client_id = match issued.first() {
+        Some(NfsCompoundResult::ClientId { client_id, .. }) => *client_id,
+        other => {
+            serial_println!("[NFS] GATE_NFS session FAILED: exchangeid {:?}", other);
+            return false;
+        }
+    };
+    let created = client.compound("session", &[NfsCompoundOp::CreateSession { client_id }]);
+    let session_ok = matches!(
+        created.first(),
+        Some(NfsCompoundResult::Session { session_id }) if *session_id != 0
+    );
+    let stale = client.compound(
+        "session-stale",
+        &[NfsCompoundOp::CreateSession { client_id: 0xdead }],
+    );
+    let stale_ok = matches!(
+        stale.first(),
+        Some(NfsCompoundResult::Status(NfsStat::StaleClientId))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "session-missing",
+        &[NfsCompoundOp::CreateSession { client_id }],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::StaleClientId)) if session_ok && stale_ok => {
+            serial_println!(
+                "[NFS] {} (CREATE_SESSION then STALE_CLIENTID)",
+                GATE_NFS_SESSION_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS session FAILED created={} stale={} missing={:?}",
+                session_ok,
+                stale_ok,
+                other
+            );
+            false
+        }
+    }
+}

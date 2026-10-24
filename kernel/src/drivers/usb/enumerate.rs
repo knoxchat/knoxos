@@ -100,6 +100,10 @@ static HIDREPORT_LIVE: AtomicBool = AtomicBool::new(false);
 static HIDGETREPORT_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when HID SET_REPORT got a Transfer Event.
 static HIDSETREPORT_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when HID GET_IDLE got a Transfer Event.
+static HIDGETIDLE_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when HID SET_IDLE got a Transfer Event.
+static HIDSETIDLE_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 static ENUM_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -139,6 +143,8 @@ pub const GATE_XHCI_HID_MARKER: &str = "GATE_USB xhci hiddesc";
 pub const GATE_XHCI_HIDREPORT_MARKER: &str = "GATE_USB xhci hidreport";
 pub const GATE_XHCI_HIDGETREPORT_MARKER: &str = "GATE_USB xhci getreport";
 pub const GATE_XHCI_HIDSETREPORT_MARKER: &str = "GATE_USB xhci setreport";
+pub const GATE_XHCI_HIDGETIDLE_MARKER: &str = "GATE_USB xhci getidle";
+pub const GATE_XHCI_HIDSETIDLE_MARKER: &str = "GATE_USB xhci setidle";
 
 /// TRB chain bit — required so Setup+Data+Status are one TD.
 pub(super) const TRB_CH: u32 = 1 << 4;
@@ -3627,5 +3633,142 @@ pub fn setreport_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_HIDSETREPORT_MARKER);
+    true
+}
+
+/// HID GET_IDLE — class IN, 1-byte idle duration. Requires a Transfer Event.
+pub fn hid_get_idle(slot_id: u8, report_id: u8) -> Option<u8> {
+    serial_println!("[XHCI] GET_IDLE({}) for slot {}", report_id, slot_id);
+    restart_ep(slot_id, 1);
+
+    let (data_buf, _data_layout) = alloc_ring_buffer(4096);
+    let wvalue = report_id as u16;
+
+    let mut setup = Trb::new();
+    // bmRequestType=0xA1 (IN, class, interface), bRequest=2 (GET_IDLE)
+    setup.param_lo = 0xA1 | 2u32 << 8 | (wvalue as u32) << 16;
+    setup.param_hi = 1u32 << 16;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 3 << 16; // TRT = IN Data Stage
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut data = Trb::new();
+    data.param_lo = (data_buf & 0xFFFFFFFF) as u32;
+    data.param_hi = (data_buf >> 32) as u32;
+    data.status = 1;
+    data.set_type(TrbType::DataStage);
+    data.control |= 1 << 16; // DIR = IN
+    data.control |= 1 << 2; // ISP
+    data.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, data, status]) {
+        serial_println!("[XHCI] Failed to submit GET_IDLE");
+        return None;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: USB2 HID may stall GET_IDLE.
+        if cc == 1 || cc == 13 || cc == 6 {
+            // SAFETY: GET_IDLE DMA page is owned by this transfer.
+            let value = unsafe { core::ptr::read(dma_virt(data_buf) as *const u8) };
+            HIDGETIDLE_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] GET_IDLE complete cc={} value={}", cc, value);
+            return Some(value);
+        }
+        serial_println!("[XHCI] GET_IDLE completion code: {}", cc);
+        return None;
+    }
+    serial_println!("[XHCI] GET_IDLE timeout");
+    None
+}
+
+/// HID SET_IDLE — class OUT, duration in wValue. Requires a Transfer Event.
+pub fn hid_set_idle(slot_id: u8, report_id: u8, duration: u8) -> bool {
+    serial_println!(
+        "[XHCI] SET_IDLE(report={} duration={}) for slot {}",
+        report_id,
+        duration,
+        slot_id
+    );
+    recover_control_ep(slot_id);
+
+    let wvalue = (duration as u16) << 8 | report_id as u16;
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x21 (OUT, class, interface), bRequest=0x0A (SET_IDLE)
+    setup.param_lo = 0x21 | 0x0Au32 << 8 | (wvalue as u32) << 16;
+    setup.param_hi = 0; // wIndex=0, wLength=0
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for no-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, status]) {
+        serial_println!("[XHCI] Failed to submit SET_IDLE");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: USB2 HID may stall SET_IDLE.
+        if cc == 1 || cc == 13 || cc == 6 {
+            HIDSETIDLE_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] SET_IDLE complete cc={}", cc);
+            return true;
+        }
+        serial_println!("[XHCI] SET_IDLE completion code: {}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] SET_IDLE timeout");
+    false
+}
+
+/// Prove HID GET_IDLE got a Transfer Event.
+pub fn getidle_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci getidle skipped (no controller)");
+        return true;
+    }
+    if !HIDGETIDLE_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = hid_get_idle(slot_id, 0);
+        }
+    }
+    if !HIDGETIDLE_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_IDLE had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_HIDGETIDLE_MARKER);
+    true
+}
+
+/// Prove HID SET_IDLE got a Transfer Event.
+pub fn setidle_self_test() -> bool {
+    if !super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci setidle skipped (no controller)");
+        return true;
+    }
+    if !HIDSETIDLE_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = hid_set_idle(slot_id, 0, 0);
+        }
+    }
+    if !HIDSETIDLE_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SET_IDLE had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_HIDSETIDLE_MARKER);
     true
 }

@@ -47,6 +47,8 @@ pub enum FuseOpcode {
     Fallocate = 43,
     Readdirplus = 44,
     Rename2 = 45,
+    Lseek = 46,
+    CopyFileRange = 47,
 }
 
 /// POSIX `R_OK` — FUSE ACCESS request/grant bit.
@@ -330,6 +332,35 @@ pub(super) fn encode_direntplus(ino: u64, size: u64, mode: u32, name: &str) -> V
     out.extend_from_slice(&(name.len() as u32).to_le_bytes());
     out.extend_from_slice(name.as_bytes());
     out
+}
+
+/// POSIX `SEEK_SET`.
+pub const SEEK_SET: u32 = 0;
+/// POSIX `SEEK_END`.
+pub const SEEK_END: u32 = 2;
+
+pub(super) fn encode_lseek(offset: u64) -> Vec<u8> {
+    offset.to_le_bytes().to_vec()
+}
+
+/// Packed FUSE LSEEK reply: offset u64.
+pub fn parse_fuse_lseek(data: &[u8]) -> Option<u64> {
+    if data.len() < 8 {
+        return None;
+    }
+    Some(u64::from_le_bytes(data[0..8].try_into().ok()?))
+}
+
+pub(super) fn encode_copy_file_range(copied: u64) -> Vec<u8> {
+    copied.to_le_bytes().to_vec()
+}
+
+/// Packed FUSE COPY_FILE_RANGE reply: bytes copied u64.
+pub fn parse_fuse_copy_file_range(data: &[u8]) -> Option<u64> {
+    if data.len() < 8 {
+        return None;
+    }
+    Some(u64::from_le_bytes(data[0..8].try_into().ok()?))
 }
 
 /// Packed FUSE READDIRPLUS: ino u64, size u64, mode u32, namelen u32, name bytes.

@@ -114,6 +114,8 @@ pub struct NfsClient {
     fh_names: BTreeMap<NfsFileHandle, String>,
     fh_parents: BTreeMap<NfsFileHandle, NfsFileHandle>,
     pub(super) client_id_confirmed: bool,
+    exchange_id_issued: bool,
+    session_id: Option<u64>,
 }
 
 impl NfsClient {
@@ -139,6 +141,8 @@ impl NfsClient {
             fh_names: BTreeMap::new(),
             fh_parents: BTreeMap::new(),
             client_id_confirmed: false,
+            exchange_id_issued: false,
+            session_id: None,
         }
     }
 
@@ -777,6 +781,29 @@ impl NfsClient {
                     NfsCompoundResult::Status(NfsStat::Ok)
                 } else {
                     NfsCompoundResult::Status(NfsStat::BadStateId)
+                }
+            }
+            NfsCompoundOp::ExchangeId { client_name } => {
+                if client_name.is_empty() {
+                    return NfsCompoundResult::Status(NfsStat::Inval);
+                }
+                self.client_id = simple_hash(client_name.as_bytes());
+                self.exchange_id_issued = true;
+                self.session_id = None;
+                NfsCompoundResult::ClientId {
+                    client_id: self.client_id,
+                    verifier: rdtsc(),
+                }
+            }
+            NfsCompoundOp::CreateSession { client_id } => {
+                if self.exchange_id_issued && self.client_id != 0 && *client_id == self.client_id {
+                    let session_id = self
+                        .session_id
+                        .unwrap_or_else(|| simple_hash(&client_id.to_le_bytes()));
+                    self.session_id = Some(session_id);
+                    NfsCompoundResult::Session { session_id }
+                } else {
+                    NfsCompoundResult::Status(NfsStat::StaleClientId)
                 }
             }
         }

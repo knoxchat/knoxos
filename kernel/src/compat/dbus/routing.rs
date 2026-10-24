@@ -12,8 +12,8 @@ use super::protocol::{DbusValue, Message, MessageType};
 use super::state::{
     BUS_FEATURES, BusState, BusType, Connection, ConnectionId, DBUS_RELEASE_NAME_REPLY_RELEASED,
     DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, DBUS_START_REPLY_ALREADY_RUNNING,
-    DBUS_START_REPLY_SUCCESS, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE, GATE_SELINUX_CONTEXT,
-    MACHINE_ID, MatchRule, get_bus,
+    DBUS_START_REPLY_SUCCESS, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE, GATE_LINUX_SECURITY_LABEL,
+    GATE_SELINUX_CONTEXT, MACHINE_ID, MatchRule, get_bus,
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -176,6 +176,18 @@ fn name_lost(name: &str) -> Message {
     msg
 }
 
+fn name_acquired(name: &str) -> Message {
+    let mut msg = Message::signal(
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameAcquired",
+    );
+    msg.sender = Some(String::from("org.freedesktop.DBus"));
+    msg.body = vec![DbusValue::String(String::from(name))];
+    msg.signature = Some(String::from("s"));
+    msg
+}
+
 /// Handle bus-level methods (org.freedesktop.DBus)
 fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
     let member = msg.member.as_deref().unwrap_or("");
@@ -218,6 +230,7 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                     c.message_queue.push(reply);
                 }
                 if code == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER && was_free {
+                    emit_bus_signal(bus, name_acquired(&name));
                     emit_bus_signal(bus, name_owner_changed(&name, "", &unique));
                 }
             }
@@ -447,6 +460,32 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 reply.signature = Some(String::from("as"));
                 if let Some(c) = bus.connections.get_mut(&from) {
                     c.message_queue.push(reply);
+                }
+            }
+            "GetConnectionLinuxSecurityLabel" => {
+                let name = match msg.body.first() {
+                    Some(DbusValue::String(s)) => s.as_str(),
+                    _ => return,
+                };
+                let owner_id = bus.names.get(name).copied().or_else(|| {
+                    bus.connections
+                        .values()
+                        .find(|c| c.unique_name == name)
+                        .map(|c| c.id)
+                });
+                if owner_id.is_some() {
+                    let bytes: Vec<DbusValue> = GATE_LINUX_SECURITY_LABEL
+                        .as_bytes()
+                        .iter()
+                        .copied()
+                        .map(DbusValue::Byte)
+                        .collect();
+                    let mut reply = Message::method_return(msg.header.serial);
+                    reply.body = vec![DbusValue::Array(bytes)];
+                    reply.signature = Some(String::from("ay"));
+                    if let Some(c) = bus.connections.get_mut(&from) {
+                        c.message_queue.push(reply);
+                    }
                 }
             }
             "GetConnectionSELinuxSecurityContext" => {

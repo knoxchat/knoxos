@@ -5,9 +5,10 @@ use alloc::vec::Vec;
 
 use super::mount::{LOOPBACK, write_response};
 use super::protocol::{
-    F_UNLCK, FuseFileLock, FuseOpcode, FuseStatfs, POLLIN, POLLOUT, RENAME_NOREPLACE, encode_bmap,
-    encode_dirent, encode_direntplus, encode_entry, encode_ioctl, encode_lk, encode_open,
-    encode_poll, encode_statfs, lock_conflicts, parse_fuse_lk,
+    F_UNLCK, FuseFileLock, FuseOpcode, FuseStatfs, POLLIN, POLLOUT, RENAME_NOREPLACE, SEEK_END,
+    SEEK_SET, encode_bmap, encode_copy_file_range, encode_dirent, encode_direntplus, encode_entry,
+    encode_ioctl, encode_lk, encode_lseek, encode_open, encode_poll, encode_statfs, lock_conflicts,
+    parse_fuse_lk,
 };
 
 pub(super) fn serve_loopback(mount_point: &str, opcode: FuseOpcode, unique: u64, req: &[u8]) {
@@ -666,6 +667,77 @@ pub(super) fn serve_loopback_rename2(mount_point: &str, unique: u64, req: &[u8])
     }
     drop(lbs);
     let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_lseek(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    if req.len() < 12 {
+        return;
+    }
+    let offset = u64::from_le_bytes(req[0..8].try_into().unwrap_or([0; 8]));
+    let whence = u32::from_le_bytes(req[8..12].try_into().unwrap_or([0; 4]));
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    let Some((_, data)) = lb.files.values().find(|(ino, _)| *ino == nodeid) else {
+        return;
+    };
+    let size = data.len() as u64;
+    let out = match whence {
+        SEEK_SET if offset <= size => offset,
+        SEEK_END => size,
+        _ => return,
+    };
+    drop(lbs);
+    let _ = write_response(mount_point, unique, encode_lseek(out));
+}
+pub(super) fn serve_loopback_copy_file_range(
+    mount_point: &str,
+    unique: u64,
+    nodeid: u64,
+    req: &[u8],
+) {
+    if req.len() < 32 {
+        return;
+    }
+    let off_in = u64::from_le_bytes(req[0..8].try_into().unwrap_or([0; 8])) as usize;
+    let nodeid_out = u64::from_le_bytes(req[8..16].try_into().unwrap_or([0; 8]));
+    let off_out = u64::from_le_bytes(req[16..24].try_into().unwrap_or([0; 8])) as usize;
+    let len = u64::from_le_bytes(req[24..32].try_into().unwrap_or([0; 8])) as usize;
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    let Some(src) = lb
+        .files
+        .values()
+        .find(|(ino, _)| *ino == nodeid)
+        .map(|(_, data)| data.clone())
+    else {
+        return;
+    };
+    if !lb.files.values().any(|(ino, _)| *ino == nodeid_out) {
+        return;
+    }
+    let end_in = off_in.saturating_add(len).min(src.len());
+    if off_in >= src.len() {
+        drop(lbs);
+        let _ = write_response(mount_point, unique, encode_copy_file_range(0));
+        return;
+    }
+    let payload = src[off_in..end_in].to_vec();
+    let copied = payload.len() as u64;
+    let Some((_, dst)) = lb.files.values_mut().find(|(ino, _)| *ino == nodeid_out) else {
+        return;
+    };
+    let end_out = off_out.saturating_add(payload.len());
+    if end_out > dst.len() {
+        dst.resize(end_out, 0);
+    }
+    if off_out < end_out {
+        dst[off_out..end_out].copy_from_slice(&payload);
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, encode_copy_file_range(copied));
 }
 pub(super) fn serve_loopback_fallocate(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
     if req.len() < 20 {

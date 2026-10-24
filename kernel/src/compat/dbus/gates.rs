@@ -13,7 +13,7 @@ use super::state::{
     BUS_FEATURES, BusType, DBUS_NAME_FLAG_DO_NOT_QUEUE, DBUS_REQUEST_NAME_REPLY_IN_QUEUE,
     DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, DBUS_START_REPLY_ALREADY_RUNNING,
     DBUS_START_REPLY_SUCCESS, GATE_ACTIVATABLE_NAME, GATE_ADT_SESSION, GATE_APPARMOR_PROFILE,
-    GATE_SELINUX_CONTEXT, MACHINE_ID,
+    GATE_LINUX_SECURITY_LABEL, GATE_SELINUX_CONTEXT, MACHINE_ID,
 };
 
 pub const GATE_DBUS_METHOD_MARKER: &str = "GATE_DBUS method";
@@ -2140,6 +2140,134 @@ pub fn namelost_self_test() -> bool {
         true
     } else {
         serial_println!("[dbus] GATE_DBUS FAILED: NameLost");
+        false
+    }
+}
+
+pub const GATE_DBUS_NAMEACQUIRED_MARKER: &str = "GATE_DBUS nameacquired";
+
+/// `NameAcquired` is delivered after `RequestName` to an AddMatch listener.
+pub fn nameacquired_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateNameAcquired";
+    const RULE: &str = "type='signal',interface='org.freedesktop.DBus',member='NameAcquired'";
+    let owner = connect(BusType::System, 0xDB2C, 1000);
+
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, owner, add);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let acquired = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.member.as_deref() == Some("NameAcquired")
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::String(s)) if s == WELL_KNOWN
+                )
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if acquired {
+        serial_println!(
+            "[dbus] {} (NameAcquired after RequestName)",
+            GATE_DBUS_NAMEACQUIRED_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: NameAcquired");
+        false
+    }
+}
+
+pub const GATE_DBUS_LABEL_MARKER: &str = "GATE_DBUS label";
+
+/// `GetConnectionLinuxSecurityLabel` must return the LSM label for unique and well-known names.
+pub fn label_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateLinuxLabel";
+    let owner = connect(BusType::System, 0xDB2D, 1000);
+    let unique = format!(":1.{}", owner);
+
+    let mut get_unique = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionLinuxSecurityLabel",
+    );
+    get_unique.body = vec![DbusValue::String(unique)];
+    get_unique.signature = Some(String::from("s"));
+    let uniq_serial = send_message(BusType::System, owner, get_unique);
+    let unique_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(uniq_serial)
+                && ay_utf8(&msg.body).as_deref() == Some(GATE_LINUX_SECURITY_LABEL)
+        })
+        .unwrap_or(false);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut get_wk = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionLinuxSecurityLabel",
+    );
+    get_wk.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    get_wk.signature = Some(String::from("s"));
+    let wk_serial = send_message(BusType::System, owner, get_wk);
+    let well_known_ok = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.reply_serial == Some(wk_serial)
+                && ay_utf8(&msg.body).as_deref() == Some(GATE_LINUX_SECURITY_LABEL)
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if unique_ok && well_known_ok {
+        serial_println!(
+            "[dbus] {} (GetConnectionLinuxSecurityLabel unique+well-known)",
+            GATE_DBUS_LABEL_MARKER
+        );
+        true
+    } else {
+        serial_println!(
+            "[dbus] GATE_DBUS FAILED: label unique={} well_known={}",
+            unique_ok,
+            well_known_ok
+        );
         false
     }
 }

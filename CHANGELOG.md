@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **FUSE LSEEK** — SEEK_SET 0 is 0; SEEK_END is size; unknown nodeid fails (`GATE_FUSE lseek`).
+- **FUSE COPY_FILE_RANGE** — copies bytes between known files; unknown nodeid fails (`GATE_FUSE copy`).
+- **D-Bus NameAcquired** — delivered after `RequestName` (`GATE_DBUS nameacquired`).
+- **D-Bus GetConnectionLinuxSecurityLabel** — LSM label for unique and well-known names (`GATE_DBUS label`).
+- **XHCI HID GET_IDLE** — class IN Transfer Event (`GATE_USB xhci getidle`).
+- **XHCI HID SET_IDLE** — class OUT Transfer Event (`GATE_USB xhci setidle`).
+- **NFS EXCHANGE_ID** — client_name returns a client_id; empty is INVAL (`GATE_NFS exchangeid`).
+- **NFS CREATE_SESSION** — EXCHANGE_ID client_id is OK; wrong id is STALE_CLIENTID (`GATE_NFS session`).
+
 ## 0.2.6
 
 - **FUSE READDIRPLUS** — root lists created names with size; unknown nodeid fails (`GATE_FUSE readdirplus`).

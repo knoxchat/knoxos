@@ -20,7 +20,7 @@ The linker path is done (BM1–BM4: `ld.so`, `dlopen`, static + dynamic musl). T
 
 Convert a silent `Ok(0)` when you touch that syscall. Do not add a new lettered gate just to ENOSYS one more unused number.
 
-The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Integration **571/571**.
+The leftover inventory that was still wireable on QEMU is also landed: memory cgroups (`GATE_CGROUP` / `GATE_CGROUP2`), job-control stop/continue (`GATE_JOB stop`), IMA on exec (`GATE_IMA exec`), lockdown + wipe-on-free (`GATE_LOCKDOWN module`, `GATE_WIPE free`), UEFI time/vars (`GATE_UEFI time`), NetworkManager DHCP apply (`GATE_NM dhcp`). Ring 3 calc re-raster, musl raster, `/bin/sh` parser, D-Bus daemon, and Wayland listen are live. Integration **579/579**.
 
 ---
 
@@ -56,6 +56,8 @@ A dynamically linked musl binary runs (BM4). VirtIO-GPU scanout + hardware curso
 ## 4. Still production (not the later list)
 
 Skip [Do not start](#do-not-start). Highest-leverage open rows in [remaining.md](remaining.md) from this section are **done**, including this batch:
+
+- FUSE LSEEK (`GATE_FUSE lseek`); FUSE COPY_FILE_RANGE (`GATE_FUSE copy`); D-Bus NameAcquired (`GATE_DBUS nameacquired`); D-Bus GetConnectionLinuxSecurityLabel (`GATE_DBUS label`); XHCI HID GET_IDLE (`GATE_USB xhci getidle`); XHCI HID SET_IDLE (`GATE_USB xhci setidle`); NFS EXCHANGE_ID (`GATE_NFS exchangeid`); NFS CREATE_SESSION (`GATE_NFS session`)
 
 - FUSE READDIRPLUS (`GATE_FUSE readdirplus`); FUSE RENAME2 (`GATE_FUSE rename2`); D-Bus NameOwnerChanged (`GATE_DBUS ownerchanged`); D-Bus NameLost (`GATE_DBUS namelost`); XHCI HID GET_REPORT (`GATE_USB xhci getreport`); XHCI HID SET_REPORT (`GATE_USB xhci setreport`); NFS DELEGPURGE (`GATE_NFS delegpurge`); NFS DELEGRETURN (`GATE_NFS delegreturn`)
 

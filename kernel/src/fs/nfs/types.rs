@@ -109,6 +109,8 @@ pub enum NfsOp {
     Verify = 37,
     Write = 38,
     ReleaseLockOwner = 39,
+    ExchangeId = 42,
+    CreateSession = 43,
 }
 
 /// NFS4 file type

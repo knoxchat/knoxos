@@ -104,6 +104,12 @@ pub enum NfsCompoundOp {
     DelegReturn {
         state_id: NfsStateId,
     },
+    ExchangeId {
+        client_name: String,
+    },
+    CreateSession {
+        client_id: u64,
+    },
 }
 
 /// Result of a compound operation
@@ -147,5 +153,8 @@ pub enum NfsCompoundResult {
     },
     SecInfo {
         flavors: Vec<u32>,
+    },
+    Session {
+        session_id: u64,
     },
 }

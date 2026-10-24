@@ -838,6 +838,22 @@ fn test_dbus_name_lost() {
 }
 
 #[test_case]
+fn test_dbus_name_acquired() {
+    assert!(
+        crate::dbus::nameacquired_self_test(),
+        "NameAcquired must be delivered after RequestName"
+    );
+}
+
+#[test_case]
+fn test_dbus_linux_security_label() {
+    assert!(
+        crate::dbus::label_self_test(),
+        "GetConnectionLinuxSecurityLabel must return the LSM label for unique and well-known names"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

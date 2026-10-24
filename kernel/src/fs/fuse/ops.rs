@@ -4,22 +4,24 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::loopback::{
-    serve_loopback, serve_loopback_access, serve_loopback_bmap, serve_loopback_create,
-    serve_loopback_destroy, serve_loopback_fallocate, serve_loopback_flush, serve_loopback_fsync,
-    serve_loopback_fsyncdir, serve_loopback_getattr, serve_loopback_getlk, serve_loopback_getxattr,
-    serve_loopback_ioctl, serve_loopback_link, serve_loopback_listxattr, serve_loopback_mkdir,
-    serve_loopback_mknod, serve_loopback_open, serve_loopback_opendir, serve_loopback_poll,
-    serve_loopback_read, serve_loopback_readdir, serve_loopback_readdirplus,
-    serve_loopback_readlink, serve_loopback_release, serve_loopback_releasedir,
-    serve_loopback_removexattr, serve_loopback_rename, serve_loopback_rename2,
-    serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setlk, serve_loopback_setxattr,
-    serve_loopback_statfs, serve_loopback_symlink, serve_loopback_unlink, serve_loopback_write,
+    serve_loopback, serve_loopback_access, serve_loopback_bmap, serve_loopback_copy_file_range,
+    serve_loopback_create, serve_loopback_destroy, serve_loopback_fallocate, serve_loopback_flush,
+    serve_loopback_fsync, serve_loopback_fsyncdir, serve_loopback_getattr, serve_loopback_getlk,
+    serve_loopback_getxattr, serve_loopback_ioctl, serve_loopback_link, serve_loopback_listxattr,
+    serve_loopback_lseek, serve_loopback_mkdir, serve_loopback_mknod, serve_loopback_open,
+    serve_loopback_opendir, serve_loopback_poll, serve_loopback_read, serve_loopback_readdir,
+    serve_loopback_readdirplus, serve_loopback_readlink, serve_loopback_release,
+    serve_loopback_releasedir, serve_loopback_removexattr, serve_loopback_rename,
+    serve_loopback_rename2, serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setlk,
+    serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_symlink, serve_loopback_unlink,
+    serve_loopback_write,
 };
 use super::mount::{send_request, take_response};
 use super::protocol::{
     FuseAttr, FuseEntry, FuseFileLock, FuseOpcode, FuseStatfs, encode_lk, parse_fuse_bmap,
-    parse_fuse_direntplus, parse_fuse_dirents, parse_fuse_entry, parse_fuse_ioctl, parse_fuse_lk,
-    parse_fuse_open, parse_fuse_poll, parse_fuse_statfs,
+    parse_fuse_copy_file_range, parse_fuse_direntplus, parse_fuse_dirents, parse_fuse_entry,
+    parse_fuse_ioctl, parse_fuse_lk, parse_fuse_lseek, parse_fuse_open, parse_fuse_poll,
+    parse_fuse_statfs,
 };
 
 /// Handle a VFS lookup through FUSE
@@ -562,4 +564,43 @@ pub fn fuse_rename2(
     serve_loopback_rename2(mount_point, unique, &data);
     take_response(mount_point, unique).ok_or("would block")?;
     Ok(())
+}
+/// Handle a VFS lseek through FUSE. SEEK_SET within size and SEEK_END succeed; unknown nodeid fails.
+pub fn fuse_lseek(
+    mount_point: &str,
+    nodeid: u64,
+    offset: u64,
+    whence: u32,
+) -> Result<u64, &'static str> {
+    let mut data = Vec::with_capacity(12);
+    data.extend_from_slice(&offset.to_le_bytes());
+    data.extend_from_slice(&whence.to_le_bytes());
+    let unique = send_request(mount_point, FuseOpcode::Lseek, nodeid, data.clone())?;
+    serve_loopback_lseek(mount_point, unique, nodeid, &data);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    parse_fuse_lseek(&resp).ok_or("short lseek")
+}
+/// Handle a VFS copy_file_range through FUSE. Known files copy bytes; unknown nodeid fails.
+pub fn fuse_copy_file_range(
+    mount_point: &str,
+    nodeid_in: u64,
+    off_in: u64,
+    nodeid_out: u64,
+    off_out: u64,
+    len: u64,
+) -> Result<u64, &'static str> {
+    let mut data = Vec::with_capacity(32);
+    data.extend_from_slice(&off_in.to_le_bytes());
+    data.extend_from_slice(&nodeid_out.to_le_bytes());
+    data.extend_from_slice(&off_out.to_le_bytes());
+    data.extend_from_slice(&len.to_le_bytes());
+    let unique = send_request(
+        mount_point,
+        FuseOpcode::CopyFileRange,
+        nodeid_in,
+        data.clone(),
+    )?;
+    serve_loopback_copy_file_range(mount_point, unique, nodeid_in, &data);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    parse_fuse_copy_file_range(&resp).ok_or("short copy_file_range")
 }

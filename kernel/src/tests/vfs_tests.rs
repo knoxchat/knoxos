@@ -517,6 +517,28 @@ fn test_xhci_hid_set_report() {
 }
 
 #[test_case]
+fn test_xhci_hid_get_idle() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::getidle_self_test(),
+        "XHCI HID GET_IDLE must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_hid_set_idle() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::setidle_self_test(),
+        "XHCI HID SET_IDLE must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_xhci_reset_device() {
     if !crate::usb::is_available() {
         return;
@@ -804,6 +826,22 @@ fn test_fuse_rename2_noreplace() {
     assert!(
         crate::fuse::rename2_self_test(),
         "FUSE RENAME2 must move a name, fail NOREPLACE if dest exists, and fail if old is missing"
+    );
+}
+
+#[test_case]
+fn test_fuse_lseek() {
+    assert!(
+        crate::fuse::lseek_self_test(),
+        "FUSE LSEEK SEEK_SET 0 must be 0, SEEK_END the size, and unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_copy_file_range() {
+    assert!(
+        crate::fuse::copy_file_range_self_test(),
+        "FUSE COPY_FILE_RANGE must copy bytes between known files; unknown nodeid must fail"
     );
 }
 
@@ -1162,6 +1200,24 @@ fn test_nfs_delegreturn() {
     assert!(
         crate::nfs::delegreturn_self_test(),
         "NFS4 DELEGRETURN must accept an OPEN state_id, BAD_STATEID a second time, and NOFILEHANDLE without FH"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_exchange_id() {
+    assert!(
+        crate::nfs::exchangeid_self_test(),
+        "NFS4 EXCHANGE_ID must return a client_id and INVAL for an empty name"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_create_session() {
+    assert!(
+        crate::nfs::session_self_test(),
+        "NFS4 CREATE_SESSION must accept an EXCHANGE_ID client_id and return STALE_CLIENTID for a wrong id"
     );
 }
 

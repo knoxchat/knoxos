@@ -294,5 +294,13 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 283. **XHCI HID SET_REPORT** — class OUT Transfer Event (`GATE_USB xhci setreport`).
 284. **NFS DELEGPURGE** — confirmed client_id OK; wrong id STALE_CLIENTID (`GATE_NFS delegpurge`).
 285. **NFS DELEGRETURN** — OPEN state_id OK; second BAD_STATEID; missing FH NOFILEHANDLE (`GATE_NFS delegreturn`).
+286. **FUSE LSEEK** — SEEK_SET 0 is 0; SEEK_END is size; unknown nodeid fails (`GATE_FUSE lseek`).
+287. **FUSE COPY_FILE_RANGE** — copies bytes between known files; unknown nodeid fails (`GATE_FUSE copy`).
+288. **D-Bus NameAcquired** — after RequestName (`GATE_DBUS nameacquired`).
+289. **D-Bus GetConnectionLinuxSecurityLabel** — LSM label unique+well-known (`GATE_DBUS label`).
+290. **XHCI HID GET_IDLE** — class IN Transfer Event (`GATE_USB xhci getidle`).
+291. **XHCI HID SET_IDLE** — class OUT Transfer Event (`GATE_USB xhci setidle`).
+292. **NFS EXCHANGE_ID** — client_name returns client_id; empty is INVAL (`GATE_NFS exchangeid`).
+293. **NFS CREATE_SESSION** — EXCHANGE_ID client_id OK; wrong id STALE_CLIENTID (`GATE_NFS session`).
 
-Integration: `./tests/run_integration.sh` **571/571** on QEMU (2026-10-24).
+Integration: `./tests/run_integration.sh` **579/579** on QEMU (2026-10-24).

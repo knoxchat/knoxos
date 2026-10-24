@@ -102,6 +102,9 @@ pub const GATE_ACTIVATABLE_NAME: &str = "org.knoxos.GateActivatable";
 /// SELinux context returned by `GetConnectionSELinuxSecurityContext`.
 pub const GATE_SELINUX_CONTEXT: &str = "system_u:system_r:unconfined_t:s0";
 
+/// LSM label returned by `GetConnectionLinuxSecurityLabel`.
+pub const GATE_LINUX_SECURITY_LABEL: &str = "system_u:object_r:knoxos_t:s0";
+
 /// AppArmor profile returned by `GetConnectionAppArmorSecurityContext`.
 pub const GATE_APPARMOR_PROFILE: &str = "unconfined";
 

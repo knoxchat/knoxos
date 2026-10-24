@@ -6,15 +6,17 @@ use crate::serial_println;
 
 use super::mount::{loopback_put, mount};
 use super::ops::{
-    fuse_access, fuse_bmap, fuse_create, fuse_destroy, fuse_fallocate, fuse_flush, fuse_fsync,
-    fuse_fsyncdir, fuse_getattr, fuse_getlk, fuse_getxattr, fuse_ioctl, fuse_link, fuse_listxattr,
-    fuse_lookup, fuse_mkdir, fuse_mknod, fuse_open, fuse_opendir, fuse_poll, fuse_read,
-    fuse_readdir, fuse_readdirplus, fuse_readlink, fuse_release, fuse_releasedir, fuse_removexattr,
-    fuse_rename, fuse_rename2, fuse_rmdir, fuse_setattr, fuse_setlk, fuse_setlkw, fuse_setxattr,
-    fuse_statfs, fuse_symlink, fuse_unlink, fuse_write,
+    fuse_access, fuse_bmap, fuse_copy_file_range, fuse_create, fuse_destroy, fuse_fallocate,
+    fuse_flush, fuse_fsync, fuse_fsyncdir, fuse_getattr, fuse_getlk, fuse_getxattr, fuse_ioctl,
+    fuse_link, fuse_listxattr, fuse_lookup, fuse_lseek, fuse_mkdir, fuse_mknod, fuse_open,
+    fuse_opendir, fuse_poll, fuse_read, fuse_readdir, fuse_readdirplus, fuse_readlink,
+    fuse_release, fuse_releasedir, fuse_removexattr, fuse_rename, fuse_rename2, fuse_rmdir,
+    fuse_setattr, fuse_setlk, fuse_setlkw, fuse_setxattr, fuse_statfs, fuse_symlink, fuse_unlink,
+    fuse_write,
 };
 use super::protocol::{
     F_UNLCK, F_WRLCK, FUSE_R_OK, FUSE_W_OK, FUSE_X_OK, FuseFileLock, POLLIN, RENAME_NOREPLACE,
+    SEEK_END, SEEK_SET,
 };
 
 pub const GATE_FUSE_MARKER: &str = "GATE_FUSE lookup";
@@ -1977,6 +1979,135 @@ pub fn rename2_self_test() -> bool {
     serial_println!(
         "[fuse] {} (RENAME2 then NOREPLACE then missing)",
         GATE_FUSE_RENAME2_MARKER
+    );
+    true
+}
+
+pub const GATE_FUSE_LSEEK_MARKER: &str = "GATE_FUSE lseek";
+
+/// LSEEK SEEK_SET 0 is 0; SEEK_END is size; unknown nodeid fails.
+pub fn lseek_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-lseek";
+    const PAYLOAD: &[u8] = b"knoxos-fuse-ls\n";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE lseek FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "lseek.txt", PAYLOAD).is_err() {
+        serial_println!("[fuse] GATE_FUSE lseek FAILED: put");
+        return false;
+    }
+    let file = match fuse_lookup(MP, 1, "lseek.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE lseek FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    let set0 = match fuse_lseek(MP, file.nodeid, 0, SEEK_SET) {
+        Ok(off) => off,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE lseek FAILED: SEEK_SET ({})", e);
+            return false;
+        }
+    };
+    let end = match fuse_lseek(MP, file.nodeid, 0, SEEK_END) {
+        Ok(off) => off,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE lseek FAILED: SEEK_END ({})", e);
+            return false;
+        }
+    };
+    if set0 != 0 || end != PAYLOAD.len() as u64 {
+        serial_println!(
+            "[fuse] GATE_FUSE lseek FAILED: set0={} end={} size={}",
+            set0,
+            end,
+            PAYLOAD.len()
+        );
+        return false;
+    }
+    if fuse_lseek(MP, 0xFFFF_FFFF, 0, SEEK_SET).is_ok() {
+        serial_println!("[fuse] GATE_FUSE lseek FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (LSEEK SEEK_SET 0 then SEEK_END {})",
+        GATE_FUSE_LSEEK_MARKER,
+        end
+    );
+    true
+}
+
+pub const GATE_FUSE_COPY_FILE_RANGE_MARKER: &str = "GATE_FUSE copy";
+
+/// COPY_FILE_RANGE copies bytes between known files; unknown nodeid fails.
+pub fn copy_file_range_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-copy";
+    const PAYLOAD: &[u8] = b"knoxos-fuse-cf\n";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE copy FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "src-cf.txt", PAYLOAD).is_err() {
+        serial_println!("[fuse] GATE_FUSE copy FAILED: put src");
+        return false;
+    }
+    if loopback_put(MP, "dst-cf.txt", b"").is_err() {
+        serial_println!("[fuse] GATE_FUSE copy FAILED: put dst");
+        return false;
+    }
+    let src = match fuse_lookup(MP, 1, "src-cf.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE copy FAILED: lookup src ({})", e);
+            return false;
+        }
+    };
+    let dst = match fuse_lookup(MP, 1, "dst-cf.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE copy FAILED: lookup dst ({})", e);
+            return false;
+        }
+    };
+    let copied = match fuse_copy_file_range(MP, src.nodeid, 0, dst.nodeid, 0, PAYLOAD.len() as u64)
+    {
+        Ok(n) => n,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE copy FAILED: copy ({})", e);
+            return false;
+        }
+    };
+    let data = match fuse_read(MP, dst.nodeid, 0, PAYLOAD.len() as u32) {
+        Ok(d) => d,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE copy FAILED: read ({})", e);
+            return false;
+        }
+    };
+    if copied != PAYLOAD.len() as u64 || data != PAYLOAD {
+        serial_println!(
+            "[fuse] GATE_FUSE copy FAILED: copied={} data={:?}",
+            copied,
+            data
+        );
+        return false;
+    }
+    if fuse_copy_file_range(MP, 0xFFFF_FFFF, 0, dst.nodeid, 0, 1).is_ok() {
+        serial_println!("[fuse] GATE_FUSE copy FAILED: missing src succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (COPY_FILE_RANGE {} bytes)",
+        GATE_FUSE_COPY_FILE_RANGE_MARKER,
+        copied
     );
     true
 }
