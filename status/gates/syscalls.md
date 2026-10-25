@@ -44,7 +44,7 @@ These gates prove Linux syscalls and namespaces on the QEMU boot path. They are 
 
 | ID | Task | Done when |
 |----|------|-----------|
-| N1 | Mount namespace isolation | **Done** — `unshare(CLONE_NEWNS)` bind mount is not visible to the parent (`GATE_N1 mount ns`) |
+| N1 | Mount namespace isolation | **Done** — `unshare(CLONE_NEWNS)` bind mount is not visible to the parent (`GATE_N1 mount ns`); `remove_mount` drops it again on umount (`GATE_UMOUNT live`) |
 | N2 | `socketpair` write/read round-trip | **Done** — Ring 3 AF_UNIX pair write/read (`GATE_N2 socketpair`) |
 | N3 | `eventfd` write/read | **Done** — Ring 3 counter write then read (`GATE_N3 eventfd`) |
 | N4 | More silent `Ok(0)` → ENOSYS | **Done** — Ring 3 `userfaultfd` returns `-ENOSYS` (`GATE_N4 enosys`) |

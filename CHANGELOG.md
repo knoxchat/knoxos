@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Mount syscalls leave the no-op list** — `umount` was the last silent `Ok(0)` in the syscall surface and `umount2`/`mount` never touched the real mount table. `sys_umount`/`sys_umount2`/`sys_mount`/`sys_mount_linux` now drive `fs::mount`, a missing target is `EINVAL`, a nested mount is `EBUSY` unless `MNT_FORCE`, and `do_move_mount` retargets an entry while keeping its `mount_id`/source/driver index. `namespaces::remove_mount` is the umount half of the mount-namespace table. `GATE_UMOUNT live` + `test_umount_live_path`; integration is 663/663.
+
 - **Chromium Ring 3 `io_uring`** — `io_uring_setup(8)` returns a ring fd and a NOP CQE (`GATE_CHR iouring`); `io_uring_setup(0,0)` stays `-ENOSYS` (M4); Ring 3 `userfaultfd` stays `-ENOSYS` (N4).
 - **Vivaldi `.deb`** — live dpkg `vivaldi-stable`; `/opt/vivaldi/vivaldi-bin` is a loadable ELF (`GATE_VIV deb`); Vivaldi chrome paints (`GATE_VIV ui`); sync fails with a real TLS error (`GATE_VIV sync`); Widevine disabled (`GATE_VIV cdm`). `vivaldi::launch` uses `spawn_elf` scheduler PIDs.
 - **Chromium glibc loader leftover** — PT_TLS `%fs` (`GATE_CHR tls`); DT_NEEDED `.so`s as real ELFs (`GATE_CHR needed`); skip-GTK Ozone (`GATE_CHR ozone`); host `scripts/check-chromium-ldd.sh` rejects stub `.so`s (`GATE_CHR ldd`).

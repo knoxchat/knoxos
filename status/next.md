@@ -97,6 +97,7 @@ Skip [Do not start](#do-not-start). Highest-leverage open rows from this leftove
 - FUSE ACCESS (`GATE_FUSE access`); FUSE FSYNC (`GATE_FUSE fsync`); D-Bus SELinux context (`GATE_DBUS selinux`); D-Bus AppArmor profile (`GATE_DBUS apparmor`); XHCI No-Op Command (`GATE_USB xhci noop`); XHCI Disable Slot (`GATE_USB xhci disable`); NFS LOOKUPP (`GATE_NFS lookupp`); NFS RESTOREFH (`GATE_NFS restorefh`)
 - FUSE OPEN (`GATE_FUSE open`); FUSE RELEASE (`GATE_FUSE release`); D-Bus ADT session (`GATE_DBUS adt`); D-Bus UpdateActivationEnvironment (`GATE_DBUS env`); XHCI Evaluate Context (`GATE_USB xhci eval`); XHCI Stop Endpoint (`GATE_USB xhci stop`); NFS PUTPUBFH (`GATE_NFS putpubfh`); NFS VERIFY (`GATE_NFS verify`)
 - TLS 1.3 HKDF (`GATE_TLS13 hkdf`); HDR/VRR (`GATE_HDR pq`, `GATE_VRR range`); e1000 `Socket::send` (`GATE_E1000 send`); eBPF/sched_ext (`GATE_EBPF exec`); Wi-Fi Beacon+PMK (`GATE_WIFI pmk`); i915 modeset (`GATE_I915 modeset`); Btrfs ramdisk (`GATE_BTRFS block`); VLAN 802.1Q (`GATE_VLAN tag`)
+- `umount`/`umount2`/`move_mount` on the real mount table (`GATE_UMOUNT live`) — the last silent `Ok(0)` in the mount syscalls is gone: a missing target is `EINVAL`, a nested mount is `EBUSY` without `MNT_FORCE`, and `move_mount` keeps the entry's identity
 
 Earlier in this section:
 

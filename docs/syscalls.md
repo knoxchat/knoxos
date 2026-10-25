@@ -8,10 +8,27 @@ Linux syscall **numbers** are not compatibility. A handler that returns `Ok(0)` 
 |------|---------|---------|
 | Live | Changes kernel state or copies real bytes | `write`, `mmap`, `clone`, `sendto` |
 | Wired | Partial: real path, incomplete POSIX | `madvise` records advice; no reclaim yet |
-| ENOSYS | Honest reject (`-ENOSYS`) | `bpf`, `io_uring`, `kexec`, `adjtimex` |
+| ENOSYS | Honest reject (`-ENOSYS`) | `bpf`, `kexec`, `adjtimex` |
 | No-op | Silent success — **do not add these** | Convert to ENOSYS or implement when you touch it |
 
 Numbers, `SyscallError`, `stat`/`statx` layouts, and `sockaddr_*` live in [`abi/`](../abi/) (`knox-abi`). The dispatch table and handlers are `kernel/src/syscall/`. VFS inodes stay in `kernel/src/fs/`. Letter gates **J–BL** in [status/gates/syscalls.md](../status/gates/syscalls.md) are QEMU proofs of individual calls (clone, namespaces, VFS, sockets). Adding another `GATE_xx` only to ENOSYS one unused number is not the critical path.
+
+## Mount: number → behaviour
+
+The mount syscalls used to be the last silent `Ok(0)`s in the tree. They now drive
+one real table (`kernel/src/fs/mount.rs`), and the mount-namespace table
+(`kernel/src/sched/namespaces.rs`) mirrors the entries that belong to a namespace.
+
+| Number | Name | Behaviour today |
+|--------|------|-----------------|
+| 165 | `mount` | Parses source/target/fstype/data, rejects an already-mounted target with `EBUSY`, creates the mount point, runs the driver (`ext4`/`ext2`/`vfat`/`iso9660`/`ntfs`/`exfat`/`btrfs`/`xfs`/`zfs`), and records the entry in the global table **and** the caller's mount namespace |
+| 166 | `umount2` | Removes the entry from both tables. Not a mount point → `EINVAL`; a nested mount still attached → `EBUSY` unless `MNT_FORCE` |
+| 0x3032 | `umount` | Same as `umount2(target, 0)` |
+| 429 | `move_mount` | Retargets the entry, keeping its `mount_id`, source, fs type, and driver index; nested mounts move with it. Root or self-nesting → `EINVAL`, occupied target → `EBUSY` |
+
+`GATE_UMOUNT live` is the QEMU self-test for that matrix; `tests/run_integration.sh`
+checks the marker. `do_move_mount` / `umount2` are also unit-tested through
+`test_umount_live_path`.
 
 ## Userspace ABI
 

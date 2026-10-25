@@ -468,10 +468,69 @@ pub fn do_mount(source: &str, target: &str, fstype: &str, opts: &str) -> Result<
     mount(source, target, fstype, 0, opts)
 }
 
-/// Move a mount point from one location to another
+/// Move a mount point from one location to another (`MS_MOVE` / `move_mount`).
+///
+/// The mount entry keeps its identity (`mount_id`, source, fs type, flags,
+/// fs/block index) and only its `target` changes, so open handles and the
+/// `/proc/mounts` device column survive the move. Nested mounts move with it.
 pub fn do_move_mount(from: &str, to: &str) -> Result<(), i32> {
-    // Simplified: umount old, mount at new
-    crate::serial_println!("[mount] move_mount: {} -> {}", from, to);
+    if from.is_empty() || to.is_empty() || from == to {
+        return Err(-22); // EINVAL
+    }
+    // Moving the root, or moving a mount inside itself, is nonsensical.
+    if from == "/" || path_under_mount(to, from) {
+        return Err(-22);
+    }
+
+    let mut table = MOUNT_TABLE.lock();
+    let idx = table
+        .mounts
+        .iter()
+        .position(|m| m.target == from)
+        .ok_or(-22i32)?;
+    if table.mounts.iter().any(|m| m.target == to) {
+        return Err(-16); // EBUSY
+    }
+
+    // Recreate the destination directory before the entry points at it.
+    {
+        let mut vfs = crate::vfs::VFS.lock();
+        let _ = vfs.mkdir(to, 0o755);
+    }
+
+    // Nested mounts follow their parent, so compute the rewrite first.
+    let prefix = alloc::format!("{}/", from);
+    let nested: Vec<(usize, String)> = table
+        .mounts
+        .iter()
+        .enumerate()
+        .filter(|(i, m)| *i != idx && m.target.starts_with(&prefix))
+        .map(|(i, m)| (i, alloc::format!("{}{}", to, &m.target[from.len()..])))
+        .collect();
+
+    // Reparent + retarget the moved entry itself.
+    let parent_id = table
+        .mounts
+        .iter()
+        .enumerate()
+        .filter(|(i, m)| *i != idx && to.starts_with(&m.target))
+        .max_by_key(|(_, m)| m.target.len())
+        .map(|(_, m)| m.mount_id)
+        .unwrap_or(0);
+    let entry = &mut table.mounts[idx];
+    // owned: the log line below runs after this mutable borrow of the table ends
+    let source = entry.source.clone();
+    entry.target = String::from(to);
+    entry.parent_id = parent_id;
+
+    for (i, new_target) in nested {
+        let m = &mut table.mounts[i];
+        m.target = new_target;
+        m.parent_id = parent_id;
+    }
+    drop(table);
+
+    serial_println!("[mount] moved {} -> {} ({})", from, to, source);
     Ok(())
 }
 
@@ -480,15 +539,20 @@ pub fn umount(target: &str) -> Result<(), i32> {
 }
 
 /// Unmount with flags
+///
+/// The prefix test uses `target` + `/` so `/mnt/a` is not treated as the parent
+/// of `/mnt/ab`. A forced umount detaches the nested mounts under `target`
+/// along with it, the same rule the mount-namespace table applies.
 pub fn umount2(target: &str, flags: u32) -> Result<(), i32> {
     let _umount_flags = UmountFlags::from_bits_truncate(flags);
     let mut table = MOUNT_TABLE.lock();
 
+    let prefix = alloc::format!("{}/", target);
     // Check if any child mounts exist
     let has_children = table
         .mounts
         .iter()
-        .any(|m| m.target != target && m.target.starts_with(target));
+        .any(|m| m.target != target && m.target.starts_with(&prefix));
     if has_children && !_umount_flags.contains(UmountFlags::MNT_FORCE) {
         return Err(-16); // EBUSY
     }
@@ -501,6 +565,10 @@ pub fn umount2(target: &str, flags: u32) -> Result<(), i32> {
 
     let entry = table.mounts.remove(idx);
     serial_println!("[mount] unmounted {} from {}", entry.source, entry.target);
+    if _umount_flags.contains(UmountFlags::MNT_FORCE) {
+        // Anything still nested under the forced mount goes with it.
+        table.mounts.retain(|m| !m.target.starts_with(&prefix));
+    }
     Ok(())
 }
 
@@ -858,4 +926,115 @@ fn try_mount_ext4_root_inner() {
             );
         }
     }
+}
+
+pub const GATE_UMOUNT_MARKER: &str = "GATE_UMOUNT live";
+const GATE_UMOUNT_SRC: &str = "/mnt/gate-umount-a";
+const GATE_UMOUNT_DST: &str = "/mnt/gate-umount-b";
+
+/// The live umount/move_mount path against the real mount table.
+///
+/// Proves, in order, that: a mount is visible in the table and in the caller's
+/// mount namespace; `umount` removes it from both; unmounting a missing target
+/// is EINVAL; a busy mount (nested child) is EBUSY unless forced; and
+/// `do_move_mount` retargets the entry while keeping its identity.
+pub fn umount_self_test() -> bool {
+    let pid = crate::scheduler::current_pid().unwrap_or(1);
+    // Leave nothing behind from a previous run.
+    for target in [GATE_UMOUNT_SRC, GATE_UMOUNT_DST] {
+        let _ = umount2(target, UmountFlags::MNT_FORCE.bits());
+        let _ = crate::namespaces::remove_mount(pid, target, true);
+    }
+
+    // ── mount(2) is visible in both tables ─────────────────────────
+    if let Err(e) = mount("tmpfs", GATE_UMOUNT_SRC, "tmpfs", 0, "") {
+        serial_println!("[mount] GATE_UMOUNT FAILED: mount ({})", e);
+        return false;
+    }
+    if let Err(e) = crate::namespaces::add_mount(pid, "tmpfs", GATE_UMOUNT_SRC, "tmpfs", 0) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: namespace mount ({})", e);
+        return false;
+    }
+    if !is_mountpoint(GATE_UMOUNT_SRC) || !crate::namespaces::has_mount(pid, GATE_UMOUNT_SRC) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: mount not visible");
+        return false;
+    }
+
+    // ── a missing target is EINVAL, not a silent success ───────────
+    if umount("/mnt/gate-umount-missing") != Err(-22) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: missing target was not EINVAL");
+        return false;
+    }
+
+    // ── move keeps identity, then umount drops it ──────────────────
+    let moved_id = find_mount(GATE_UMOUNT_SRC).map(|m| m.mount_id);
+    if let Err(e) = do_move_mount(GATE_UMOUNT_SRC, GATE_UMOUNT_DST) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: move ({})", e);
+        return false;
+    }
+    let moved = find_mount(GATE_UMOUNT_DST);
+    let kept_identity = moved.as_ref().map(|m| m.mount_id) == moved_id
+        && moved.as_ref().is_some_and(|m| m.source == "tmpfs");
+    if !kept_identity || is_mountpoint(GATE_UMOUNT_SRC) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: move did not retarget the entry");
+        return false;
+    }
+
+    // ── a nested mount makes its parent busy ───────────────────────
+    if mount("tmpfs", GATE_UMOUNT_DST, "tmpfs", 0, "") != Err(-16) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: duplicate target was not EBUSY");
+        return false;
+    }
+    let child = alloc::format!("{}/nested", GATE_UMOUNT_DST);
+    if let Err(e) = mount("tmpfs", &child, "tmpfs", 0, "") {
+        serial_println!("[mount] GATE_UMOUNT FAILED: nested mount ({})", e);
+        return false;
+    }
+    if umount(GATE_UMOUNT_DST) != Err(-16) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: nested mount did not block umount");
+        return false;
+    }
+    if umount2(GATE_UMOUNT_DST, UmountFlags::MNT_FORCE.bits()).is_err() {
+        serial_println!("[mount] GATE_UMOUNT FAILED: forced umount of parent");
+        return false;
+    }
+    // The forced umount detaches the nested mount with its parent.
+    if is_mountpoint(GATE_UMOUNT_DST) || is_mountpoint(&child) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: forced umount left a nested mount");
+        return false;
+    }
+
+    // ── namespace removal mirrors the global table ─────────────────
+    // `do_move_mount` retargeted the global entry, so the namespace still
+    // lists the old target; dropping it is the umount half of that table.
+    if let Err(e) = crate::namespaces::remove_mount(pid, GATE_UMOUNT_SRC, false) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: namespace umount ({})", e);
+        return false;
+    }
+    if crate::namespaces::has_mount(pid, GATE_UMOUNT_SRC) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: namespace kept the mount");
+        return false;
+    }
+    // A bind/overlay mount only ever lives in the namespace table.
+    if let Err(e) = crate::namespaces::add_mount(pid, "/tmp", GATE_UMOUNT_SRC, "bind", 0x1000) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: namespace bind ({})", e);
+        return false;
+    }
+    if let Err(e) = crate::namespaces::remove_mount(pid, GATE_UMOUNT_SRC, false) {
+        serial_println!(
+            "[mount] GATE_UMOUNT FAILED: namespace umount of bind ({})",
+            e
+        );
+        return false;
+    }
+    if crate::namespaces::has_mount(pid, GATE_UMOUNT_SRC) {
+        serial_println!("[mount] GATE_UMOUNT FAILED: namespace kept the bind mount");
+        return false;
+    }
+
+    serial_println!(
+        "[mount] {} (umount, EINVAL, EBUSY, MNT_FORCE, move_mount, namespace)",
+        GATE_UMOUNT_MARKER
+    );
+    true
 }

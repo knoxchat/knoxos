@@ -297,15 +297,36 @@ pub fn sys_lsblk(buf_ptr: u64, buf_len: usize) -> SyscallResult {
     Ok(copy_len as u64)
 }
 
-pub fn sys_mount(device_ptr: u64, _target_ptr: u64) -> SyscallResult {
+pub fn sys_mount(device_ptr: u64, target_ptr: u64) -> SyscallResult {
     // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
-    let _device = unsafe { read_user_string(device_ptr) }.ok_or(SyscallError::InvalidArgument)?;
-    crate::ext2::mount(0).map_err(|_| SyscallError::IoError)?;
-    Ok(0)
+    let device = unsafe { read_user_string(device_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
+    let target = unsafe { read_user_string(target_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    crate::mount::do_mount(&device, &target, "ext2", "")
+        .map(|_| 0u64)
+        .map_err(mount_errno)
 }
 
-pub fn sys_umount(_target_ptr: u64) -> SyscallResult {
-    Ok(0)
+pub fn sys_umount(target_ptr: u64) -> SyscallResult {
+    // SAFETY: kernel-mode exclusive access; operands are owned, mapped, or architecture-defined for this path.
+    let target = unsafe { read_user_string(target_ptr) }.ok_or(SyscallError::InvalidArgument)?;
+    crate::mount::umount(&target)
+        .map(|_| 0u64)
+        .map_err(mount_errno)
+}
+
+/// Map the `-errno` values the mount subsystem returns onto `SyscallError`.
+pub(crate) fn mount_errno(errno: i32) -> SyscallError {
+    match errno {
+        -2 => SyscallError::FileNotFound,
+        -13 => SyscallError::PermissionDenied,
+        -16 => SyscallError::DeviceBusy,
+        -20 => SyscallError::NotDirectory,
+        -22 => SyscallError::InvalidArgument,
+        -30 => SyscallError::ReadOnlyFs,
+        -5 => SyscallError::IoError,
+        _ => SyscallError::InvalidArgument,
+    }
 }
 
 // ── Namespaces & hostname ───────────────────────────────────────────

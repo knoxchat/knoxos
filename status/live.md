@@ -385,4 +385,4 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 374. **Chromium WebGPU** — SwiftShader/Vulkan ICD (`GATE_CHR webgpu`).
 375. **Chromium io_uring** — Ring 3 `io_uring_setup(8)` returns a ring fd; NOP CQE (`GATE_CHR iouring`). `userfaultfd` stays ENOSYS.
 
-Integration: `./tests/run_integration.sh` **661/661** on QEMU (2026-10-24).
+Integration: `./tests/run_integration.sh` **663/663** on QEMU (2026-10-24).

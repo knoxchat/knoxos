@@ -383,6 +383,38 @@ pub fn bind_mount(pid: u32, source: &str, target: &str) -> Result<(), i32> {
     add_mount(pid, source, target, "bind", 0x1000)
 }
 
+/// Drop `target` from `pid`'s mount namespace.
+///
+/// The namespace table only holds mounts added through `add_mount` (bind,
+/// overlay, and `mount(2)`), so this is the umount half of that table.
+/// `-22` (EINVAL) means "not a mount point here"; `-16` (EBUSY) means a
+/// nested mount still lives under `target` and the caller did not pass
+/// `MNT_FORCE`.
+pub fn remove_mount(pid: u32, target: &str, force: bool) -> Result<(), i32> {
+    let ns_id = PROCESS_NS.lock().get(&pid).map(|n| n.mount_ns).unwrap_or(1);
+    let mut mounts = MOUNT_NAMESPACES.lock();
+    let ns = mounts.get_mut(&ns_id).ok_or(-22i32)?;
+    let idx = ns
+        .mounts
+        .iter()
+        .position(|m| m.target == target)
+        .ok_or(-22i32)?;
+    // A mount with a nested mount inside it is busy unless forced.
+    let prefix = alloc::format!("{}/", target);
+    let has_children = ns
+        .mounts
+        .iter()
+        .enumerate()
+        .any(|(i, m)| i != idx && m.target.starts_with(&prefix));
+    if has_children && !force {
+        return Err(-16);
+    }
+    // Children go away with a forced umount of their parent.
+    ns.mounts
+        .retain(|m| m.target != target && !(force && m.target.starts_with(&prefix)));
+    Ok(())
+}
+
 /// Whether `pid`'s mount namespace lists `target`.
 pub fn has_mount(pid: u32, target: &str) -> bool {
     let ns_id = PROCESS_NS.lock().get(&pid).map(|n| n.mount_ns).unwrap_or(1);

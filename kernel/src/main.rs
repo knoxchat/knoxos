@@ -544,6 +544,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize mount subsystem, then take `/` from ext4 when a volume exists.
     mount::init();
     mount::try_mount_ext4_root();
+    // Prove the umount/move_mount half of the mount table on the live path.
+    let _ = mount::umount_self_test();
 
     // Initialize work queue subsystem (deferred work)
     workqueue::init();

@@ -898,6 +898,16 @@ fn test_fuse_syncfs() {
 }
 
 #[test_case]
+fn test_umount_live_path() {
+    assert!(
+        crate::mount::umount_self_test(),
+        "umount must remove a mounted target, reject a missing one with EINVAL, \
+         report EBUSY for a nested mount, honour MNT_FORCE, and move_mount must \
+         retarget an entry while keeping its identity"
+    );
+}
+
+#[test_case]
 fn test_fuse_statx() {
     assert!(
         crate::fuse::statx_self_test(),

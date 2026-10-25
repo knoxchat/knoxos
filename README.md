@@ -2,6 +2,9 @@
 
 An operating system written in Rust. It boots in QEMU to an in-kernel software desktop plus scheduled Ring 3 tasks.
 
+| ![](./media/desktop.png) |
+|-|
+
 This is **not** a production OS yet. The kernel compiles a large tree of modules; only the **live path** (what runs after `./run.sh`) counts. See [status/next.md](status/next.md) for what to do first, and [status/README.md](status/README.md) for the subsystem scores.
 
 | What works today | What does not |
