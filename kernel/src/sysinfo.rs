@@ -86,9 +86,6 @@ pub fn init() {
 
 /// Get current system info (for sysinfo() syscall)
 pub fn get_sysinfo() -> SysInfo {
-    let now = crate::rtc::unix_time() as u64;
-    let boot = now.saturating_sub(crate::interrupts::get_ticks() / 18); // ~18 ticks/sec
-
     let heap_size = crate::allocator::HEAP_SIZE as u64;
     let used_estimate = heap_size / 3; // Rough estimate
 
@@ -109,7 +106,7 @@ pub fn get_sysinfo() -> SysInfo {
     let total_ram = detect_total_ram();
 
     SysInfo {
-        uptime: (crate::interrupts::get_ticks() / 18) as i64,
+        uptime: crate::clock::uptime_seconds() as i64,
         loads: [load1, load5, load15],
         totalram: total_ram,
         freeram: total_ram.saturating_sub(used_estimate),

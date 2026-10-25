@@ -169,6 +169,13 @@ pub fn flex_layout(
             height = height.max(avail_h);
         }
     }
+    // Column `align: stretch` (the default) offers a definite width on the
+    // place pass. A row without an explicit width must fill it, otherwise
+    // `justify_between` / child `grow` have no free space and trailing
+    // chrome (min/max/close) sits next to the title.
+    if style.width.is_none() && avail_w.0 > width.0 {
+        width = avail_w;
+    }
     let size = style.clamp_size(Size { width, height });
     let inner = Size {
         width: nonneg(size.width - pad.horizontal()),
@@ -630,5 +637,24 @@ mod tests {
         assert_eq!(buf.pixel(19, 15), Some(Hsla::RED.to_bgra()));
         assert_eq!(buf.pixel(0, 0), Some(crate::Bgra::TRANSPARENT));
         assert_eq!(buf.pixel(10, 0), Some(crate::Bgra::TRANSPARENT));
+    }
+
+    #[test]
+    fn stretched_column_row_puts_trailing_at_end() {
+        let mut root = div().flex_col().w(px(80)).h(px(16)).child(
+            div()
+                .flex()
+                .h(px(16))
+                .justify_between()
+                .child(div().w(px(8)).h(px(8)).bg(Hsla::RED))
+                .child(div().w(px(8)).h(px(8)).bg(Hsla::BLUE)),
+        );
+        let mut scene = Scene::new();
+        paint_element(&mut root, Point::ZERO, Size::wh(80, 16), &mut scene);
+        let mut buf = RasterBuffer::new(80, 16);
+        buf.draw(&scene);
+        assert_eq!(buf.pixel(0, 4), Some(Hsla::RED.to_bgra()));
+        assert_eq!(buf.pixel(72, 4), Some(Hsla::BLUE.to_bgra()));
+        assert_eq!(buf.pixel(20, 4), Some(crate::Bgra::TRANSPARENT));
     }
 }

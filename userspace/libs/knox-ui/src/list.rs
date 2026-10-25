@@ -8,7 +8,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, IntoElement, Key, Styled, div, px};
+use knox_gpui::{Div, IntoElement, Key, MouseButton, Styled, div, px};
 
 use crate::icon::{Icon, IconName};
 use crate::interact::IndexHandler;
@@ -90,9 +90,11 @@ impl IntoElement for List {
                             .themed(&self.theme)
                             .size(self.theme.typo.caption),
                     )
-                    .on_click(move |_| {
-                        if let Some(p) = &pick {
-                            p(i);
+                    .on_mouse_down(move |e| {
+                        if e.button == MouseButton::Left {
+                            if let Some(p) = &pick {
+                                p(i);
+                            }
                         }
                     })
                     .on_key_down(move |e| {
@@ -308,7 +310,10 @@ fn paint_nodes(
                 .themed(theme)
                 .size(theme.typo.caption),
         );
-        out.add_child(row.on_click(move |_| {
+        out.add_child(row.on_mouse_down(move |e| {
+            if e.button != MouseButton::Left {
+                return;
+            }
             if expandable {
                 if let Some(t) = &tog {
                     t(i);

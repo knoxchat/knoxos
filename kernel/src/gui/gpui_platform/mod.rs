@@ -53,9 +53,9 @@ pub use chat::{
     is_live as chat_is_live, pointer_moved as chat_pointer_moved, present_chat,
 };
 pub use desktop::{
-    GATE_GPUI_DESKTOP, dispatch_icons_pointer_down as desktop_pointer_down,
-    is_live as desktop_is_live, menu_is_open as desktop_menu_open,
-    present_menu as present_desktop_menu,
+    GATE_GPUI_DESKTOP, damage as desktop_damage,
+    dispatch_icons_pointer_down as desktop_pointer_down, is_live as desktop_is_live,
+    menu_is_open as desktop_menu_open, present_menu as present_desktop_menu,
 };
 pub use dialogs::{
     dispatch_pointer_down as dialogs_pointer_down, dispatch_scroll as dialogs_scroll,

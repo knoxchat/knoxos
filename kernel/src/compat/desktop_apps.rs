@@ -502,7 +502,7 @@ impl SystemMonitorState {
     /// Get overview text
     pub fn overview(&self) -> String {
         let process_count = crate::process::PROCESS_TABLE.lock().processes.len();
-        let uptime = crate::interrupts::get_ticks() / 18; // Approximate seconds
+        let uptime = crate::clock::uptime_seconds();
         let sched_stats = crate::scheduler::SCHEDULER.lock().stats();
         let smp_cpus = crate::smp::online_cpus();
 

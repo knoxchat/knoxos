@@ -236,7 +236,7 @@ impl IntoElement for TaskManagerView {
                         .themed(&self.theme)
                         .danger()
                         .label("End Process")
-                        .on_click(move || h()),
+                        .on_press(move || h()),
                 );
             }
         }

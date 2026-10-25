@@ -149,7 +149,7 @@ impl IntoElement for FilesView {
                     .ghost()
                     .compact()
                     .icon(IconName::ChevronLeft)
-                    .on_click(move || h()),
+                    .on_press(move || h()),
             );
         }
         if let Some(h) = self.on_forward {
@@ -159,7 +159,7 @@ impl IntoElement for FilesView {
                     .ghost()
                     .compact()
                     .icon(IconName::ChevronRight)
-                    .on_click(move || h()),
+                    .on_press(move || h()),
             );
         }
         if let Some(h) = self.on_up {
@@ -169,7 +169,7 @@ impl IntoElement for FilesView {
                     .ghost()
                     .compact()
                     .icon(IconName::ChevronUp)
-                    .on_click(move || h()),
+                    .on_press(move || h()),
             );
         }
         nav = nav.child(
@@ -215,7 +215,7 @@ impl IntoElement for FilesView {
                     .icon(glyph)
                     .label(entry.name)
                     .selected(self.selected == Some(i))
-                    .on_click(move || {
+                    .on_press(move || {
                         if let Some(p) = &pick {
                             p(i);
                         }

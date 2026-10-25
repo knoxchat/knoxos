@@ -123,7 +123,7 @@ impl IntoElement for Calculator {
                     ButtonVariantsKind::Default => btn,
                 };
                 if let Some(h) = handler {
-                    btn = btn.on_click(move || h(code));
+                    btn = btn.on_press(move || h(code));
                 }
                 line = line.child(btn);
             }

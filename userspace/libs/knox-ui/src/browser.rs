@@ -164,7 +164,7 @@ impl IntoElement for BrowserChrome {
                     .themed(&self.theme)
                     .ghost()
                     .label("+")
-                    .on_click(move || h()),
+                    .on_press(move || h()),
             );
         }
 
@@ -175,7 +175,7 @@ impl IntoElement for BrowserChrome {
                     .themed(&self.theme)
                     .ghost()
                     .label("<")
-                    .on_click(move || h()),
+                    .on_press(move || h()),
             );
         }
         if let Some(h) = self.on_forward {
@@ -184,7 +184,7 @@ impl IntoElement for BrowserChrome {
                     .themed(&self.theme)
                     .ghost()
                     .label(">")
-                    .on_click(move || h()),
+                    .on_press(move || h()),
             );
         }
         if let Some(h) = self.on_reload {
@@ -193,7 +193,7 @@ impl IntoElement for BrowserChrome {
                     .themed(&self.theme)
                     .ghost()
                     .label("O")
-                    .on_click(move || h()),
+                    .on_press(move || h()),
             );
         }
         let mut url = Input::new("br-url")
@@ -212,7 +212,7 @@ impl IntoElement for BrowserChrome {
                     .themed(&self.theme)
                     .primary()
                     .label("Go")
-                    .on_click(move || h()),
+                    .on_press(move || h()),
             );
         }
 

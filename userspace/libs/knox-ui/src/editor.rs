@@ -10,7 +10,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use knox_gpui::{Div, IntoElement, Pixels, Styled, div, px, text};
+use knox_gpui::{Div, IntoElement, MouseButton, Pixels, Styled, div, px, text};
 
 use crate::input::{FieldState, GapBuffer};
 use crate::scroll::{ScrollArea, visible_range};
@@ -213,9 +213,11 @@ impl IntoElement for Editor {
                             .color(self.theme.colors.muted_foreground)
                             .size(12),
                     )
-                    .on_click(move |_| {
-                        if let Some(f) = &fold {
-                            f(i);
+                    .on_mouse_down(move |e| {
+                        if e.button == MouseButton::Left {
+                            if let Some(f) = &fold {
+                                f(i);
+                            }
                         }
                     }),
             );

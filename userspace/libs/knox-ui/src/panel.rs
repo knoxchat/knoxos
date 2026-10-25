@@ -340,7 +340,7 @@ impl IntoElement for Panel {
                     .large()
                     .icon(entry.icon)
                     .selected(entry.active)
-                    .on_click(move || {
+                    .on_press(move || {
                         if let Some(p) = &pick {
                             p(i);
                         }
@@ -546,6 +546,26 @@ mod tests {
             .collect();
         boxes.sort_by_key(|p| p.x.0);
         boxes
+    }
+
+    #[test]
+    fn dock_app_presses_on_mouse_down() {
+        let hit = Arc::new(AtomicU32::new(99));
+        let id = hit.clone();
+        let mut el = Panel::new()
+            .themed(&Theme::aurora_dark())
+            .entries([PanelEntry::new(
+                "Term",
+                crate::icon::IconName::SquareTerminal,
+            )])
+            .on_app(move |i| id.store(i as u32, Ordering::SeqCst))
+            .into_element();
+        let mut input = WindowInput::new();
+        prepare_element(&mut el, Point::ZERO, Size::wh(560, 52), &mut input);
+        let stops = tab_stops(&input);
+        assert!(stops.len() >= 2, "start + dock app, got {}", stops.len());
+        dispatch_mouse_down(&mut el, &mut input, stops[1]);
+        assert_eq!(hit.load(Ordering::SeqCst), 0);
     }
 
     #[test]

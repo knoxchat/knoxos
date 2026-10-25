@@ -266,9 +266,12 @@ pub fn clock_nanosleep(clock_id: u32, flags: i32, req: &Timespec) -> Result<Time
     }
 }
 
-/// Get uptime in seconds
+/// Get uptime in seconds.
+///
+/// The local APIC timer is 100Hz (`start_periodic(10_000)`). Dividing by 18
+/// (PIT leftover) made the desktop widget jump ~5–6 seconds per real second.
 pub fn uptime_seconds() -> u64 {
-    (monotonic_ns() / 1_000_000_000) as u64
+    crate::interrupts::get_ticks() / 100
 }
 
 /// Get timer ticks (delegates to interrupts::get_ticks)

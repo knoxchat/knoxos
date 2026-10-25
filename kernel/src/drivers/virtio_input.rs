@@ -609,6 +609,7 @@ static REL_DX: AtomicI32 = AtomicI32::new(0);
 static REL_DY: AtomicI32 = AtomicI32::new(0);
 static ACCUM_WHEEL: AtomicI32 = AtomicI32::new(0);
 static BTN_STATE: AtomicU32 = AtomicU32::new(0);
+static HW_BUTTONS_LIVE: AtomicBool = AtomicBool::new(false);
 
 /// Sticky tablet axes (0..32767). -1 = never seen.
 static ABS_CURSOR_X: AtomicI32 = AtomicI32::new(-1);
@@ -638,6 +639,15 @@ fn apply_button(code: u16, pressed: bool) -> bool {
         BTN_STATE.fetch_and(!bit, Ordering::Relaxed);
     }
     true
+}
+
+fn note_hw_button() {
+    if HW_BUTTONS_LIVE
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+    {
+        serial_println!("[VIRTIO-INPUT] live button events");
+    }
 }
 
 fn pointer_xy() -> (i32, i32) {
@@ -710,7 +720,12 @@ fn dispatch_input_event(evt: VirtioInputEvent) {
         EV_KEY => {
             let pressed = evt.value != 0;
             if apply_button(evt.code, pressed) {
+                // Flush this edge now. A tap's press+release often sits in
+                // one virtqueue drain (TCG is slow); a single end-of-poll
+                // commit would see buttons already up and drop the click.
+                note_hw_button();
                 POINTER_DIRTY.store(true, Ordering::Relaxed);
+                flush_pointer();
             } else if evt.code < 0x80 {
                 let sc = evt.code as u8;
                 if pressed {
@@ -728,6 +743,7 @@ fn dispatch_input_event(evt: VirtioInputEvent) {
             {
                 POINTER_DIRTY.store(true, Ordering::Relaxed);
             }
+            flush_pointer();
         }
         _ => {}
     }
@@ -923,4 +939,12 @@ pub fn is_active() -> bool {
 /// True after a real virtqueue pointer event (not the software KAT).
 pub fn pointer_live() -> bool {
     HW_POINTER_LIVE.load(Ordering::Relaxed)
+}
+
+/// True after a real virtqueue button event (BTN_LEFT / TOUCH / …).
+///
+/// Cocoa often delivers motion on `virtio-tablet-pci` and clicks on
+/// `usb-tablet`. Motion alone must not hide USB button reports.
+pub fn buttons_live() -> bool {
+    HW_BUTTONS_LIVE.load(Ordering::Relaxed)
 }

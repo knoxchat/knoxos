@@ -110,6 +110,15 @@ pub(crate) fn draw_snap_preview(fb: &mut FrameBuffer, mx: i32, my: i32) {
     }
 }
 
+/// Icon index whose cell contains `(x, y)`, matching the painted GPUI lockup.
+pub fn icon_at(x: i32, y: i32) -> Option<usize> {
+    let desktop = DESKTOP.lock();
+    desktop
+        .icons
+        .iter()
+        .position(|icon| Rect::new(icon.x, icon.y, ICON_WIDTH, ICON_HEIGHT).contains(x, y))
+}
+
 /// Handle desktop click
 pub fn handle_click(x: i32, y: i32) {
     // Close start menu if open and clicking outside. GPUI launcher owns its
@@ -132,14 +141,7 @@ pub fn handle_click(x: i32, y: i32) {
         return;
     }
 
-    let clicked = {
-        let desktop = DESKTOP.lock();
-        desktop
-            .icons
-            .iter()
-            .position(|icon| Rect::new(icon.x, icon.y, ICON_WIDTH, ICON_HEIGHT).contains(x, y))
-    };
-    match clicked {
+    match icon_at(x, y) {
         Some(idx) => press_icon(idx, x, y),
         None => begin_rubber_band(x, y),
     }
@@ -167,7 +169,7 @@ pub fn press_icon(idx: usize, x: i32, y: i32) {
     drop(desktop);
     crate::serial_println!("[KnoxOS] Opening: {}", name);
     open_application(&name, icon_type);
-    crate::gui::request_redraw();
+    crate::gui::gpui_platform::desktop_damage();
 }
 
 /// Deselect icons and start a rubber-band from `(x, y)`.

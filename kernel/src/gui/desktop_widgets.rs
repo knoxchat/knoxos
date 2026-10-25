@@ -234,8 +234,7 @@ fn draw_kv_row(fb: &mut FrameBuffer, x: i32, y: i32, w: u32, key: &str, value: &
 }
 
 fn draw_uptime_block(fb: &mut FrameBuffer, x: i32, y: i32, w: u32) {
-    let info = crate::sysinfo::get_sysinfo();
-    let secs = info.uptime as u64;
+    let secs = crate::clock::uptime_seconds();
     let hours = secs / 3600;
     let mins = (secs % 3600) / 60;
     let mut up = String::new();

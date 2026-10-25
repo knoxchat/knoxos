@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::gui::desktop::{
     CONTEXT_MENU, ContextAction, DESKTOP, IconType, begin_rubber_band, close_context_menu,
-    execute_context_action, press_icon,
+    execute_context_action, icon_at, press_icon,
 };
 use crate::gui::framebuffer::{FrameBuffer, Rect};
 use knox_gpui::{
@@ -419,30 +419,17 @@ pub fn dispatch_menu_pointer_up(x: i32, y: i32) -> bool {
 }
 
 pub fn dispatch_icons_pointer_down(x: i32, y: i32, button: MouseButton) -> bool {
-    if !contains_icons(x, y) {
+    if button != MouseButton::Left {
         return false;
     }
-    let mut slot = APP.lock();
-    let Some(app) = slot.as_mut() else {
+    let hit = icon_at(x, y);
+    if hit.is_none() && !contains_icons(x, y) {
         return false;
-    };
-    let Some(id) = icons_window_id() else {
-        return false;
-    };
-    let theme = app_theme(app);
-    let Some(win) = app.window_mut(id) else {
-        return false;
-    };
-    let bounds = win.bounds();
-    let local = local_point(bounds, x, y);
-    let size = Size::wh(bounds.width(), bounds.height());
-    {
-        let input = win.input_mut();
-        let mut root = icons_tree(&theme);
-        prepare_element(&mut root, Point::ZERO, size, input);
-        dispatch_mouse_down_button(&mut root, input, local, button);
     }
-    win.request_layout();
+    match hit {
+        Some(idx) => press_icon(idx, x, y),
+        None => begin_rubber_band(x, y),
+    }
     true
 }
 

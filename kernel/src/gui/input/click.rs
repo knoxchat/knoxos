@@ -269,8 +269,6 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     let taskbar_y = screen_h as i32 - crate::gui::scale::taskbar_height() as i32;
     if crate::gui::gpui_platform::panel_is_live() || crate::gui::gpui_platform::launcher_is_live() {
         if crate::gui::gpui_platform::pointer_down(x, y) {
-            crate::gui::gpui_platform::damage_proof();
-            crate::gui::request_taskbar_redraw();
             return;
         }
     } else if y >= taskbar_y && taskbar::handle_click(x, y, screen_w, screen_h) {
@@ -903,7 +901,6 @@ pub(super) fn handle_click(x: i32, y: i32, screen_w: u32, screen_h: u32) {
     // D9.7: desktop icons / rubber-band start are a GPUI layer.
     if crate::gui::gpui_platform::desktop_is_live() {
         if crate::gui::gpui_platform::desktop_pointer_down(x, y, knox_gpui::MouseButton::Left) {
-            crate::gui::request_redraw();
             return;
         }
     }

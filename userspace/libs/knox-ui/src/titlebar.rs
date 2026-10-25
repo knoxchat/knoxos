@@ -114,7 +114,7 @@ impl IntoElement for TitleBar {
                     .small()
                     .compact()
                     .icon(IconName::Minus)
-                    .on_click(move || min()),
+                    .on_press(move || min()),
             );
         }
         if let Some(max) = self.on_max {
@@ -130,7 +130,7 @@ impl IntoElement for TitleBar {
                     .small()
                     .compact()
                     .icon(glyph)
-                    .on_click(move || max()),
+                    .on_press(move || max()),
             );
         }
         if let Some(close) = self.on_close {
@@ -141,7 +141,7 @@ impl IntoElement for TitleBar {
                     .small()
                     .compact()
                     .icon(IconName::Close)
-                    .on_click(move || close()),
+                    .on_press(move || close()),
             );
         }
         div()
@@ -227,7 +227,7 @@ mod tests {
     use alloc::sync::Arc;
     use core::sync::atomic::{AtomicBool, Ordering};
     use knox_gpui::{
-        IntoElement, Point, Size, WindowInput, dispatch_mouse_down, prepare_element, text,
+        IntoElement, Point, Size, WindowInput, dispatch_mouse_down, prepare_element, px, text,
     };
 
     #[test]
@@ -249,5 +249,32 @@ mod tests {
             .themed(&Theme::aurora_dark())
             .body(text("body"))
             .into_element();
+    }
+
+    #[test]
+    fn titlebar_controls_sit_on_trailing_edge() {
+        let mut el = WindowBorder::new("Terminal")
+            .themed(&Theme::aurora_dark())
+            .size(px(400), px(240))
+            .titlebar(
+                TitleBar::new("Terminal")
+                    .themed(&Theme::aurora_dark())
+                    .on_min(|| {})
+                    .on_max(|| {})
+                    .on_close(|| {}),
+            )
+            .into_element();
+        let mut input = WindowInput::new();
+        prepare_element(&mut el, Point::ZERO, Size::wh(400, 240), &mut input);
+        let right = input
+            .hitboxes()
+            .iter()
+            .map(|h| h.bounds.right().0)
+            .max()
+            .unwrap_or(0);
+        assert!(
+            right >= 400 - 24,
+            "close/min/max should sit on the trailing edge, right={right}"
+        );
     }
 }

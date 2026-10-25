@@ -339,12 +339,16 @@ fn cascade_offset() -> i32 {
 
 fn present_window(win: Window, dock_title: &str) -> WindowId {
     let wid = win.id;
+    let rect = win.rect;
     crate::gui::window_events::register_window(wid);
     window::WINDOW_MANAGER.lock().add_window(win);
     taskbar::add_entry(wid, dock_title);
     taskbar::set_active(wid);
     crate::gui::sounds::window_open();
-    crate::gui::request_redraw();
+    // Full-screen redraw re-rasters the panel + icon strip on TCG and starves
+    // the next click. Damage the new window and the dock only.
+    crate::gui::request_window_redraw(rect);
+    crate::gui::request_taskbar_redraw();
     crate::serial_println!("[KnoxOS] Launched {} (window {})", dock_title, wid);
     wid
 }
@@ -361,7 +365,8 @@ fn focus_existing(content_type: WindowContentType) -> bool {
         wm.focus_window(id);
         drop(wm);
         taskbar::set_active(id);
-        crate::gui::request_redraw();
+        crate::gui::damage_window(id);
+        crate::gui::request_taskbar_redraw();
         true
     } else {
         false

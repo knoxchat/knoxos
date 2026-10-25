@@ -288,7 +288,7 @@ fn power_row(
             b.ghost()
         };
         if let Some(cb) = cb {
-            b = b.on_click(move || cb(action));
+            b = b.on_press(move || cb(action));
         }
         row = row.child(b);
     }

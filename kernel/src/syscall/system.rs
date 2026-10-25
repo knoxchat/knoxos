@@ -68,11 +68,10 @@ pub fn sys_sysinfo(buf_ptr: u64) -> SyscallResult {
         freehigh: u64,
         mem_unit: u32,
     }
-    let ticks = crate::interrupts::get_ticks();
     let mem = crate::allocator::HEAP_SIZE as u64;
     let procs = crate::process::PROCESS_TABLE.lock().count() as u16;
     let si = Si {
-        uptime: (ticks as f64 / 18.2) as i64,
+        uptime: crate::clock::uptime_seconds() as i64,
         loads: [0; 3],
         totalram: mem,
         freeram: mem / 2,

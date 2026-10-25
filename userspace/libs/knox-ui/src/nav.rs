@@ -82,7 +82,7 @@ impl IntoElement for TabBar {
                     .compact()
                     .label(label)
                     .selected(i == selected)
-                    .on_click(move || {
+                    .on_press(move || {
                         if let Some(p) = &fire {
                             p(i);
                         }
@@ -232,7 +232,7 @@ impl IntoElement for Collapsible {
             .icon(caret)
             .label(self.title);
         if let Some(t) = self.on_toggle {
-            head = head.on_click(move || t());
+            head = head.on_press(move || t());
         }
         let mut root = div().flex_col().child(head);
         if self.open {
@@ -381,7 +381,7 @@ impl IntoElement for Breadcrumb {
                     .ghost()
                     .label(part)
                     .selected(i == last)
-                    .on_click(move || {
+                    .on_press(move || {
                         if let Some(p) = &pick {
                             p(i);
                         }
@@ -441,7 +441,7 @@ impl IntoElement for Pagination {
                 .ghost()
                 .icon(IconName::ChevronLeft)
                 .compact()
-                .on_click(move || {
+                .on_press(move || {
                     if let Some(p) = &f {
                         p(prev);
                     }
@@ -455,7 +455,7 @@ impl IntoElement for Pagination {
                     .ghost()
                     .label(format!("{}", i + 1))
                     .selected(i == page)
-                    .on_click(move || {
+                    .on_press(move || {
                         if let Some(p) = &f {
                             p(i);
                         }
@@ -470,7 +470,7 @@ impl IntoElement for Pagination {
                 .ghost()
                 .icon(IconName::ChevronRight)
                 .compact()
-                .on_click(move || {
+                .on_press(move || {
                     if let Some(p) = &f {
                         p(next);
                     }
@@ -541,7 +541,7 @@ impl IntoElement for Stepper {
                     .ghost()
                     .label(format!("{}. {label}", i + 1))
                     .selected(i == self.step)
-                    .on_click(move || {
+                    .on_press(move || {
                         if let Some(p) = &pick {
                             p(i);
                         }
@@ -614,7 +614,7 @@ impl IntoElement for NavStack {
                 .icon(IconName::ChevronLeft)
                 .compact();
             if let Some(b) = self.on_back {
-                back = back.on_click(move || b());
+                back = back.on_press(move || b());
             }
             head = head.child(back);
         }

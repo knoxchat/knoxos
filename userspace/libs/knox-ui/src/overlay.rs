@@ -9,8 +9,8 @@ use alloc::string::String;
 use alloc::sync::Arc;
 
 use knox_gpui::{
-    Bounds, Div, Element, IntoElement, Key, LayoutHints, PaintEnv, Pixels, Point, Scene, Size,
-    Styled, WindowInput, div, px, text,
+    Bounds, Div, Element, IntoElement, Key, LayoutHints, MouseButton, PaintEnv, Pixels, Point,
+    Scene, Size, Styled, WindowInput, div, px, text,
 };
 
 use crate::button::{Button, ButtonVariants};
@@ -172,7 +172,7 @@ fn panel(theme: &Theme, width: Pixels, title: &str, body: Div, on_dismiss: Optio
                 .themed(theme)
                 .ghost()
                 .label("x")
-                .on_click(move || dismiss()),
+                .on_press(move || dismiss()),
         );
     }
     let mut card = div()
@@ -287,7 +287,11 @@ impl IntoElement for Dialog {
             .justify_center()
             .bg(knox_gpui::Hsla::BLACK.alpha(0.45));
         if let Some(d) = dismiss.clone() {
-            dim = dim.on_click(move |_| d());
+            dim = dim.on_mouse_down(move |e| {
+                if e.button == MouseButton::Left {
+                    d();
+                }
+            });
         }
         let trap = if let Some(d) = dismiss {
             FocusTrap::new(card).on_escape(move || d())
@@ -368,7 +372,7 @@ impl IntoElement for AlertDialog {
                     .themed(&self.theme)
                     .secondary()
                     .label("Cancel")
-                    .on_click(move || dismiss()),
+                    .on_press(move || dismiss()),
             );
         }
         if let Some(confirm) = self.on_confirm.clone() {
@@ -377,7 +381,7 @@ impl IntoElement for AlertDialog {
                     .themed(&self.theme)
                     .primary()
                     .label("OK")
-                    .on_click(move || confirm()),
+                    .on_press(move || confirm()),
             );
         }
         let theme = self.theme;

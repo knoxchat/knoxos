@@ -102,7 +102,7 @@ impl IntoElement for TerminalChrome {
                     .themed(&self.theme)
                     .ghost()
                     .label("+")
-                    .on_click(move || h()),
+                    .on_press(move || h()),
             );
         }
         bar

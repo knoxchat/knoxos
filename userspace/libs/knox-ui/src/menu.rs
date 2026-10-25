@@ -164,7 +164,10 @@ fn menu_panel(
         } else {
             let pick = on_pick.clone();
             let dismiss = on_dismiss.clone();
-            row = row.child(left).on_click(move |_| {
+            row = row.child(left).on_mouse_down(move |e| {
+                if e.button != MouseButton::Left {
+                    return;
+                }
                 if let Some(p) = &pick {
                     p(i);
                 }
@@ -430,7 +433,7 @@ impl IntoElement for DropdownMenu {
             .label(format!("{} v", self.label))
             .selected(self.open);
         if let Some(toggle) = self.on_toggle.clone() {
-            btn = btn.on_click(move || toggle());
+            btn = btn.on_press(move || toggle());
         }
         let mut root = div().flex_col().child(btn);
         if self.open {
@@ -545,7 +548,7 @@ impl IntoElement for AppMenuBar {
                     .small()
                     .label(title.clone())
                     .selected(self.open == Some(i))
-                    .on_click(move || {
+                    .on_press(move || {
                         if let Some(h) = &open {
                             h(i);
                         }

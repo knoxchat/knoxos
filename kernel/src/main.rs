@@ -1369,7 +1369,8 @@ async fn gui_redraw_loop() {
             last_clock_second = dt.second;
             let ticks = crate::interrupts::get_ticks();
             gui::taskbar::update_clock(ticks);
-            gui::request_taskbar_redraw();
+            // Time lives on the desktop widget, not the dock. Damaging both
+            // every second unioned into a near-fullscreen TCG paint.
             gui::request_desktop_widget_redraw();
 
             cron::poll_timer();

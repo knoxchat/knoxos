@@ -31,7 +31,7 @@ pub use folder::{
 pub use interaction::{
     begin_rubber_band, cancel_icon_drag, commit_icon_drag_if_moved, finish_rubber_band,
     handle_click, handle_double_click, handle_icon_drag, handle_icon_drop, handle_rubber_band_drag,
-    is_dragging_icon, is_icon_press_pending, is_rubber_band_active, press_icon,
+    icon_at, is_dragging_icon, is_icon_press_pending, is_rubber_band_active, press_icon,
 };
 pub use types::{
     CONTEXT_MENU, ContextAction, ContextMenuItem, DESKTOP, Desktop, DesktopContextMenu,
@@ -45,7 +45,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 
 use super::FRAMEBUFFER;
-use super::framebuffer::Rect;
+use super::framebuffer::{FrameBuffer, Rect};
 use super::startmenu;
 use super::taskbar;
 use super::window;
@@ -250,10 +250,15 @@ fn draw_desktop_damaged_inner(damage: &[Rect]) {
             screen_h,
         );
 
-        // Check if this is a full-screen redraw (damage covers ≥90% of screen)
-        let damage_area = damage_union.width as u64 * damage_union.height as u64;
+        // Full-screen only when a *single* rect covers the display. Union of
+        // disjoint patches (window + dock, clock + cursor) used to look like
+        // 90% coverage and force a 1920×1080 TCG composite every second.
         let screen_area = screen_w as u64 * screen_h as u64;
-        let is_full = damage_area * 100 / screen_area.max(1) >= 90;
+        let is_full = damage.is_empty()
+            || damage.iter().any(|r| {
+                let area = (r.width.min(screen_w) as u64) * (r.height.min(screen_h) as u64);
+                area * 100 / screen_area.max(1) >= 90
+            });
 
         // Update taskbar/dock hover state and auto-hide animation
         taskbar::update_hover(mx, my, screen_w, screen_h);
@@ -283,27 +288,12 @@ fn draw_desktop_damaged_inner(damage: &[Rect]) {
                         );
                     }
                 } else {
-                    // Partial — only copy rows within the damage union
-                    let bpp = fb.bytes_per_pixel;
-                    let pitch = fb.pitch;
-                    let x0 = damage_union.x.max(0) as usize;
-                    let y0 = damage_union.y.max(0) as usize;
-                    let x1 = ((damage_union.x + damage_union.width as i32) as usize).min(fb.width);
-                    let y1 =
-                        ((damage_union.y + damage_union.height as i32) as usize).min(fb.height);
-                    let row_bytes = (x1 - x0) * bpp;
-                    for row in y0..y1 {
-                        let off = row * pitch + x0 * bpp;
-                        if off + row_bytes <= cached.len() && off + row_bytes <= fb.buffer.len() {
-                            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
-                            unsafe {
-                                core::ptr::copy_nonoverlapping(
-                                    cached.as_ptr().add(off),
-                                    fb.buffer.as_mut_ptr().add(off),
-                                    row_bytes,
-                                );
-                            }
-                        }
+                    for r in damage {
+                        blit_wallpaper_rect(fb, cached, *r, screen_w, screen_h);
+                    }
+                    if !hw_pointer {
+                        blit_wallpaper_rect(fb, cached, old_cursor_rect, screen_w, screen_h);
+                        blit_wallpaper_rect(fb, cached, new_cursor_rect, screen_w, screen_h);
                     }
                 }
             }
@@ -475,14 +465,31 @@ fn draw_desktop_damaged_inner(damage: &[Rect]) {
             super::night_light::apply(fb, damage_union);
         }
 
-        // 10. Present the damaged region (which now includes old + new cursor area)
-        // to HW framebuffer.
-        fb.present_rect(
-            damage_union.x,
-            damage_union.y,
-            damage_union.width,
-            damage_union.height,
-        );
+        // 10. Present only the original patches (not their bounding union).
+        if is_full {
+            fb.present_rect(0, 0, screen_w, screen_h);
+        } else {
+            for r in damage {
+                let c = clamp_rect_to_screen(*r, screen_w, screen_h);
+                if c.width > 0 && c.height > 0 {
+                    fb.present_rect(c.x, c.y, c.width, c.height);
+                }
+            }
+            if !hw_pointer {
+                fb.present_rect(
+                    old_cursor_rect.x,
+                    old_cursor_rect.y,
+                    old_cursor_rect.width,
+                    old_cursor_rect.height,
+                );
+                fb.present_rect(
+                    new_cursor_rect.x,
+                    new_cursor_rect.y,
+                    new_cursor_rect.width,
+                    new_cursor_rect.height,
+                );
+            }
+        }
         super::input::end_frame();
     }
 }
@@ -496,6 +503,39 @@ pub fn draw_desktop() {
         draw_desktop_damaged(&[Rect::new(0, 0, sw as u32, sh as u32)]);
     } else {
         draw_desktop_damaged(&damage);
+    }
+}
+
+fn blit_wallpaper_rect(
+    fb: &mut FrameBuffer,
+    cached: &[u8],
+    rect: Rect,
+    screen_w: u32,
+    screen_h: u32,
+) {
+    let r = clamp_rect_to_screen(rect, screen_w, screen_h);
+    if r.width == 0 || r.height == 0 {
+        return;
+    }
+    let bpp = fb.bytes_per_pixel;
+    let pitch = fb.pitch;
+    let x0 = r.x as usize;
+    let y0 = r.y as usize;
+    let x1 = (r.x + r.width as i32) as usize;
+    let y1 = (r.y + r.height as i32) as usize;
+    let row_bytes = (x1 - x0) * bpp;
+    for row in y0..y1 {
+        let off = row * pitch + x0 * bpp;
+        if off + row_bytes <= cached.len() && off + row_bytes <= fb.buffer.len() {
+            // SAFETY: src and dst are valid for the copied byte count and do not overlap.
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    cached.as_ptr().add(off),
+                    fb.buffer.as_mut_ptr().add(off),
+                    row_bytes,
+                );
+            }
+        }
     }
 }
 

@@ -524,7 +524,7 @@ pub fn parse_tablet_report(device: &mut HidDevice, report: &[u8]) {
     // events. Binding the PCI device is not enough — cocoa often sends the
     // pointer to usb-tablet, and a silent virtqueue then leaves the desktop
     // frozen.
-    if crate::virtio_input::pointer_live() {
+    if crate::virtio_input::buttons_live() {
         return;
     }
     if report.len() < 5 {
@@ -533,11 +533,34 @@ pub fn parse_tablet_report(device: &mut HidDevice, report: &[u8]) {
     let buttons = report[0];
     let x = u16::from_le_bytes([report[1], report[2]]);
     let y = u16::from_le_bytes([report[3], report[4]]);
+    let prev_buttons = device.buttons;
     device.buttons = buttons;
     device.x = x as i16;
     device.y = y as i16;
+    #[cfg(not(feature = "gui"))]
+    let _ = prev_buttons;
     #[cfg(feature = "gui")]
     {
+        // VirtIO already owns absolute motion. Cocoa still sends clicks on
+        // usb-tablet — apply button edges at the live VirtIO cursor.
+        if crate::virtio_input::pointer_live() {
+            if prev_buttons == buttons {
+                return;
+            }
+            let mouse = crate::gui::input::MOUSE.lock();
+            let px = mouse.x;
+            let py = mouse.y;
+            drop(mouse);
+            crate::gui::input::set_absolute_mouse(
+                px,
+                py,
+                buttons & 1 != 0,
+                buttons & 2 != 0,
+                buttons & 4 != 0,
+                0,
+            );
+            return;
+        }
         let (sw, sh) = crate::gui::cached_screen_size();
         let px = if sw > 1 {
             ((x as i64 * sw as i64) / 32767).min(sw as i64 - 1) as i32
@@ -565,7 +588,7 @@ pub fn parse_boot_mouse_report(device: &mut HidDevice, report: &[u8]) {
     // Drop relative USB packets only once VirtIO-tablet is actually delivering
     // events. Binding the PCI device is not enough — otherwise a dead tablet
     // queue leaves the desktop with no pointer.
-    if crate::virtio_input::pointer_live() {
+    if crate::virtio_input::buttons_live() {
         return;
     }
     if report.len() < 3 {
@@ -596,16 +619,23 @@ pub fn parse_boot_mouse_report(device: &mut HidDevice, report: &[u8]) {
         }
     }
 
-    // Relative movement
-    if dx != 0 || dy != 0 {
+    // Relative movement — skip when VirtIO already owns the cursor.
+    if (dx != 0 || dy != 0) && !crate::virtio_input::pointer_live() {
         crate::input_event::submit_mouse_move(device.device_id, dx as i32, dy as i32);
     }
     #[cfg(feature = "gui")]
     {
         let (x, y) = {
             let mouse = crate::gui::input::MOUSE.lock();
-            (mouse.x + dx as i32, mouse.y + dy as i32)
+            if crate::virtio_input::pointer_live() {
+                (mouse.x, mouse.y)
+            } else {
+                (mouse.x + dx as i32, mouse.y + dy as i32)
+            }
         };
+        if crate::virtio_input::pointer_live() && old_buttons == buttons && wheel == 0 {
+            return;
+        }
         crate::gui::input::set_absolute_mouse(
             x,
             y,

@@ -8,7 +8,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use knox_gpui::{Div, IntoElement, Pixels, Styled, div, px, text};
+use knox_gpui::{Div, IntoElement, MouseButton, Pixels, Styled, div, px, text};
 
 use crate::chrome::Sidebar;
 use crate::interact::IndexHandler;
@@ -270,7 +270,11 @@ impl IntoElement for SettingsWidget {
                         );
                     } else if let Some(fire) = self.on_item.clone() {
                         let page_i = self.selected;
-                        row = row.on_click(move |_| fire(page_i, gi, ii));
+                        row = row.on_mouse_down(move |e| {
+                            if e.button == MouseButton::Left {
+                                fire(page_i, gi, ii);
+                            }
+                        });
                     }
                     body = body.child(row);
                 }
