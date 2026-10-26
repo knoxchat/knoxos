@@ -169,13 +169,6 @@ pub fn flex_layout(
             height = height.max(avail_h);
         }
     }
-    // Column `align: stretch` (the default) offers a definite width on the
-    // place pass. A row without an explicit width must fill it, otherwise
-    // `justify_between` / child `grow` have no free space and trailing
-    // chrome (min/max/close) sits next to the title.
-    if style.width.is_none() && avail_w.0 > width.0 {
-        width = avail_w;
-    }
     let size = style.clamp_size(Size { width, height });
     let inner = Size {
         width: nonneg(size.width - pad.horizontal()),
@@ -644,6 +637,7 @@ mod tests {
         let mut root = div().flex_col().w(px(80)).h(px(16)).child(
             div()
                 .flex()
+                .w(px(80))
                 .h(px(16))
                 .justify_between()
                 .child(div().w(px(8)).h(px(8)).bg(Hsla::RED))

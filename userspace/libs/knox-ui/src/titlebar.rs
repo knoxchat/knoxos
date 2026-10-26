@@ -212,7 +212,7 @@ impl IntoElement for WindowBorder {
             .border_1()
             .border_color(self.theme.colors.border)
             .rounded(self.theme.radius.lg)
-            .child(self.titlebar);
+            .child(self.titlebar.into_element().w(self.width));
         if let Some(body) = self.body {
             col = col.child(body.grow());
         }
