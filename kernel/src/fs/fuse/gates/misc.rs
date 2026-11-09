@@ -3,9 +3,9 @@ use crate::serial_println;
 use super::super::mount::{loopback_put, mount};
 use super::super::ops::{
     fuse_batch_forget, fuse_bmap, fuse_destroy, fuse_forget, fuse_getattr, fuse_init,
-    fuse_interrupt, fuse_ioctl, fuse_lookup, fuse_notify_inval_entry, fuse_notify_inval_inode,
-    fuse_notify_poll, fuse_notify_reply, fuse_notify_store, fuse_poll, fuse_read, fuse_syncfs,
-    fuse_tmpfile,
+    fuse_interrupt, fuse_ioctl, fuse_lookup, fuse_notify_delete, fuse_notify_inval_entry,
+    fuse_notify_inval_inode, fuse_notify_poll, fuse_notify_reply, fuse_notify_retrieve,
+    fuse_notify_store, fuse_poll, fuse_read, fuse_syncfs, fuse_tmpfile,
 };
 use super::super::protocol::{FUSE_KERNEL_MINOR_VERSION, FUSE_KERNEL_VERSION, POLLIN};
 
@@ -678,6 +678,88 @@ pub fn invalentry_self_test() -> bool {
     serial_println!(
         "[fuse] {} (NOTIFY_INVAL_ENTRY parent=1)",
         GATE_FUSE_INVALENTRY_MARKER
+    );
+    true
+}
+
+pub const GATE_FUSE_RETRIEVE_MARKER: &str = "GATE_FUSE retrieve";
+
+/// NOTIFY_RETRIEVE of a known file returns stored bytes; unknown nodeid fails.
+pub fn retrieve_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-retrieve";
+    const PAYLOAD: &[u8] = b"retrieve-bytes";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE retrieve FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "retrieve.txt", PAYLOAD).is_err() {
+        serial_println!("[fuse] GATE_FUSE retrieve FAILED: put");
+        return false;
+    }
+    let file = match fuse_lookup(MP, 1, "retrieve.txt") {
+        Ok(e) => e,
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE retrieve FAILED: lookup ({})", e);
+            return false;
+        }
+    };
+    match fuse_notify_retrieve(MP, file.nodeid) {
+        Ok(got) if got == PAYLOAD => {}
+        other => {
+            serial_println!("[fuse] GATE_FUSE retrieve FAILED: {:?}", other);
+            return false;
+        }
+    }
+    if fuse_notify_retrieve(MP, 0xFFFF_FFFF).is_ok() {
+        serial_println!("[fuse] GATE_FUSE retrieve FAILED: missing nodeid succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (NOTIFY_RETRIEVE ino={})",
+        GATE_FUSE_RETRIEVE_MARKER,
+        file.nodeid
+    );
+    true
+}
+
+pub const GATE_FUSE_DELETE_MARKER: &str = "GATE_FUSE delete";
+
+/// NOTIFY_DELETE of a known parent+name drops it; LOOKUP then fails; unknown or empty fails.
+pub fn delete_self_test() -> bool {
+    const MP: &str = "/mnt/fuse-delete";
+    match mount(MP, 1) {
+        Ok(()) | Err("Mount point already in use") => {}
+        Err(e) => {
+            serial_println!("[fuse] GATE_FUSE delete FAILED: mount ({})", e);
+            return false;
+        }
+    }
+    if loopback_put(MP, "gone.txt", b"x").is_err() {
+        serial_println!("[fuse] GATE_FUSE delete FAILED: put");
+        return false;
+    }
+    if let Err(e) = fuse_notify_delete(MP, 1, "gone.txt") {
+        serial_println!("[fuse] GATE_FUSE delete FAILED: delete ({})", e);
+        return false;
+    }
+    if fuse_lookup(MP, 1, "gone.txt").is_ok() {
+        serial_println!("[fuse] GATE_FUSE delete FAILED: lookup after delete");
+        return false;
+    }
+    if fuse_notify_delete(MP, 1, "").is_ok() {
+        serial_println!("[fuse] GATE_FUSE delete FAILED: empty name succeeded");
+        return false;
+    }
+    if fuse_notify_delete(MP, 0xFFFF_FFFF, "gone.txt").is_ok() {
+        serial_println!("[fuse] GATE_FUSE delete FAILED: missing parent succeeded");
+        return false;
+    }
+    serial_println!(
+        "[fuse] {} (NOTIFY_DELETE parent=1)",
+        GATE_FUSE_DELETE_MARKER
     );
     true
 }

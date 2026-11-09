@@ -125,6 +125,8 @@ pub enum NfsOp {
     SecInfoNoName = 52,
     WantDelegation = 56,
     Allocate = 59,
+    Copy = 60,
+    Deallocate = 62,
     TestStateId = 55,
     Sequence = 53,
     DestroyClientId = 57,

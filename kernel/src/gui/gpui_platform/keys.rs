@@ -109,9 +109,7 @@ pub fn key_down(key: Key, modifiers: Modifiers) -> bool {
         return super::notify::key_down(key, modifiers);
     }
     if super::launcher::is_open() {
-        let consumed = super::launcher::key_down(key, modifiers);
-        super::launcher::drain_pending();
-        return consumed;
+        return super::launcher::key_down(key, modifiers);
     }
     if super::calc::key_down(key) {
         return true;

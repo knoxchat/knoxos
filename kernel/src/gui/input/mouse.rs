@@ -238,21 +238,24 @@ fn process_mouse_byte(byte: u8) {
             drop(settings);
             mouse.scroll_delta = effective_scroll;
             drop(mouse);
-            super::frame::note_scroll(effective_scroll as i32);
-            handle_scroll(x, y, effective_scroll, screen_w as u32, screen_h as u32);
-            // Scroll only affects one window — push damage for it
-            let wm = window::WINDOW_MANAGER.lock();
-            if let Some(wid) = wm.window_at(x, y) {
-                if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
-                    push_window_damage(win.rect);
+            let sw = screen_w as u32;
+            let sh = screen_h as u32;
+            desktop::run_on_compose_stack(move || {
+                super::frame::note_scroll(effective_scroll as i32);
+                handle_scroll(x, y, effective_scroll, sw, sh);
+                let wm = window::WINDOW_MANAGER.lock();
+                if let Some(wid) = wm.window_at(x, y) {
+                    if let Some(win) = wm.windows.iter().find(|w| w.id == wid) {
+                        push_window_damage(win.rect);
+                    } else {
+                        drop(wm);
+                        crate::gui::request_redraw();
+                    }
                 } else {
                     drop(wm);
                     crate::gui::request_redraw();
                 }
-            } else {
-                drop(wm);
-                crate::gui::request_redraw();
-            }
+            });
             return;
         }
 
@@ -272,41 +275,55 @@ fn process_mouse_byte(byte: u8) {
 
             drop(mouse);
 
-            // Close desktop context menus on any left click. The GPUI tray
-            // menu is closed by overlay hit-testing in `pointer_down_button`.
-            desktop::close_context_menu();
+            let sw = screen_w as u32;
+            let sh = screen_h as u32;
+            desktop::run_on_compose_stack(move || {
+                // Close desktop context menus on any left click. The GPUI tray
+                // menu is closed by overlay hit-testing in `pointer_down_button`.
+                desktop::close_context_menu();
 
-            if is_double_click {
-                super::frame::note_double_click();
-                let on_button = is_on_window_button(x, y);
-                if on_button {
-                    handle_click(x, y, screen_w as u32, screen_h as u32);
+                if is_double_click {
+                    super::frame::note_double_click();
+                    let on_button = is_on_window_button(x, y);
+                    if on_button {
+                        handle_click(x, y, sw, sh);
+                    } else {
+                        handle_double_click(x, y, sw, sh);
+                    }
                 } else {
-                    handle_double_click(x, y, screen_w as u32, screen_h as u32);
+                    handle_click(x, y, sw, sh);
                 }
-            } else {
-                handle_click(x, y, screen_w as u32, screen_h as u32);
-            }
-            finish_pointer_redraw(x, y);
+                finish_pointer_redraw(x, y);
+            });
         } else if mouse.right_button && !prev_right {
             // Right-click
             drop(mouse);
-            handle_right_click(x, y, screen_w as u32, screen_h as u32);
-            finish_pointer_redraw(x, y);
+            let sw = screen_w as u32;
+            let sh = screen_h as u32;
+            desktop::run_on_compose_stack(move || {
+                handle_right_click(x, y, sw, sh);
+                finish_pointer_redraw(x, y);
+            });
         } else if mouse.middle_button && !prev_middle && middle_paste {
             // Middle-click paste — pastes clipboard content at cursor position
             drop(mouse);
-            handle_middle_click_paste(x, y);
-            finish_pointer_redraw(x, y);
+            desktop::run_on_compose_stack(move || {
+                handle_middle_click_paste(x, y);
+                finish_pointer_redraw(x, y);
+            });
         } else if !mouse.left_button && prev_left {
             // Mouse up - stop dragging/resizing and apply snap zones
             drop(mouse);
-            handle_mouse_up(x, y);
-            finish_pointer_redraw(x, y);
+            desktop::run_on_compose_stack(move || {
+                handle_mouse_up(x, y);
+                finish_pointer_redraw(x, y);
+            });
         } else if mouse.left_button {
             // Mouse drag — handle_drag pushes targeted damage rects
             drop(mouse);
-            handle_drag(x, y);
+            desktop::run_on_compose_stack(move || {
+                handle_drag(x, y);
+            });
         } else if moved {
             drop(mouse);
             if session_pointer_only(x, y) {

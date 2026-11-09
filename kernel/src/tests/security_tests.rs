@@ -958,6 +958,22 @@ fn test_dbus_invalid_args() {
 }
 
 #[test_case]
+fn test_dbus_match_rule_invalid() {
+    assert!(
+        crate::dbus::matchinvalid_self_test(),
+        "AddMatch of a garbage rule must be MatchRuleInvalid"
+    );
+}
+
+#[test_case]
+fn test_dbus_match_rule_not_found() {
+    assert!(
+        crate::dbus::matchnotfound_self_test(),
+        "RemoveMatch of a never-added rule must be MatchRuleNotFound"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),

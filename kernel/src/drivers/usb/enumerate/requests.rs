@@ -10,9 +10,10 @@ use super::super::xhci::{Trb, TrbType, alloc_ring_buffer, dma_virt};
 use super::command::{TRB_CH, submit_transfer, wait_command_completion};
 use super::live::{
     BOS_LIVE, CLEAR_LIVE, CLEARDEV_LIVE, CLEARFEATIFACE_LIVE, CONFIG_DESC_LIVE, CONFIG_LIVE,
-    DESC_LIVE, EPDESC_LIVE, GETCFG_LIVE, GETIFACE_LIVE, IFACE_LIVE, IFACEDESC_LIVE,
-    ISOCHDELAY_LIVE, OSCFG_LIVE, QUAL_LIVE, SET_LIVE, SETDESC_LIVE, SETDEV_LIVE, SETFEATIFACE_LIVE,
-    SETSEL_LIVE, STATUS_LIVE, STATUSEP_LIVE, STATUSIFACE_LIVE, STRING_LIVE, SYNCH_LIVE,
+    DESC_LIVE, EPDESC_LIVE, GETCFG_LIVE, GETIFACE_LIVE, IAD_LIVE, IFACE_LIVE, IFACEDESC_LIVE,
+    ISOCHDELAY_LIVE, OSCFG_LIVE, OTG_LIVE, QUAL_LIVE, SET_LIVE, SETDESC_LIVE, SETDEV_LIVE,
+    SETFEATIFACE_LIVE, SETSEL_LIVE, STATUS_LIVE, STATUSEP_LIVE, STATUSIFACE_LIVE, STRING_LIVE,
+    SYNCH_LIVE,
 };
 use super::slot::{recover_control_ep, restart_ep};
 
@@ -1079,6 +1080,22 @@ pub fn get_endpoint_descriptor(slot_id: u8) -> Option<usize> {
         7,
         &EPDESC_LIVE,
         "Endpoint",
+    )
+}
+
+/// GET_DESCRIPTOR(OTG). Requires a Transfer Event.
+pub fn get_otg_descriptor(slot_id: u8) -> Option<usize> {
+    control_get_descriptor(slot_id, UsbDescriptorType::OTG, 5, &OTG_LIVE, "OTG")
+}
+
+/// GET_DESCRIPTOR(Interface Association). Requires a Transfer Event.
+pub fn get_iad_descriptor(slot_id: u8) -> Option<usize> {
+    control_get_descriptor(
+        slot_id,
+        UsbDescriptorType::InterfaceAssociation,
+        8,
+        &IAD_LIVE,
+        "Interface Association",
     )
 }
 

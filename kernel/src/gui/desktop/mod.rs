@@ -59,8 +59,10 @@ use zoom::apply_zoom_lens;
 
 /// Heap stack for the compositor. First GPUI pump lays out the kit gallery
 /// plus shell windows; that depth overflows the bootloader stack and double
-/// faults (RSP lands in unmapped memory, no guard page).
-const COMPOSE_STACK_BYTES: usize = 512 * 1024;
+/// faults (RSP lands in unmapped memory, no guard page). Launchers drain on
+/// one switch (PTY + VT welcome + CSD), then pump on a second switch so each
+/// gets a fresh 2 MiB rather than stacking Terminal construction on the pump.
+const COMPOSE_STACK_BYTES: usize = 2 * 1024 * 1024;
 static COMPOSE_STACK: Mutex<Option<Vec<u8>>> = Mutex::new(None);
 static COMPOSE_DAMAGE: Mutex<Vec<Rect>> = Mutex::new(Vec::new());
 static COMPOSE_JOB: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
@@ -79,25 +81,21 @@ static COMPOSE_STACK_GATE: AtomicBool = AtomicBool::new(false);
 ///  - Click/scroll pushes damage for just the affected widget/area
 ///  - Full redraws (resolution change, first paint) push a screen-sized rect
 pub fn draw_desktop_damaged(damage: &[Rect]) {
-    if COMPOSE_ACTIVE.load(Ordering::SeqCst) {
-        draw_desktop_damaged_inner(damage);
-        return;
-    }
     {
         let mut slot = COMPOSE_DAMAGE.lock();
-        slot.clear();
         slot.extend_from_slice(damage);
     }
-    COMPOSE_ACTIVE.store(true, Ordering::SeqCst);
-    #[cfg(target_arch = "x86_64")]
-    // SAFETY: GUI is single-threaded; the compose Vec is initialized once
-    // and never moved; `compose_trampoline` returns to this asm.
-    unsafe {
-        call_on_compose_stack();
+    // Nested compose used to run `draw_desktop_damaged_inner` on whatever
+    // stack was live. If that was the bootloader stack (COMPOSE_ACTIVE set,
+    // RSP not yet switched, or a Ring 0 IRQ), opening Terminal walked RSP
+    // into the physical-memory window (`0x18000000…`) and double-faulted.
+    if COMPOSE_ACTIVE.load(Ordering::SeqCst) {
+        return;
     }
-    #[cfg(not(target_arch = "x86_64"))]
-    compose_stack_entry();
+    COMPOSE_ACTIVE.store(true, Ordering::SeqCst);
+    drain_then_compose();
     COMPOSE_ACTIVE.store(false, Ordering::SeqCst);
+    COMPOSE_DAMAGE.lock().clear();
 }
 
 /// Run GPUI hit-testing / layout on the compositor heap stack.
@@ -112,14 +110,37 @@ pub fn run_on_compose_stack<F: FnOnce() + Send + 'static>(f: F) {
     }
     *COMPOSE_JOB.lock() = Some(Box::new(f));
     COMPOSE_ACTIVE.store(true, Ordering::SeqCst);
+    switch_to_compose_stack();
+    COMPOSE_ACTIVE.store(false, Ordering::SeqCst);
+}
+
+fn drain_then_compose() {
+    *COMPOSE_JOB.lock() = Some(Box::new(|| {
+        super::gpui_platform::drain_pending_ui();
+    }));
+    switch_to_compose_stack();
+    // `present_window` queued the new client rect after we cloned damage.
+    // Fold it into this frame so the first Terminal paint is not a 1920×1080
+    // kit-gallery relayout (queue_launch no longer requests a full redraw).
+    {
+        let extra = super::take_damage();
+        if !extra.is_empty() {
+            super::NEEDS_REDRAW.store(false, Ordering::Relaxed);
+            COMPOSE_DAMAGE.lock().extend(extra);
+        }
+    }
+    switch_to_compose_stack();
+}
+
+fn switch_to_compose_stack() {
     #[cfg(target_arch = "x86_64")]
-    // SAFETY: same contract as `draw_desktop_damaged`; job runs and returns.
+    // SAFETY: GUI is single-threaded; the compose Vec is initialized once
+    // and never moved; `compose_stack_entry` returns to the naked stub.
     unsafe {
         call_on_compose_stack();
     }
     #[cfg(not(target_arch = "x86_64"))]
     compose_stack_entry();
-    COMPOSE_ACTIVE.store(false, Ordering::SeqCst);
 }
 
 fn compose_stack_top() -> u64 {
@@ -154,32 +175,35 @@ extern "C" fn compose_trampoline() {
 }
 
 #[cfg(target_arch = "x86_64")]
+#[unsafe(naked)]
+unsafe extern "C" fn jump_compose_stack(_top: u64) {
+    // SysV: `top` is in rdi. rbx is callee-saved on the *old* stack so a
+    // C call cannot clobber the resume RSP. LLVM never sees the RSP switch.
+    core::arch::naked_asm!(
+        "push rbx",
+        "mov rbx, rsp",
+        "mov rsp, rdi",
+        "call {}",
+        "mov rsp, rbx",
+        "pop rbx",
+        "ret",
+        sym compose_stack_entry,
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
 unsafe fn call_on_compose_stack() {
     let top = compose_stack_top();
-    // SAFETY: r12 holds the compose top and rbx the old RSP (both callee-saved
-    // across the C call). `{top}` is copied into r12 *before* rbx is reused so
-    // LLVM cannot allocate `{top}` to rbx and turn the switch into a no-op.
-    // `compose_stack_entry` returns to this asm before RSP is restored.
+    // SAFETY: `top` is the 16-byte-aligned end of `COMPOSE_STACK`; the naked
+    // stub restores the caller's RSP before returning.
     unsafe {
-        core::arch::asm!(
-            "push rbx",
-            "push r12",
-            "mov r12, {top}",
-            "mov rbx, rsp",
-            "mov rsp, r12",
-            "call {entry}",
-            "mov rsp, rbx",
-            "pop r12",
-            "pop rbx",
-            top = in(reg) top,
-            entry = sym compose_stack_entry,
-            clobber_abi("C"),
-            options(nostack),
-        );
+        jump_compose_stack(top);
     }
 }
 
 fn draw_desktop_damaged_inner(damage: &[Rect]) {
+    // Launcher/switcher drain ran on the previous compose-stack switch so
+    // Terminal construction is not stacked on this pump.
     // Read mouse position BEFORE locking FRAMEBUFFER to avoid deadlock.
     let (mx, my) = {
         let mouse = super::input::MOUSE.lock();

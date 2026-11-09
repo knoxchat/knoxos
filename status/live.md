@@ -416,5 +416,13 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 405. **XHCI GET_DESCRIPTOR(Endpoint)**: Transfer Event (`GATE_USB xhci epdesc`).
 406. **NFS WANT_DELEGATION**: file OK; directory NOTDIR; no FH NOFILEHANDLE (`GATE_NFS wantdeleg`).
 407. **NFS ALLOCATE**: extends a file; directory NOTDIR; no FH NOFILEHANDLE (`GATE_NFS allocate`).
+408. **FUSE NOTIFY_RETRIEVE**: known file returns stored bytes; unknown nodeid fails (`GATE_FUSE retrieve`).
+409. **FUSE NOTIFY_DELETE**: known parent+name is dropped; LOOKUP then fails; unknown parent or empty name fails (`GATE_FUSE delete`).
+410. **D-Bus MatchRuleInvalid**: AddMatch of a garbage rule (`GATE_DBUS matchinvalid`).
+411. **D-Bus MatchRuleNotFound**: RemoveMatch of a never-added rule (`GATE_DBUS matchnotfound`).
+412. **XHCI GET_DESCRIPTOR(OTG)**: Transfer Event (`GATE_USB xhci otg`).
+413. **XHCI GET_DESCRIPTOR(Interface Association)**: Transfer Event (`GATE_USB xhci iad`).
+414. **NFS COPY**: copies bytes from SAVEFH; directory NOTDIR; no FH NOFILEHANDLE (`GATE_NFS copy`).
+415. **NFS DEALLOCATE**: punches/shrinks a file; directory NOTDIR; no FH NOFILEHANDLE (`GATE_NFS deallocate`).
 
-Integration: `./tests/run_integration.sh` **695/695** on QEMU (2026-11-09).
+Integration: `./tests/run_integration.sh` **703/703** on QEMU (2026-11-10).

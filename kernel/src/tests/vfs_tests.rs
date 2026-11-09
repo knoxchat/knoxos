@@ -671,6 +671,28 @@ fn test_xhci_get_descriptor_endpoint() {
 }
 
 #[test_case]
+fn test_xhci_get_descriptor_otg() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::otg_self_test(),
+        "XHCI GET_DESCRIPTOR(OTG) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_get_descriptor_iad() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::iad_self_test(),
+        "XHCI GET_DESCRIPTOR(Interface Association) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_xhci_reset_device() {
     if !crate::usb::is_available() {
         return;
@@ -1080,6 +1102,22 @@ fn test_fuse_notify_inval_entry() {
     assert!(
         crate::fuse::invalentry_self_test(),
         "FUSE NOTIFY_INVAL_ENTRY of a known parent+name must ACK; LOOKUP must still work; unknown parent or empty name must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_notify_retrieve() {
+    assert!(
+        crate::fuse::retrieve_self_test(),
+        "FUSE NOTIFY_RETRIEVE of a known file must return stored bytes; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_notify_delete() {
+    assert!(
+        crate::fuse::delete_self_test(),
+        "FUSE NOTIFY_DELETE of a known parent+name must drop it; LOOKUP must then fail; unknown parent or empty name must fail"
     );
 }
 
@@ -1748,6 +1786,24 @@ fn test_nfs_allocate() {
     assert!(
         crate::nfs::allocate_self_test(),
         "NFS4 ALLOCATE must extend a file, return NOTDIR for a directory, and NOFILEHANDLE with no current FH"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_copy() {
+    assert!(
+        crate::nfs::copy_self_test(),
+        "NFS4 COPY must copy bytes from SAVEFH into the current FH, return NOTDIR for a directory, and NOFILEHANDLE with no current FH"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_deallocate() {
+    assert!(
+        crate::nfs::deallocate_self_test(),
+        "NFS4 DEALLOCATE must punch/shrink a file, return NOTDIR for a directory, and NOFILEHANDLE with no current FH"
     );
 }
 

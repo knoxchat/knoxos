@@ -602,3 +602,72 @@ pub fn ifacesremoved_self_test() -> bool {
         false
     }
 }
+
+pub const GATE_DBUS_MATCHINVALID_MARKER: &str = "GATE_DBUS matchinvalid";
+
+/// `AddMatch` of a garbage rule is `MatchRuleInvalid`.
+pub fn matchinvalid_self_test() -> bool {
+    let conn = connect(BusType::System, 0xDB3D, 1000);
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from("this is not a match rule"))];
+    add.signature = Some(String::from("s"));
+    let serial = send_message(BusType::System, conn, add);
+    let invalid = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Error
+                && msg.reply_serial == Some(serial)
+                && msg.error_name.as_deref() == Some("org.freedesktop.DBus.Error.MatchRuleInvalid")
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if invalid {
+        serial_println!(
+            "[dbus] {} (MatchRuleInvalid)",
+            GATE_DBUS_MATCHINVALID_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: MatchRuleInvalid");
+        false
+    }
+}
+
+pub const GATE_DBUS_MATCHNOTFOUND_MARKER: &str = "GATE_DBUS matchnotfound";
+
+/// `RemoveMatch` of a never-added rule is `MatchRuleNotFound`.
+pub fn matchnotfound_self_test() -> bool {
+    const RULE: &str = "type='signal',interface='org.knoxos.GateNeverMatched',member='Ping'";
+    let conn = connect(BusType::System, 0xDB3E, 1000);
+    let mut rem = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RemoveMatch",
+    );
+    rem.body = vec![DbusValue::String(String::from(RULE))];
+    rem.signature = Some(String::from("s"));
+    let serial = send_message(BusType::System, conn, rem);
+    let missing = receive_message(BusType::System, conn)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Error
+                && msg.reply_serial == Some(serial)
+                && msg.error_name.as_deref() == Some("org.freedesktop.DBus.Error.MatchRuleNotFound")
+        })
+        .unwrap_or(false);
+    disconnect(BusType::System, conn);
+    if missing {
+        serial_println!(
+            "[dbus] {} (MatchRuleNotFound)",
+            GATE_DBUS_MATCHNOTFOUND_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: MatchRuleNotFound");
+        false
+    }
+}

@@ -16,19 +16,20 @@ use super::live::{
     CLEARFEATIFACE_LIVE, CONFIG_DESC_LIVE, CONFIG_EP_LIVE, CONFIG_LIVE, DESC_LIVE, DISABLE_LIVE,
     ENUM_LIVE, EPDESC_LIVE, EVAL_LIVE, FORCEHDR_LIVE, GETCFG_LIVE, GETIFACE_LIVE, HID_LIVE,
     HIDGETIDLE_LIVE, HIDGETPROTOCOL_LIVE, HIDGETREPORT_LIVE, HIDREPORT_LIVE, HIDSETIDLE_LIVE,
-    HIDSETPROTOCOL_LIVE, HIDSETREPORT_LIVE, IFACE_LIVE, IFACEDESC_LIVE, INTR_LIVE, ISOCH_IN_LIVE,
-    ISOCHDELAY_LIVE, NOOP_LIVE, OSCFG_LIVE, QUAL_LIVE, RESETDEV_LIVE, RESETEP_LIVE, SET_LIVE,
-    SETDESC_LIVE, SETDEV_LIVE, SETFEATIFACE_LIVE, SETSEL_LIVE, SETTR_LIVE, SLOT_ENABLE_LIVE,
-    STATUS_LIVE, STATUSEP_LIVE, STATUSIFACE_LIVE, STOP_LIVE, STRING_LIVE, SYNCH_LIVE, TRNOOP_LIVE,
+    HIDSETPROTOCOL_LIVE, HIDSETREPORT_LIVE, IAD_LIVE, IFACE_LIVE, IFACEDESC_LIVE, INTR_LIVE,
+    ISOCH_IN_LIVE, ISOCHDELAY_LIVE, NOOP_LIVE, OSCFG_LIVE, OTG_LIVE, QUAL_LIVE, RESETDEV_LIVE,
+    RESETEP_LIVE, SET_LIVE, SETDESC_LIVE, SETDEV_LIVE, SETFEATIFACE_LIVE, SETSEL_LIVE, SETTR_LIVE,
+    SLOT_ENABLE_LIVE, STATUS_LIVE, STATUSEP_LIVE, STATUSIFACE_LIVE, STOP_LIVE, STRING_LIVE,
+    SYNCH_LIVE, TRNOOP_LIVE,
 };
 use super::pipes::{bulk_in, bulk_out, interrupt_in, isoch_in, transfer_noop};
 use super::requests::{
     clear_device_feature, clear_feature, clear_interface_feature, get_bos_descriptor,
     get_configuration, get_device_descriptor, get_device_qualifier, get_endpoint_descriptor,
-    get_endpoint_status, get_interface, get_interface_descriptor, get_interface_status,
-    get_other_speed_config, get_status, get_string_descriptor, set_configuration, set_descriptor,
-    set_device_feature, set_feature, set_interface, set_interface_feature, set_isoch_delay,
-    set_sel, synch_frame,
+    get_endpoint_status, get_iad_descriptor, get_interface, get_interface_descriptor,
+    get_interface_status, get_otg_descriptor, get_other_speed_config, get_status,
+    get_string_descriptor, set_configuration, set_descriptor, set_device_feature, set_feature,
+    set_interface, set_interface_feature, set_isoch_delay, set_sel, synch_frame,
 };
 use super::slot::{
     address_device, configure_interrupt_ep, disable_slot, enable_slot, evaluate_context,
@@ -86,6 +87,8 @@ pub const GATE_XHCI_SETFEATIFACE_MARKER: &str = "GATE_USB xhci setfeatiface";
 pub const GATE_XHCI_CLEARFEATIFACE_MARKER: &str = "GATE_USB xhci clearfeatiface";
 pub const GATE_XHCI_IFACEDESC_MARKER: &str = "GATE_USB xhci ifacedesc";
 pub const GATE_XHCI_EPDESC_MARKER: &str = "GATE_USB xhci epdesc";
+pub const GATE_XHCI_OTG_MARKER: &str = "GATE_USB xhci otg";
+pub const GATE_XHCI_IAD_MARKER: &str = "GATE_USB xhci iad";
 
 /// Prove Enable Slot got a Command Completion (cc=1), not a timeout fallback.
 pub fn slot_self_test() -> bool {
@@ -1282,5 +1285,37 @@ pub fn epdesc_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_EPDESC_MARKER);
+    true
+}
+
+/// Prove GET_DESCRIPTOR(OTG) got a Transfer Event.
+pub fn otg_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci otg skipped (no controller)");
+        return true;
+    }
+    descriptor_probe(&OTG_LIVE, get_otg_descriptor);
+    if !OTG_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(OTG) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_OTG_MARKER);
+    true
+}
+
+/// Prove GET_DESCRIPTOR(Interface Association) got a Transfer Event.
+pub fn iad_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci iad skipped (no controller)");
+        return true;
+    }
+    descriptor_probe(&IAD_LIVE, get_iad_descriptor);
+    if !IAD_LIVE.load(Ordering::Relaxed) {
+        serial_println!(
+            "[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(Interface Association) had no Transfer Event"
+        );
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_IAD_MARKER);
     true
 }

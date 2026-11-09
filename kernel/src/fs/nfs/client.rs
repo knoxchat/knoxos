@@ -964,6 +964,88 @@ impl NfsClient {
                     None => NfsCompoundResult::Status(NfsStat::Noent),
                 }
             }
+            NfsCompoundOp::Copy {
+                src_offset,
+                dst_offset,
+                count,
+            } => {
+                let Some(dst_fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let Some(src_fh) = self.saved_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let src_name = self.fh_names.get(&src_fh);
+                let dst_name = self.fh_names.get(&dst_fh);
+                let src_is_dir = src_name
+                    .map(|n| self.export_dirs.contains(n))
+                    .unwrap_or(true);
+                let dst_is_dir = dst_name
+                    .map(|n| self.export_dirs.contains(n))
+                    .unwrap_or(true);
+                if src_is_dir || dst_is_dir {
+                    return NfsCompoundResult::Status(NfsStat::Notdir);
+                }
+                let Some(src_n) = src_name.cloned() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let Some(dst_n) = dst_name.cloned() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let src_data = match self.export_files.get(&src_n) {
+                    Some(f) => {
+                        let start = *src_offset as usize;
+                        let end = start.saturating_add(*count as usize).min(f.len());
+                        if start >= f.len() {
+                            Vec::new()
+                        } else {
+                            f[start..end].to_vec()
+                        }
+                    }
+                    None => return NfsCompoundResult::Status(NfsStat::Noent),
+                };
+                match self.export_files.get_mut(&dst_n) {
+                    Some(file) => {
+                        apply_write(file, *dst_offset, &src_data);
+                        NfsCompoundResult::WriteResult {
+                            count: src_data.len() as u32,
+                            committed: true,
+                        }
+                    }
+                    None => NfsCompoundResult::Status(NfsStat::Noent),
+                }
+            }
+            NfsCompoundOp::Deallocate { offset, length } => {
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let name = self.fh_names.get(&fh);
+                let is_dir = name.map(|n| self.export_dirs.contains(n)).unwrap_or(true);
+                if is_dir {
+                    return NfsCompoundResult::Status(NfsStat::Notdir);
+                }
+                let Some(n) = name.cloned() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                match self.export_files.get_mut(&n) {
+                    Some(file) => {
+                        let start = *offset as usize;
+                        let end = start.saturating_add(*length as usize);
+                        if start >= file.len() {
+                            return NfsCompoundResult::Status(NfsStat::Ok);
+                        }
+                        let punch_end = end.min(file.len());
+                        for b in &mut file[start..punch_end] {
+                            *b = 0;
+                        }
+                        if end >= file.len() {
+                            file.truncate(start);
+                        }
+                        NfsCompoundResult::Status(NfsStat::Ok)
+                    }
+                    None => NfsCompoundResult::Status(NfsStat::Noent),
+                }
+            }
         }
     }
 

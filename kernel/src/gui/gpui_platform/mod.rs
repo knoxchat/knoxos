@@ -148,3 +148,15 @@ pub fn init() {
 pub fn is_ready() -> bool {
     INITIALIZED.load(Ordering::SeqCst)
 }
+
+/// Run queued launcher / switcher actions on the compositor stack.
+///
+/// Pointer and key dispatch only enqueue. Opening Terminal (PTY + VT +
+/// welcome) on top of a live launcher tree, or stacked on the same switch
+/// as the GPUI pump, walks RSP into the physical memory window and
+/// double-faults. `draw_desktop_damaged` drains on one switch, then pumps
+/// on a second so each gets a fresh heap stack.
+pub fn drain_pending_ui() {
+    launcher::drain_pending();
+    switcher::drain_pending();
+}

@@ -710,3 +710,220 @@ pub fn allocate_self_test() -> bool {
         }
     }
 }
+
+pub const GATE_NFS_COPY_MARKER: &str = "GATE_NFS copy";
+
+/// COPY from SAVEFH source into current FH; a directory is NOTDIR; missing FH is NOFILEHANDLE.
+pub fn copy_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    const PAYLOAD: &[u8] = b"nfs-copy-bytes";
+    let src = client.compound(
+        "copy-src",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-copy-src.txt"),
+                create: true,
+            },
+            NfsCompoundOp::Write {
+                state_id: NfsStateId::anonymous(),
+                offset: 0,
+                data: PAYLOAD.to_vec(),
+                stable: true,
+            },
+            NfsCompoundOp::SaveFh,
+        ],
+    );
+    if !matches!(src.get(1), Some(NfsCompoundResult::OpenResult { .. })) {
+        serial_println!("[NFS] GATE_NFS copy FAILED: src open {:?}", src.get(1));
+        return false;
+    }
+    let dst = client.compound(
+        "copy-dst",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-copy-dst.txt"),
+                create: true,
+            },
+        ],
+    );
+    if !matches!(dst.get(1), Some(NfsCompoundResult::OpenResult { .. })) {
+        serial_println!("[NFS] GATE_NFS copy FAILED: dst open {:?}", dst.get(1));
+        return false;
+    }
+    let copied = client.compound(
+        "copy",
+        &[NfsCompoundOp::Copy {
+            src_offset: 0,
+            dst_offset: 0,
+            count: PAYLOAD.len() as u64,
+        }],
+    );
+    let copy_ok = matches!(
+        copied.first(),
+        Some(NfsCompoundResult::WriteResult { count, .. }) if *count as usize == PAYLOAD.len()
+    );
+    let read = client.compound(
+        "copy-read",
+        &[NfsCompoundOp::Read {
+            state_id: NfsStateId::anonymous(),
+            offset: 0,
+            count: PAYLOAD.len() as u32,
+        }],
+    );
+    let read_ok = matches!(
+        read.first(),
+        Some(NfsCompoundResult::ReadResult { data, .. }) if data == PAYLOAD
+    );
+    let root = client.compound(
+        "copy-root",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Copy {
+                src_offset: 0,
+                dst_offset: 0,
+                count: 4,
+            },
+        ],
+    );
+    let notdir_ok = matches!(
+        root.get(1),
+        Some(NfsCompoundResult::Status(NfsStat::Notdir))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "copy-missing",
+        &[NfsCompoundOp::Copy {
+            src_offset: 0,
+            dst_offset: 0,
+            count: 4,
+        }],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle))
+            if copy_ok && read_ok && notdir_ok =>
+        {
+            serial_println!(
+                "[NFS] {} (COPY then NOTDIR then NOFILEHANDLE)",
+                GATE_NFS_COPY_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS copy FAILED copy={} read={} notdir={} missing={:?}",
+                copy_ok,
+                read_ok,
+                notdir_ok,
+                other
+            );
+            false
+        }
+    }
+}
+
+pub const GATE_NFS_DEALLOCATE_MARKER: &str = "GATE_NFS deallocate";
+
+/// DEALLOCATE of a file punches/shrinks; a directory is NOTDIR; missing FH is NOFILEHANDLE.
+pub fn deallocate_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let opened = client.compound(
+        "deallocate-open",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-de.txt"),
+                create: true,
+            },
+            NfsCompoundOp::Write {
+                state_id: NfsStateId::anonymous(),
+                offset: 0,
+                data: b"xxxxxxxxxxxxxxxx".to_vec(),
+                stable: true,
+            },
+        ],
+    );
+    if !matches!(opened.get(1), Some(NfsCompoundResult::OpenResult { .. })) {
+        serial_println!("[NFS] GATE_NFS deallocate FAILED: open {:?}", opened.get(1));
+        return false;
+    }
+    let ok = client.compound(
+        "deallocate",
+        &[NfsCompoundOp::Deallocate {
+            offset: 0,
+            length: 16,
+        }],
+    );
+    let dealloc_ok = matches!(ok.first(), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let after = client.compound("deallocate-getattr", &[NfsCompoundOp::GetAttr(vec![0, 1])]);
+    let size_ok = matches!(
+        after.first(),
+        Some(NfsCompoundResult::Attrs(a)) if a.size == 0
+    );
+    let root = client.compound(
+        "deallocate-root",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Deallocate {
+                offset: 0,
+                length: 16,
+            },
+        ],
+    );
+    let notdir_ok = matches!(
+        root.get(1),
+        Some(NfsCompoundResult::Status(NfsStat::Notdir))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "deallocate-missing",
+        &[NfsCompoundOp::Deallocate {
+            offset: 0,
+            length: 16,
+        }],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle))
+            if dealloc_ok && size_ok && notdir_ok =>
+        {
+            serial_println!(
+                "[NFS] {} (DEALLOCATE then NOTDIR then NOFILEHANDLE)",
+                GATE_NFS_DEALLOCATE_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS deallocate FAILED dealloc={} size={} notdir={} missing={:?}",
+                dealloc_ok,
+                size_ok,
+                notdir_ok,
+                other
+            );
+            false
+        }
+    }
+}

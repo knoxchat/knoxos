@@ -10,15 +10,15 @@ use super::loopback::{
     serve_loopback_fsyncdir, serve_loopback_getattr, serve_loopback_getlk, serve_loopback_getxattr,
     serve_loopback_init, serve_loopback_interrupt, serve_loopback_ioctl, serve_loopback_link,
     serve_loopback_listxattr, serve_loopback_lseek, serve_loopback_mkdir, serve_loopback_mknod,
-    serve_loopback_notify_inval_entry, serve_loopback_notify_inval_inode,
-    serve_loopback_notify_poll, serve_loopback_notify_reply, serve_loopback_notify_store,
-    serve_loopback_open, serve_loopback_opendir, serve_loopback_poll, serve_loopback_read,
-    serve_loopback_readdir, serve_loopback_readdirplus, serve_loopback_readlink,
-    serve_loopback_release, serve_loopback_releasedir, serve_loopback_removexattr,
-    serve_loopback_rename, serve_loopback_rename2, serve_loopback_rmdir, serve_loopback_setattr,
-    serve_loopback_setlk, serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_statx,
-    serve_loopback_symlink, serve_loopback_syncfs, serve_loopback_tmpfile, serve_loopback_unlink,
-    serve_loopback_write,
+    serve_loopback_notify_delete, serve_loopback_notify_inval_entry,
+    serve_loopback_notify_inval_inode, serve_loopback_notify_poll, serve_loopback_notify_reply,
+    serve_loopback_notify_retrieve, serve_loopback_notify_store, serve_loopback_open,
+    serve_loopback_opendir, serve_loopback_poll, serve_loopback_read, serve_loopback_readdir,
+    serve_loopback_readdirplus, serve_loopback_readlink, serve_loopback_release,
+    serve_loopback_releasedir, serve_loopback_removexattr, serve_loopback_rename,
+    serve_loopback_rename2, serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setlk,
+    serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_statx, serve_loopback_symlink,
+    serve_loopback_syncfs, serve_loopback_tmpfile, serve_loopback_unlink, serve_loopback_write,
 };
 use super::mount::{send_notify, send_request, take_response};
 use super::protocol::{
@@ -781,6 +781,27 @@ pub fn fuse_notify_inval_entry(
         body.clone(),
     )?;
     serve_loopback_notify_inval_entry(mount_point, unique, parent, &body);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle FUSE_NOTIFY_RETRIEVE. Known files return stored bytes; unknown fails.
+pub fn fuse_notify_retrieve(mount_point: &str, nodeid: u64) -> Result<Vec<u8>, &'static str> {
+    let unique = send_notify(mount_point, FuseNotifyCode::Retrieve, nodeid, Vec::new())?;
+    serve_loopback_notify_retrieve(mount_point, unique, nodeid);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    if resp.is_empty() {
+        return Err("empty retrieve");
+    }
+    Ok(resp)
+}
+/// Handle FUSE_NOTIFY_DELETE. Known parent+name is dropped; LOOKUP then fails.
+pub fn fuse_notify_delete(mount_point: &str, parent: u64, name: &str) -> Result<(), &'static str> {
+    if name.is_empty() {
+        return Err("empty name");
+    }
+    let body = name.as_bytes().to_vec();
+    let unique = send_notify(mount_point, FuseNotifyCode::Delete, parent, body.clone())?;
+    serve_loopback_notify_delete(mount_point, unique, parent, &body);
     take_response(mount_point, unique).ok_or("would block")?;
     Ok(())
 }

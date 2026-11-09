@@ -101,5 +101,9 @@ pub(super) static CLEARFEATIFACE_LIVE: AtomicBool = AtomicBool::new(false);
 pub(super) static IFACEDESC_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when GET_DESCRIPTOR(Endpoint) got a Transfer Event.
 pub(super) static EPDESC_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(OTG) got a Transfer Event.
+pub(super) static OTG_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(Interface Association) got a Transfer Event.
+pub(super) static IAD_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 pub(super) static ENUM_LIVE: AtomicBool = AtomicBool::new(false);

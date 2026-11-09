@@ -448,22 +448,54 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 }
             }
             "AddMatch" => {
-                if let Some(conn) = bus.connections.get_mut(&from) {
-                    if let Some(DbusValue::String(rule_str)) = msg.body.first() {
-                        conn.match_rules.push(parse_match_rule(rule_str));
+                if let Some(DbusValue::String(rule_str)) = msg.body.first() {
+                    if !match_rule_valid(rule_str) {
+                        if let Some(c) = bus.connections.get_mut(&from) {
+                            c.message_queue.push(Message::error(
+                                msg.header.serial,
+                                "org.freedesktop.DBus.Error.MatchRuleInvalid",
+                                "AddMatch",
+                            ));
+                        }
+                        return;
                     }
+                    if let Some(conn) = bus.connections.get_mut(&from) {
+                        conn.match_rules.push(parse_match_rule(rule_str));
+                        conn.message_queue
+                            .push(Message::method_return(msg.header.serial));
+                    }
+                } else if let Some(conn) = bus.connections.get_mut(&from) {
                     conn.message_queue
                         .push(Message::method_return(msg.header.serial));
                 }
             }
             "RemoveMatch" => {
-                if let Some(conn) = bus.connections.get_mut(&from) {
-                    if let Some(DbusValue::String(rule_str)) = msg.body.first() {
-                        let parsed = parse_match_rule(rule_str);
+                if let Some(DbusValue::String(rule_str)) = msg.body.first() {
+                    if !match_rule_valid(rule_str) {
+                        if let Some(c) = bus.connections.get_mut(&from) {
+                            c.message_queue.push(Message::error(
+                                msg.header.serial,
+                                "org.freedesktop.DBus.Error.MatchRuleInvalid",
+                                "RemoveMatch",
+                            ));
+                        }
+                        return;
+                    }
+                    let parsed = parse_match_rule(rule_str);
+                    if let Some(conn) = bus.connections.get_mut(&from) {
                         if let Some(idx) = conn.match_rules.iter().position(|r| r == &parsed) {
                             conn.match_rules.remove(idx);
+                            conn.message_queue
+                                .push(Message::method_return(msg.header.serial));
+                        } else {
+                            conn.message_queue.push(Message::error(
+                                msg.header.serial,
+                                "org.freedesktop.DBus.Error.MatchRuleNotFound",
+                                "RemoveMatch",
+                            ));
                         }
                     }
+                } else if let Some(conn) = bus.connections.get_mut(&from) {
                     conn.message_queue
                         .push(Message::method_return(msg.header.serial));
                 }
@@ -1072,6 +1104,32 @@ fn match_rule_to_string(rule: &MatchRule) -> String {
         parts.push(format!("path='{}'", path));
     }
     parts.join(",")
+}
+
+/// True when `rule` has at least one known key=value part and no bare tokens.
+fn match_rule_valid(rule: &str) -> bool {
+    let rule = rule.trim();
+    if rule.is_empty() {
+        return false;
+    }
+    let mut known = false;
+    for part in rule.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let Some(eq) = part.find('=') else {
+            return false;
+        };
+        let key = part[..eq].trim();
+        if matches!(
+            key,
+            "type" | "sender" | "interface" | "member" | "path" | "destination" | "arg0"
+        ) {
+            known = true;
+        }
+    }
+    known
 }
 
 /// Parse a D-Bus match rule string

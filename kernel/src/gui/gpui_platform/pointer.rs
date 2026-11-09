@@ -172,7 +172,6 @@ pub fn pointer_down_button(x: i32, y: i32, button: MouseButton) -> bool {
     }
     if super::launcher::dispatch_pointer_down(x, y, button) {
         super::launcher::damage();
-        super::launcher::drain_pending();
         return true;
     }
     if super::launcher::is_open() && !super::panel::contains_screen(x, y) {
@@ -249,7 +248,6 @@ pub fn pointer_up(x: i32, y: i32) -> bool {
         return true;
     }
     if super::switcher::dispatch_pointer_up(x, y) {
-        super::switcher::drain_pending();
         super::switcher::damage();
         return true;
     }
@@ -271,7 +269,6 @@ pub fn pointer_up(x: i32, y: i32) -> bool {
     }
     if super::launcher::dispatch_pointer_up(x, y) {
         super::launcher::damage();
-        super::launcher::drain_pending();
         return true;
     }
     if super::panel::dispatch_pointer_up(x, y) {

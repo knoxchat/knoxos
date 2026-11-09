@@ -8,7 +8,7 @@
 //! Split by bus surface:
 //!   names          — Hello, RequestName, ReleaseName, ListNames, ownership, REPLACE_EXISTING, unique GetNameOwner, NameHasNoOwner, UnknownMethod, ReleaseName NON_EXISTENT/NOT_OWNER, UnknownObject, InvalidArgs
 //!   identity       — pid/uid/creds and LSM labels
-//!   match_rules    — AddMatch, RemoveMatch, BecomeMonitor, name signals
+//!   match_rules    — AddMatch, RemoveMatch, BecomeMonitor, name signals, MatchRuleInvalid, MatchRuleNotFound
 //!   admin          — GetId, activation env, ReloadConfig, GetConfigFile
 //!   introspection  — Peer, Introspectable, Properties, ObjectManager
 //!   stats          — Debug.Stats GetStats / GetAllMatchRules / GetConnectionStats

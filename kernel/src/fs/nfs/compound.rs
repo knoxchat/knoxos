@@ -142,6 +142,15 @@ pub enum NfsCompoundOp {
         offset: u64,
         length: u64,
     },
+    Copy {
+        src_offset: u64,
+        dst_offset: u64,
+        count: u64,
+    },
+    Deallocate {
+        offset: u64,
+        length: u64,
+    },
 }
 
 /// Result of a compound operation

@@ -291,18 +291,20 @@ pub fn open_editor_at(path: &str) {
 }
 
 fn open_terminal() {
-    let offset = cascade_offset();
-    let mut win = Window::new("Terminal", 280 + offset, 100 + offset, 860, 540);
-    win.content_type = WindowContentType::TerminalSurface;
-    win.content_color = Pixel::rgb(12, 12, 12);
-    win.decorations = false;
-    let wid = present_window(win, "Terminal");
-    crate::terminal::create_for_window(wid);
-    let mut wm = window::WINDOW_MANAGER.lock();
-    if let Some(win) = wm.windows.iter_mut().find(|w| w.id == wid) {
-        win.terminal_tabs = vec![wid];
-        win.terminal_active_tab = 0;
-    }
+    super::run_on_compose_stack(|| {
+        let offset = cascade_offset();
+        let mut win = Window::new("Terminal", 280 + offset, 100 + offset, 860, 540);
+        win.content_type = WindowContentType::TerminalSurface;
+        win.content_color = Pixel::rgb(12, 12, 12);
+        win.decorations = false;
+        let wid = present_window(win, "Terminal");
+        crate::terminal::create_for_window(wid);
+        let mut wm = window::WINDOW_MANAGER.lock();
+        if let Some(win) = wm.windows.iter_mut().find(|w| w.id == wid) {
+            win.terminal_tabs = vec![wid];
+            win.terminal_active_tab = 0;
+        }
+    });
 }
 
 fn open_settings() {

@@ -112,6 +112,13 @@ fn apps_from_menu() -> Vec<LauncherApp> {
 fn queue_launch(name: &str) {
     *PENDING_LAUNCH.lock() = Some(String::from(name));
     startmenu::close();
+    // Erase the launcher. Do not `open_application` here: launcher
+    // `prepare_element` is already as deep as the first desktop paint, and
+    // nesting Terminal/GPUI construction overflows into the physical-memory
+    // window (`0x18000000…`) with no guard, then double-faults. Do not
+    // request a full-screen redraw either: that relayouts the kit gallery
+    // on the same frame as the new window's first paint.
+    damage();
 }
 
 fn queue_power(action: PowerAction) {

@@ -65,6 +65,8 @@ pub enum FuseNotifyCode {
     InvalInode = 2,
     InvalEntry = 3,
     Store = 4,
+    Retrieve = 5,
+    Delete = 6,
 }
 
 /// Linux `FUSE_KERNEL_VERSION`.

@@ -5,7 +5,7 @@
 //! `*_self_test` functions; serial markers stay `GATE_NFS <name>`.
 //!
 //! Split by NFS4 surface:
-//!   io       — READ, WRITE, COMMIT, SETATTR, ACCESS, CREATE/REMOVE/RENAME/LINK/READDIR, ALLOCATE
+//!   io       — READ, WRITE, COMMIT, SETATTR, ACCESS, CREATE/REMOVE/RENAME/LINK/READDIR, ALLOCATE, COPY, DEALLOCATE
 //!   fh       — GETFH, PUTFH, LOOKUPP, RESTOREFH, PUTPUBFH
 //!   verify   — VERIFY, NVERIFY
 //!   state    — SETCLIENTID_CONFIRM, CLOSE, RENEW

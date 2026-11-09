@@ -904,6 +904,55 @@ pub(super) fn serve_loopback_notify_inval_entry(
     drop(lbs);
     let _ = write_response(mount_point, unique, Vec::new());
 }
+pub(super) fn serve_loopback_notify_retrieve(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    let Some((_, data)) = lb.files.values().find(|(ino, _)| *ino == nodeid) else {
+        return;
+    };
+    if data.is_empty() {
+        return;
+    }
+    let resp = data.clone();
+    drop(lbs);
+    let _ = write_response(mount_point, unique, resp);
+}
+pub(super) fn serve_loopback_notify_delete(
+    mount_point: &str,
+    unique: u64,
+    parent: u64,
+    req: &[u8],
+) {
+    if req.is_empty() {
+        return;
+    }
+    let Ok(name) = core::str::from_utf8(req) else {
+        return;
+    };
+    let mut lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get_mut(mount_point) else {
+        return;
+    };
+    if !loopback_is_dir(lb, parent) {
+        return;
+    }
+    let known = parent == 1
+        && (lb.files.contains_key(name)
+            || lb.dirs.contains_key(name)
+            || lb.links.contains_key(name)
+            || lb.nodes.contains_key(name));
+    if !known {
+        return;
+    }
+    lb.files.remove(name);
+    lb.dirs.remove(name);
+    lb.links.remove(name);
+    lb.nodes.remove(name);
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
 pub(super) fn serve_loopback_tmpfile(mount_point: &str, unique: u64, parent: u64) {
     let resp = {
         let mut lbs = LOOPBACK.lock();
