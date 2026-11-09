@@ -123,6 +123,25 @@ pub enum NfsCompoundOp {
     ReclaimComplete {
         one_fs: bool,
     },
+    BindConnToSession {
+        session_id: u64,
+    },
+    FreeStateId {
+        state_id: NfsStateId,
+    },
+    BackchannelCtl {
+        session_id: u64,
+    },
+    TestStateId {
+        state_id: NfsStateId,
+    },
+    GetDirDelegation,
+    SecInfoNoName,
+    WantDelegation,
+    Allocate {
+        offset: u64,
+        length: u64,
+    },
 }
 
 /// Result of a compound operation
@@ -173,5 +192,11 @@ pub enum NfsCompoundResult {
     Sequence {
         session_id: u64,
         sequenceid: u32,
+    },
+    DirDeleg {
+        state_id: NfsStateId,
+    },
+    WantDeleg {
+        state_id: NfsStateId,
     },
 }

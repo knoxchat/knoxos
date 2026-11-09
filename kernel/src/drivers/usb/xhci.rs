@@ -69,6 +69,8 @@ pub enum TrbType {
     StopEndpoint = 15,
     SetTRDequeuePointer = 16,
     ResetDevice = 17,
+    GetPortBandwidth = 21,
+    ForceHeader = 22,
     NoOpCommand = 23,
     TransferEvent = 32,
     CommandCompletion = 33,

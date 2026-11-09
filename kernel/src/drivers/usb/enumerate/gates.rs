@@ -12,25 +12,28 @@ use super::hid::{
     hid_set_idle, hid_set_protocol, hid_set_report,
 };
 use super::live::{
-    ADDRESS_LIVE, BOS_LIVE, BULK_IN_LIVE, BULK_LIVE, CLEAR_LIVE, CONFIG_DESC_LIVE, CONFIG_EP_LIVE,
-    CONFIG_LIVE, DESC_LIVE, DISABLE_LIVE, ENUM_LIVE, EVAL_LIVE, GETCFG_LIVE, GETIFACE_LIVE,
-    HID_LIVE, HIDGETIDLE_LIVE, HIDGETPROTOCOL_LIVE, HIDGETREPORT_LIVE, HIDREPORT_LIVE,
-    HIDSETIDLE_LIVE, HIDSETPROTOCOL_LIVE, HIDSETREPORT_LIVE, IFACE_LIVE, INTR_LIVE, ISOCH_IN_LIVE,
+    ADDRESS_LIVE, BANDWIDTH_LIVE, BOS_LIVE, BULK_IN_LIVE, BULK_LIVE, CLEAR_LIVE, CLEARDEV_LIVE,
+    CLEARFEATIFACE_LIVE, CONFIG_DESC_LIVE, CONFIG_EP_LIVE, CONFIG_LIVE, DESC_LIVE, DISABLE_LIVE,
+    ENUM_LIVE, EPDESC_LIVE, EVAL_LIVE, FORCEHDR_LIVE, GETCFG_LIVE, GETIFACE_LIVE, HID_LIVE,
+    HIDGETIDLE_LIVE, HIDGETPROTOCOL_LIVE, HIDGETREPORT_LIVE, HIDREPORT_LIVE, HIDSETIDLE_LIVE,
+    HIDSETPROTOCOL_LIVE, HIDSETREPORT_LIVE, IFACE_LIVE, IFACEDESC_LIVE, INTR_LIVE, ISOCH_IN_LIVE,
     ISOCHDELAY_LIVE, NOOP_LIVE, OSCFG_LIVE, QUAL_LIVE, RESETDEV_LIVE, RESETEP_LIVE, SET_LIVE,
-    SETDESC_LIVE, SETSEL_LIVE, SETTR_LIVE, SLOT_ENABLE_LIVE, STATUS_LIVE, STATUSEP_LIVE,
-    STATUSIFACE_LIVE, STOP_LIVE, STRING_LIVE, SYNCH_LIVE, TRNOOP_LIVE,
+    SETDESC_LIVE, SETDEV_LIVE, SETFEATIFACE_LIVE, SETSEL_LIVE, SETTR_LIVE, SLOT_ENABLE_LIVE,
+    STATUS_LIVE, STATUSEP_LIVE, STATUSIFACE_LIVE, STOP_LIVE, STRING_LIVE, SYNCH_LIVE, TRNOOP_LIVE,
 };
 use super::pipes::{bulk_in, bulk_out, interrupt_in, isoch_in, transfer_noop};
 use super::requests::{
-    clear_feature, get_bos_descriptor, get_configuration, get_device_descriptor,
-    get_device_qualifier, get_endpoint_status, get_interface, get_interface_status,
+    clear_device_feature, clear_feature, clear_interface_feature, get_bos_descriptor,
+    get_configuration, get_device_descriptor, get_device_qualifier, get_endpoint_descriptor,
+    get_endpoint_status, get_interface, get_interface_descriptor, get_interface_status,
     get_other_speed_config, get_status, get_string_descriptor, set_configuration, set_descriptor,
-    set_feature, set_interface, set_isoch_delay, set_sel, synch_frame,
+    set_device_feature, set_feature, set_interface, set_interface_feature, set_isoch_delay,
+    set_sel, synch_frame,
 };
 use super::slot::{
     address_device, configure_interrupt_ep, disable_slot, enable_slot, evaluate_context,
-    no_op_command, recover_control_ep, reset_device, reset_endpoint, restart_ep, set_tr_dequeue,
-    stop_endpoint,
+    force_header, get_port_bandwidth, no_op_command, recover_control_ep, reset_device,
+    reset_endpoint, restart_ep, set_tr_dequeue, stop_endpoint,
 };
 
 pub const GATE_XHCI_SLOT_MARKER: &str = "GATE_USB xhci slot";
@@ -75,6 +78,14 @@ pub const GATE_XHCI_HIDGETPROTOCOL_MARKER: &str = "GATE_USB xhci getprotocol";
 pub const GATE_XHCI_HIDSETPROTOCOL_MARKER: &str = "GATE_USB xhci setprotocol";
 pub const GATE_XHCI_STATUSIFACE_MARKER: &str = "GATE_USB xhci statusiface";
 pub const GATE_XHCI_STATUSEP_MARKER: &str = "GATE_USB xhci statusep";
+pub const GATE_XHCI_BANDWIDTH_MARKER: &str = "GATE_USB xhci bandwidth";
+pub const GATE_XHCI_FORCEHDR_MARKER: &str = "GATE_USB xhci forcehdr";
+pub const GATE_XHCI_SETDEV_MARKER: &str = "GATE_USB xhci setdev";
+pub const GATE_XHCI_CLEARDEV_MARKER: &str = "GATE_USB xhci cleardev";
+pub const GATE_XHCI_SETFEATIFACE_MARKER: &str = "GATE_USB xhci setfeatiface";
+pub const GATE_XHCI_CLEARFEATIFACE_MARKER: &str = "GATE_USB xhci clearfeatiface";
+pub const GATE_XHCI_IFACEDESC_MARKER: &str = "GATE_USB xhci ifacedesc";
+pub const GATE_XHCI_EPDESC_MARKER: &str = "GATE_USB xhci epdesc";
 
 /// Prove Enable Slot got a Command Completion (cc=1), not a timeout fallback.
 pub fn slot_self_test() -> bool {
@@ -1129,5 +1140,147 @@ pub fn statusep_self_test() -> bool {
         return false;
     }
     serial_println!("[XHCI] {}", GATE_XHCI_STATUSEP_MARKER);
+    true
+}
+
+/// Prove Get Port Bandwidth got a Command Completion (cc=1).
+pub fn bandwidth_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci bandwidth skipped (no controller)");
+        return true;
+    }
+    if !BANDWIDTH_LIVE.load(Ordering::Relaxed) {
+        let _ = get_port_bandwidth();
+    }
+    if !BANDWIDTH_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Get Port Bandwidth had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_BANDWIDTH_MARKER);
+    true
+}
+
+/// Prove Force Header got a Command Completion (cc=1).
+pub fn forcehdr_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci forcehdr skipped (no controller)");
+        return true;
+    }
+    if !FORCEHDR_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = force_header(slot_id);
+        }
+    }
+    if !FORCEHDR_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: Force Header had no Command Completion");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_FORCEHDR_MARKER);
+    true
+}
+
+/// Prove SET_FEATURE(DEVICE) got a Transfer Event.
+pub fn setdev_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci setdev skipped (no controller)");
+        return true;
+    }
+    if !SETDEV_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = set_device_feature(slot_id, 1);
+        }
+    }
+    if !SETDEV_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SET_FEATURE(DEVICE) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_SETDEV_MARKER);
+    true
+}
+
+/// Prove CLEAR_FEATURE(DEVICE) got a Transfer Event.
+pub fn cleardev_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci cleardev skipped (no controller)");
+        return true;
+    }
+    if !CLEARDEV_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = clear_device_feature(slot_id, 1);
+        }
+    }
+    if !CLEARDEV_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: CLEAR_FEATURE(DEVICE) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_CLEARDEV_MARKER);
+    true
+}
+
+/// Prove SET_FEATURE(INTERFACE) got a Transfer Event.
+pub fn setfeatiface_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci setfeatiface skipped (no controller)");
+        return true;
+    }
+    if !SETFEATIFACE_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = set_interface_feature(slot_id, 0, 0);
+        }
+    }
+    if !SETFEATIFACE_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: SET_FEATURE(INTERFACE) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_SETFEATIFACE_MARKER);
+    true
+}
+
+/// Prove CLEAR_FEATURE(INTERFACE) got a Transfer Event.
+pub fn clearfeatiface_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci clearfeatiface skipped (no controller)");
+        return true;
+    }
+    if !CLEARFEATIFACE_LIVE.load(Ordering::Relaxed) {
+        if let Some(slot_id) = hid_slot() {
+            let _ = clear_interface_feature(slot_id, 0, 0);
+        }
+    }
+    if !CLEARFEATIFACE_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: CLEAR_FEATURE(INTERFACE) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_CLEARFEATIFACE_MARKER);
+    true
+}
+
+/// Prove GET_DESCRIPTOR(Interface) got a Transfer Event.
+pub fn ifacedesc_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci ifacedesc skipped (no controller)");
+        return true;
+    }
+    descriptor_probe(&IFACEDESC_LIVE, get_interface_descriptor);
+    if !IFACEDESC_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(Interface) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_IFACEDESC_MARKER);
+    true
+}
+
+/// Prove GET_DESCRIPTOR(Endpoint) got a Transfer Event.
+pub fn epdesc_self_test() -> bool {
+    if !super::super::is_available() {
+        serial_println!("[XHCI] GATE_USB xhci epdesc skipped (no controller)");
+        return true;
+    }
+    descriptor_probe(&EPDESC_LIVE, get_endpoint_descriptor);
+    if !EPDESC_LIVE.load(Ordering::Relaxed) {
+        serial_println!("[XHCI] GATE_USB FAILED: GET_DESCRIPTOR(Endpoint) had no Transfer Event");
+        return false;
+    }
+    serial_println!("[XHCI] {}", GATE_XHCI_EPDESC_MARKER);
     true
 }

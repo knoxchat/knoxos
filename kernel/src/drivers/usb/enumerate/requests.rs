@@ -9,9 +9,10 @@ use super::super::types::{
 use super::super::xhci::{Trb, TrbType, alloc_ring_buffer, dma_virt};
 use super::command::{TRB_CH, submit_transfer, wait_command_completion};
 use super::live::{
-    BOS_LIVE, CLEAR_LIVE, CONFIG_DESC_LIVE, CONFIG_LIVE, DESC_LIVE, GETCFG_LIVE, GETIFACE_LIVE,
-    IFACE_LIVE, ISOCHDELAY_LIVE, OSCFG_LIVE, QUAL_LIVE, SET_LIVE, SETDESC_LIVE, SETSEL_LIVE,
-    STATUS_LIVE, STATUSEP_LIVE, STATUSIFACE_LIVE, STRING_LIVE, SYNCH_LIVE,
+    BOS_LIVE, CLEAR_LIVE, CLEARDEV_LIVE, CLEARFEATIFACE_LIVE, CONFIG_DESC_LIVE, CONFIG_LIVE,
+    DESC_LIVE, EPDESC_LIVE, GETCFG_LIVE, GETIFACE_LIVE, IFACE_LIVE, IFACEDESC_LIVE,
+    ISOCHDELAY_LIVE, OSCFG_LIVE, QUAL_LIVE, SET_LIVE, SETDESC_LIVE, SETDEV_LIVE, SETFEATIFACE_LIVE,
+    SETSEL_LIVE, STATUS_LIVE, STATUSEP_LIVE, STATUSIFACE_LIVE, STRING_LIVE, SYNCH_LIVE,
 };
 use super::slot::{recover_control_ep, restart_ep};
 
@@ -549,6 +550,197 @@ pub fn set_feature(slot_id: u8, feature: u16, index: u16) -> bool {
     false
 }
 
+/// SET_FEATURE(DEVICE REMOTE_WAKEUP) — Setup+Status (no data stage). Requires a Transfer Event.
+pub fn set_device_feature(slot_id: u8, feature: u16) -> bool {
+    serial_println!(
+        "[XHCI] SET_FEATURE(DEVICE feature={}) for slot {}",
+        feature,
+        slot_id
+    );
+    recover_control_ep(slot_id);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x00 (device), bRequest=3 (SET_FEATURE)
+    setup.param_lo = (UsbRequestType::SetFeature as u32) << 8 | (feature as u32) << 16;
+    setup.param_hi = 0;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for no-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, status]) {
+        serial_println!("[XHCI] Failed to submit SET_FEATURE(DEVICE) transfer");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: some HID devices stall DEVICE_REMOTE_WAKEUP.
+        if cc == 1 || cc == 13 || cc == 6 {
+            SETDEV_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] SET_FEATURE(DEVICE feature={}) complete cc={}",
+                feature,
+                cc
+            );
+            return true;
+        }
+        serial_println!("[XHCI] SET_FEATURE(DEVICE) completion code: {}", cc);
+    } else {
+        serial_println!("[XHCI] SET_FEATURE(DEVICE) timeout");
+    }
+    false
+}
+
+/// CLEAR_FEATURE(DEVICE REMOTE_WAKEUP) — Setup+Status (no data stage). Requires a Transfer Event.
+pub fn clear_device_feature(slot_id: u8, feature: u16) -> bool {
+    serial_println!(
+        "[XHCI] CLEAR_FEATURE(DEVICE feature={}) for slot {}",
+        feature,
+        slot_id
+    );
+    recover_control_ep(slot_id);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x00 (device), bRequest=1 (CLEAR_FEATURE)
+    setup.param_lo = (UsbRequestType::ClearFeature as u32) << 8 | (feature as u32) << 16;
+    setup.param_hi = 0;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for no-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, status]) {
+        serial_println!("[XHCI] Failed to submit CLEAR_FEATURE(DEVICE) transfer");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: some HID devices stall DEVICE_REMOTE_WAKEUP.
+        if cc == 1 || cc == 13 || cc == 6 {
+            CLEARDEV_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] CLEAR_FEATURE(DEVICE feature={}) complete cc={}",
+                feature,
+                cc
+            );
+            return true;
+        }
+        serial_println!("[XHCI] CLEAR_FEATURE(DEVICE) completion code: {}", cc);
+    } else {
+        serial_println!("[XHCI] CLEAR_FEATURE(DEVICE) timeout");
+    }
+    false
+}
+
+/// SET_FEATURE(INTERFACE) — Setup+Status (no data stage). Requires a Transfer Event.
+pub fn set_interface_feature(slot_id: u8, iface: u8, feature: u16) -> bool {
+    serial_println!(
+        "[XHCI] SET_FEATURE(INTERFACE iface={} feature={}) for slot {}",
+        iface,
+        feature,
+        slot_id
+    );
+    recover_control_ep(slot_id);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x01 (interface), bRequest=3 (SET_FEATURE), wIndex=iface
+    setup.param_lo = 0x01 | (UsbRequestType::SetFeature as u32) << 8 | (feature as u32) << 16;
+    setup.param_hi = iface as u32;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for no-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, status]) {
+        serial_println!("[XHCI] Failed to submit SET_FEATURE(INTERFACE) transfer");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        // 1 Success, 13 Short Packet, 6 Stall: some HID devices stall interface features.
+        if cc == 1 || cc == 13 || cc == 6 {
+            SETFEATIFACE_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] SET_FEATURE(INTERFACE iface={} feature={}) complete cc={}",
+                iface,
+                feature,
+                cc
+            );
+            return true;
+        }
+        serial_println!("[XHCI] SET_FEATURE(INTERFACE) completion code: {}", cc);
+    } else {
+        serial_println!("[XHCI] SET_FEATURE(INTERFACE) timeout");
+    }
+    false
+}
+
+/// CLEAR_FEATURE(INTERFACE) — Setup+Status (no data stage). Requires a Transfer Event.
+pub fn clear_interface_feature(slot_id: u8, iface: u8, feature: u16) -> bool {
+    serial_println!(
+        "[XHCI] CLEAR_FEATURE(INTERFACE iface={} feature={}) for slot {}",
+        iface,
+        feature,
+        slot_id
+    );
+    recover_control_ep(slot_id);
+
+    let mut setup = Trb::new();
+    // bmRequestType=0x01 (interface), bRequest=1 (CLEAR_FEATURE), wIndex=iface
+    setup.param_lo = 0x01 | (UsbRequestType::ClearFeature as u32) << 8 | (feature as u32) << 16;
+    setup.param_hi = iface as u32;
+    setup.status = 8;
+    setup.set_type(TrbType::SetupStage);
+    setup.control |= 1 << 6; // IDT
+    setup.control |= TRB_CH;
+
+    let mut status = Trb::new();
+    status.set_type(TrbType::StatusStage);
+    status.control |= 1 << 16; // DIR = IN for no-data control
+    status.control |= 1 << 5; // IOC
+
+    if !submit_transfer(slot_id, 1, &[setup, status]) {
+        serial_println!("[XHCI] Failed to submit CLEAR_FEATURE(INTERFACE) transfer");
+        return false;
+    }
+
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 || cc == 13 || cc == 6 {
+            CLEARFEATIFACE_LIVE.store(true, Ordering::Relaxed);
+            serial_println!(
+                "[XHCI] CLEAR_FEATURE(INTERFACE iface={} feature={}) complete cc={}",
+                iface,
+                feature,
+                cc
+            );
+            return true;
+        }
+        serial_println!("[XHCI] CLEAR_FEATURE(INTERFACE) completion code: {}", cc);
+    } else {
+        serial_println!("[XHCI] CLEAR_FEATURE(INTERFACE) timeout");
+    }
+    false
+}
+
 pub fn set_descriptor(slot_id: u8, desc_type: u16, index: u8, data: &[u8]) -> bool {
     serial_println!(
         "[XHCI] SET_DESCRIPTOR(type={} index={}) for slot {}",
@@ -865,6 +1057,28 @@ pub fn get_other_speed_config(slot_id: u8) -> Option<usize> {
         9,
         &OSCFG_LIVE,
         "Other Speed Configuration",
+    )
+}
+
+/// GET_DESCRIPTOR(Interface). Requires a Transfer Event.
+pub fn get_interface_descriptor(slot_id: u8) -> Option<usize> {
+    control_get_descriptor(
+        slot_id,
+        UsbDescriptorType::Interface,
+        9,
+        &IFACEDESC_LIVE,
+        "Interface",
+    )
+}
+
+/// GET_DESCRIPTOR(Endpoint). Requires a Transfer Event.
+pub fn get_endpoint_descriptor(slot_id: u8) -> Option<usize> {
+    control_get_descriptor(
+        slot_id,
+        UsbDescriptorType::Endpoint,
+        7,
+        &EPDESC_LIVE,
+        "Endpoint",
     )
 }
 

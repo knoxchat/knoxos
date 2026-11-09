@@ -6,11 +6,12 @@ use core::sync::atomic::Ordering;
 use crate::serial_println;
 
 use super::state::{
-    BusState, BusType, Connection, ConnectionId, DBUS_NAME_FLAG_DO_NOT_QUEUE,
-    DBUS_NAME_FLAG_REPLACE_EXISTING, DBUS_RELEASE_NAME_REPLY_NON_EXISTENT,
-    DBUS_RELEASE_NAME_REPLY_NOT_OWNER, DBUS_RELEASE_NAME_REPLY_RELEASED,
-    DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER, DBUS_REQUEST_NAME_REPLY_EXISTS,
-    DBUS_REQUEST_NAME_REPLY_IN_QUEUE, DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, NEXT_CONN_ID, get_bus,
+    BusState, BusType, Connection, ConnectionId, DBUS_NAME_FLAG_ALLOW_REPLACEMENT,
+    DBUS_NAME_FLAG_DO_NOT_QUEUE, DBUS_NAME_FLAG_REPLACE_EXISTING,
+    DBUS_RELEASE_NAME_REPLY_NON_EXISTENT, DBUS_RELEASE_NAME_REPLY_NOT_OWNER,
+    DBUS_RELEASE_NAME_REPLY_RELEASED, DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER,
+    DBUS_REQUEST_NAME_REPLY_EXISTS, DBUS_REQUEST_NAME_REPLY_IN_QUEUE,
+    DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER, NEXT_CONN_ID, get_bus,
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -90,9 +91,14 @@ pub(super) fn request_name_on_bus(
             return DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER;
         }
 
-        if flags & DBUS_NAME_FLAG_REPLACE_EXISTING != 0 {
-            // Try to replace
+        let allow =
+            bus.name_flags.get(name).copied().unwrap_or(0) & DBUS_NAME_FLAG_ALLOW_REPLACEMENT != 0;
+        if flags & DBUS_NAME_FLAG_REPLACE_EXISTING != 0 && allow {
+            if let Some(conn) = bus.connections.get_mut(&current_owner) {
+                conn.owned_names.retain(|n| n != name);
+            }
             bus.names.insert(name.to_string(), conn_id);
+            bus.name_flags.insert(name.to_string(), flags);
             if let Some(conn) = bus.connections.get_mut(&conn_id) {
                 conn.owned_names.push(name.to_string());
             }
@@ -114,6 +120,7 @@ pub(super) fn request_name_on_bus(
 
     // Name is free, take it
     bus.names.insert(name.to_string(), conn_id);
+    bus.name_flags.insert(name.to_string(), flags);
     if let Some(conn) = bus.connections.get_mut(&conn_id) {
         conn.owned_names.push(name.to_string());
     }
@@ -132,6 +139,7 @@ pub(super) fn release_name_on_bus(bus: &mut BusState, conn_id: ConnectionId, nam
     match bus.names.get(name).copied() {
         Some(owner) if owner == conn_id => {
             bus.names.remove(name);
+            bus.name_flags.remove(name);
             if let Some(conn) = bus.connections.get_mut(&conn_id) {
                 conn.owned_names.retain(|n| n != name);
             }

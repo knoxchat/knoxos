@@ -118,6 +118,9 @@ pub struct NfsClient {
     session_id: Option<u64>,
     sequenceid: u32,
     reclaim_complete: bool,
+    bound_conn: Option<u64>,
+    closed_stateids: Vec<NfsStateId>,
+    backchannel: Option<u64>,
 }
 
 impl NfsClient {
@@ -147,6 +150,9 @@ impl NfsClient {
             session_id: None,
             sequenceid: 0,
             reclaim_complete: false,
+            bound_conn: None,
+            closed_stateids: Vec::new(),
+            backchannel: None,
         }
     }
 
@@ -334,6 +340,7 @@ impl NfsClient {
                 match self.open_files.get(&fh) {
                     Some((open_sid, _)) if open_sid == state_id => {
                         self.open_files.remove(&fh);
+                        self.closed_stateids.push(*state_id);
                         NfsCompoundResult::Status(NfsStat::Ok)
                     }
                     _ => NfsCompoundResult::Status(NfsStat::BadStateId),
@@ -794,6 +801,7 @@ impl NfsClient {
                 self.client_id = simple_hash(client_name.as_bytes());
                 self.exchange_id_issued = true;
                 self.session_id = None;
+                self.backchannel = None;
                 NfsCompoundResult::ClientId {
                     client_id: self.client_id,
                     verifier: rdtsc(),
@@ -807,6 +815,8 @@ impl NfsClient {
                     self.session_id = Some(session_id);
                     self.sequenceid = 0;
                     self.reclaim_complete = false;
+                    self.bound_conn = None;
+                    self.backchannel = None;
                     NfsCompoundResult::Session { session_id }
                 } else {
                     NfsCompoundResult::Status(NfsStat::StaleClientId)
@@ -817,6 +827,8 @@ impl NfsClient {
                     self.session_id = None;
                     self.sequenceid = 0;
                     self.reclaim_complete = false;
+                    self.bound_conn = None;
+                    self.backchannel = None;
                     NfsCompoundResult::Status(NfsStat::Ok)
                 } else {
                     NfsCompoundResult::Status(NfsStat::BadSession)
@@ -859,6 +871,97 @@ impl NfsClient {
                 } else {
                     self.reclaim_complete = true;
                     NfsCompoundResult::Status(NfsStat::Ok)
+                }
+            }
+            NfsCompoundOp::BindConnToSession { session_id } => {
+                if self.session_id == Some(*session_id) {
+                    self.bound_conn = Some(*session_id);
+                    NfsCompoundResult::Session {
+                        session_id: *session_id,
+                    }
+                } else {
+                    NfsCompoundResult::Status(NfsStat::BadSession)
+                }
+            }
+            NfsCompoundOp::FreeStateId { state_id } => {
+                if let Some(idx) = self.closed_stateids.iter().position(|s| s == state_id) {
+                    self.closed_stateids.remove(idx);
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::BadStateId)
+                }
+            }
+            NfsCompoundOp::BackchannelCtl { session_id } => {
+                if self.session_id == Some(*session_id) {
+                    self.backchannel = Some(*session_id);
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::BadSession)
+                }
+            }
+            NfsCompoundOp::TestStateId { state_id } => {
+                let live = self.open_files.values().any(|(sid, _)| sid == state_id);
+                if live {
+                    NfsCompoundResult::Status(NfsStat::Ok)
+                } else {
+                    NfsCompoundResult::Status(NfsStat::BadStateId)
+                }
+            }
+            NfsCompoundOp::GetDirDelegation => {
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let name = self.fh_names.get(&fh);
+                let is_dir = name.map(|n| self.export_dirs.contains(n)).unwrap_or(true);
+                if !is_dir {
+                    return NfsCompoundResult::Status(NfsStat::Notdir);
+                }
+                let state_id = NfsStateId::new(1);
+                self.delegations.push((state_id, fh));
+                NfsCompoundResult::DirDeleg { state_id }
+            }
+            NfsCompoundOp::SecInfoNoName => {
+                if self.current_fh.is_none() {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                }
+                NfsCompoundResult::SecInfo {
+                    flavors: vec![AuthFlavor::Sys as u32],
+                }
+            }
+            NfsCompoundOp::WantDelegation => {
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let name = self.fh_names.get(&fh);
+                let is_dir = name.map(|n| self.export_dirs.contains(n)).unwrap_or(true);
+                if is_dir {
+                    return NfsCompoundResult::Status(NfsStat::Notdir);
+                }
+                let state_id = NfsStateId::new(1);
+                self.delegations.push((state_id, fh));
+                NfsCompoundResult::WantDeleg { state_id }
+            }
+            NfsCompoundOp::Allocate { offset, length } => {
+                let Some(fh) = self.current_fh.clone() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                let name = self.fh_names.get(&fh);
+                let is_dir = name.map(|n| self.export_dirs.contains(n)).unwrap_or(true);
+                if is_dir {
+                    return NfsCompoundResult::Status(NfsStat::Notdir);
+                }
+                let Some(n) = name.cloned() else {
+                    return NfsCompoundResult::Status(NfsStat::NoFileHandle);
+                };
+                match self.export_files.get_mut(&n) {
+                    Some(file) => {
+                        let need = (*offset as usize).saturating_add(*length as usize);
+                        if file.len() < need {
+                            file.resize(need, 0);
+                        }
+                        NfsCompoundResult::Status(NfsStat::Ok)
+                    }
+                    None => NfsCompoundResult::Status(NfsStat::Noent),
                 }
             }
         }

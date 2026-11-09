@@ -583,6 +583,94 @@ fn test_xhci_get_status_endpoint() {
 }
 
 #[test_case]
+fn test_xhci_get_port_bandwidth() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::bandwidth_self_test(),
+        "XHCI Get Port Bandwidth must complete with Command Completion cc=1"
+    );
+}
+
+#[test_case]
+fn test_xhci_force_header() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::forcehdr_self_test(),
+        "XHCI Force Header must complete with Command Completion cc=1"
+    );
+}
+
+#[test_case]
+fn test_xhci_set_feature_device() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::setdev_self_test(),
+        "XHCI SET_FEATURE(DEVICE) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_clear_feature_device() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::cleardev_self_test(),
+        "XHCI CLEAR_FEATURE(DEVICE) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_set_feature_interface() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::setfeatiface_self_test(),
+        "XHCI SET_FEATURE(INTERFACE) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_clear_feature_interface() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::clearfeatiface_self_test(),
+        "XHCI CLEAR_FEATURE(INTERFACE) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_get_descriptor_interface() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::ifacedesc_self_test(),
+        "XHCI GET_DESCRIPTOR(Interface) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
+fn test_xhci_get_descriptor_endpoint() {
+    if !crate::usb::is_available() {
+        return;
+    }
+    assert!(
+        crate::usb::epdesc_self_test(),
+        "XHCI GET_DESCRIPTOR(Endpoint) must complete with a Transfer Event"
+    );
+}
+
+#[test_case]
 fn test_xhci_reset_device() {
     if !crate::usb::is_available() {
         return;
@@ -928,6 +1016,70 @@ fn test_fuse_forget() {
     assert!(
         crate::fuse::forget_self_test(),
         "FUSE FORGET of a known nodeid must succeed; unknown nodeid or nlookup 0 must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_interrupt() {
+    assert!(
+        crate::fuse::interrupt_self_test(),
+        "FUSE INTERRUPT of an issued unique must succeed; unique 0 or never-issued must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_batch_forget() {
+    assert!(
+        crate::fuse::batchforget_self_test(),
+        "FUSE BATCH_FORGET of a known nodeid must succeed; unknown nodeid or nlookup 0 must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_notify_reply() {
+    assert!(
+        crate::fuse::notifyreply_self_test(),
+        "FUSE NOTIFY_REPLY of a known file must store bytes a later READ returns; unknown nodeid or empty data must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_tmpfile() {
+    assert!(
+        crate::fuse::tmpfile_self_test(),
+        "FUSE TMPFILE of a directory must return an unnamed S_IFREG inode; a file parent must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_notify_inval_inode() {
+    assert!(
+        crate::fuse::invalinode_self_test(),
+        "FUSE NOTIFY_INVAL_INODE of a known nodeid must ACK; GETATTR must still work; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_notify_store() {
+    assert!(
+        crate::fuse::notifystore_self_test(),
+        "FUSE NOTIFY_STORE of a known file must store bytes a later READ returns; unknown nodeid or empty data must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_notify_poll() {
+    assert!(
+        crate::fuse::notifypoll_self_test(),
+        "FUSE NOTIFY_POLL of a known nodeid must ACK; POLL must still work; unknown nodeid must fail"
+    );
+}
+
+#[test_case]
+fn test_fuse_notify_inval_entry() {
+    assert!(
+        crate::fuse::invalentry_self_test(),
+        "FUSE NOTIFY_INVAL_ENTRY of a known parent+name must ACK; LOOKUP must still work; unknown parent or empty name must fail"
     );
 }
 
@@ -1524,6 +1676,78 @@ fn test_nfs_reclaim_complete() {
     assert!(
         crate::nfs::reclaim_self_test(),
         "NFS4 RECLAIM_COMPLETE must succeed once, return COMPLETE_ALREADY the second time, and BADSESSION without a session"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_bind_conn_to_session() {
+    assert!(
+        crate::nfs::bindconn_self_test(),
+        "NFS4 BIND_CONN_TO_SESSION must accept a CREATE_SESSION id and return BADSESSION for an unknown session"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_free_stateid() {
+    assert!(
+        crate::nfs::freestateid_self_test(),
+        "NFS4 FREE_STATEID must accept a CLOSEd OPEN state_id and return BAD_STATEID for a second or unknown id"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_backchannel_ctl() {
+    assert!(
+        crate::nfs::backchannel_self_test(),
+        "NFS4 BACKCHANNEL_CTL must accept a CREATE_SESSION id and return BADSESSION for an unknown session"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_test_stateid() {
+    assert!(
+        crate::nfs::teststateid_self_test(),
+        "NFS4 TEST_STATEID must accept a live OPEN state_id and return BAD_STATEID for a CLOSEd or unknown id"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_get_dir_delegation() {
+    assert!(
+        crate::nfs::dirdeleg_self_test(),
+        "NFS4 GET_DIR_DELEGATION must accept a directory, return NOTDIR for a file, and NOFILEHANDLE with no current FH"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_secinfo_no_name() {
+    assert!(
+        crate::nfs::secinfoname_self_test(),
+        "NFS4 SECINFO_NO_NAME must return AUTH_SYS for the current FH and NOFILEHANDLE with no current FH"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_want_delegation() {
+    assert!(
+        crate::nfs::wantdeleg_self_test(),
+        "NFS4 WANT_DELEGATION must accept a file, return NOTDIR for a directory, and NOFILEHANDLE with no current FH"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test_case]
+fn test_nfs_allocate() {
+    assert!(
+        crate::nfs::allocate_self_test(),
+        "NFS4 ALLOCATE must extend a file, return NOTDIR for a directory, and NOFILEHANDLE with no current FH"
     );
 }
 

@@ -218,6 +218,24 @@ fn properties_changed() -> Message {
     msg
 }
 
+fn interfaces_removed(name: &str) -> Message {
+    let mut msg = Message::signal(
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.ObjectManager",
+        "InterfacesRemoved",
+    );
+    msg.sender = Some(String::from("org.freedesktop.DBus"));
+    msg.body = vec![
+        DbusValue::ObjectPath(String::from("/org/freedesktop/DBus")),
+        DbusValue::Array(vec![
+            DbusValue::String(String::from("org.freedesktop.DBus")),
+            DbusValue::String(String::from(name)),
+        ]),
+    ];
+    msg.signature = Some(String::from("oas"));
+    msg
+}
+
 fn interfaces_added(name: &str) -> Message {
     let mut msg = Message::signal(
         "/org/freedesktop/DBus",
@@ -277,6 +295,17 @@ fn dispatch_desktop_service(msg: &Message) -> Option<Message> {
 fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
     let member = msg.member.as_deref().unwrap_or("");
     let interface = msg.interface.as_deref().unwrap_or("");
+    let path = msg.path.as_deref().unwrap_or("");
+    if path != "/org/freedesktop/DBus" {
+        if let Some(c) = bus.connections.get_mut(&from) {
+            c.message_queue.push(Message::error(
+                msg.header.serial,
+                "org.freedesktop.DBus.Error.UnknownObject",
+                path,
+            ));
+        }
+        return;
+    }
 
     if interface == "org.freedesktop.DBus" {
         match member {
@@ -295,13 +324,26 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
             "RequestName" => {
                 let name = match msg.body.first() {
                     Some(DbusValue::String(s)) => s.clone(),
-                    _ => return,
+                    _ => {
+                        if let Some(c) = bus.connections.get_mut(&from) {
+                            c.message_queue.push(Message::error(
+                                msg.header.serial,
+                                "org.freedesktop.DBus.Error.InvalidArgs",
+                                "RequestName",
+                            ));
+                        }
+                        return;
+                    }
                 };
                 let flags = match msg.body.get(1) {
                     Some(DbusValue::Uint32(f)) => *f,
                     _ => 0,
                 };
                 let was_free = !bus.names.contains_key(&name);
+                let previous = bus
+                    .names
+                    .get(&name)
+                    .and_then(|id| bus.connections.get(id).map(|c| c.unique_name.clone()));
                 let unique = bus
                     .connections
                     .get(&from)
@@ -318,6 +360,12 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                     emit_bus_signal(bus, name_acquired(&name));
                     emit_bus_signal(bus, name_owner_changed(&name, "", &unique));
                     emit_bus_signal(bus, interfaces_added(&name));
+                } else if code == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER {
+                    if let Some(old) = previous {
+                        emit_bus_signal(bus, name_lost(&name));
+                        emit_bus_signal(bus, name_owner_changed(&name, &old, &unique));
+                        emit_bus_signal(bus, name_acquired(&name));
+                    }
                 }
             }
             "ReleaseName" => {
@@ -340,6 +388,7 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 if code == DBUS_RELEASE_NAME_REPLY_RELEASED {
                     emit_bus_signal(bus, name_lost(&name));
                     emit_bus_signal(bus, name_owner_changed(&name, &unique, ""));
+                    emit_bus_signal(bus, interfaces_removed(&name));
                 }
             }
             "ListNames" => {
@@ -360,17 +409,30 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
                 }
             }
             "GetNameOwner" => {
-                // Return the unique name of the owner of a well-known name
                 if let Some(DbusValue::String(name)) = msg.body.first() {
-                    if let Some(&owner_id) = bus.names.get(name) {
-                        if let Some(owner) = bus.connections.get(&owner_id) {
-                            let mut reply = Message::method_return(msg.header.serial);
-                            reply.body = vec![DbusValue::String(owner.unique_name.clone())];
-                            reply.signature = Some(String::from("s"));
-                            if let Some(c) = bus.connections.get_mut(&from) {
-                                c.message_queue.push(reply);
-                            }
+                    let unique = if name.starts_with(':') {
+                        bus.connections
+                            .values()
+                            .find(|c| c.unique_name == *name)
+                            .map(|c| c.unique_name.clone())
+                    } else {
+                        bus.names
+                            .get(name)
+                            .and_then(|id| bus.connections.get(id).map(|c| c.unique_name.clone()))
+                    };
+                    if let Some(unique) = unique {
+                        let mut reply = Message::method_return(msg.header.serial);
+                        reply.body = vec![DbusValue::String(unique)];
+                        reply.signature = Some(String::from("s"));
+                        if let Some(c) = bus.connections.get_mut(&from) {
+                            c.message_queue.push(reply);
                         }
+                    } else if let Some(c) = bus.connections.get_mut(&from) {
+                        c.message_queue.push(Message::error(
+                            msg.header.serial,
+                            "org.freedesktop.DBus.Error.NameHasNoOwner",
+                            name,
+                        ));
                     }
                 }
             }
@@ -683,6 +745,13 @@ fn handle_bus_method(bus: &mut BusState, from: ConnectionId, msg: &Message) {
             }
             _ => {
                 serial_println!("[dbus] Unknown bus method: {}.{}", interface, member);
+                if let Some(c) = bus.connections.get_mut(&from) {
+                    c.message_queue.push(Message::error(
+                        msg.header.serial,
+                        "org.freedesktop.DBus.Error.UnknownMethod",
+                        member,
+                    ));
+                }
             }
         }
     } else if interface == "org.freedesktop.DBus.Monitoring" {

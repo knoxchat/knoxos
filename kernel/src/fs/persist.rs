@@ -644,11 +644,60 @@ pub fn init() {
     for mount in ["/dev", "/proc", "/sys", "/run", "/tmp"] {
         persist_directory(mount, 0o755);
     }
+    // C11 must run before the C1–C10 self-tests write anything: at this point
+    // the only way the boot serial can exist is that a *previous* boot put it
+    // on the disk and `restore_all` just read it back.
+    let _ = reboot_persist_check();
     let _ = roundtrip_self_test();
     let _ = journal_recovery_self_test();
     let _ = root_persist_self_test();
     let _ = bin_persist_self_test();
     let _ = virtfs_persist_self_test();
+}
+
+pub const GATE_C11_MARKER: &str = "GATE_C11 reboot persist";
+const GATE_C11_PATH: &str = "/var/lib/knoxos/boot_serial";
+
+/// Cross-reboot proof: a counter written by the previous boot and read back by
+/// `restore_all` in this one. C1–C10 each drop the RAM copy and re-read inside a
+/// single boot; only C11 crosses a real kernel restart, because the value it
+/// reports was produced by a process that no longer exists.
+///
+/// Boot 1 writes `1` and prints nothing (no earlier boot to compare against).
+/// Boot N > 1 sees N-1 on disk, prints `GATE_C11 reboot persist serial=N-1`, and
+/// writes `N` for the next boot.
+pub fn reboot_persist_check() -> bool {
+    if !crate::virtio_blk::is_available() {
+        crate::serial_println!("[persist] Gate C11 skipped: no virtio-blk");
+        return false;
+    }
+
+    let previous = crate::vfs::read_file_dispatch(GATE_C11_PATH).and_then(|bytes| {
+        core::str::from_utf8(&bytes)
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+    });
+
+    let next = match previous {
+        Some(n) => {
+            crate::serial_println!("[persist] {} serial={}", GATE_C11_MARKER, n);
+            n + 1
+        }
+        None => 1,
+    };
+
+    let payload = alloc::format!("{}\n", next);
+    if !crate::vfs::write_file_dispatch(GATE_C11_PATH, payload.as_bytes()) {
+        crate::serial_println!(
+            "[persist] Gate C11 FAILED: could not write {}",
+            GATE_C11_PATH
+        );
+        return false;
+    }
+    // Durability is the whole point: the counter must reach the disk before the
+    // next boot reads the header sector.
+    crate::virtio_blk::flush();
+    previous.is_some()
 }
 
 /// Serial marker the integration test waits for once a file has been written

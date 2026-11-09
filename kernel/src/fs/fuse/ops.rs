@@ -4,25 +4,28 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::loopback::{
-    serve_loopback, serve_loopback_access, serve_loopback_bmap, serve_loopback_copy_file_range,
-    serve_loopback_create, serve_loopback_destroy, serve_loopback_fallocate, serve_loopback_flush,
-    serve_loopback_forget, serve_loopback_fsync, serve_loopback_fsyncdir, serve_loopback_getattr,
-    serve_loopback_getlk, serve_loopback_getxattr, serve_loopback_init, serve_loopback_ioctl,
-    serve_loopback_link, serve_loopback_listxattr, serve_loopback_lseek, serve_loopback_mkdir,
-    serve_loopback_mknod, serve_loopback_open, serve_loopback_opendir, serve_loopback_poll,
-    serve_loopback_read, serve_loopback_readdir, serve_loopback_readdirplus,
-    serve_loopback_readlink, serve_loopback_release, serve_loopback_releasedir,
-    serve_loopback_removexattr, serve_loopback_rename, serve_loopback_rename2,
-    serve_loopback_rmdir, serve_loopback_setattr, serve_loopback_setlk, serve_loopback_setxattr,
-    serve_loopback_statfs, serve_loopback_statx, serve_loopback_symlink, serve_loopback_syncfs,
-    serve_loopback_unlink, serve_loopback_write,
+    serve_loopback, serve_loopback_access, serve_loopback_batch_forget, serve_loopback_bmap,
+    serve_loopback_copy_file_range, serve_loopback_create, serve_loopback_destroy,
+    serve_loopback_fallocate, serve_loopback_flush, serve_loopback_forget, serve_loopback_fsync,
+    serve_loopback_fsyncdir, serve_loopback_getattr, serve_loopback_getlk, serve_loopback_getxattr,
+    serve_loopback_init, serve_loopback_interrupt, serve_loopback_ioctl, serve_loopback_link,
+    serve_loopback_listxattr, serve_loopback_lseek, serve_loopback_mkdir, serve_loopback_mknod,
+    serve_loopback_notify_inval_entry, serve_loopback_notify_inval_inode,
+    serve_loopback_notify_poll, serve_loopback_notify_reply, serve_loopback_notify_store,
+    serve_loopback_open, serve_loopback_opendir, serve_loopback_poll, serve_loopback_read,
+    serve_loopback_readdir, serve_loopback_readdirplus, serve_loopback_readlink,
+    serve_loopback_release, serve_loopback_releasedir, serve_loopback_removexattr,
+    serve_loopback_rename, serve_loopback_rename2, serve_loopback_rmdir, serve_loopback_setattr,
+    serve_loopback_setlk, serve_loopback_setxattr, serve_loopback_statfs, serve_loopback_statx,
+    serve_loopback_symlink, serve_loopback_syncfs, serve_loopback_tmpfile, serve_loopback_unlink,
+    serve_loopback_write,
 };
-use super::mount::{send_request, take_response};
+use super::mount::{send_notify, send_request, take_response};
 use super::protocol::{
-    FuseAttr, FuseEntry, FuseFileLock, FuseOpcode, FuseStatfs, encode_lk, parse_fuse_bmap,
-    parse_fuse_copy_file_range, parse_fuse_direntplus, parse_fuse_dirents, parse_fuse_entry,
-    parse_fuse_init, parse_fuse_ioctl, parse_fuse_lk, parse_fuse_lseek, parse_fuse_open,
-    parse_fuse_poll, parse_fuse_statfs, parse_fuse_statx,
+    FuseAttr, FuseEntry, FuseFileLock, FuseNotifyCode, FuseOpcode, FuseStatfs, encode_lk,
+    parse_fuse_bmap, parse_fuse_copy_file_range, parse_fuse_direntplus, parse_fuse_dirents,
+    parse_fuse_entry, parse_fuse_init, parse_fuse_ioctl, parse_fuse_lk, parse_fuse_lseek,
+    parse_fuse_open, parse_fuse_poll, parse_fuse_statfs, parse_fuse_statx,
 };
 
 /// Handle a VFS lookup through FUSE
@@ -655,6 +658,129 @@ pub fn fuse_forget(mount_point: &str, nodeid: u64, nlookup: u64) -> Result<(), &
         nlookup.to_le_bytes().to_vec(),
     )?;
     serve_loopback_forget(mount_point, unique, nodeid, &nlookup.to_le_bytes());
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a FUSE INTERRUPT. Issued uniques succeed; unique 0 or never-issued fails.
+pub fn fuse_interrupt(mount_point: &str, unique: u64) -> Result<(), &'static str> {
+    let unique_req = send_request(
+        mount_point,
+        FuseOpcode::Interrupt,
+        0,
+        unique.to_le_bytes().to_vec(),
+    )?;
+    serve_loopback_interrupt(mount_point, unique_req, &unique.to_le_bytes());
+    take_response(mount_point, unique_req).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a FUSE BATCH_FORGET. Known nodeids with nlookup>=1 succeed; count 0 or unknown fails.
+pub fn fuse_batch_forget(mount_point: &str, nodeid: u64, nlookup: u64) -> Result<(), &'static str> {
+    let mut data = Vec::with_capacity(24);
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(&0u32.to_le_bytes());
+    data.extend_from_slice(&nodeid.to_le_bytes());
+    data.extend_from_slice(&nlookup.to_le_bytes());
+    let unique = send_request(mount_point, FuseOpcode::BatchForget, 0, data.clone())?;
+    serve_loopback_batch_forget(mount_point, unique, &data);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a FUSE NOTIFY_REPLY. Known files store the bytes; unknown nodeid or empty data fails.
+pub fn fuse_notify_reply(
+    mount_point: &str,
+    nodeid: u64,
+    offset: u64,
+    data: &[u8],
+) -> Result<(), &'static str> {
+    if data.is_empty() {
+        return Err("empty retrieve");
+    }
+    let mut body = Vec::with_capacity(8 + data.len());
+    body.extend_from_slice(&offset.to_le_bytes());
+    body.extend_from_slice(data);
+    let unique = send_request(mount_point, FuseOpcode::NotifyReply, nodeid, body.clone())?;
+    serve_loopback_notify_reply(mount_point, unique, nodeid, &body);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle a FUSE TMPFILE. Directory parents return an unnamed inode; a file parent fails.
+pub fn fuse_tmpfile(mount_point: &str, parent: u64) -> Result<FuseEntry, &'static str> {
+    let unique = send_request(mount_point, FuseOpcode::Tmpfile, parent, Vec::new())?;
+    serve_loopback_tmpfile(mount_point, unique, parent);
+    let resp = take_response(mount_point, unique).ok_or("would block")?;
+    if resp.len() < 32 {
+        return Err("short tmpfile");
+    }
+    let (ino, size, mode) = parse_fuse_entry(&resp).ok_or("short entry")?;
+    let _ = parse_fuse_open(&resp[20..]).ok_or("short open")?;
+    Ok(FuseEntry {
+        nodeid: ino,
+        generation: 1,
+        attr: FuseAttr {
+            ino,
+            size,
+            blocks: 0,
+            mode,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            atime: 0,
+            mtime: 0,
+            ctime: 0,
+        },
+        attr_valid_secs: 1,
+        entry_valid_secs: 1,
+    })
+}
+/// Handle FUSE_NOTIFY_INVAL_INODE. Known nodeids ACK; GETATTR still works; unknown fails.
+pub fn fuse_notify_inval_inode(mount_point: &str, nodeid: u64) -> Result<(), &'static str> {
+    let unique = send_notify(mount_point, FuseNotifyCode::InvalInode, nodeid, Vec::new())?;
+    serve_loopback_notify_inval_inode(mount_point, unique, nodeid);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle FUSE_NOTIFY_STORE. Known files store the bytes; unknown nodeid or empty data fails.
+pub fn fuse_notify_store(
+    mount_point: &str,
+    nodeid: u64,
+    offset: u64,
+    data: &[u8],
+) -> Result<(), &'static str> {
+    if data.is_empty() {
+        return Err("empty store");
+    }
+    let mut body = Vec::with_capacity(8 + data.len());
+    body.extend_from_slice(&offset.to_le_bytes());
+    body.extend_from_slice(data);
+    let unique = send_notify(mount_point, FuseNotifyCode::Store, nodeid, body.clone())?;
+    serve_loopback_notify_store(mount_point, unique, nodeid, &body);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle FUSE_NOTIFY_POLL. Known nodeids ACK; POLL still works; unknown fails.
+pub fn fuse_notify_poll(mount_point: &str, nodeid: u64) -> Result<(), &'static str> {
+    let unique = send_notify(mount_point, FuseNotifyCode::Poll, nodeid, Vec::new())?;
+    serve_loopback_notify_poll(mount_point, unique, nodeid);
+    take_response(mount_point, unique).ok_or("would block")?;
+    Ok(())
+}
+/// Handle FUSE_NOTIFY_INVAL_ENTRY. Known parent+name ACK; LOOKUP still works; unknown or empty fails.
+pub fn fuse_notify_inval_entry(
+    mount_point: &str,
+    parent: u64,
+    name: &str,
+) -> Result<(), &'static str> {
+    if name.is_empty() {
+        return Err("empty name");
+    }
+    let body = name.as_bytes().to_vec();
+    let unique = send_notify(
+        mount_point,
+        FuseNotifyCode::InvalEntry,
+        parent,
+        body.clone(),
+    )?;
+    serve_loopback_notify_inval_entry(mount_point, unique, parent, &body);
     take_response(mount_point, unique).ok_or("would block")?;
     Ok(())
 }

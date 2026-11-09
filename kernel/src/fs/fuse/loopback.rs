@@ -1,9 +1,10 @@
 //! In-kernel FUSE loopback daemon.
 
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::mount::{LOOPBACK, write_response};
+use super::mount::{LOOPBACK, issued_unique, write_response};
 use super::protocol::{
     F_UNLCK, FUSE_KERNEL_MINOR_VERSION, FUSE_KERNEL_VERSION, FuseFileLock, FuseOpcode, FuseStatfs,
     POLLIN, POLLOUT, RENAME_NOREPLACE, SEEK_END, SEEK_SET, encode_bmap, encode_copy_file_range,
@@ -247,6 +248,9 @@ pub(super) fn serve_loopback_readdir(mount_point: &str, unique: u64, nodeid: u64
     let mut out = Vec::new();
     if is_root {
         for (name, &(ino, _)) in &lb.files {
+            if name.starts_with('\0') {
+                continue;
+            }
             out.extend_from_slice(&encode_dirent(ino, 0o100644, name));
         }
         for (name, &ino) in &lb.dirs {
@@ -621,6 +625,9 @@ pub(super) fn serve_loopback_readdirplus(mount_point: &str, unique: u64, nodeid:
     let mut out = Vec::new();
     if is_root {
         for (name, &(ino, ref data)) in &lb.files {
+            if name.starts_with('\0') {
+                continue;
+            }
             out.extend_from_slice(&encode_direntplus(ino, data.len() as u64, 0o100644, name));
         }
         for (name, &ino) in &lb.dirs {
@@ -799,6 +806,131 @@ pub(super) fn serve_loopback_forget(mount_point: &str, unique: u64, nodeid: u64,
     }
     let nlookup = u64::from_le_bytes(req[0..8].try_into().unwrap_or([0; 8]));
     if nlookup == 0 {
+        return;
+    }
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    let known = nodeid == 1
+        || lb.files.values().any(|(ino, _)| *ino == nodeid)
+        || lb.dirs.values().any(|&ino| ino == nodeid)
+        || lb.links.values().any(|(ino, _)| *ino == nodeid)
+        || lb.nodes.values().any(|(ino, _)| *ino == nodeid);
+    if !known {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_interrupt(mount_point: &str, unique: u64, req: &[u8]) {
+    if req.len() < 8 {
+        return;
+    }
+    let target = u64::from_le_bytes(req[0..8].try_into().unwrap_or([0; 8]));
+    if !issued_unique(mount_point, target) {
+        return;
+    }
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_notify_reply(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    if req.len() <= 8 {
+        return;
+    }
+    let offset = u64::from_le_bytes(req[0..8].try_into().unwrap_or([0; 8])) as usize;
+    let payload = &req[8..];
+    {
+        let mut lbs = LOOPBACK.lock();
+        let Some(lb) = lbs.get_mut(mount_point) else {
+            return;
+        };
+        let Some((_, data)) = lb.files.values_mut().find(|(ino, _)| *ino == nodeid) else {
+            return;
+        };
+        let end = offset.saturating_add(payload.len());
+        if end > data.len() {
+            data.resize(end, 0);
+        }
+        if offset < end {
+            data[offset..end].copy_from_slice(payload);
+        }
+    }
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_notify_inval_inode(mount_point: &str, unique: u64, nodeid: u64) {
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_has_ino(lb, nodeid) {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_notify_store(mount_point: &str, unique: u64, nodeid: u64, req: &[u8]) {
+    serve_loopback_notify_reply(mount_point, unique, nodeid, req);
+}
+pub(super) fn serve_loopback_notify_poll(mount_point: &str, unique: u64, nodeid: u64) {
+    serve_loopback_notify_inval_inode(mount_point, unique, nodeid);
+}
+pub(super) fn serve_loopback_notify_inval_entry(
+    mount_point: &str,
+    unique: u64,
+    parent: u64,
+    req: &[u8],
+) {
+    if req.is_empty() {
+        return;
+    }
+    let Ok(name) = core::str::from_utf8(req) else {
+        return;
+    };
+    let lbs = LOOPBACK.lock();
+    let Some(lb) = lbs.get(mount_point) else {
+        return;
+    };
+    if !loopback_is_dir(lb, parent) {
+        return;
+    }
+    let known = parent == 1
+        && (lb.files.contains_key(name)
+            || lb.dirs.contains_key(name)
+            || lb.links.contains_key(name)
+            || lb.nodes.contains_key(name));
+    if !known {
+        return;
+    }
+    drop(lbs);
+    let _ = write_response(mount_point, unique, Vec::new());
+}
+pub(super) fn serve_loopback_tmpfile(mount_point: &str, unique: u64, parent: u64) {
+    let resp = {
+        let mut lbs = LOOPBACK.lock();
+        let Some(lb) = lbs.get_mut(mount_point) else {
+            return;
+        };
+        let parent_ok = parent == 1 || lb.dirs.values().any(|&ino| ino == parent);
+        if !parent_ok {
+            return;
+        }
+        let ino = lb.next_ino;
+        lb.next_ino += 1;
+        lb.files.insert(format!("\0{}", ino), (ino, Vec::new()));
+        let mut out = encode_entry(ino, 0, 0o100644);
+        out.extend_from_slice(&encode_open(ino, 0));
+        out
+    };
+    let _ = write_response(mount_point, unique, resp);
+}
+pub(super) fn serve_loopback_batch_forget(mount_point: &str, unique: u64, req: &[u8]) {
+    if req.len() < 24 {
+        return;
+    }
+    let count = u32::from_le_bytes(req[0..4].try_into().unwrap_or([0; 4]));
+    let nodeid = u64::from_le_bytes(req[8..16].try_into().unwrap_or([0; 8]));
+    let nlookup = u64::from_le_bytes(req[16..24].try_into().unwrap_or([0; 8]));
+    if count == 0 || nlookup == 0 {
         return;
     }
     let lbs = LOOPBACK.lock();

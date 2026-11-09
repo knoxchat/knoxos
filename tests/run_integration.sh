@@ -21,7 +21,7 @@ echo " KnoxOS Integration Test"
 echo "═══════════════════════════════════════════════════════"
 
 # 1. Build
-echo "[1/4] Building kernel..."
+echo "[1/4] Building kernel... (two boot passes: fresh disk, then reboot)"
 cd "$PROJECT_ROOT"
 ./scripts/kernel-cargo.sh build --release 2>&1 | tail -5
 KERNEL_BIN="$KERNEL_DIR/target/x86_64-unknown-none/release/knoxos-kernel"
@@ -87,9 +87,10 @@ chmod +x "$PROJECT_ROOT/tests/d4_http.sh"
 echo "       Build OK"
 
 # 2. Boot QEMU with serial to file (headless, auto-exit on triple fault)
-echo "[2/4] Booting QEMU (timeout ${TIMEOUT_SECS}s)..."
-rm -f "$SERIAL_LOG"
-
+#
+# `PERSIST_DISK` is deliberately *not* recreated between the two passes below:
+# the first boot writes `/var/lib/knoxos/boot_serial`, the second one reads it
+# back through `persist::restore_all`. That is the only way Gate C11 can fire.
 QEMU_ERR="$PROJECT_ROOT/tests/qemu_stderr.log"
 rm -f "$QEMU_ERR"
 
@@ -115,7 +116,6 @@ QEMU_CMD=(qemu-system-x86_64
     -device usb-tablet,bus=xhci.0
     -device intel-hda,id=hda0
     -device hda-duplex,bus=hda0.0
-    -serial file:"$SERIAL_LOG"
     -display none
     -device isa-debug-exit,iobase=0xf4,iosize=0x04
     -m 2G
@@ -126,46 +126,80 @@ QEMU_CMD=(qemu-system-x86_64
     -no-reboot
     -no-shutdown
 )
-if command -v timeout >/dev/null 2>&1; then
-    timeout "$TIMEOUT_SECS" "${QEMU_CMD[@]}" 2>"$QEMU_ERR" &
-else
-    "${QEMU_CMD[@]}" 2>"$QEMU_ERR" &
-fi
-QEMU_PID=$!
+BOOT_PASS=0
+PERSIST_SECOND_LOG="$PROJECT_ROOT/tests/serial_output_boot2.log"
 
-# 3. Wait for boot marker or timeout
-echo "[3/4] Waiting for boot..."
-WAITED=0
-BOOT_OK=false
-while [ "$WAITED" -lt "$TIMEOUT_SECS" ]; do
-    sleep 2
-    WAITED=$((WAITED + 2))
-    if [ -f "$SERIAL_LOG" ] && grep -q "Desktop Environment ready" "$SERIAL_LOG" 2>/dev/null; then
-        BOOT_OK=true
-        break
-    fi
-    # Check if QEMU died
-    if ! kill -0 "$QEMU_PID" 2>/dev/null; then
-        break
-    fi
-done
+# boot_once <log-path> — run the QEMU_CMD defined above against `log-path`,
+# wait for the desktop marker, then stop QEMU. Returns non-zero if the boot
+# never reached the desktop.
+boot_once() {
+    local log="$1"
+    rm -f "$log"
+    local cmd=("${QEMU_CMD[@]}" -serial "file:$log")
 
-# Kill QEMU
-kill "$QEMU_PID" 2>/dev/null || true
-wait "$QEMU_PID" 2>/dev/null || true
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$TIMEOUT_SECS" "${cmd[@]}" 2>"$QEMU_ERR" &
+    else
+        "${cmd[@]}" 2>"$QEMU_ERR" &
+    fi
+    local pid=$!
 
-if [ "$BOOT_OK" != "true" ]; then
-    echo "FAIL: Boot did not complete within ${TIMEOUT_SECS}s"
-    if [ -f "$SERIAL_LOG" ]; then
-        echo "Last 20 lines of serial output:"
-        tail -20 "$SERIAL_LOG"
+    local waited=0
+    local ok=false
+    while [ "$waited" -lt "$TIMEOUT_SECS" ]; do
+        sleep 2
+        waited=$((waited + 2))
+        if [ -f "$log" ] && grep -q "Desktop Environment ready" "$log" 2>/dev/null; then
+            ok=true
+            break
+        fi
+        if ! kill -0 "$pid" 2>/dev/null; then
+            break
+        fi
+    done
+
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+
+    if [ "$ok" != "true" ]; then
+        echo "FAIL: boot did not complete within ${TIMEOUT_SECS}s ($log)"
+        if [ -f "$log" ]; then
+            echo "Last 20 lines of serial output:"
+            tail -20 "$log"
+        fi
+        if [ -s "$QEMU_ERR" ]; then
+            echo "QEMU stderr:"
+            cat "$QEMU_ERR"
+        fi
+        return 1
     fi
-    if [ -s "$QEMU_ERR" ]; then
-        echo "QEMU stderr:"
-        cat "$QEMU_ERR"
-    fi
+    return 0
+}
+
+echo "[2/4] Booting QEMU pass 1 (timeout ${TIMEOUT_SECS}s)..."
+boot_once "$SERIAL_LOG" || exit 1
+BOOT_PASS=1
+
+# 3. Second boot pass on the *same* persist disk — the cross-reboot proof.
+# Gate C11 only prints on a boot that found the counter a previous boot wrote,
+# so pass 1 must not contain the marker and pass 2 must.
+echo "[3/4] Booting QEMU pass 2 on the same persist disk (cross-reboot proof)..."
+boot_once "$PERSIST_SECOND_LOG" || exit 1
+BOOT_PASS=2
+
+if grep -q "GATE_C11 reboot persist" "$SERIAL_LOG" 2>/dev/null; then
+    echo "FAIL: boot 1 already reported GATE_C11 — the persist disk was not fresh"
     exit 1
 fi
+if ! grep -q "GATE_C11 reboot persist serial=1" "$PERSIST_SECOND_LOG" 2>/dev/null; then
+    echo "FAIL: boot 2 did not restore the boot_serial written by boot 1"
+    echo "  boot 1 persist writes:"
+    grep -E "\[persist\] (Saved|Restored)" "$SERIAL_LOG" | tail -20 || true
+    echo "  boot 2 restore:"
+    grep -E "\[persist\] (Saved|Restored)|GATE_C11" "$PERSIST_SECOND_LOG" | tail -20 || true
+    exit 1
+fi
+echo "  ✅ GATE_C11 reboot persist serial=1 (boot 1 wrote it, boot 2 read it back)"
 
 # 4. Verify expected log markers
 echo "[4/4] Verifying boot log..."
@@ -774,6 +808,38 @@ check_marker "GATE_USB xhci statusiface"
 check_marker "GATE_USB xhci statusep"
 check_marker "GATE_NFS sequence"
 check_marker "GATE_NFS reclaim"
+check_marker "GATE_FUSE interrupt"
+check_marker "GATE_FUSE batchforget"
+check_marker "GATE_DBUS ifacesremoved"
+check_marker "GATE_DBUS replace"
+check_marker "GATE_USB xhci bandwidth"
+check_marker "GATE_USB xhci forcehdr"
+check_marker "GATE_NFS bindconn"
+check_marker "GATE_NFS freestateid"
+check_marker "GATE_FUSE notifyreply"
+check_marker "GATE_FUSE tmpfile"
+check_marker "GATE_DBUS uniqueowner"
+check_marker "GATE_DBUS noowner"
+check_marker "GATE_USB xhci setdev"
+check_marker "GATE_USB xhci cleardev"
+check_marker "GATE_NFS backchannel"
+check_marker "GATE_NFS teststateid"
+check_marker "GATE_FUSE invalinode"
+check_marker "GATE_FUSE notifystore"
+check_marker "GATE_DBUS unknownmethod"
+check_marker "GATE_DBUS notowner"
+check_marker "GATE_USB xhci setfeatiface"
+check_marker "GATE_USB xhci clearfeatiface"
+check_marker "GATE_NFS dirdeleg"
+check_marker "GATE_NFS secinfoname"
+check_marker "GATE_FUSE notifypoll"
+check_marker "GATE_FUSE invalentry"
+check_marker "GATE_DBUS unknownobject"
+check_marker "GATE_DBUS invalidargs"
+check_marker "GATE_USB xhci ifacedesc"
+check_marker "GATE_USB xhci epdesc"
+check_marker "GATE_NFS wantdeleg"
+check_marker "GATE_NFS allocate"
 check_marker "GATE_CHR unpack"
 check_marker "GATE_CHR exec"
 check_marker "GATE_CHR ldso"
@@ -845,13 +911,22 @@ check_marker "GATE_GPUI musl raster"
 check_marker "GATE_SH ring3 parser"
 check_marker "GATE_DBUS daemon userspace"
 check_marker "GATE_WL server userspace"
+# Gate C11 is a *cross-reboot* marker: it can only appear in pass 2, so it is
+# checked against that log rather than the single-boot marker list above.
+if grep -q "GATE_C11 reboot persist serial=1" "$PERSIST_SECOND_LOG" 2>/dev/null; then
+    echo "  ✅ GATE_C11 reboot persist serial=1 (boot 2)"
+    PASS=$((PASS + 1))
+else
+    echo "  ❌ GATE_C11 reboot persist serial=1 (boot 2)"
+    FAIL=$((FAIL + 1))
+fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
 if [ "$FAIL" -eq 0 ]; then
     echo " PASSED ($PASS/$PASS checks)"
     echo "═══════════════════════════════════════════════════════"
-    rm -f "$SERIAL_LOG"
+    rm -f "$SERIAL_LOG" "$PERSIST_SECOND_LOG"
     exit 0
 else
     echo " FAILED ($FAIL failures, $PASS passed)"

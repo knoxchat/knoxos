@@ -7,7 +7,7 @@ use spin::Mutex;
 
 use crate::serial_println;
 
-use super::protocol::{FuseInHeader, FuseOpcode};
+use super::protocol::{FuseInHeader, FuseNotifyCode, FuseOpcode};
 
 /// A mounted FUSE filesystem
 #[derive(Debug)]
@@ -146,9 +146,49 @@ pub(super) fn send_request(
     Ok(unique)
 }
 
+/// Queue a FUSE notify (kernel → daemon). `header.opcode` is the notify code.
+pub(super) fn send_notify(
+    mount_point: &str,
+    code: FuseNotifyCode,
+    nodeid: u64,
+    data: Vec<u8>,
+) -> Result<u64, &'static str> {
+    let mut mounts = MOUNTS.lock();
+    let fm = mounts.get_mut(mount_point).ok_or("Not a FUSE mount")?;
+
+    if !fm.connected {
+        return Err("FUSE daemon disconnected");
+    }
+
+    let unique = fm.next_unique;
+    fm.next_unique += 1;
+
+    let header = FuseInHeader {
+        len: (core::mem::size_of::<FuseInHeader>() + data.len()) as u32,
+        opcode: code as u32,
+        unique,
+        nodeid,
+        uid: 0,
+        gid: 0,
+        pid: 0,
+        padding: 0,
+    };
+
+    fm.pending.insert(unique, FuseRequest { header, data });
+    Ok(unique)
+}
+
 pub(super) fn take_response(mount_point: &str, unique: u64) -> Option<Vec<u8>> {
     let mut mounts = MOUNTS.lock();
     mounts.get_mut(mount_point)?.responses.remove(&unique)
+}
+
+/// True when `unique` was issued on this mount (`1..next_unique`).
+pub(super) fn issued_unique(mount_point: &str, unique: u64) -> bool {
+    let mounts = MOUNTS.lock();
+    mounts
+        .get(mount_point)
+        .is_some_and(|fm| unique != 0 && unique < fm.next_unique)
 }
 
 /// FUSE daemon reads the next pending request (via /dev/fuse read)

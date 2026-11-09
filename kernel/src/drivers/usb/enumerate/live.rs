@@ -85,5 +85,21 @@ pub(super) static HIDSETPROTOCOL_LIVE: AtomicBool = AtomicBool::new(false);
 pub(super) static STATUSIFACE_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when GET_STATUS(ENDPOINT) got a Transfer Event.
 pub(super) static STATUSEP_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Get Port Bandwidth returned Command Completion cc=1.
+pub(super) static BANDWIDTH_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when Force Header returned Command Completion cc=1.
+pub(super) static FORCEHDR_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when SET_FEATURE(DEVICE) got a Transfer Event.
+pub(super) static SETDEV_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when CLEAR_FEATURE(DEVICE) got a Transfer Event.
+pub(super) static CLEARDEV_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when SET_FEATURE(INTERFACE) got a Transfer Event.
+pub(super) static SETFEATIFACE_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when CLEAR_FEATURE(INTERFACE) got a Transfer Event.
+pub(super) static CLEARFEATIFACE_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(Interface) got a Transfer Event.
+pub(super) static IFACEDESC_LIVE: AtomicBool = AtomicBool::new(false);
+/// True only when GET_DESCRIPTOR(Endpoint) got a Transfer Event.
+pub(super) static EPDESC_LIVE: AtomicBool = AtomicBool::new(false);
 /// True only when enumerate_device completed every step from a live event (no fallback).
 pub(super) static ENUM_LIVE: AtomicBool = AtomicBool::new(false);

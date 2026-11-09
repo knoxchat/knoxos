@@ -72,6 +72,7 @@ pub enum BusType {
 pub(super) struct BusState {
     pub(super) connections: BTreeMap<ConnectionId, Connection>,
     pub(super) names: BTreeMap<String, ConnectionId>, // well-known name → owner
+    pub(super) name_flags: BTreeMap<String, u32>,     // well-known name → RequestName flags
     pub(super) name_queues: BTreeMap<String, Vec<ConnectionId>>, // queued ownership
     pub(super) activatable_names: BTreeSet<String>,
     pub(super) services: BTreeMap<String, ServiceInfo>, // registered service handlers
@@ -124,6 +125,7 @@ lazy_static::lazy_static! {
     pub(super) static ref SYSTEM_BUS: Mutex<BusState> = Mutex::new(BusState {
         connections: BTreeMap::new(),
         names: BTreeMap::new(),
+        name_flags: BTreeMap::new(),
         name_queues: BTreeMap::new(),
         activatable_names: default_activatable_names(),
         services: BTreeMap::new(),
@@ -135,6 +137,7 @@ lazy_static::lazy_static! {
     pub(super) static ref SESSION_BUS: Mutex<BusState> = Mutex::new(BusState {
         connections: BTreeMap::new(),
         names: BTreeMap::new(),
+        name_flags: BTreeMap::new(),
         name_queues: BTreeMap::new(),
         activatable_names: default_activatable_names(),
         services: BTreeMap::new(),

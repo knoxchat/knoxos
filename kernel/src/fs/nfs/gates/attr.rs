@@ -87,6 +87,49 @@ pub fn secinfo_self_test() -> bool {
     }
 }
 
+pub const GATE_NFS_SECINFONAME_MARKER: &str = "GATE_NFS secinfoname";
+
+/// SECINFO_NO_NAME of current FH is AUTH_SYS; missing FH is NOFILEHANDLE.
+pub fn secinfoname_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let ok = client.compound(
+        "secinfoname",
+        &[NfsCompoundOp::PutRootFh, NfsCompoundOp::SecInfoNoName],
+    );
+    let flavors_ok = matches!(
+        ok.get(1),
+        Some(NfsCompoundResult::SecInfo { flavors })
+            if matches!(flavors.as_slice(), [f] if *f == AuthFlavor::Sys as u32)
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound("secinfoname-missing", &[NfsCompoundOp::SecInfoNoName]);
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle)) if flavors_ok => {
+            serial_println!(
+                "[NFS] {} (SECINFO_NO_NAME AUTH_SYS then NOFILEHANDLE)",
+                GATE_NFS_SECINFONAME_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS secinfoname FAILED flavors={} missing={:?}",
+                flavors_ok,
+                other
+            );
+            false
+        }
+    }
+}
+
 pub const GATE_NFS_OPENATTR_MARKER: &str = "GATE_NFS openattr";
 
 /// OPENATTR createdir creates a named-attr directory; without createdir first is NOENT; missing FH is NOFILEHANDLE.

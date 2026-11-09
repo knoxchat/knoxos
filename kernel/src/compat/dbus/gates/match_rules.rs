@@ -533,3 +533,72 @@ pub fn ifacesadded_self_test() -> bool {
         false
     }
 }
+
+pub const GATE_DBUS_IFACESREMOVED_MARKER: &str = "GATE_DBUS ifacesremoved";
+
+/// `InterfacesRemoved` is delivered after `ReleaseName` to an AddMatch listener.
+pub fn ifacesremoved_self_test() -> bool {
+    const WELL_KNOWN: &str = "org.knoxos.GateIfacesRemoved";
+    const RULE: &str =
+        "type='signal',interface='org.freedesktop.DBus.ObjectManager',member='InterfacesRemoved'";
+    let owner = connect(BusType::System, 0xDB32, 1000);
+
+    let mut add = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "AddMatch",
+    );
+    add.body = vec![DbusValue::String(String::from(RULE))];
+    add.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, owner, add);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut req = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+    );
+    req.body = vec![
+        DbusValue::String(String::from(WELL_KNOWN)),
+        DbusValue::Uint32(0),
+    ];
+    req.signature = Some(String::from("su"));
+    let _ = send_message(BusType::System, owner, req);
+    let _ = receive_message(BusType::System, owner);
+
+    let mut rel = Message::method_call(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "ReleaseName",
+    );
+    rel.body = vec![DbusValue::String(String::from(WELL_KNOWN))];
+    rel.signature = Some(String::from("s"));
+    let _ = send_message(BusType::System, owner, rel);
+    let _ = receive_message(BusType::System, owner);
+
+    let removed = receive_message(BusType::System, owner)
+        .map(|msg| {
+            msg.header.message_type == MessageType::Signal
+                && msg.member.as_deref() == Some("InterfacesRemoved")
+                && matches!(
+                    msg.body.first(),
+                    Some(DbusValue::ObjectPath(p)) if p == "/org/freedesktop/DBus"
+                )
+        })
+        .unwrap_or(false);
+
+    disconnect(BusType::System, owner);
+    if removed {
+        serial_println!(
+            "[dbus] {} (InterfacesRemoved after ReleaseName)",
+            GATE_DBUS_IFACESREMOVED_MARKER
+        );
+        true
+    } else {
+        serial_println!("[dbus] GATE_DBUS FAILED: InterfacesRemoved");
+        false
+    }
+}

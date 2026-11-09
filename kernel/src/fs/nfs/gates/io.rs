@@ -623,3 +623,90 @@ pub fn commit_self_test() -> bool {
         }
     }
 }
+
+pub const GATE_NFS_ALLOCATE_MARKER: &str = "GATE_NFS allocate";
+
+/// ALLOCATE of a file extends size; a directory is NOTDIR; missing FH is NOFILEHANDLE.
+pub fn allocate_self_test() -> bool {
+    let mut client = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let opened = client.compound(
+        "allocate-open",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Open {
+                share_access: NFS4_SHARE_ACCESS_WRITE,
+                share_deny: NFS4_SHARE_DENY_NONE,
+                name: String::from("gate-al.txt"),
+                create: true,
+            },
+        ],
+    );
+    if !matches!(opened.get(1), Some(NfsCompoundResult::OpenResult { .. })) {
+        serial_println!("[NFS] GATE_NFS allocate FAILED: open {:?}", opened.get(1));
+        return false;
+    }
+    let ok = client.compound(
+        "allocate",
+        &[NfsCompoundOp::Allocate {
+            offset: 0,
+            length: 16,
+        }],
+    );
+    let alloc_ok = matches!(ok.first(), Some(NfsCompoundResult::Status(NfsStat::Ok)));
+    let after = client.compound("allocate-getattr", &[NfsCompoundOp::GetAttr(vec![0, 1])]);
+    let size_ok = matches!(
+        after.first(),
+        Some(NfsCompoundResult::Attrs(a)) if a.size >= 16
+    );
+    let root = client.compound(
+        "allocate-root",
+        &[
+            NfsCompoundOp::PutRootFh,
+            NfsCompoundOp::Allocate {
+                offset: 0,
+                length: 16,
+            },
+        ],
+    );
+    let notdir_ok = matches!(
+        root.get(1),
+        Some(NfsCompoundResult::Status(NfsStat::Notdir))
+    );
+    let mut bare = NfsClient::new(NfsMountOptions::default(
+        [127, 0, 0, 1],
+        "/export",
+        "/mnt/nfs",
+    ));
+    let missing = bare.compound(
+        "allocate-missing",
+        &[NfsCompoundOp::Allocate {
+            offset: 0,
+            length: 16,
+        }],
+    );
+    match missing.first() {
+        Some(NfsCompoundResult::Status(NfsStat::NoFileHandle))
+            if alloc_ok && size_ok && notdir_ok =>
+        {
+            serial_println!(
+                "[NFS] {} (ALLOCATE then NOTDIR then NOFILEHANDLE)",
+                GATE_NFS_ALLOCATE_MARKER
+            );
+            true
+        }
+        other => {
+            serial_println!(
+                "[NFS] GATE_NFS allocate FAILED alloc={} size={} notdir={} missing={:?}",
+                alloc_ok,
+                size_ok,
+                notdir_ok,
+                other
+            );
+            false
+        }
+    }
+}

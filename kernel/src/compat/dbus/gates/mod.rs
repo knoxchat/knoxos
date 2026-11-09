@@ -6,7 +6,7 @@
 //! `GATE_DBUS <name>`.
 //!
 //! Split by bus surface:
-//!   names          — Hello, RequestName, ReleaseName, ListNames, ownership
+//!   names          — Hello, RequestName, ReleaseName, ListNames, ownership, REPLACE_EXISTING, unique GetNameOwner, NameHasNoOwner, UnknownMethod, ReleaseName NON_EXISTENT/NOT_OWNER, UnknownObject, InvalidArgs
 //!   identity       — pid/uid/creds and LSM labels
 //!   match_rules    — AddMatch, RemoveMatch, BecomeMonitor, name signals
 //!   admin          — GetId, activation env, ReloadConfig, GetConfigFile

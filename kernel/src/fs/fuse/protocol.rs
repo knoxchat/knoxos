@@ -40,17 +40,31 @@ pub enum FuseOpcode {
     Setlkw = 33,
     Access = 34,
     Create = 35,
+    Interrupt = 36,
     Bmap = 37,
     Destroy = 38,
     Ioctl = 39,
     Poll = 40,
+    NotifyReply = 41,
+    BatchForget = 42,
     Fallocate = 43,
     Readdirplus = 44,
     Rename2 = 45,
     Lseek = 46,
     CopyFileRange = 47,
     Syncfs = 50,
+    Tmpfile = 51,
     Statx = 52,
+}
+
+/// FUSE notify codes (kernel → daemon). Not opcodes; `FUSE_NOTIFY_*` in `fuse.h`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum FuseNotifyCode {
+    Poll = 1,
+    InvalInode = 2,
+    InvalEntry = 3,
+    Store = 4,
 }
 
 /// Linux `FUSE_KERNEL_VERSION`.

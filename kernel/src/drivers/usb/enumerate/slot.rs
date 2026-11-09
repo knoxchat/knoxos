@@ -8,8 +8,8 @@ use super::super::types::UsbSpeed;
 use super::super::xhci::{TRB_SIZE, Trb, TrbType, XHCI, alloc_ring_buffer, dma_virt};
 use super::command::{allocate_transfer_ring, enqueue_command, wait_command_completion};
 use super::live::{
-    ADDRESS_LIVE, CONFIG_EP_LIVE, DISABLE_LIVE, EVAL_LIVE, NOOP_LIVE, RESETDEV_LIVE, RESETEP_LIVE,
-    SETTR_LIVE, SLOT_ENABLE_LIVE, STOP_LIVE,
+    ADDRESS_LIVE, BANDWIDTH_LIVE, CONFIG_EP_LIVE, DISABLE_LIVE, EVAL_LIVE, FORCEHDR_LIVE,
+    NOOP_LIVE, RESETDEV_LIVE, RESETEP_LIVE, SETTR_LIVE, SLOT_ENABLE_LIVE, STOP_LIVE,
 };
 
 /// Enable a device slot via Enable Slot command
@@ -542,6 +542,62 @@ pub fn reset_device(slot_id: u8) -> bool {
         return false;
     }
     serial_println!("[XHCI] Reset Device: timeout");
+    false
+}
+
+/// Get Port Bandwidth Command. Requires Command Completion cc=1 (no timeout fallback).
+pub fn get_port_bandwidth() -> bool {
+    serial_println!("[XHCI] Get Port Bandwidth");
+    let (ctx_ptr, _layout) = alloc_ring_buffer(4096);
+    if ctx_ptr == 0 {
+        serial_println!("[XHCI] Get Port Bandwidth: no DMA context");
+        return false;
+    }
+    let mut trb = Trb::new();
+    trb.param_lo = ctx_ptr as u32;
+    trb.param_hi = (ctx_ptr >> 32) as u32;
+    trb.set_type(TrbType::GetPortBandwidth);
+
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue Get Port Bandwidth");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            BANDWIDTH_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] Get Port Bandwidth succeeded");
+            return true;
+        }
+        serial_println!("[XHCI] Get Port Bandwidth failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Get Port Bandwidth: timeout");
+    false
+}
+
+/// Force Header Command. Requires Command Completion cc=1 (no timeout fallback).
+pub fn force_header(slot_id: u8) -> bool {
+    serial_println!("[XHCI] Force Header for slot {}", slot_id);
+    let mut trb = Trb::new();
+    trb.set_type(TrbType::ForceHeader);
+    trb.control |= (slot_id as u32) << 24;
+
+    if !enqueue_command(&trb) {
+        serial_println!("[XHCI] Failed to enqueue Force Header");
+        return false;
+    }
+    if let Some(event) = wait_command_completion() {
+        let cc = event.completion_code();
+        if cc == 1 {
+            FORCEHDR_LIVE.store(true, Ordering::Relaxed);
+            serial_println!("[XHCI] Force Header succeeded for slot {}", slot_id);
+            return true;
+        }
+        serial_println!("[XHCI] Force Header failed: cc={}", cc);
+        return false;
+    }
+    serial_println!("[XHCI] Force Header: timeout");
     false
 }
 

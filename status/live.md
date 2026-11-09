@@ -384,5 +384,37 @@ Syscall gates **J–BL** (clone, namespaces, VFS, sockets, ENOSYS honesty) are p
 373. **Chromium HiDPI** — `wl_output` scale 2 (`GATE_CHR hidpi`).
 374. **Chromium WebGPU** — SwiftShader/Vulkan ICD (`GATE_CHR webgpu`).
 375. **Chromium io_uring** — Ring 3 `io_uring_setup(8)` returns a ring fd; NOP CQE (`GATE_CHR iouring`). `userfaultfd` stays ENOSYS.
+376. **FUSE INTERRUPT** — issued unique succeeds; unique 0 or never-issued fails (`GATE_FUSE interrupt`).
+377. **FUSE BATCH_FORGET** — known nodeid succeeds; unknown nodeid or nlookup 0 fails (`GATE_FUSE batchforget`).
+378. **D-Bus InterfacesRemoved** — after ReleaseName (`GATE_DBUS ifacesremoved`).
+379. **D-Bus REPLACE_EXISTING** — takes over ALLOW_REPLACEMENT; without it EXISTS (`GATE_DBUS replace`).
+380. **XHCI Get Port Bandwidth** — Command Completion cc=1 (`GATE_USB xhci bandwidth`).
+381. **XHCI Force Header** — Command Completion cc=1 (`GATE_USB xhci forcehdr`).
+382. **NFS BIND_CONN_TO_SESSION** — CREATE_SESSION id OK; unknown BADSESSION (`GATE_NFS bindconn`).
+383. **NFS FREE_STATEID** — CLOSEd OPEN OK; second/unknown BAD_STATEID (`GATE_NFS freestateid`).
+384. **FUSE NOTIFY_REPLY** — known file stores bytes a later READ returns; unknown nodeid or empty fails (`GATE_FUSE notifyreply`).
+385. **FUSE TMPFILE** — directory parent returns unnamed `S_IFREG`; file parent fails (`GATE_FUSE tmpfile`).
+386. **D-Bus unique GetNameOwner** — unique name returns itself (`GATE_DBUS uniqueowner`).
+387. **D-Bus NameHasNoOwner** — missing name is `NameHasNoOwner` (`GATE_DBUS noowner`).
+388. **XHCI SET_FEATURE(DEVICE)** — Transfer Event (`GATE_USB xhci setdev`).
+389. **XHCI CLEAR_FEATURE(DEVICE)** — Transfer Event (`GATE_USB xhci cleardev`).
+390. **NFS BACKCHANNEL_CTL** — CREATE_SESSION id OK; unknown BADSESSION (`GATE_NFS backchannel`).
+391. **NFS TEST_STATEID** — live OPEN OK; CLOSEd/unknown BAD_STATEID (`GATE_NFS teststateid`).
+392. **FUSE NOTIFY_INVAL_INODE**: known nodeid ACKs; GETATTR still works; unknown fails (`GATE_FUSE invalinode`).
+393. **FUSE NOTIFY_STORE**: known file stores bytes a later READ returns; unknown nodeid or empty fails (`GATE_FUSE notifystore`).
+394. **D-Bus UnknownMethod**: unknown `org.freedesktop.DBus` member (`GATE_DBUS unknownmethod`).
+395. **D-Bus ReleaseName NOT_OWNER**: missing is NON_EXISTENT; other conn is NOT_OWNER (`GATE_DBUS notowner`).
+396. **XHCI SET_FEATURE(INTERFACE)**: Transfer Event (`GATE_USB xhci setfeatiface`).
+397. **XHCI CLEAR_FEATURE(INTERFACE)**: Transfer Event (`GATE_USB xhci clearfeatiface`).
+398. **NFS GET_DIR_DELEGATION**: directory OK; file NOTDIR; no FH NOFILEHANDLE (`GATE_NFS dirdeleg`).
+399. **NFS SECINFO_NO_NAME**: current FH AUTH_SYS; no FH NOFILEHANDLE (`GATE_NFS secinfoname`).
+400. **FUSE NOTIFY_POLL**: known nodeid ACKs; POLL still works; unknown fails (`GATE_FUSE notifypoll`).
+401. **FUSE NOTIFY_INVAL_ENTRY**: known parent+name ACKs; LOOKUP still works; unknown parent or empty name fails (`GATE_FUSE invalentry`).
+402. **D-Bus UnknownObject**: bus method on the wrong object path (`GATE_DBUS unknownobject`).
+403. **D-Bus InvalidArgs**: RequestName without a string body (`GATE_DBUS invalidargs`).
+404. **XHCI GET_DESCRIPTOR(Interface)**: Transfer Event (`GATE_USB xhci ifacedesc`).
+405. **XHCI GET_DESCRIPTOR(Endpoint)**: Transfer Event (`GATE_USB xhci epdesc`).
+406. **NFS WANT_DELEGATION**: file OK; directory NOTDIR; no FH NOFILEHANDLE (`GATE_NFS wantdeleg`).
+407. **NFS ALLOCATE**: extends a file; directory NOTDIR; no FH NOFILEHANDLE (`GATE_NFS allocate`).
 
-Integration: `./tests/run_integration.sh` **663/663** on QEMU (2026-10-24).
+Integration: `./tests/run_integration.sh` **695/695** on QEMU (2026-11-09).

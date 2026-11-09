@@ -894,6 +894,70 @@ fn test_dbus_interfaces_added() {
 }
 
 #[test_case]
+fn test_dbus_interfaces_removed() {
+    assert!(
+        crate::dbus::ifacesremoved_self_test(),
+        "InterfacesRemoved must be delivered after ReleaseName"
+    );
+}
+
+#[test_case]
+fn test_dbus_replace_existing() {
+    assert!(
+        crate::dbus::replace_self_test(),
+        "RequestName REPLACE_EXISTING must take over ALLOW_REPLACEMENT and EXISTS without it"
+    );
+}
+
+#[test_case]
+fn test_dbus_unique_owner() {
+    assert!(
+        crate::dbus::uniqueowner_self_test(),
+        "GetNameOwner of a unique name must return that unique name"
+    );
+}
+
+#[test_case]
+fn test_dbus_name_has_no_owner() {
+    assert!(
+        crate::dbus::noowner_self_test(),
+        "GetNameOwner of a missing name must be NameHasNoOwner"
+    );
+}
+
+#[test_case]
+fn test_dbus_unknown_method() {
+    assert!(
+        crate::dbus::unknownmethod_self_test(),
+        "An unknown org.freedesktop.DBus member must be UnknownMethod"
+    );
+}
+
+#[test_case]
+fn test_dbus_release_not_owner() {
+    assert!(
+        crate::dbus::notowner_self_test(),
+        "ReleaseName of a missing name must be NON_EXISTENT; another connection must be NOT_OWNER"
+    );
+}
+
+#[test_case]
+fn test_dbus_unknown_object() {
+    assert!(
+        crate::dbus::unknownobject_self_test(),
+        "A bus method on the wrong object path must be UnknownObject"
+    );
+}
+
+#[test_case]
+fn test_dbus_invalid_args() {
+    assert!(
+        crate::dbus::invalidargs_self_test(),
+        "RequestName without a string body must be InvalidArgs"
+    );
+}
+
+#[test_case]
 fn test_acpi_s5_pm1a() {
     assert!(
         crate::acpi::s5_self_test(),
